@@ -54,20 +54,27 @@ What does **not** exist: any canvas, any speech capture/STT/TTS, any LLM-driven 
 
 ---
 
-## 3. Fork and upstream strategy
+## 3. Fork lineage and standalone strategy
 
-emdash ships ~10 merges a day. If we edit its core files freely we'll be buried in conflicts within a month.
+Chorus started from emdash, but this checkout is intentionally managed as a standalone Chorus
+project. Keep the Apache-2.0 license and NOTICE credit, but avoid default Git remotes, branch
+names, update feeds, or profile directories that point at emdash.
 
 - **Rule:** all new behavior lives in three new vertical slices (`canvas`, `voice`, `conductor`) that follow the repo's slice conventions (`api/`, `node/`, `browser/`, `contributions/`). Existing files are touched only at the registration seams listed below.
-- **Allowed seam edits** (expect trivial conflicts only):
+- **Allowed seam edits**:
   - `src/core/manifests/browser/view-catalog.ts`, `browser-contributions.ts`, `app-scoped-stores.ts`
   - `src/core/manifests/node/controllers.ts`, `src/core/manifests/shared/desktop-wire-contract.ts`, `command-catalog.ts`, `command-palette-catalog.ts`
-  - Drizzle schema + a new generated migration
+  - Drizzle schema + generated migrations
   - `electron-builder.config.ts` (app id, name, icons), `app-identity` primitive (branding)
   - One main-process permission handler for `media` on the main window session (§5.1)
-- **Sync:** `upstream` remote; merge `upstream/main` weekly; CI runs `pnpm run check` plus our canvas/voice/conductor suites on `windows-2022`.
-- **Licensing:** keep `LICENSE.md` and add a `NOTICE` crediting emdash; rename the product (app id, name, icons, update feed) so we don't collide with emdash's auto-updater or trademark.
-- **Upstreaming:** generic improvements (e.g. Windows fixes) go upstream as PRs, which shrinks our diff.
+- **Git remotes:** do not configure a push-capable remote to `generalaction/emdash`. This
+  partial clone may keep a fetch-only promisor remote solely to hydrate missing historical
+  objects until a full Chorus repository is created.
+- **Branch namespace:** generated Chorus work branches default to `chorus/...`; per-project settings may override the prefix.
+- **Licensing:** keep `LICENSE.md` and `NOTICE` crediting emdash; keep product identity (app id,
+  name, icons, update feed, profile directory) distinct from emdash.
+- **Upstreaming:** generic fixes can still be proposed upstream manually when desired, but
+  day-to-day Chorus work should not depend on an emdash GitHub remote.
 
 ---
 

@@ -3,12 +3,13 @@ import { join } from 'node:path';
 
 export const PREVIOUS_DB_FILENAME = 'emdash3.db';
 export const CURRENT_DB_FILENAME = 'emdash4.db';
-const USER_DATA_DIR_NAME = 'emdash';
+const USER_DATA_DIR_NAME = 'chorus-dev';
 
 /**
  * Returns the platform-specific default userData directory without requiring
- * the Electron `app` module. This is pinned to the shared `emdash` directory
- * regardless of product identity.
+ * the Electron `app` module. This is pinned to Chorus's development profile
+ * directory because packaged Electron builds set userData from app identity
+ * before opening the database.
  *
  * Pass this result as `userDataPath` to `resolveDatabasePath()` when running
  * outside of Electron (e.g. drizzle-kit CLI).

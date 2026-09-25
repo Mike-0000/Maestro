@@ -1,5 +1,10 @@
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { resolveDbResetTargets } from './db-reset.ts';
+
+function expectTargetsToContain(targets: string[], expected: string): void {
+  expect(targets.map((target) => path.normalize(target))).toContain(path.normalize(expected));
+}
 
 describe('resolveDbResetTargets', () => {
   it('targets the EMDASH_DB_FILE family when the override is set', () => {
@@ -9,16 +14,16 @@ describe('resolveDbResetTargets', () => {
       home: '/Users/dev',
     });
 
-    expect(targets).toContain('/tmp/scratch.db');
-    expect(targets).toContain('/tmp/scratch-file-search.db');
-    expect(targets).toContain('/tmp/scratch-automations.db');
-    expect(targets).toContain('/tmp/scratch-operations.db');
+    expectTargetsToContain(targets, '/tmp/scratch.db');
+    expectTargetsToContain(targets, '/tmp/scratch-file-search.db');
+    expectTargetsToContain(targets, '/tmp/scratch-automations.db');
+    expectTargetsToContain(targets, '/tmp/scratch-operations.db');
     // Every database file brings its SQLite sidecars along.
-    expect(targets).toContain('/tmp/scratch.db-wal');
-    expect(targets).toContain('/tmp/scratch.db-shm');
-    expect(targets).toContain('/tmp/scratch-file-search.db-wal');
+    expectTargetsToContain(targets, '/tmp/scratch.db-wal');
+    expectTargetsToContain(targets, '/tmp/scratch.db-shm');
+    expectTargetsToContain(targets, '/tmp/scratch-file-search.db-wal');
     // The default dev databases are left alone when the override is set.
-    expect(targets.some((t) => t.includes('emdash-dev'))).toBe(false);
+    expect(targets.some((target) => target.includes('chorus-dev'))).toBe(false);
   });
 
   it('derives sibling names for override paths without a .db extension', () => {
@@ -28,8 +33,8 @@ describe('resolveDbResetTargets', () => {
       home: '/home/dev',
     });
 
-    expect(targets).toContain('/tmp/scratch');
-    expect(targets).toContain('/tmp/scratch-file-search.db');
+    expectTargetsToContain(targets, '/tmp/scratch');
+    expectTargetsToContain(targets, '/tmp/scratch-file-search.db');
   });
 
   it('targets the default dev databases in the macOS userData dir', () => {
@@ -39,14 +44,14 @@ describe('resolveDbResetTargets', () => {
       home: '/Users/dev',
     });
 
-    const dir = '/Users/dev/Library/Application Support/emdash-dev';
-    expect(targets).toContain(`${dir}/emdash4.db`);
-    expect(targets).toContain(`${dir}/emdash4-file-search.db`);
-    expect(targets).toContain(`${dir}/emdash4-automations.db`);
-    expect(targets).toContain(`${dir}/emdash4-operations.db`);
-    expect(targets).toContain(`${dir}/emdash3.db`);
-    expect(targets).toContain(`${dir}/emdash4.db-wal`);
-    expect(targets).toContain(`${dir}/emdash4.db-shm`);
+    const dir = '/Users/dev/Library/Application Support/chorus-dev';
+    expectTargetsToContain(targets, `${dir}/emdash4.db`);
+    expectTargetsToContain(targets, `${dir}/emdash4-file-search.db`);
+    expectTargetsToContain(targets, `${dir}/emdash4-automations.db`);
+    expectTargetsToContain(targets, `${dir}/emdash4-operations.db`);
+    expectTargetsToContain(targets, `${dir}/emdash3.db`);
+    expectTargetsToContain(targets, `${dir}/emdash4.db-wal`);
+    expectTargetsToContain(targets, `${dir}/emdash4.db-shm`);
   });
 
   it('targets the default dev databases in the Linux config dir', () => {
@@ -56,7 +61,7 @@ describe('resolveDbResetTargets', () => {
       home: '/home/dev',
     });
 
-    expect(targets).toContain('/home/dev/.config/emdash-dev/emdash4.db');
+    expectTargetsToContain(targets, '/home/dev/.config/chorus-dev/emdash4.db');
   });
 
   it('targets the default dev databases under APPDATA on Windows', () => {
@@ -67,6 +72,8 @@ describe('resolveDbResetTargets', () => {
       appData: 'C:\\Users\\dev\\AppData\\Roaming',
     });
 
-    expect(targets.some((t) => t.includes('emdash-dev') && t.endsWith('emdash4.db'))).toBe(true);
+    expect(
+      targets.some((target) => target.includes('chorus-dev') && target.endsWith('emdash4.db'))
+    ).toBe(true);
   });
 });

@@ -33,7 +33,7 @@ function withSidecars(files: string[]): string[] {
 }
 
 function defaultUserDataDir(options: DbResetOptions): string {
-  const dirName = 'emdash-dev';
+  const dirName = 'chorus-dev';
   switch (options.platform) {
     case 'darwin':
       return path.join(options.home, 'Library', 'Application Support', dirName);

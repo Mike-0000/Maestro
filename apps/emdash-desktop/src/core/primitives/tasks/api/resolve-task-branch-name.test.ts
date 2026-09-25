@@ -5,7 +5,7 @@ describe('resolveTaskBranchName', () => {
   it('uses Linear branchName as-is when available', () => {
     const branchName = resolveTaskBranchName({
       rawBranch: 'linear-issue-branch-name-creation',
-      branchPrefix: 'emdash',
+      branchPrefix: 'chorus',
       suffix: 'abc12',
       appendRandomSuffix: true,
       linkedIssue: {
@@ -23,7 +23,7 @@ describe('resolveTaskBranchName', () => {
   it('keeps Linear branch names unsuffixed when Linear branchName is absent', () => {
     const branchName = resolveTaskBranchName({
       rawBranch: 'linear-issue-branch-name-creation',
-      branchPrefix: 'emdash',
+      branchPrefix: 'chorus',
       suffix: 'abc12',
       appendRandomSuffix: true,
       linkedIssue: {
@@ -34,13 +34,13 @@ describe('resolveTaskBranchName', () => {
       },
     });
 
-    expect(branchName).toBe('emdash/linear-issue-branch-name-creation');
+    expect(branchName).toBe('chorus/linear-issue-branch-name-creation');
   });
 
   it('keeps the existing format for non-Linear issues', () => {
     const branchName = resolveTaskBranchName({
       rawBranch: 'bugfix-login',
-      branchPrefix: 'emdash',
+      branchPrefix: 'chorus',
       suffix: 'xyz99',
       appendRandomSuffix: true,
       linkedIssue: {
@@ -52,30 +52,30 @@ describe('resolveTaskBranchName', () => {
       },
     });
 
-    expect(branchName).toBe('emdash/bugfix-login-xyz99');
+    expect(branchName).toBe('chorus/bugfix-login-xyz99');
   });
 
   it('omits only the random suffix when disabled', () => {
     const branchName = resolveTaskBranchName({
       rawBranch: 'bugfix-login',
-      branchPrefix: 'emdash',
+      branchPrefix: 'chorus',
       suffix: 'xyz99',
       appendRandomSuffix: false,
     });
 
-    expect(branchName).toBe('emdash/bugfix-login');
+    expect(branchName).toBe('chorus/bugfix-login');
   });
 
   it('omits the random suffix when explicitly disabled for a provider flow', () => {
     const branchName = resolveTaskBranchName({
       rawBranch: 'bugfix-login',
-      branchPrefix: 'emdash',
+      branchPrefix: 'chorus',
       suffix: 'xyz99',
       appendRandomSuffix: true,
       disableRandomSuffix: true,
     });
 
-    expect(branchName).toBe('emdash/bugfix-login');
+    expect(branchName).toBe('chorus/bugfix-login');
   });
 
   it('can create the raw task name when suffix and prefix are disabled', () => {
