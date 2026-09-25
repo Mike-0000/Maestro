@@ -11,10 +11,24 @@ export async function createIdleAgentTask(page, { taskName, agentLabel }) {
   await dialog.getByText('Task name').waitFor();
   await page.keyboard.type(taskName);
   // Wait for agent detection to preselect something, then switch if needed.
-  await dialog.getByText(/Claude Code|Codex|Cursor|Antigravity|Pi/).first().waitFor({ timeout: 60000 });
-  if (!(await dialog.getByText(agentLabel, { exact: true }).isVisible().catch(() => false))) {
-    await dialog.getByText(/Claude Code|Codex|Cursor|Antigravity|Autohand Code|Oh My Pi|^Pi$/).first().click();
-    await page.getByRole('option', { name: new RegExp(agentLabel) }).first().click();
+  await dialog
+    .getByText(/Claude Code|Codex|Cursor|Antigravity|Pi/)
+    .first()
+    .waitFor({ timeout: 60000 });
+  if (
+    !(await dialog
+      .getByText(agentLabel, { exact: true })
+      .isVisible()
+      .catch(() => false))
+  ) {
+    await dialog
+      .getByText(/Claude Code|Codex|Cursor|Antigravity|Autohand Code|Oh My Pi|^Pi$/)
+      .first()
+      .click();
+    await page
+      .getByRole('option', { name: new RegExp(agentLabel) })
+      .first()
+      .click();
   }
   await dialog.getByRole('button', { name: /^Create/ }).click();
   await page.waitForTimeout(3000);

@@ -52,5 +52,11 @@ export default async function noteDrop({ app, page, shot, log }) {
   await page.getByRole('button', { name: 'Voice and conductor settings' }).click();
   await page.waitForTimeout(2500);
   await shot('settings-windows-checks');
-  log('long paths card visible:', await page.getByText('Git long paths are off').isVisible().catch(() => false));
+  log(
+    'long paths card visible:',
+    await page
+      .getByText('Git long paths are off')
+      .isVisible()
+      .catch(() => false)
+  );
 }

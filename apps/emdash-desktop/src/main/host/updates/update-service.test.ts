@@ -17,6 +17,11 @@ vi.mock('electron-updater', () => ({
   },
 }));
 vi.mock('@main/core/app/utils', () => ({ resolveAppVersion: async () => '1.2.5' }));
+// Chorus ships with updates disabled (UPDATES_ENABLED); these tests cover the updater itself.
+vi.mock('@core/primitives/app-identity/api/app-identity', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  UPDATES_ENABLED: true,
+}));
 vi.mock('@main/lib/logger', () => ({
   log: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));

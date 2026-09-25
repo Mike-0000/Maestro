@@ -77,6 +77,7 @@ const shot = async (name) => {
   return file;
 };
 
+// oxlint-disable-next-line emdash/no-dynamic-imports -- the step module is chosen on the command line.
 const steps = (await import(pathToFileURL(resolve(values.steps)).href)).default;
 const deadline = setTimeout(() => {
   log('timed out');

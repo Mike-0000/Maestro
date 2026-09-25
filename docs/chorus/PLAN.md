@@ -2,7 +2,7 @@
 
 Working name: **Chorus** (placeholder; don't ship with "CNVS" or "emdash" branding).
 Base: fork of `generalaction/emdash` @ `95838289` (2026-09-24), Apache-2.0.
-Plan version: v4 (revision log and self-scores at the end).
+Plan version: v4 (revision log and self-scores at the end). Implementation status: §11.
 
 ---
 
@@ -299,6 +299,49 @@ Playwright browser tests (`src/renderer/tests/browser/`) using emdash's fixture 
 2. `git config core.longpaths true`, `pnpm install`, `pnpm run doctor`, `pnpm run dev` — record any Windows setup friction.
 3. Rebrand the app id/name and disable the update feed so a dev build can't pull emdash updates.
 4. Start S1 (canvas + xterm) and S6 (ConPTY injection); they carry the most technical risk.
+
+---
+
+## 11. Implementation status (2026-09-24)
+
+Built on `chorus/main`. Everything below was verified in the built app by Playwright drivers in
+`apps/emdash-desktop/tooling/chorus/` (no real LLM or cloud STT calls; agents stay idle).
+
+### Shipped
+
+| Area | What exists | Verified by |
+|------|-------------|-------------|
+| Fork/rebrand | App id `dev.chorus.app`, name, userData dir, icons (generated Chorus mark), UI strings, NOTICE, updater and signing disabled | build + launch; `smoke`, `explore` steps |
+| Canvas | `canvas` view: React Flow board of every agent across projects; live xterm at zoom 1 (interactive), throttled preview, glyph LOD, live-tile budget 6; notes; minimap; project filter; hide/show; rename spoken names; resume sleeping agents; focus/fit animations; attention cycling | `canvas` step, screenshots |
+| Voice | AudioWorklet capture → 16 kHz WAV → main; OpenAI / Deepgram (keyterm) / local whisper.cpp; vocabulary biasing from roster; Right-Ctrl hold-to-talk, Shift for dictation, global toggle shortcut, click-to-talk, silence auto-stop; TTS replies and attention announcements with barge-in | `voice`, `voice-e2e` (fake mic → mock whisper-server → grammar → note on canvas) |
+| Conductor | Grammar fast path (52-case routing eval); Claude tool loop with 11 tools executing through existing stores; 1.5 s cancel window for send/interrupt/spawn; explicit confirmation for permission answers; agent resolver never guesses; plans with owned-path overlap/cycle/provider validation, approval, `sequential_after`, conflict radar (`git merge-tree`); sending to a stopped agent starts it and delivers when ready; JSONL audit log with history panel; daily token budget + HUD readout | unit tests; `conductor`, `note-drop` steps |
+| Windows | Long-path check with one-click `core.longpaths`; quit dialog names running agents; mic-privacy deep link | `note-drop` step (card shown) |
+
+### Deviations from the plan (and why)
+
+- **No new Drizzle tables.** Canvas layout, notes and names are an app memento (`canvas.board`);
+  conductor settings/usage/log are JSON(L) files under `userData/chorus`. Avoids migration
+  collisions with a fast-moving upstream; boards are one global board with a project filter.
+- **Conductor tools execute in the renderer** against the existing MobX stores (the same code paths
+  the UI uses); only the Claude call, keys, STT and git live in main. This reuses validated flows
+  instead of duplicating them in main.
+- **Model defaults:** `claude-opus-5` with effort `low` for commands and `high` for plans, adaptive
+  thinking, prompt caching, and server-side fallback to `claude-opus-4-8`. Configurable in settings.
+- **Plans render in the HUD**, not as canvas nodes (avoids a canvas↔conductor dependency cycle).
+- **Audio is uploaded per utterance** (Wire `uploadFile`), not streamed; the renderer never holds keys.
+
+### Not built yet
+
+- GroupTile/DiffTile; canvas as the default home view; `Ctrl+Tab` binding (attention cycling exists
+  via "next" and the toolbar button); Esc-to-canvas focus.
+- Streaming STT with live partials; hands-free VAD/wake word; global hold-to-talk (`uiohook-napi`).
+- `archive_agent` tool; per-project context pack for planning; cost estimate on plans.
+- Main-window `setPermissionRequestHandler` scoping (Electron's default currently grants media).
+- Defender-exclusion guide; default short worktree root; persistent PTY host (agents still stop
+  when the app quits; they resume via the provider's resume path).
+- First-run onboarding for voice (mic test, pick engine); signed installer.
+- Measurements M1–M8 and the 200-utterance / 50-recording / 10-goal eval sets. The grammar has a
+  52-case routing eval; everything else needs real keys, a real mic, and real agent runs.
 
 ---
 
