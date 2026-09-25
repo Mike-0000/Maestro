@@ -103,6 +103,8 @@ export class ConductorStore {
   error: ConductorErrorState | null = null;
   pending: PendingAction | null = null;
   status: ConductorStatus | null = null;
+  /** Bumped after each turn is written to the log, so history views can refresh. */
+  logVersion = 0;
   readonly plans: PlanStore;
 
   private history: Anthropic.Beta.BetaMessageParam[] = [];
@@ -153,6 +155,16 @@ export class ConductorStore {
     this.voice.setVocabularyProvider(() => this.vocabulary());
     void this.refreshStatus();
     void installedProviders();
+    this.disposers.push(
+      reaction(
+        () => this.canvas.noteDrop,
+        (drop) => {
+          if (!drop) return;
+          this.canvas.consumeNoteDrop(drop.id);
+          void this.sendNote(drop.conversationId, drop.text);
+        }
+      )
+    );
     let known = new Set(this.canvas.attentionEntries.map((entry) => entry.tileId));
     this.disposers.push(
       reaction(
@@ -245,6 +257,25 @@ export class ConductorStore {
       this.queued = null;
       if (next) void this.handleUtterance(next.text, next.source);
     }
+  }
+
+  /** A note dropped on an agent: send its text after the usual cancel window. */
+  private async sendNote(conversationId: string, text: string): Promise<void> {
+    const entry = entryForConversation(this.canvas, conversationId);
+    if (!entry) return;
+    const name = this.nameOf(entry);
+    const confirmed = await this.requestPending(
+      `Send note to ${name}: “${truncate(text, 80)}”`,
+      'countdown'
+    );
+    if (!confirmed) {
+      this.setReply('Cancelled.', null);
+      return;
+    }
+    this.setReply(
+      await this.attempt(() => this.deliver(entry, text, true), this.deliveryReply(entry)),
+      null
+    );
   }
 
   // ── Fast path ──────────────────────────────────────────────────────────────
@@ -807,7 +838,9 @@ export class ConductorStore {
     };
     void getConductorClient()
       .then((client) => client.appendLog(record))
+      .then(() => runInAction(() => this.logVersion++))
       .catch((error: unknown) => log.warn('conductor: log write failed', { error }));
+    if (entry.route === 'llm') void this.refreshStatus();
   }
 }
 

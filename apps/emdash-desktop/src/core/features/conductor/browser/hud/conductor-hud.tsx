@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  History,
   Keyboard,
   Loader2,
   Mic,
@@ -16,6 +17,7 @@ import { getVoiceStore } from '@core/features/voice/contributions/browser/app-st
 import { getNavigation } from '@core/primitives/navigation/browser/navigation-selectors';
 import { cn } from '@core/primitives/styling/browser/cn';
 import { getConductorStore } from '../../contributions/browser/app-stores';
+import { ConductorLogPanel } from './conductor-log-panel';
 import { PendingActionCard } from './pending-action-card';
 import { PlanPanel } from './plan-panel';
 
@@ -31,6 +33,7 @@ export const ConductorHud = observer(function ConductorHud() {
   const voice = getVoiceStore();
   const conductor = getConductorStore();
   const [typing, setTyping] = useState(false);
+  const [showLog, setShowLog] = useState(false);
   const replyVisible = useRecentlyChanged(conductor.replyAt, REPLY_VISIBLE_MS);
 
   useEffect(() => {
@@ -58,7 +61,8 @@ export const ConductorHud = observer(function ConductorHud() {
     conductor.pending !== null ||
     (replyVisible && conductor.reply !== '') ||
     error !== null ||
-    typing;
+    typing ||
+    showLog;
 
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex flex-col items-center gap-2 px-4">
@@ -81,6 +85,13 @@ export const ConductorHud = observer(function ConductorHud() {
             onClick={() => voice.setMuted(!voice.muted)}
           >
             {voice.muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
+          </HudIconButton>
+          <HudIconButton
+            label="Conductor history"
+            active={showLog}
+            onClick={() => setShowLog((open) => !open)}
+          >
+            <History className="size-4" />
           </HudIconButton>
           <HudIconButton
             label="Type a command"
@@ -110,6 +121,8 @@ export const ConductorHud = observer(function ConductorHud() {
         )}
 
         {error && <ErrorCard />}
+
+        {showLog && <ConductorLogPanel refreshKey={conductor.logVersion} />}
 
         {typing && <CommandInput onClose={() => setTyping(false)} />}
       </div>
@@ -197,6 +210,7 @@ const StatusLine = observer(function StatusLine() {
       {voice.lastLatencyMs !== null && (
         <span className="ml-2 tabular-nums opacity-70">STT {voice.lastLatencyMs} ms</span>
       )}
+      <UsageReadout />
     </span>
   );
 });
@@ -343,4 +357,33 @@ function useRecentlyChanged(changedAt: number, durationMs: number): boolean {
     return () => clearTimeout(timer);
   }, [changedAt, durationMs]);
   return visible;
+}
+
+/** Today's conductor tokens against the daily budget; hidden until the conductor has been used. */
+const UsageReadout = observer(function UsageReadout() {
+  const status = getConductorStore().status;
+  if (!status?.configured) return null;
+  const used = status.usageToday.inputTokens + status.usageToday.outputTokens;
+  if (used === 0) return null;
+  const budget = status.settings.dailyTokenBudget;
+  const share = budget > 0 ? used / budget : 0;
+  return (
+    <span
+      className={cn('ml-2 tabular-nums opacity-70', share > 0.8 && 'text-amber-600 opacity-100')}
+      title={
+        budget > 0
+          ? `${used.toLocaleString()} of ${budget.toLocaleString()} tokens today`
+          : undefined
+      }
+    >
+      {formatCompact(used)}
+      {budget > 0 ? ` / ${formatCompact(budget)}` : ''} tok
+    </span>
+  );
+});
+
+function formatCompact(count: number): string {
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+  if (count >= 1_000) return `${Math.round(count / 1_000)}k`;
+  return String(count);
 }

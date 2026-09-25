@@ -4,6 +4,8 @@ import { observer } from 'mobx-react-lite';
 import { useEffect, useState } from 'react';
 import { getVoiceStore } from '@core/features/voice/contributions/browser/app-stores';
 import type { ChorusCredentialId } from '@core/primitives/chorus-host/api/credentials';
+import { getConductorClient } from '../../api/browser/client';
+import type { SystemChecks } from '../../api/contract';
 import { getConductorStore } from '../../contributions/browser/app-stores';
 
 const ENGINE_LABELS = {
@@ -42,6 +44,8 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
         title="Voice & Conductor"
         description="Talk to your agents. Keys are encrypted with Windows DPAPI and never leave the main process."
       />
+
+      <WindowsChecks />
 
       <SettingsSection title="API keys">
         <KeyRow
@@ -436,4 +440,47 @@ function formatTokens(count: number): string {
   if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M tokens`;
   if (count >= 1_000) return `${Math.round(count / 1_000)}k tokens`;
   return `${count} tokens`;
+}
+
+/** Surfaces Windows settings that break agent worktrees, with a one-click fix. */
+function WindowsChecks() {
+  const [checks, setChecks] = useState<SystemChecks | null>(null);
+  const [fixing, setFixing] = useState(false);
+  useEffect(() => {
+    void getConductorClient()
+      .then((client) => client.getSystemChecks())
+      .then(setChecks)
+      .catch(() => setChecks(null));
+  }, []);
+  if (!checks || checks.platform !== 'win32' || (checks.git && checks.longPaths)) return null;
+  return (
+    <SettingsSection title="Windows">
+      <SettingsRow
+        label={checks.git ? 'Git long paths are off' : 'Git was not found'}
+        description={
+          checks.git
+            ? 'Agent worktrees nest deep folders (node_modules). With long paths off, checkouts fail past 260 characters. This sets git config --global core.longpaths true.'
+            : 'Install Git for Windows and restart Chorus; agents work in git worktrees.'
+        }
+        control={
+          checks.git ? (
+            <Button
+              variant="primary"
+              size="xs"
+              disabled={fixing}
+              onClick={() => {
+                setFixing(true);
+                void getConductorClient()
+                  .then((client) => client.enableGitLongPaths())
+                  .then(setChecks)
+                  .finally(() => setFixing(false));
+              }}
+            >
+              Enable long paths
+            </Button>
+          ) : null
+        }
+      />
+    </SettingsSection>
+  );
 }

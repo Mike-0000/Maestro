@@ -93,6 +93,14 @@ export const conductorTurnRecordSchema = z.object({
 });
 export type ConductorTurnRecord = z.infer<typeof conductorTurnRecordSchema>;
 
+export const systemChecksSchema = z.object({
+  platform: z.string(),
+  git: z.boolean(),
+  /** Whether git's global core.longpaths is on; null when not applicable (non-Windows, no git). */
+  longPaths: z.boolean().nullable(),
+});
+export type SystemChecks = z.infer<typeof systemChecksSchema>;
+
 export const conductorContract = defineContract({
   runTurn: fallible({
     input: z.object({
@@ -119,6 +127,9 @@ export const conductorContract = defineContract({
     error: z.object({ message: z.string() }),
   }),
   appendLog: procedure({ input: conductorTurnRecordSchema, output: z.void() }),
+  getSystemChecks: procedure({ input: z.void(), output: systemChecksSchema }),
+  /** Runs `git config --global core.longpaths true`; only called from an explicit user click. */
+  enableGitLongPaths: procedure({ input: z.void(), output: systemChecksSchema }),
   readLog: procedure({
     input: z.object({ limit: z.number().int().min(1).max(500) }),
     output: z.array(conductorTurnRecordSchema),

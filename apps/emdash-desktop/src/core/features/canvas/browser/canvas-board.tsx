@@ -132,6 +132,9 @@ const Board = observer(function Board() {
       onNodesChange={onNodesChange}
       onNodeDragStop={(_event, _node, dragged) => {
         for (const node of dragged) store.setTileRect(node.id, node.position);
+        // A single note dropped onto an agent tile offers to send its text to that agent.
+        const [only] = dragged;
+        if (dragged.length === 1 && only?.id.startsWith('note:')) store.noteDropped(only.id);
       }}
       onMoveEnd={(_event, viewport) => store.setViewport(viewport)}
       onPaneClick={() => store.focusTile(null)}

@@ -5,6 +5,7 @@ import type { ChorusHostServices } from '@core/primitives/chorus-host/api/host-s
 import { conductorContract } from '../api/contract';
 import { ConductorService } from './conductor-service';
 import { checkWorktreeConflicts } from './conflicts';
+import { enableGitLongPaths, readSystemChecks } from './system-checks';
 
 export function createConductorWireController(options: {
   host: ChorusHostServices;
@@ -24,5 +25,7 @@ export function createConductorWireController(options: {
     },
     appendLog: (record) => service.appendLog(record),
     readLog: ({ limit }) => service.readLog(limit),
+    getSystemChecks: () => readSystemChecks(),
+    enableGitLongPaths: () => enableGitLongPaths(),
   });
 }

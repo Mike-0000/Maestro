@@ -1,5 +1,6 @@
 import { Spinner, toast } from '@emdash/ui/react/primitives';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { getCanvasStore } from '@core/features/canvas/contributions/browser/app-stores';
 import { openFileStore } from '@core/features/editor/api/browser/open-file-store/open-file-store';
 import { useOpenModal } from '@core/manifests/browser/modal-api';
 import type { ActiveSessionSummary } from '@core/primitives/desktop-host/api/host-contract';
@@ -50,7 +51,7 @@ export function AppShutdownLifecycle() {
       if (activeRequestId.current !== requestId) return false;
       const confirmation = await openConfirmQuitModal({
         title: 'Quit Chorus?',
-        description: describeShutdownImpact(summary),
+        description: `${describeShutdownImpact(summary)}${describeRunningAgents()}`,
         confirmLabel: 'Quit',
       });
       return confirmation.success && activeRequestId.current === requestId;
@@ -155,6 +156,18 @@ function ShutdownOverlay() {
       </div>
     </div>
   );
+}
+
+/** Names the running agents so the user knows exactly what quitting interrupts. */
+function describeRunningAgents(): string {
+  const canvas = getCanvasStore();
+  const running = canvas.agentEntries.filter((entry) => entry.sessionActive);
+  if (running.length === 0) return '';
+  const names = running
+    .slice(0, 6)
+    .map((entry) => `${canvas.spokenName(entry.conversationId)} (${entry.taskName})`);
+  const more = running.length > 6 ? ` and ${running.length - 6} more` : '';
+  return ` Running: ${names.join(', ')}${more}. You can resume them from the canvas after restarting.`;
 }
 
 function describeShutdownImpact(summary: ActiveSessionSummary): string {

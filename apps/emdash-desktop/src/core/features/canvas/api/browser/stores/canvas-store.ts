@@ -51,6 +51,14 @@ export type NoteTileEntry = {
   readonly color: NonNullable<CanvasBoardState['notes'][string]['color']>;
 };
 
+/** A note dropped onto an agent tile: its text is offered to that agent (the conductor sends it). */
+export type NoteDrop = {
+  readonly id: number;
+  readonly noteId: string;
+  readonly conversationId: string;
+  readonly text: string;
+};
+
 export type ViewportCommand =
   | { readonly id: number; readonly kind: 'focus'; readonly tileId: string }
   | { readonly id: number; readonly kind: 'fit'; readonly tileIds?: readonly string[] };
@@ -86,6 +94,7 @@ export class CanvasStore {
   focusOrder: string[] = [];
   focusedTileId: string | null = null;
   viewportCommand: ViewportCommand | null = null;
+  noteDrop: NoteDrop | null = null;
   /** Conversations the user explicitly asked to start or resume from the canvas. */
   readonly startRequested = observable.set<string>();
   /** First time each tile was observed needing attention, for oldest-first cycling. */
@@ -101,6 +110,9 @@ export class CanvasStore {
       focusOrder: observable.ref,
       focusedTileId: observable,
       viewportCommand: observable.ref,
+      noteDrop: observable.ref,
+      noteDropped: action,
+      consumeNoteDrop: action,
       state: computed,
       agentEntries: computed,
       visibleAgentEntries: computed,
@@ -399,6 +411,27 @@ export class CanvasStore {
     }));
   }
 
+  /** Records a note dropped onto an agent tile (largest overlap wins); ignores empty notes. */
+  noteDropped(noteTile: string): void {
+    const noteId = noteTile.slice('note:'.length);
+    const text = this.state.notes[noteId]?.text.trim();
+    if (!text) return;
+    const rect = this.tileRect(noteTile);
+    let best: { conversationId: string; area: number } | null = null;
+    for (const entry of this.visibleAgentEntries) {
+      const area = overlapArea(rect, this.tileRect(entry.tileId));
+      if (area > 0 && (!best || area > best.area)) {
+        best = { conversationId: entry.conversationId, area };
+      }
+    }
+    if (!best) return;
+    this.noteDrop = { id: ++this.commandSeq, noteId, conversationId: best.conversationId, text };
+  }
+
+  consumeNoteDrop(id: number): void {
+    if (this.noteDrop?.id === id) this.noteDrop = null;
+  }
+
   removeNote(noteId: string): void {
     this.updateState((current) => {
       const notes = { ...current.notes };
@@ -452,6 +485,12 @@ export class CanvasStore {
       spokenNames: { ...current.spokenNames, [conversationId]: trimmed },
     }));
   }
+}
+
+function overlapArea(a: TileRect, b: TileRect): number {
+  const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+  const h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+  return w > 0 && h > 0 ? w * h : 0;
 }
 
 function isCanvasTask(task: TaskStore): boolean {
