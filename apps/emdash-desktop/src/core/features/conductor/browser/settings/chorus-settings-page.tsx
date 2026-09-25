@@ -121,6 +121,12 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
           description="Speech-to-text with Nova-3 and keyterm boosting for agent names."
           present={credentials?.deepgram}
         />
+        <KeyRow
+          id="gemini"
+          label="Google Gemini"
+          description="Optional cloud text-to-speech. Spoken replies are sent to Google and billed by audio duration. GEMINI_API_KEY also works."
+          present={credentials?.gemini}
+        />
       </SettingsSection>
 
       <SettingsSection title="Canvas">
@@ -296,8 +302,118 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
           }
         />
         <SettingsRow
-          label="Voice"
-          description="Windows text-to-speech voice for replies."
+          label="Spoken output"
+          description="Kitten Mini runs offline on your CPU; Gemini sends reply text to Google. Windows speech is the fallback."
+          control={
+            <Select.Root
+              value={voiceSettings?.ttsEngine ?? 'platform'}
+              disabled={!voiceSettings}
+              onValueChange={(engine) => {
+                if (
+                  engine === 'platform' ||
+                  engine === 'kitten' ||
+                  engine === 'gemini-flash' ||
+                  engine === 'gemini-flash-lite'
+                ) {
+                  void voice.updateSettings({ ttsEngine: engine });
+                }
+              }}
+            >
+              <Select.Trigger className="w-[230px]">
+                <Select.Value>
+                  {voiceSettings?.ttsEngine === 'kitten'
+                    ? 'Kitten Mini (offline)'
+                    : voiceSettings?.ttsEngine === 'gemini-flash'
+                      ? 'Gemini 3.8 Flash (quality)'
+                      : voiceSettings?.ttsEngine === 'gemini-flash-lite'
+                        ? 'Gemini 3.8 Flash-Lite (fast)'
+                        : 'Windows (offline)'}
+                </Select.Value>
+              </Select.Trigger>
+              <Select.Content align="end">
+                <Select.Item value="platform">Windows (offline)</Select.Item>
+                <Select.Item value="kitten">Kitten Mini (offline)</Select.Item>
+                <Select.Item value="gemini-flash">Gemini 3.8 Flash (quality)</Select.Item>
+                <Select.Item value="gemini-flash-lite">Gemini 3.8 Flash-Lite (fast)</Select.Item>
+              </Select.Content>
+            </Select.Root>
+          }
+        />
+        {voiceSettings?.ttsEngine === 'kitten' && (
+          <SettingsRow
+            label="Local voice"
+            description="An English voice from the bundled Kitten Mini model; no account or download needed."
+            control={
+              <Select.Root
+                value={voiceSettings.localVoice}
+                onValueChange={(localVoice) => {
+                  if (
+                    localVoice === 'Bella' ||
+                    localVoice === 'Jasper' ||
+                    localVoice === 'Luna' ||
+                    localVoice === 'Bruno' ||
+                    localVoice === 'Rosie' ||
+                    localVoice === 'Hugo' ||
+                    localVoice === 'Kiki' ||
+                    localVoice === 'Leo'
+                  ) {
+                    void voice.updateSettings({ localVoice });
+                  }
+                }}
+              >
+                <Select.Trigger className="w-[230px]">
+                  <Select.Value>{voiceSettings.localVoice}</Select.Value>
+                </Select.Trigger>
+                <Select.Content align="end">
+                  {(
+                    ['Bella', 'Jasper', 'Luna', 'Bruno', 'Rosie', 'Hugo', 'Kiki', 'Leo'] as const
+                  ).map((name) => (
+                    <Select.Item key={name} value={name}>
+                      {name}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select.Root>
+            }
+          />
+        )}
+        {(voiceSettings?.ttsEngine === 'gemini-flash' ||
+          voiceSettings?.ttsEngine === 'gemini-flash-lite') && (
+          <SettingsRow
+            label="Gemini voice"
+            description="A prebuilt English voice for spoken replies and notifications."
+            control={
+              <Select.Root
+                value={voiceSettings?.geminiVoice ?? 'Kore'}
+                disabled={!voiceSettings}
+                onValueChange={(geminiVoice) => {
+                  if (
+                    geminiVoice === 'Kore' ||
+                    geminiVoice === 'Puck' ||
+                    geminiVoice === 'Aoede' ||
+                    geminiVoice === 'Zephyr'
+                  ) {
+                    void voice.updateSettings({ geminiVoice });
+                  }
+                }}
+              >
+                <Select.Trigger className="w-[230px]">
+                  <Select.Value>{voiceSettings?.geminiVoice ?? 'Kore'}</Select.Value>
+                </Select.Trigger>
+                <Select.Content align="end">
+                  {(['Kore', 'Puck', 'Aoede', 'Zephyr'] as const).map((name) => (
+                    <Select.Item key={name} value={name}>
+                      {name}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select.Root>
+            }
+          />
+        )}
+        <SettingsRow
+          label="Windows fallback voice"
+          description="Used if the selected model fails. Test previews the selected output engine."
           control={<VoicePicker />}
         />
       </SettingsSection>

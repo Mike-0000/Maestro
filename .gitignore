@@ -8,6 +8,8 @@ out/
 apps/*/out/
 apps/*/release/
 apps/*/dist/
+# Pinned, downloaded speech model is bundled by electron-builder, not committed.
+apps/emdash-desktop/.cache/local-tts/
 apps/workspace-server/dist-artifacts/
 apps/workspace-server/runtime-deps/node_modules/
 

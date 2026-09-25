@@ -70,6 +70,18 @@ export function createVoiceWireController(options: {
       }
     },
     abortStream: ({ streamId }) => service.abortStream(streamId),
+    startTts: ({ requestId, text }) =>
+      service.startTts(requestId, text, (event) => {
+        if (event.type === 'chunk') {
+          voiceEvents.emit(undefined, { type: 'tts-chunk', requestId, pcm: event.pcm });
+        } else {
+          voiceEvents.emit(undefined, {
+            type: event.type === 'done' ? 'tts-done' : 'tts-error',
+            requestId,
+          });
+        }
+      }),
+    stopTts: ({ requestId }) => service.stopTts(requestId),
     updateSettings: (patch) => service.updateSettings(patch),
     setCredential: ({ id, value }) => service.setCredential(id, value),
     openMicrophoneSettings: () => options.host.openMicrophoneSettings(),

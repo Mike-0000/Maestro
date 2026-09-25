@@ -1,13 +1,26 @@
-/**
- * Spoken replies through the platform speech synthesizer (the installed Windows OneCore/SAPI
- * voices: offline and free). Replies are short; pressing push-to-talk cuts them off (barge-in).
- */
+import { getVoiceClient } from '../api/browser/client';
+import type { VoiceEvent, VoiceSettings } from '../api/contract';
+
+/** Cancellable spoken output: local or Gemini PCM, otherwise the installed system voice. */
 export class SpeechOutput {
   private preferredVoice = '';
+  private engine: VoiceSettings['ttsEngine'] = 'platform';
+  private geminiAvailable = false;
+  private requestId: string | null = null;
+  private starting: Promise<void> | null = null;
+  private context: AudioContext | null = null;
+  private sources = new Set<AudioBufferSourceNode>();
+  private nextStart = 0;
+  private receivedAudio = false;
+  private finished = false;
+  private fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+  private generation = 0;
   onSpeakingChange: ((speaking: boolean) => void) | null = null;
 
-  setPreferredVoice(name: string): void {
-    this.preferredVoice = name;
+  configure(settings: VoiceSettings, geminiAvailable: boolean): void {
+    this.preferredVoice = settings.ttsVoice;
+    this.engine = settings.ttsEngine;
+    this.geminiAvailable = geminiAvailable;
   }
 
   static voices(): SpeechSynthesisVoice[] {
@@ -15,7 +28,123 @@ export class SpeechOutput {
   }
 
   speak(text: string): void {
-    if (typeof speechSynthesis === 'undefined' || !text.trim()) return;
+    if (!text.trim()) return;
+    this.stop();
+    const generation = this.generation;
+    if (
+      this.engine === 'platform' ||
+      (this.engine !== 'kitten' && !this.geminiAvailable) ||
+      text.length > 1200
+    ) {
+      this.speakPlatform(text, generation);
+      return;
+    }
+    const requestId = crypto.randomUUID();
+    this.requestId = requestId;
+    this.pendingText = text;
+    // A stalled connection must not leave the reply silent indefinitely.
+    this.fallbackTimer = setTimeout(
+      () => this.fallback(text, generation),
+      this.engine === 'kitten' ? 12_000 : 3500
+    );
+    const starting = getVoiceClient().then(async (client) => {
+      if (this.requestId !== requestId) return;
+      await client.startTts({ requestId, text });
+    });
+    this.starting = starting;
+    void starting.catch(() => this.fallback(text, generation));
+  }
+
+  handleEvent(event: VoiceEvent): void {
+    if (!('requestId' in event) || event.requestId !== this.requestId) return;
+    if (event.type === 'tts-error') {
+      if (!this.receivedAudio) this.fallbackToPlatform();
+      else {
+        this.finished = true;
+        this.finishCloud();
+      }
+    } else if (event.type === 'tts-done') {
+      this.finished = true;
+      if (!this.receivedAudio) this.fallbackToPlatform();
+      else this.finishCloud();
+    } else if (event.type === 'tts-chunk') {
+      try {
+        this.playChunk(event.pcm);
+      } catch {
+        if (!this.receivedAudio) this.fallbackToPlatform();
+        else this.stop();
+      }
+    }
+  }
+
+  private playChunk(pcm: string): void {
+    const bytes = Uint8Array.from(atob(pcm), (char) => char.charCodeAt(0));
+    if (!bytes.length || bytes.length % 2) throw new Error('Invalid PCM chunk');
+    const context = (this.context ??= new AudioContext({ sampleRate: 24_000 }));
+    const buffer = context.createBuffer(1, bytes.length / 2, 24_000);
+    const samples = buffer.getChannelData(0);
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    for (let i = 0; i < samples.length; i++) samples[i] = view.getInt16(i * 2, true) / 32768;
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    source.connect(context.destination);
+    const startAt = Math.max(context.currentTime + 0.02, this.nextStart);
+    this.nextStart = startAt + buffer.duration;
+    this.sources.add(source);
+    source.onended = () => {
+      this.sources.delete(source);
+      source.disconnect();
+      this.finishCloud();
+    };
+    source.start(startAt);
+    this.receivedAudio = true;
+    this.clearFallbackTimer();
+    this.onSpeakingChange?.(true);
+    if (context.state !== 'running') {
+      const generation = this.generation;
+      const timeout = setTimeout(() => {
+        if (this.generation === generation && context.state !== 'running') {
+          this.fallbackToPlatform();
+        }
+      }, 1000);
+      void context.resume().then(
+        () => {
+          clearTimeout(timeout);
+          if (this.generation === generation && context.state !== 'running') {
+            this.fallbackToPlatform();
+          }
+        },
+        () => {
+          clearTimeout(timeout);
+          if (this.generation === generation) this.fallbackToPlatform();
+        }
+      );
+    }
+  }
+
+  private finishCloud(): void {
+    if (!this.finished || this.sources.size) return;
+    this.requestId = null;
+    this.pendingText = '';
+    this.onSpeakingChange?.(false);
+  }
+
+  private fallback(text: string, generation: number): void {
+    if (this.generation !== generation || this.receivedAudio) return;
+    this.fallbackToPlatform(text);
+  }
+
+  private fallbackToPlatform(text?: string): void {
+    // The text is stored only in this closure until the first chunk or timeout; no cloud retry.
+    const fallbackText = text ?? this.pendingText;
+    this.stop();
+    if (fallbackText) this.speakPlatform(fallbackText, this.generation);
+  }
+
+  private pendingText = '';
+
+  private speakPlatform(text: string, generation: number): void {
+    if (typeof speechSynthesis === 'undefined') return;
     speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     const voice =
@@ -25,15 +154,47 @@ export class SpeechOutput {
       );
     if (voice) utterance.voice = voice;
     utterance.rate = 1.1;
-    utterance.onstart = () => this.onSpeakingChange?.(true);
-    utterance.onend = () => this.onSpeakingChange?.(false);
-    utterance.onerror = () => this.onSpeakingChange?.(false);
+    utterance.onstart = () => {
+      if (this.generation === generation) this.onSpeakingChange?.(true);
+    };
+    const done = () => {
+      if (this.generation === generation) this.onSpeakingChange?.(false);
+    };
+    utterance.onend = done;
+    utterance.onerror = done;
     speechSynthesis.speak(utterance);
   }
 
+  private clearFallbackTimer(): void {
+    if (this.fallbackTimer) clearTimeout(this.fallbackTimer);
+    this.fallbackTimer = null;
+  }
+
   stop(): void {
-    if (typeof speechSynthesis === 'undefined') return;
-    speechSynthesis.cancel();
+    this.generation++;
+    this.clearFallbackTimer();
+    const requestId = this.requestId;
+    const starting = this.starting;
+    this.requestId = null;
+    this.starting = null;
+    this.pendingText = '';
+    if (requestId) {
+      // Wait for start's Wire acknowledgment so a delayed start cannot outlive its cancellation.
+      void (starting ?? Promise.resolve())
+        .catch(() => {})
+        .then(async () => (await getVoiceClient()).stopTts({ requestId }))
+        .catch(() => {});
+    }
+    for (const source of this.sources) {
+      source.onended = null;
+      source.stop();
+      source.disconnect();
+    }
+    this.sources.clear();
+    this.nextStart = 0;
+    this.receivedAudio = false;
+    this.finished = false;
+    if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel();
     this.onSpeakingChange?.(false);
   }
 }

@@ -1,4 +1,5 @@
 import type { Configuration } from 'electron-builder';
+import { LOCAL_TTS_MODEL_DIR, prepareLocalTtsModel } from './scripts/prepare-local-tts-model.ts';
 import {
   APP_ID,
   ARTIFACT_PREFIX,
@@ -24,12 +25,17 @@ const config: Configuration = {
   ],
   generateUpdatesFilesForAllChannels: false,
   files: ['out/**/*', 'node_modules/**/*', 'drizzle/**/*'],
+  // The pinned, checksum-verified offline model ships with every installer; no first-run download.
+  beforePack: async () => prepareLocalTtsModel(),
+  extraResources: [{ from: LOCAL_TTS_MODEL_DIR, to: 'models/kitten-mini-en-v0_8' }],
   asarUnpack: [
     'out/main/adapters/**',
     'node_modules/better-sqlite3/**',
     'node_modules/node-pty/**',
     // Global hold-to-talk keyboard hook: N-API prebuilds are resolved from its folder at runtime.
     'node_modules/uiohook-napi/**',
+    // The native addon loads its ONNX runtime DLLs/dylibs/so files from its own directory.
+    'node_modules/sherpa-onnx-*/**',
     'node_modules/@parcel/watcher/**',
     '**/*.node',
   ],

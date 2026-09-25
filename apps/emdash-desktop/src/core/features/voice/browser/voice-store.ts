@@ -105,7 +105,7 @@ export class VoiceStore {
             else if (event.type === 'global-hold') this.onGlobalHold(event.action, event.intent);
             else if (event.type === 'partial' && event.streamId === this.streamId) {
               runInAction(() => (this.partial = event.text));
-            }
+            } else this.speech.handleEvent(event);
           },
         });
         if (disposed) next();
@@ -433,7 +433,7 @@ export class VoiceStore {
       const status = await (await getVoiceClient()).getStatus();
       runInAction(() => {
         this.status = status;
-        this.speech.setPreferredVoice(status.settings.ttsVoice);
+        this.speech.configure(status.settings, status.credentials.gemini);
       });
       void this.applyHandsFree();
     } catch (error) {
@@ -445,7 +445,7 @@ export class VoiceStore {
     const status = await (await getVoiceClient()).updateSettings(patch);
     runInAction(() => {
       this.status = status;
-      this.speech.setPreferredVoice(status.settings.ttsVoice);
+      this.speech.configure(status.settings, status.credentials.gemini);
     });
     if ('handsFree' in patch) void this.applyHandsFree();
   }
@@ -456,7 +456,10 @@ export class VoiceStore {
 
   async setCredential(id: ChorusCredentialId, value: string | null): Promise<void> {
     const status = await (await getVoiceClient()).setCredential({ id, value });
-    runInAction(() => (this.status = status));
+    runInAction(() => {
+      this.status = status;
+      this.speech.configure(status.settings, status.credentials.gemini);
+    });
   }
 }
 

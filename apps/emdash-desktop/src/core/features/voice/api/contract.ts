@@ -22,6 +22,11 @@ export const voiceSettingsSchema = z.object({
   speakReplies: z.boolean(),
   speakAttention: z.boolean(),
   ttsVoice: z.string(),
+  /** Spoken output is independent of the speech-to-text engine. */
+  ttsEngine: z.enum(['platform', 'kitten', 'gemini-flash', 'gemini-flash-lite']),
+  /** Kitten TTS Mini 0.8 English voice (runs entirely on the CPU). */
+  localVoice: z.enum(['Bella', 'Jasper', 'Luna', 'Bruno', 'Rosie', 'Hugo', 'Kiki', 'Leo']),
+  geminiVoice: z.enum(['Kore', 'Puck', 'Aoede', 'Zephyr']),
   /** Stream audio while speaking for live partial transcripts (Deepgram only). */
   streaming: z.boolean(),
   /** Listen continuously and start on speech; only acts after the wake phrase. */
@@ -43,6 +48,9 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   speakReplies: true,
   speakAttention: true,
   ttsVoice: '',
+  ttsEngine: 'platform',
+  localVoice: 'Bella',
+  geminiVoice: 'Kore',
   streaming: true,
   handsFree: false,
   wakePhrase: 'chorus',
@@ -83,6 +91,10 @@ export const voiceEventSchema = z.discriminatedUnion('type', [
   }),
   /** Live partial transcript of an open stream. */
   z.object({ type: z.literal('partial'), streamId: z.string(), text: z.string() }),
+  /** 24 kHz mono signed 16-bit little-endian PCM from Gemini or the local Kitten model. */
+  z.object({ type: z.literal('tts-chunk'), requestId: z.string(), pcm: z.string() }),
+  z.object({ type: z.literal('tts-done'), requestId: z.string() }),
+  z.object({ type: z.literal('tts-error'), requestId: z.string() }),
 ]);
 export type VoiceEvent = z.infer<typeof voiceEventSchema>;
 
@@ -120,6 +132,12 @@ export const voiceContract = defineContract({
     error: voiceErrorSchema,
   }),
   abortStream: procedure({ input: z.object({ streamId: z.string() }), output: z.void() }),
+  /** Starts abortable cloud or offline synthesis; audio is delivered on events. */
+  startTts: procedure({
+    input: z.object({ requestId: z.string().uuid(), text: z.string().min(1).max(1200) }),
+    output: z.void(),
+  }),
+  stopTts: procedure({ input: z.object({ requestId: z.string().uuid() }), output: z.void() }),
   updateSettings: procedure({
     input: voiceSettingsSchema.partial(),
     output: voiceStatusSchema,

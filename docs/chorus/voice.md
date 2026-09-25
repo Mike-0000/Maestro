@@ -86,6 +86,40 @@ Add an Anthropic API key in **Settings → Voice & Conductor**. The default mode
 and a daily token budget (3M by default) stops runaway spend. Every turn is logged to
 `%APPDATA%\chorus\chorus\conductor-log.jsonl` (utterance, actions, reply, latency, tokens).
 
+## Spoken replies (text-to-speech)
+
+In **Settings → Voice & Conductor → Spoken output**, select **Kitten Mini (offline)** for
+higher-quality English speech on the CPU without an account, download, or GPU. The packaged app
+includes [KittenTTS Mini 0.8](https://huggingface.co/KittenML/kitten-tts-mini-0.8) and its
+English phonemizer data; the model is about 96 MB unpacked. Pick from eight local
+voices. Windows speech remains the default and fallback. The local option does **not** send text
+to any service. Synthesis occurs in the app's main process, so it can run without Internet, even
+on a Windows PC without a dedicated GPU. Initial model load can take a few seconds on slow CPUs.
+
+Alternatively, select Gemini 3.8 Flash (higher quality) or Flash-Lite (faster and cheaper). Add a
+Google Gemini API key under **API keys**, or set `GEMINI_API_KEY` before launching Chorus. Keys
+stay in the encrypted secret store or main-process environment; the renderer never receives the
+key. Only short conductor replies to spoken commands and enabled attention notices are
+synthesized, not entire agent transcripts. **Gemini sends that reply text to Google**; both
+engines stream 24 kHz PCM and stop when you start talking, mute, or another reply arrives. If
+synthesis fails or times out, Chorus uses the chosen Windows fallback voice. The **Test** button
+previews the active output engine.
+
+For developers, `pnpm --dir apps/emdash-desktop run voice:model` downloads the model for local
+development. `electron-builder` does this automatically when packaging and verifies the pinned
+SHA-256 before including the model in every installer; end users never need to run that command.
+The model archive is not stored in Git. The native runtime is
+[sherpa-onnx-node](https://www.npmjs.com/package/sherpa-onnx-node) 1.13.8, with explicit
+platform binaries for Windows x64, macOS arm64/x64, and Linux arm64/x64. KittenTTS and
+sherpa-onnx are Apache-2.0, but sherpa-onnx links **eSpeak NG (GPL-3.0)** for phonemization;
+its COPYING text is shipped with the model. Public redistribution of the bundled runtime
+requires GPL-3.0 source/notice compliance and legal review before a release. Bundling adds
+roughly 100 MB plus platform runtime libraries to the installer; no install scripts are needed.
+
+Google bills paid usage by text input and generated audio tokens; check the current
+[Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing) before enabling cloud output.
+The cloud option is separate from speech-to-text and from the conductor provider.
+
 ## Speech-to-text engines
 
 | Engine | Setup | Notes |
@@ -160,4 +194,4 @@ source can also be set to Auto or TypeSafe.
   says when registration failed).
 - **Names are misheard**: rename agents to distinct words ("Frontend", "Tests"), or switch engines.
 - **No spoken replies**: check the mute button in the HUD and "Speak replies" in settings; pick an
-  installed Windows voice under "Voice".
+  installed Windows fallback voice or configure Gemini under "Spoken output".

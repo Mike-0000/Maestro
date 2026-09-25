@@ -32,8 +32,8 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     id: 'chorus-api-keys',
     label: 'Voice & conductor API keys',
     tab: 'chorus',
-    description: 'Anthropic, OpenAI, and Deepgram keys for the conductor and speech-to-text.',
-    keywords: ['anthropic', 'claude', 'openai', 'deepgram', 'api key', 'voice'],
+    description: 'Keys for the conductor, speech-to-text, and optional Gemini speech output.',
+    keywords: ['anthropic', 'claude', 'openai', 'deepgram', 'gemini', 'tts', 'api key', 'voice'],
   },
   {
     id: 'chorus-speech-engine',
@@ -41,6 +41,13 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     tab: 'chorus',
     description: 'Transcribe with OpenAI, Deepgram, or a local whisper.cpp server.',
     keywords: ['stt', 'whisper', 'microphone', 'dictation', 'push to talk', 'shortcut'],
+  },
+  {
+    id: 'chorus-spoken-output',
+    label: 'Spoken output',
+    tab: 'chorus',
+    description: 'Speak replies with Windows, offline Kitten Mini, or Gemini Flash / Flash-Lite TTS.',
+    keywords: ['tts', 'text to speech', 'gemini', 'kitten', 'model', 'spoken replies', 'voice'],
   },
   {
     id: 'chorus-conductor',

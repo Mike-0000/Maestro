@@ -40,6 +40,7 @@
     "package:win": "pnpm run build && electron-builder --win --publish never --config electron-builder.config.ts",
     "postinstall": "node --experimental-strip-types scripts/postinstall.ts",
     "rebuild": "electron-rebuild -f --only=better-sqlite3",
+    "voice:model": "node --experimental-strip-types scripts/prepare-local-tts-model.ts",
     "clean": "rm -rf node_modules dist",
     "reset": "pnpm run clean && pnpm install",
     "lint": "node --test ../../tooling/oxlint/rules/*.test.js ../../tooling/oxlint/scripts/*.test.mjs && oxlint .",
@@ -77,6 +78,7 @@
     "nbranch": "^0.1.1",
     "node-pty": "1.1.0",
     "pidusage": "^4.0.1",
+    "sherpa-onnx-node": "1.13.8",
     "smol-toml": "^1.6.0",
     "ssh2": "^1.17.0",
     "tinykeys": "^4.0.0",
@@ -184,5 +186,12 @@
         }
       }
     }
+  },
+  "optionalDependencies": {
+    "sherpa-onnx-darwin-arm64": "1.13.8",
+    "sherpa-onnx-darwin-x64": "1.13.8",
+    "sherpa-onnx-linux-arm64": "1.13.8",
+    "sherpa-onnx-linux-x64": "1.13.8",
+    "sherpa-onnx-win-x64": "1.13.8"
   }
 }

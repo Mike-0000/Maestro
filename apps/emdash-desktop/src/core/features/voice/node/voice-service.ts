@@ -18,6 +18,8 @@ import { SttEngineError, type SttEngine } from './engines/engine';
 import { OpenAiSttEngine } from './engines/openai';
 import { OpenRouterSttEngine } from './engines/openrouter';
 import { WhisperLocalSttEngine } from './engines/whisper-local';
+import { streamGeminiTts } from './gemini-tts';
+import { LocalTts } from './local-tts';
 
 /** RIFF header (44 bytes) plus at least ~0.2 s of 16 kHz 16-bit audio. */
 const MIN_WAV_BYTES = 44 + 6400;
@@ -42,6 +44,8 @@ export class VoiceService {
   private registeredShortcut: string | null = null;
   private holdKey: number | null = null;
   private readonly hold: HoldToTalkMachine;
+  private readonly ttsRequests = new Map<string, AbortController>();
+  private localTts: LocalTts | null = null;
   private readonly streams = new Map<
     string,
     { stream: DeepgramStream; startedAt: number; timer: ReturnType<typeof setTimeout> }
@@ -81,6 +85,7 @@ export class VoiceService {
   }
 
   dispose(): void {
+    for (const id of [...this.ttsRequests.keys()]) this.stopTts(id);
     for (const id of [...this.streams.keys()]) this.abortStream(id);
     this.applyGlobalHold('off');
     if (this.registeredShortcut) this.host.globalShortcuts.unregister(this.registeredShortcut);
@@ -109,6 +114,70 @@ export class VoiceService {
   async setCredential(id: ChorusCredentialId, value: string | null): Promise<VoiceStatus> {
     await this.credentials.set(id, value);
     return this.status();
+  }
+
+  /** Synthesis runs in the main process; Gemini credentials never reach the renderer. */
+  async startTts(
+    requestId: string,
+    text: string,
+    emit: (event: { type: 'chunk'; pcm: string } | { type: 'done' } | { type: 'error' }) => void
+  ): Promise<void> {
+    // Replies replace one another; never generate several billable utterances concurrently.
+    for (const id of [...this.ttsRequests.keys()]) this.stopTts(id);
+    const controller = new AbortController();
+    this.ttsRequests.set(requestId, controller);
+    try {
+      const settings = await this.settings.read();
+      if (controller.signal.aborted) return;
+      if (settings.ttsEngine === 'platform') {
+        emit({ type: 'error' });
+        this.ttsRequests.delete(requestId);
+        return;
+      }
+      const forward = (event: { type: 'chunk'; pcm: string } | { type: 'done' }) => {
+        if (!controller.signal.aborted) emit(event);
+      };
+      let synthesis: Promise<void>;
+      if (settings.ttsEngine === 'kitten') {
+        synthesis = (this.localTts ??= new LocalTts()).speak(
+          text,
+          settings.localVoice,
+          controller.signal,
+          forward
+        );
+      } else {
+        const key = await this.credentials.get('gemini');
+        if (controller.signal.aborted) return;
+        if (!key) {
+          emit({ type: 'error' });
+          this.ttsRequests.delete(requestId);
+          return;
+        }
+        const model =
+          settings.ttsEngine === 'gemini-flash'
+            ? 'gemini-3.8-flash-tts'
+            : 'gemini-3.8-flash-lite-tts';
+        synthesis = streamGeminiTts(
+          { key, model, voice: settings.geminiVoice, text, signal: controller.signal },
+          forward
+        );
+      }
+      void synthesis
+        .catch(() => {
+          if (!controller.signal.aborted) emit({ type: 'error' });
+        })
+        .finally(() => {
+          if (this.ttsRequests.get(requestId) === controller) this.ttsRequests.delete(requestId);
+        });
+    } catch {
+      this.ttsRequests.delete(requestId);
+      if (!controller.signal.aborted) emit({ type: 'error' });
+    }
+  }
+
+  stopTts(requestId: string): void {
+    this.ttsRequests.get(requestId)?.abort();
+    this.ttsRequests.delete(requestId);
   }
 
   /** Opens a live stream if the current engine supports one; null means upload instead. */
