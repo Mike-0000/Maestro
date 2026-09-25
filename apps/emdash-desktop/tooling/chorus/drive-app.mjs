@@ -2,7 +2,7 @@
 // steps module against its first window. Dev-only verification tooling; never bundled.
 //
 //   node tooling/chorus/drive-app.mjs --steps tooling/chorus/steps/smoke.mjs \
-//     [--profile <dir>] [--out <dir>] [--keep-open]
+//     [--profile <dir>] [--out <dir>] [--keep-open] [--fake-mic]
 //
 // A steps module default-exports `async ({ app, page, shot, log, profileDir }) => {}`.
 import { mkdirSync } from 'node:fs';
@@ -22,6 +22,8 @@ const { values } = parseArgs({
     out: { type: 'string' },
     'keep-open': { type: 'boolean', default: false },
     timeout: { type: 'string', default: '600000' },
+    // Feed Chromium's synthetic audio/video devices (a beeping tone) and auto-grant media access.
+    'fake-mic': { type: 'boolean', default: false },
   },
 });
 
@@ -51,7 +53,12 @@ log('profile', profileDir);
 log('screenshots', outDir);
 
 const app = await electron.launch({
-  args: [appDir],
+  args: [
+    ...(values['fake-mic']
+      ? ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream']
+      : []),
+    appDir,
+  ],
   cwd: appDir,
   env,
   timeout: 120_000,
