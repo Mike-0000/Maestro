@@ -56,6 +56,7 @@ import {
   submitAgentInput,
 } from './agent-io';
 import { deliverPromptWhenReady } from './deferred-prompt';
+import { focusSpawnedAgent } from './focus-spawned-agent';
 import { jevDecide } from './jev';
 import { PlanStore } from './plan-store';
 import {
@@ -815,6 +816,7 @@ export class ConductorStore {
           this.canvas.releaseSpokenName(conversationId);
           throw error;
         });
+        this.disposers.push(focusSpawnedAgent(this.canvas, result.conversationId));
         void startAgentSession(projectId, result.taskId, result.conversationId).then((started) => {
           if (started && result.promptDeferred && spawn.prompt.trim()) {
             void deliverPromptWhenReady(this.canvas, result.conversationId, spawn.prompt);
