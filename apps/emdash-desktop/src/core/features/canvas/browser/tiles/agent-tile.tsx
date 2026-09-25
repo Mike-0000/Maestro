@@ -3,7 +3,11 @@ import { NodeResizer, useStore, type NodeProps } from '@xyflow/react';
 import { EyeOff, Maximize2, PanelsTopLeft, Play } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useState } from 'react';
-import { ConversationAgentIcon } from '@core/features/conversations/browser/conversation-agent-icon';
+import { AgentIcon } from '@core/features/agents/contributions/browser/agent-icon';
+import {
+  needsAttention,
+  type AgentTileEntry,
+} from '@core/features/canvas/api/browser/stores/canvas-store';
 import { taskViewDef } from '@core/features/tasks/contributions/views';
 import { getNavigation } from '@core/primitives/navigation/browser/navigation-selectors';
 import { cn } from '@core/primitives/styling/browser/cn';
@@ -15,7 +19,6 @@ import {
   resolveTileDetail,
 } from '../../api/canvas-model';
 import { getCanvasStore } from '../../contributions/browser/app-stores';
-import { needsAttention, type AgentTileEntry } from '../canvas-store';
 import { AgentPreview } from './agent-preview';
 import { AgentTerminal, TerminalPlaceholder } from './agent-terminal';
 import { statusPresentation } from './status-presentation';
@@ -76,6 +79,7 @@ export const AgentTileNode = observer(function AgentTileNode({ data, selected }:
         ) : detail === 'live' ? (
           <AgentTerminal
             entry={entry}
+            hydrate={!entry.sessionActive && store.startRequested.has(entry.conversationId)}
             interactive={band === 'interactive'}
             autoFocus={focused}
             onActivate={() => store.requestFocus(tileId)}
@@ -107,11 +111,7 @@ const AgentTileHeader = observer(function AgentTileHeader({
         glyph ? 'h-16' : 'h-10'
       )}
     >
-      <ConversationAgentIcon
-        providerId={entry.providerId}
-        isAcp={entry.type === 'acp'}
-        size={glyph ? 28 : 16}
-      />
+      <AgentIcon id={entry.providerId} size={glyph ? 28 : 16} />
       {renaming ? (
         <input
           autoFocus

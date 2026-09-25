@@ -66,29 +66,53 @@ const cases: [utterance: string, focused: string | null, expected: Expected][] =
     null,
     { kind: 'send', agent: 'c2', text: 'fix the lint errors' },
   ],
-  ['ask Gemini to summarize the README', null, { kind: 'send', agent: 'g1', text: 'summarize the README' }],
+  [
+    'ask Gemini to summarize the README',
+    null,
+    { kind: 'send', agent: 'g1', text: 'summarize the README' },
+  ],
   ['tell this one to keep going', 'c1', { kind: 'send', agent: 'c1', text: 'keep going' }],
-  ['Uh, tell codecs to commit its work', null, { kind: 'send', agent: 'x1', text: 'commit its work' }],
-  ['tell claude one that the API changed', null, { kind: 'send', agent: 'c1', text: 'the API changed' }],
-  ['Claude 2, use the existing theme tokens.', null, {
-    kind: 'send',
-    agent: 'c2',
-    text: 'use the existing theme tokens',
-  }],
-  ['Codex, write a test for the parser.', null, {
-    kind: 'send',
-    agent: 'x1',
-    text: 'write a test for the parser',
-  }],
+  [
+    'Uh, tell codecs to commit its work',
+    null,
+    { kind: 'send', agent: 'x1', text: 'commit its work' },
+  ],
+  [
+    'tell claude one that the API changed',
+    null,
+    { kind: 'send', agent: 'c1', text: 'the API changed' },
+  ],
+  [
+    'Claude 2, use the existing theme tokens.',
+    null,
+    {
+      kind: 'send',
+      agent: 'c2',
+      text: 'use the existing theme tokens',
+    },
+  ],
+  [
+    'Codex, write a test for the parser.',
+    null,
+    {
+      kind: 'send',
+      agent: 'x1',
+      text: 'write a test for the parser',
+    },
+  ],
   // Dictation control, voice, notes
   ['Send it.', null, { kind: 'submit' }],
   ['submit', null, { kind: 'submit' }],
   ['Mute.', null, { kind: 'mute' }],
   ['unmute', null, { kind: 'unmute' }],
-  ['Take a note: check the migration on staging', null, {
-    kind: 'note',
-    text: 'check the migration on staging',
-  }],
+  [
+    'Take a note: check the migration on staging',
+    null,
+    {
+      kind: 'note',
+      text: 'check the migration on staging',
+    },
+  ],
   // Ambiguity asks, never guesses
   ['tell Claude to run the tests', null, { kind: 'clarify' }],
   ['focus claude', null, { kind: 'clarify' }],

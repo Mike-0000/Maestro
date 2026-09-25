@@ -1,45 +1,51 @@
 import { observer } from 'mobx-react-lite';
 import { useEffect, useMemo, useRef } from 'react';
+import type { AgentTileEntry } from '@core/features/canvas/api/browser/stores/canvas-store';
 import { conversationRegistry } from '@core/features/conversations/api/browser/stores/conversation-registry';
-import { getConversationSessionManager } from '@core/features/conversations/browser/stores/conversation-session-manager';
-import { createConversationTerminalAttachments } from '@core/features/conversations/browser/terminal-attachments';
 import { PaneSizingContextProvider } from '@core/features/terminals/contributions/browser/pty/pane-sizing-context';
 import { PtyPane } from '@core/features/terminals/contributions/browser/pty/pty-pane';
+import { log } from '@core/primitives/logging/browser/logger';
 import { cn } from '@core/primitives/styling/browser/cn';
 import {
   createPaneDimensionSink,
   PaneDimensionProvider,
 } from '@core/primitives/workbench-shell/browser/tabs/pane-dimension-provider';
-import type { AgentTileEntry } from '../canvas-store';
+import { createConversationAttachments } from '../../api/browser/conversation-attachments';
 
 /**
  * The agent's real terminal, mounted into a canvas tile.
  *
- * Acquiring the conversation attaches to (or resumes) its session exactly like opening its tab;
- * releasing only drops the output subscription — it never stops the agent.
+ * A tile never stops an agent: unmounting only moves the xterm back off-screen. When the user asks
+ * to start or resume an agent that is not running, the tile hydrates its conversation exactly like
+ * opening its tab would.
  */
 export const AgentTerminal = observer(function AgentTerminal({
   entry,
+  hydrate,
   interactive,
   autoFocus,
   onActivate,
 }: {
   entry: AgentTileEntry;
+  /** Start or resume the agent's session (only when the user asked to). */
+  hydrate: boolean;
   /** False when canvas zoom would make pointer input land on the wrong cells. */
   interactive: boolean;
   autoFocus: boolean;
   onActivate: () => void;
 }) {
-  const { taskId, conversationId, workspaceId } = entry;
+  const { taskId, conversationId, workspaceId, taskProvisioned } = entry;
   useEffect(() => {
-    const manager = getConversationSessionManager(taskId);
-    manager.acquire(conversationId);
-    return () => manager.release(conversationId);
-  }, [taskId, conversationId]);
+    if (!hydrate || !taskProvisioned) return;
+    void conversationRegistry
+      .get(taskId)
+      ?.hydrateConversation(conversationId)
+      .catch((error: unknown) => log.warn('canvas: could not start agent', { error }));
+  }, [hydrate, taskProvisioned, taskId, conversationId]);
 
   const sink = useMemo(() => createPaneDimensionSink(), []);
   const attachments = useMemo(
-    () => createConversationTerminalAttachments(conversationId),
+    () => createConversationAttachments(conversationId),
     [conversationId]
   );
   const terminalRef = useRef<{ focus: () => void }>(null);

@@ -24,7 +24,10 @@ describe('resolveAgent', () => {
   });
 
   it('resolves a unique provider, and asks when a provider is shared', () => {
-    expect(resolveAgent('codex', roster, null)).toMatchObject({ kind: 'match', agent: { id: 'x1' } });
+    expect(resolveAgent('codex', roster, null)).toMatchObject({
+      kind: 'match',
+      agent: { id: 'x1' },
+    });
     expect(resolveAgent('claude', roster, null).kind).toBe('ambiguous');
   });
 

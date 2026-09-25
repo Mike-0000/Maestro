@@ -1,10 +1,10 @@
 import { NodeResizer, type NodeProps } from '@xyflow/react';
 import { Trash2 } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
+import type { NoteTileEntry } from '@core/features/canvas/api/browser/stores/canvas-store';
 import { cn } from '@core/primitives/styling/browser/cn';
 import { MIN_TILE_SIZE } from '../../api/canvas-model';
 import { getCanvasStore } from '../../contributions/browser/app-stores';
-import type { NoteTileEntry } from '../canvas-store';
 
 export type NoteTileData = { tileId: string; noteId: string };
 

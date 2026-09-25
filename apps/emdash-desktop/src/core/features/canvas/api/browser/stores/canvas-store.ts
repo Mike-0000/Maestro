@@ -10,6 +10,7 @@ import type { AgentStatus, NotificationType } from '@core/primitives/agents/api'
 import { log } from '@core/primitives/logging/browser/logger';
 import type { MementoHandle } from '@core/primitives/mementos/browser';
 import { isProvisioned } from '@core/primitives/task-state/browser/task-state';
+import { canvasBoardMemento, type CanvasBoardState } from '../../../contributions/mementos';
 import {
   AGENT_TILE_SIZE,
   assignSpokenName,
@@ -18,9 +19,8 @@ import {
   placeTiles,
   type CanvasViewport,
   type TileRect,
-} from '../api/canvas-model';
-import { spokenProviderLabel } from '../api/provider-names';
-import { canvasBoardMemento, type CanvasBoardState } from '../contributions/mementos';
+} from '../../canvas-model';
+import { spokenProviderLabel } from '../../provider-names';
 
 export type AgentTileEntry = {
   readonly tileId: string;

@@ -1,10 +1,10 @@
 import { err, ok } from '@emdash/shared';
-import type { Logger } from '@emdash/shared/logger';
 import type { Scope } from '@emdash/shared/concurrency';
+import type { Logger } from '@emdash/shared/logger';
 import { createEventStreamHost } from '@emdash/wire/live';
 import { createController, type Controller } from '@emdash/wire/rpc';
-import { voiceContract } from '../api/contract';
 import type { ChorusHostServices } from '@core/primitives/chorus-host/api/host-services';
+import { voiceContract } from '../api/contract';
 import { SttEngineError } from './engines/engine';
 import { VoiceService } from './voice-service';
 
@@ -30,7 +30,8 @@ export function createVoiceWireController(options: {
       try {
         return ok(await service.transcribe(await file.bytes(), vocabulary));
       } catch (error) {
-        if (error instanceof SttEngineError) return err({ type: error.kind, message: error.message });
+        if (error instanceof SttEngineError)
+          return err({ type: error.kind, message: error.message });
         options.logger.error('voice: transcription failed', { error });
         return err({
           type: 'engine-failed' as const,

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { findPlanOverlaps, pathsMayOverlap, scopedPrompt, staticPrefix, type PlanSubtask } from './plan';
+import {
+  findPlanOverlaps,
+  pathsMayOverlap,
+  scopedPrompt,
+  staticPrefix,
+  type PlanSubtask,
+} from './plan';
 
 function subtask(title: string, owned: string[], extra: Partial<PlanSubtask> = {}): PlanSubtask {
   return { title, provider: 'claude', prompt: `do ${title}`, owned_paths: owned, ...extra };
@@ -47,7 +53,10 @@ describe('findPlanOverlaps', () => {
 
 describe('scopedPrompt', () => {
   it('adds the goal, ownership, and acceptance command', () => {
-    const prompt = scopedPrompt(subtask('ui', ['src/ui/**'], { acceptance: 'pnpm test' }), 'Dark mode');
+    const prompt = scopedPrompt(
+      subtask('ui', ['src/ui/**'], { acceptance: 'pnpm test' }),
+      'Dark mode'
+    );
     expect(prompt).toContain('do ui');
     expect(prompt).toContain('Dark mode');
     expect(prompt).toContain('src/ui/**');

@@ -25,7 +25,12 @@ import { conductorToolDefinitions } from '../api/tools';
 const LOG_FILE = 'conductor-log.jsonl';
 const FALLBACK_BETA = 'server-side-fallback-2026-06-01';
 /** Models that take adaptive thinking and output_config.effort. */
-const ADAPTIVE_MODEL_PREFIXES = ['claude-opus-', 'claude-fable-', 'claude-sonnet-5', 'claude-mythos-'];
+const ADAPTIVE_MODEL_PREFIXES = [
+  'claude-opus-',
+  'claude-fable-',
+  'claude-sonnet-5',
+  'claude-mythos-',
+];
 /** Models for which the server-side refusal fallback is enabled by default. */
 const FALLBACK_MODEL_PREFIXES = ['claude-opus-5', 'claude-fable-5'];
 
@@ -204,14 +209,20 @@ export class ConductorService {
       return { type: 'not-configured', message: 'The Anthropic API key was rejected.' };
     }
     if (error instanceof Anthropic.RateLimitError) {
-      return { type: 'rate-limited', message: 'Claude is rate limited right now. Try again shortly.' };
+      return {
+        type: 'rate-limited',
+        message: 'Claude is rate limited right now. Try again shortly.',
+      };
     }
     if (error instanceof Anthropic.APIConnectionError) {
       return { type: 'api-error', message: 'Could not reach the Claude API.' };
     }
     if (error instanceof Anthropic.APIError) {
       this.logger.warn('conductor: API error', { status: error.status, message: error.message });
-      return { type: 'api-error', message: `Claude API error ${error.status ?? ''}: ${error.message}` };
+      return {
+        type: 'api-error',
+        message: `Claude API error ${error.status ?? ''}: ${error.message}`,
+      };
     }
     this.logger.error('conductor: unexpected failure', { error });
     return { type: 'api-error', message: error instanceof Error ? error.message : String(error) };

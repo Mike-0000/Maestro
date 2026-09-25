@@ -1,27 +1,17 @@
 import type { Terminal } from '@xterm/xterm';
 import { observer } from 'mobx-react-lite';
 import { useEffect, useState } from 'react';
+import type { AgentTileEntry } from '@core/features/canvas/api/browser/stores/canvas-store';
 import { conversationRegistry } from '@core/features/conversations/api/browser/stores/conversation-registry';
-import type { AgentTileEntry } from '../canvas-store';
+import { readTerminalTail } from '../../api/browser/terminal-tail';
 
 const PREVIEW_REFRESH_MS = 250;
 const PREVIEW_MAX_ROWS = 60;
 
-/** Reads the bottom `rows` lines of the terminal's active buffer as plain text. */
-export function readTerminalTail(terminal: Terminal, rows: number): string[] {
-  const buffer = terminal.buffer.active;
-  const end = buffer.baseY + terminal.rows;
-  const start = Math.max(0, end - rows);
-  const lines: string[] = [];
-  for (let index = start; index < end; index++) {
-    lines.push(buffer.getLine(index)?.translateToString(true) ?? '');
-  }
-  while (lines.length > 0 && lines[lines.length - 1]?.trim() === '') lines.pop();
-  return lines;
-}
-
 function useTerminalTail(terminal: Terminal | undefined, rows: number): string[] {
-  const [lines, setLines] = useState<string[]>(() => (terminal ? readTerminalTail(terminal, rows) : []));
+  const [lines, setLines] = useState<string[]>(() =>
+    terminal ? readTerminalTail(terminal, rows) : []
+  );
   useEffect(() => {
     if (!terminal) {
       setLines([]);

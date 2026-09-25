@@ -110,7 +110,10 @@ export const conductorContract = defineContract({
   /** Predicts merge conflicts between worktrees of one repository (read-only `git merge-tree`). */
   checkConflicts: fallible({
     input: z.object({
-      worktrees: z.array(z.object({ label: z.string(), path: z.string() })).min(2).max(12),
+      worktrees: z
+        .array(z.object({ label: z.string(), path: z.string() }))
+        .min(2)
+        .max(12),
     }),
     data: conflictReportSchema,
     error: z.object({ message: z.string() }),

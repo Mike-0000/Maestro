@@ -55,7 +55,15 @@ const PROVIDER_ALIASES: Record<string, string> = {
   curser: 'cursor',
 };
 
-const DEICTIC = new Set(['this', 'this one', 'it', 'here', 'current', 'the current one', 'that one']);
+const DEICTIC = new Set([
+  'this',
+  'this one',
+  'it',
+  'here',
+  'current',
+  'the current one',
+  'that one',
+]);
 
 export function normalizeSpoken(text: string): string {
   // "the codex one" describes an agent ("the Codex agent"); "codex one" names Codex 1.

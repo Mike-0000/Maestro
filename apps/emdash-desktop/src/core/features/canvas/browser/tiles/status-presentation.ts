@@ -1,4 +1,4 @@
-import type { AgentTileEntry } from '../canvas-store';
+import type { AgentTileEntry } from '@core/features/canvas/api/browser/stores/canvas-store';
 
 export type StatusPresentation = { label: string; className: string };
 

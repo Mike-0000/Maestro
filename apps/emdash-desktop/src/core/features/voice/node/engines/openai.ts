@@ -21,7 +21,8 @@ export class OpenAiSttEngine implements SttEngine {
 
   async transcribe(request: SttRequest): Promise<string> {
     const key = await this.apiKey();
-    if (!key) throw new SttEngineError('not-configured', 'Add an OpenAI API key in Chorus settings.');
+    if (!key)
+      throw new SttEngineError('not-configured', 'Add an OpenAI API key in Chorus settings.');
 
     const form = new FormData();
     form.append('file', wavBlob(request.audio), 'utterance.wav');

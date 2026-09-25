@@ -22,7 +22,10 @@ const runGit: GitRunner = async (cwd, args) => {
   } catch (error) {
     const failure = error as { code?: unknown; stdout?: unknown };
     if (typeof failure.code === 'number') {
-      return { stdout: typeof failure.stdout === 'string' ? failure.stdout : '', exitCode: failure.code };
+      return {
+        stdout: typeof failure.stdout === 'string' ? failure.stdout : '',
+        exitCode: failure.code,
+      };
     }
     throw error;
   }
@@ -61,7 +64,9 @@ export async function checkWorktreeConflicts(
   worktrees: readonly { label: string; path: string }[],
   git: GitRunner = runGit
 ): Promise<ConflictReport> {
-  const commits = await Promise.all(worktrees.map((worktree) => snapshotCommit(worktree.path, git)));
+  const commits = await Promise.all(
+    worktrees.map((worktree) => snapshotCommit(worktree.path, git))
+  );
   const pairs: ConflictReport['pairs'] = [];
   for (let i = 0; i < worktrees.length; i++) {
     for (let j = i + 1; j < worktrees.length; j++) {

@@ -24,7 +24,8 @@ const LEADING_FILLER =
   /^(?:(?:uh+|um+|er+|ok(?:ay)?|so|hey|hi|chorus|please|alright|all right)[,.!]?\s+)+/i;
 const TRAILING_FILLER = /[\s,]+(?:please|thanks|thank you)[.!]?$/i;
 
-const CONFIRM = /^(?:yes|yeah|yep|yup|approve|approved|confirm|do it|go ahead|go|allow(?: it)?|ok go|send it off)$/;
+const CONFIRM =
+  /^(?:yes|yeah|yep|yup|approve|approved|confirm|do it|go ahead|go|allow(?: it)?|ok go|send it off)$/;
 const REJECT = /^(?:no|nope|deny|cancel|never ?mind|reject|don'?t|stop that|abort)$/;
 const NEXT = /^(?:next|next one|next agent|what'?s next|who needs me|who'?s waiting)$/;
 const OVERVIEW =
@@ -96,7 +97,10 @@ function splitAddressed(
     const lastWord = (words[k - 1] ?? '').toLowerCase().replace(/[^a-z]/g, '');
     let remainder = words.slice(k);
     // Never split a name from its number ("claude | 3 to deploy").
-    if (/^\d+$/.test(normalizeSpoken(remainder[0] ?? '')) && !/^(?:to|too)$/i.test(remainder[0] ?? '')) {
+    if (
+      /^\d+$/.test(normalizeSpoken(remainder[0] ?? '')) &&
+      !/^(?:to|too)$/i.test(remainder[0] ?? '')
+    ) {
       continue;
     }
     if (/^(?:to|that)$/i.test(remainder[0] ?? '')) remainder = remainder.slice(1);

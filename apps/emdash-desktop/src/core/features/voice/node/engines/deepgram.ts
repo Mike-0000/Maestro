@@ -33,7 +33,8 @@ export class DeepgramSttEngine implements SttEngine {
 
   async transcribe(request: SttRequest): Promise<string> {
     const key = await this.apiKey();
-    if (!key) throw new SttEngineError('not-configured', 'Add a Deepgram API key in Chorus settings.');
+    if (!key)
+      throw new SttEngineError('not-configured', 'Add a Deepgram API key in Chorus settings.');
 
     let response: Response;
     try {

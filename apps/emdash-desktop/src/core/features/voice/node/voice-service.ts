@@ -1,5 +1,8 @@
 import type { Logger } from '@emdash/shared/logger';
+import type { ChorusCredentialId } from '@core/primitives/chorus-host/api/credentials';
 import type { ChorusHostServices } from '@core/primitives/chorus-host/api/host-services';
+import { ChorusCredentials } from '@core/primitives/chorus-host/node/credentials';
+import { JsonSettingsFile } from '@core/primitives/chorus-host/node/json-settings-file';
 import {
   DEFAULT_VOICE_SETTINGS,
   voiceSettingsSchema,
@@ -8,13 +11,10 @@ import {
   type VoiceSettings,
   type VoiceStatus,
 } from '../api/contract';
-import type { ChorusCredentialId } from '@core/primitives/chorus-host/api/credentials';
-import { ChorusCredentials } from '@core/primitives/chorus-host/node/credentials';
 import { DeepgramSttEngine } from './engines/deepgram';
 import { SttEngineError, type SttEngine } from './engines/engine';
 import { OpenAiSttEngine } from './engines/openai';
 import { WhisperLocalSttEngine } from './engines/whisper-local';
-import { JsonSettingsFile } from '@core/primitives/chorus-host/node/json-settings-file';
 
 /** RIFF header (44 bytes) plus at least ~0.2 s of 16 kHz 16-bit audio. */
 const MIN_WAV_BYTES = 44 + 6400;
@@ -40,7 +40,9 @@ export class VoiceService {
     this.engines = {
       openai: new OpenAiSttEngine(() => this.credentials.get('openai')),
       deepgram: new DeepgramSttEngine(() => this.credentials.get('deepgram')),
-      'whisper-local': new WhisperLocalSttEngine(async () => (await this.settings.read()).whisperUrl),
+      'whisper-local': new WhisperLocalSttEngine(
+        async () => (await this.settings.read()).whisperUrl
+      ),
     };
   }
 
@@ -97,7 +99,9 @@ export class VoiceService {
       if (this.host.globalShortcuts.register(trimmed, this.onGlobalToggle)) {
         this.registeredShortcut = trimmed;
       } else {
-        this.logger.warn('voice: global shortcut is taken by another app', { accelerator: trimmed });
+        this.logger.warn('voice: global shortcut is taken by another app', {
+          accelerator: trimmed,
+        });
       }
     } catch (error) {
       this.logger.warn('voice: invalid global shortcut', { accelerator: trimmed, error });

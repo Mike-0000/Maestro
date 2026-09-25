@@ -1,3 +1,4 @@
+import { CanvasStore } from '@core/features/canvas/api/browser/stores/canvas-store';
 import { projectManagerStoreToken } from '@core/features/projects/contributions/app-store-tokens';
 import {
   contributeScopedStore,
@@ -5,7 +6,6 @@ import {
   scopedStoreToken,
   type AppScopedStoreContribution,
 } from '@core/primitives/scoped-stores/browser';
-import { CanvasStore } from '../../browser/canvas-store';
 
 const canvasStoreToken = scopedStoreToken<CanvasStore>('canvas.board');
 

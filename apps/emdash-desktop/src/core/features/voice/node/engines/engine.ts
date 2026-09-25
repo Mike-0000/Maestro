@@ -48,7 +48,10 @@ export async function failFromResponse(engine: string, response: Response): Prom
   const body = await response.text().catch(() => '');
   const detail = body.slice(0, 300);
   if (response.status === 401 || response.status === 403) {
-    throw new SttEngineError('not-configured', `${engine} rejected the API key (${response.status}).`);
+    throw new SttEngineError(
+      'not-configured',
+      `${engine} rejected the API key (${response.status}).`
+    );
   }
   throw new SttEngineError(
     'engine-failed',
