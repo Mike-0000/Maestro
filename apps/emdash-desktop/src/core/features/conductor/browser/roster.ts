@@ -39,16 +39,26 @@ export function installedProviders(): Promise<InstalledProvider[]> {
 }
 
 export function toRosterAgent(canvas: CanvasStore, entry: AgentTileEntry): RosterAgent {
-  return {
+  const agent: RosterAgent = {
     id: entry.conversationId,
     name: canvas.spokenName(entry.conversationId),
     providerLabel: spokenProviderLabel(entry.providerId),
     taskName: entry.taskName,
   };
+  return canvas.isOffBoard(entry) ? { ...agent, hidden: true } : agent;
 }
 
+/**
+ * Every agent the user can address. Closed and filtered-out agents are included (flagged
+ * `hidden`) so "open Bravo" can bring one back; the resolver prefers visible agents.
+ */
 export function buildRoster(canvas: CanvasStore): RosterAgent[] {
-  return canvas.visibleAgentEntries.map((entry) => toRosterAgent(canvas, entry));
+  return canvas.agentEntries.map((entry) => toRosterAgent(canvas, entry));
+}
+
+/** Agents that are off the board: closed by the user or outside the project filter. */
+export function offBoardEntries(canvas: CanvasStore): AgentTileEntry[] {
+  return canvas.agentEntries.filter((entry) => canvas.isOffBoard(entry));
 }
 
 export function focusedConversationId(canvas: CanvasStore): string | null {
@@ -95,6 +105,13 @@ export function buildContext(
       );
     }
   }
+  const closed = offBoardEntries(canvas);
+  if (closed.length > 0) {
+    const names = closed.map(
+      (entry) => `${canvas.spokenName(entry.conversationId)} (${describeStatus(entry)})`
+    );
+    lines.push(`Closed windows (off the canvas, reopen with reopen_agent): ${names.join(', ')}`);
+  }
   const focused = focusedConversationId(canvas);
   lines.push(`Focused agent: ${focused ? canvas.spokenName(focused) : 'none'}`);
   const projects = canvas.projectOptions.map((project) => project.name).filter(Boolean);
@@ -113,7 +130,7 @@ export function buildContext(
 /** Words the speech engine should expect: spoken names, providers, tasks, projects. */
 export function vocabulary(canvas: CanvasStore): string[] {
   const words = new Set<string>(['Chorus', 'Claude', 'Codex', 'worktree']);
-  for (const entry of canvas.visibleAgentEntries) {
+  for (const entry of canvas.agentEntries) {
     words.add(canvas.spokenName(entry.conversationId));
     words.add(spokenProviderLabel(entry.providerId));
     words.add(entry.taskName);

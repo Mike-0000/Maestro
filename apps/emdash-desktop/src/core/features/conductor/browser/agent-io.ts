@@ -66,6 +66,16 @@ export async function interruptAgent(entry: AgentTileEntry): Promise<void> {
 }
 
 /**
+ * Ends an agent's session (kills the TUI process or terminates the chat session). The
+ * conversation stays on the task and can be resumed later.
+ */
+export async function stopAgentSession(entry: AgentTileEntry): Promise<void> {
+  const manager = conversationRegistry.get(entry.taskId);
+  if (!manager) throw new Error(`${entry.taskName} is not loaded.`);
+  await manager.killSession(entry.conversationId);
+}
+
+/**
  * Answers a pending permission prompt. Claude Code and Codex both highlight "allow once" by
  * default, so Enter accepts it; Escape declines.
  */

@@ -20,6 +20,7 @@ import { cn } from '@core/primitives/styling/browser/cn';
 import { getConductorStore } from '../../contributions/browser/app-stores';
 import { ConductorLogPanel } from './conductor-log-panel';
 import { PendingActionCard } from './pending-action-card';
+import { pendingKeyAction } from './pending-keys';
 import { PlanPanel } from './plan-panel';
 import { VoiceSetupPanel } from './voice-setup';
 
@@ -41,10 +42,13 @@ export const ConductorHud = observer(function ConductorHud() {
   const replyVisible = useRecentlyChanged(conductor.replyAt, REPLY_VISIBLE_MS);
 
   useEffect(() => {
-    if (!conductor.pending) return;
+    const pending = conductor.pending;
+    if (!pending) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Enter' && !event.shiftKey) conductor.confirmPending();
-      else if (event.key === 'Escape') conductor.cancelPending();
+      // Enter typed into a terminal or text field must never approve an action.
+      const action = pendingKeyAction(event, pending.startedAt, Date.now());
+      if (action === 'confirm') conductor.confirmPending();
+      else if (action === 'cancel') conductor.cancelPending();
       else return;
       event.preventDefault();
       event.stopPropagation();
@@ -347,7 +351,7 @@ function CommandInput({ onClose }: { onClose: () => void }) {
       <input
         ref={inputRef}
         aria-label="Command"
-        placeholder='Try "tell Atlas to run the tests" or "what is Bravo doing"'
+        placeholder='Try "tell Atlas to run the tests", "close Bravo", or "help"'
         className="h-8 min-w-0 flex-1 rounded-md border border-border bg-background px-2.5 text-sm text-foreground outline-none placeholder:text-foreground-muted focus:border-blue-500"
         onKeyDown={(event) => {
           if (event.key === 'Escape') onClose();

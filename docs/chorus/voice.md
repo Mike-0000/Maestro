@@ -32,13 +32,42 @@ again, or click **Send** (up to 5 minutes). Only hands-free listening stops on a
 - "Send it" (presses Enter in the focused agent, after dictation)
 - "Take a note: …"
 - "Mute" / "unmute"
-- "Yes" / "no" (confirm or cancel the pending action or plan)
+- "Yes" / "no" (confirm or cancel the pending action or plan; "stop", "wait", "hold on", and
+  "scratch that" also cancel)
+- "Help" / "what can I say"
 
-Agent names are the spoken names on each tile ("Claude 1", "Codex 2"). Double-click a name to
-rename it. Common mishearings ("clod two", "codecs") are corrected automatically.
+### Windows and agents
 
-Sending text or interrupting shows a 1.5-second countdown in the HUD; press **Esc** or say "no"
-to cancel. Answering an agent's permission prompt always needs an explicit "yes".
+| Say | What happens |
+| --- | --- |
+| "Close" / "close this" / "hide it" | Closes the focused window (or cancels a pending action) |
+| "Close Atlas" / "dismiss the Bravo window" / "get rid of Bravo" | Closes that agent's window |
+| "Close all" / "close the others" / "close the finished ones" | Closes several windows (countdown first) |
+| "Reopen" / "bring it back" / "undo" | Reopens what you closed last |
+| "Reopen Atlas" / "bring Atlas back" / "go to Atlas" | Reopens that agent's window and focuses it |
+| "Reopen all" / "show hidden windows" | Reopens every closed window |
+| "Allow Atlas" / "deny Bravo" | Answers that agent's permission prompt (confirm first) |
+| "Shut down Atlas" / "kill Atlas" | Ends the agent's session; the conversation is kept (confirm first) |
+| "Archive Atlas" | Archives the agent's task (confirm first) |
+
+**Close only hides the window:** the agent keeps running and stays addressable by name, and the
+canvas's "show hidden" button or "reopen" brings it back. Stopping the current step is "stop
+Atlas" / "interrupt Atlas"; ending the session is "shut down"; archiving is separate again.
+"Delete Atlas" asks which of close or archive you meant. Polite lead-ins work ("can you close
+Atlas", "please close Bravo"), and a name the grammar cannot place goes to the conductor rather
+than closing the wrong window.
+
+Agent names are the spoken names on each tile ("Atlas", "Bravo", or "Claude 1"). Double-click a
+name to rename it. Common mishearings ("clod two", "codecs", "at less", "brave oh") are corrected
+automatically; a close-but-ambiguous name gets a "which one?" instead of a guess. "Atlas's
+window" and "the Bravo terminal" work too.
+
+Sending text, interrupting, or closing several windows shows a 1.5-second countdown in the HUD;
+press **Esc** or say "no" to cancel. Answering a permission prompt, shutting down, and archiving
+always need an explicit "yes" (or **Enter**). Enter only confirms when it is pressed outside a
+terminal or text field, and not in the instant the action appears, so typing into an agent never
+approves something by accident. For the same reason, Chorus refuses to type a message into a
+terminal agent that is showing a permission prompt; say "allow" or "deny" instead.
 
 ## The conductor
 
@@ -90,8 +119,9 @@ Chorus posts 16 kHz mono WAV to `/inference`.
 
 Turn on **Hands-free** in Settings → Voice & Conductor. The mic stays open; when you start
 speaking, Chorus records (including the moment before you started) until you pause. Only
-utterances that begin with the wake phrase run: "Chorus, focus Claude 1". Everything else is
-ignored (the HUD shows what it ignored). Every utterance is transcribed, so this uses more STT.
+utterances that begin with the wake phrase run: "Chorus, focus Claude 1" (a greeting first is
+fine: "hey Chorus, close Atlas"; common mishearings such as "courses" also count, but only as a
+whole word). Everything else is ignored (the HUD shows what it ignored). Every utterance is transcribed, so this uses more STT.
 
 ## Live transcript
 

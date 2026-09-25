@@ -135,7 +135,7 @@ describe('parseCommand routing eval', () => {
     expect(command?.kind).toBe(expected.kind);
     if (!command) return;
     if ('agent' in expected) {
-      expect('agent' in command && command.agent.id).toBe(expected.agent);
+      expect('agent' in command && command.agent?.id).toBe(expected.agent);
     }
     if ('text' in expected) {
       expect('text' in command && command.text).toBe(expected.text);

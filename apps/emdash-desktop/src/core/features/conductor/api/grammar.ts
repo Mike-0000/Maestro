@@ -1,4 +1,4 @@
-import { normalizeSpoken, resolveAgent, type RosterAgent } from './resolver';
+import { isDeictic, normalizeSpoken, resolveAgent, type RosterAgent } from './resolver';
 
 /**
  * Deterministic fast path for the most common spoken commands. It runs before any model call:
@@ -18,7 +18,22 @@ export type GrammarCommand =
   | { kind: 'interrupt'; agent: RosterAgent }
   | { kind: 'status'; agent: RosterAgent }
   | { kind: 'send'; agent: RosterAgent; text: string }
+  /** Hide an agent's window; the agent keeps running. `null` means "whatever is in front of me". */
+  | { kind: 'close'; agent: RosterAgent | null }
+  | { kind: 'closeMany'; scope: CloseScope }
+  /** Bring closed windows back: one agent, the most recently closed, or all of them. */
+  | { kind: 'reopen'; target: RosterAgent | 'last' | 'all' }
+  /** Stop an agent's session entirely (needs confirmation). */
+  | { kind: 'kill'; agent: RosterAgent }
+  /** Archive an agent's conversation (needs confirmation). */
+  | { kind: 'archive'; agent: RosterAgent }
+  /** Answer an agent's permission prompt (needs confirmation). */
+  | { kind: 'permission'; agent: RosterAgent; decision: 'allow' | 'deny' }
+  | { kind: 'help' }
   | { kind: 'clarify'; question: string };
+
+/** "close all", "close the others", "close the finished ones". */
+export type CloseScope = 'all' | 'others' | 'done';
 
 const LEADING_FILLER =
   /^(?:(?:uh+|um+|er+|ok(?:ay)?|so|hey|hi|chorus|please|alright|all right)[,.!]?\s+)+/i;
@@ -26,7 +41,8 @@ const TRAILING_FILLER = /[\s,]+(?:please|thanks|thank you)[.!]?$/i;
 
 const CONFIRM =
   /^(?:yes|yeah|yep|yup|approve|approved|confirm|do it|go ahead|go|allow(?: it)?|ok go|send it off)$/;
-const REJECT = /^(?:no|nope|deny|cancel|never ?mind|reject|don'?t|stop that|abort)$/;
+const REJECT =
+  /^(?:no|nope|deny|cancel|never ?mind|reject|don'?t|stop|stop that|abort|wait|hold on|hold it|scratch that|forget it|forget that)$/;
 const NEXT = /^(?:next|next one|next agent|what'?s next|who needs me|who'?s waiting)$/;
 const OVERVIEW =
   /^(?:show (?:me )?(?:all|everything|everyone|all agents|the whole board)|overview|zoom out|fit(?: all)?|show all agents)$/;
@@ -40,6 +56,42 @@ const INTERRUPT = /^(?:stop|interrupt|pause|halt|escape)\s+(.+)$/i;
 const STATUS =
   /^(?:what(?:'?s| is)\s+(.+?)\s+doing|how(?:'?s| is)\s+(.+?)\s+doing|status (?:of|for)\s+(.+)|is\s+(.+?)\s+(?:done|finished))$/i;
 const TELL = /^(?:tell|ask)\s+(.+)$/i;
+
+// Window and agent management. These run on the utterance with a polite lead-in removed
+// ("can you close Atlas"), which the older commands never needed.
+const POLITE = /^(?:(?:can|could|would) you|i want to|i'd like to|let'?s|go ahead and|just)\s+/i;
+const HELP =
+  /^(?:help|help me|what can i say|what can you do|what do you understand|(?:list |show |voice )?commands|how do i use (?:this|you))$/;
+const CLOSE_VERB = '(?:close|hide|dismiss|remove|minimi[sz]e|put away|get rid of|close out)';
+const CLOSE = new RegExp(`^${CLOSE_VERB}(?:\\s+(.+?))?$`, 'i');
+const CLOSE_ALL = new RegExp(
+  `^${CLOSE_VERB}\\s+(?:all|everything|everyone|every (?:agent|window)|all (?:of )?(?:them|the agents|the windows|agents|windows))$`,
+  'i'
+);
+const CLOSE_OTHERS = new RegExp(
+  `^${CLOSE_VERB}\\s+(?:(?:all )?(?:the )?others|everything else|every other (?:agent|window)|all (?:the )?other (?:agents|windows|ones)|the rest|all but (?:this|this one|the focused one|the current one))$`,
+  'i'
+);
+const CLOSE_DONE = new RegExp(
+  `^${CLOSE_VERB}\\s+(?:all )?(?:the )?(?:finished|done|completed|idle|stopped)(?: (?:ones|agents|windows))?$`,
+  'i'
+);
+const REOPEN_ALL =
+  /^(?:(?:reopen|re open|restore|unhide|bring back) (?:all|everything|everyone|all (?:of )?(?:them|the agents|the windows|agents|windows))|bring (?:them|everything|everyone|all of them) back|show (?:the )?(?:hidden|closed)(?: (?:ones|agents|windows))?)$/i;
+const REOPEN_LAST =
+  /^(?:reopen|re open|restore|unhide|undo|undo (?:that|close|the close)|bring (?:it|that) back|reopen (?:it|that|the last one|last))$/i;
+const REOPEN = /^(?:reopen|re open|restore|unhide|bring back|un ?close)\s+(.+)$/i;
+const REOPEN_BACK = /^bring\s+(.+?)\s+back$/i;
+const KILL = /^(?:kill|terminate|shut down|force quit)\s+(.+?)(?:'s session| session)?$/i;
+const KILL_DOWN = /^shut\s+(.+?)\s+down$/i;
+const ARCHIVE = /^archive\s+(.+)$/i;
+const DELETE = /^(?:delete|destroy|trash)\s+(.+)$/i;
+const PERMISSION_TAIL = String.raw`(?:'s)?(?:\s+(?:request|permission|prompt))?$`;
+const ALLOW = new RegExp(
+  String.raw`^(?:allow|approve|accept|grant|permit)\s+(.+?)` + PERMISSION_TAIL,
+  'i'
+);
+const DENY = new RegExp(String.raw`^(?:deny|decline|refuse|block)\s+(.+?)` + PERMISSION_TAIL, 'i');
 
 function clean(utterance: string): string {
   return utterance
@@ -74,6 +126,87 @@ function resolveOrClarify(
   if (resolution.kind === 'match') return resolution.agent;
   if (resolution.kind === 'ambiguous') {
     return { question: `Which one: ${describeCandidates(resolution.candidates)}?` };
+  }
+  return null;
+}
+
+/** A command aimed at one agent: resolved, a clarifying question, or not ours (null). */
+function target(
+  reference: string,
+  roster: readonly RosterAgent[],
+  focusedId: string | null
+): RosterAgent | { question: string } | null {
+  const agent = resolveOrClarify(reference, roster, focusedId);
+  if (agent) return agent;
+  if (isDeictic(reference)) return { question: 'Which agent? None is focused right now.' };
+  return null;
+}
+
+type Targeted = 'reopen' | 'kill' | 'archive';
+
+function targeted(
+  kind: Targeted,
+  reference: string,
+  roster: readonly RosterAgent[],
+  focusedId: string | null
+): GrammarCommand | null {
+  const agent = target(reference, roster, focusedId);
+  if (!agent) return null;
+  if ('question' in agent) return { kind: 'clarify', question: agent.question };
+  return kind === 'reopen' ? { kind, target: agent } : { kind, agent };
+}
+
+/** Window and agent management: close, reopen, stop, archive, allow/deny, help. */
+function parseWindowCommand(
+  text: string,
+  roster: readonly RosterAgent[],
+  focusedId: string | null
+): GrammarCommand | null {
+  if (HELP.test(key(text))) return { kind: 'help' };
+  if (CLOSE_ALL.test(text)) return { kind: 'closeMany', scope: 'all' };
+  if (CLOSE_OTHERS.test(text)) return { kind: 'closeMany', scope: 'others' };
+  if (CLOSE_DONE.test(text)) return { kind: 'closeMany', scope: 'done' };
+  if (REOPEN_ALL.test(text)) return { kind: 'reopen', target: 'all' };
+  if (REOPEN_LAST.test(text)) return { kind: 'reopen', target: 'last' };
+
+  const close = CLOSE.exec(text);
+  if (close) {
+    const reference = close[1]?.trim() ?? '';
+    if (!reference || isDeictic(reference)) return { kind: 'close', agent: null };
+    const agent = resolveOrClarify(reference, roster, focusedId);
+    if (agent && 'question' in agent) return { kind: 'clarify', question: agent.question };
+    return agent ? { kind: 'close', agent } : null;
+  }
+
+  const reopen = REOPEN.exec(text) ?? REOPEN_BACK.exec(text);
+  if (reopen?.[1]) return targeted('reopen', reopen[1], roster, focusedId);
+  const kill = KILL.exec(text) ?? KILL_DOWN.exec(text);
+  if (kill?.[1]) return targeted('kill', kill[1], roster, focusedId);
+  const archive = ARCHIVE.exec(text);
+  if (archive?.[1]) return targeted('archive', archive[1], roster, focusedId);
+
+  const remove = DELETE.exec(text);
+  if (remove?.[1]) {
+    const agent = target(remove[1], roster, focusedId);
+    if (!agent) return null;
+    if ('question' in agent) return { kind: 'clarify', question: agent.question };
+    return {
+      kind: 'clarify',
+      question:
+        `Say "close ${agent.name}" to hide its window and keep it running, ` +
+        `or "archive ${agent.name}" to put it away for good.`,
+    };
+  }
+
+  for (const [pattern, decision] of [
+    [ALLOW, 'allow'],
+    [DENY, 'deny'],
+  ] as const) {
+    const permission = pattern.exec(text);
+    if (!permission?.[1]) continue;
+    const agent = target(permission[1], roster, focusedId);
+    if (agent && 'question' in agent) return { kind: 'clarify', question: agent.question };
+    if (agent) return { kind: 'permission', agent, decision };
   }
   return null;
 }
@@ -149,6 +282,9 @@ export function parseCommand(
 
   const note = NOTE.exec(text);
   if (note?.[1]) return { kind: 'note', text: note[1].trim() };
+
+  const windowCommand = parseWindowCommand(text.replace(POLITE, ''), roster, focusedId);
+  if (windowCommand) return windowCommand;
 
   const status = STATUS.exec(text);
   if (status) {

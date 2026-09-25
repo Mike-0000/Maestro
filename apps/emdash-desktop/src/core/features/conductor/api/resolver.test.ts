@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { editDistance, normalizeSpoken, resolveAgent, type RosterAgent } from './resolver';
+import {
+  editDistance,
+  isDeictic,
+  normalizeSpoken,
+  phoneticKey,
+  resolveAgent,
+  type RosterAgent,
+} from './resolver';
 
 const roster: RosterAgent[] = [
   { id: 'c1', name: 'Claude 1', providerLabel: 'Claude', taskName: 'auth-refactor' },
@@ -64,5 +71,43 @@ describe('editDistance', () => {
     expect(editDistance('kitten', 'sitting')).toBe(3);
     expect(editDistance('', 'abc')).toBe(3);
     expect(editDistance('same', 'same')).toBe(0);
+  });
+});
+
+describe('roster names', () => {
+  const named: RosterAgent[] = [
+    { id: 'a', name: 'Atlas', providerLabel: 'Claude', taskName: 'auth' },
+    { id: 'b', name: 'Bravo', providerLabel: 'Codex', taskName: 'api-tests' },
+    { id: 'c', name: 'Cedar', providerLabel: 'Codex', taskName: 'docs', hidden: true },
+  ];
+
+  it('matches misheard names by sound', () => {
+    expect(phoneticKey('at less')).toBe(phoneticKey('Atlas'));
+    expect(resolveAgent('at less', named, null)).toMatchObject({ agent: { id: 'a' } });
+    expect(resolveAgent('brave oh', named, null)).toMatchObject({ agent: { id: 'b' } });
+  });
+
+  it('strips window nouns and possessives', () => {
+    expect(normalizeSpoken("Atlas's window")).toBe('atlas');
+    expect(resolveAgent('the bravo terminal', named, null)).toMatchObject({ agent: { id: 'b' } });
+  });
+
+  it('prefers visible agents but still finds closed ones', () => {
+    // "codex" would be ambiguous if the closed Cedar counted.
+    expect(resolveAgent('codex', named, null)).toMatchObject({ agent: { id: 'b' } });
+    expect(resolveAgent('cedar', named, null)).toMatchObject({ agent: { id: 'c' } });
+  });
+
+  it('resolves deictic references to the focused agent', () => {
+    expect(isDeictic('this one')).toBe(true);
+    expect(isDeictic('that window')).toBe(true);
+    expect(isDeictic('atlas')).toBe(false);
+    expect(resolveAgent('this one', named, 'b')).toMatchObject({ agent: { id: 'b' } });
+    expect(resolveAgent('this one', named, null).kind).toBe('none');
+  });
+
+  it('does not match short or unrelated words by sound', () => {
+    expect(resolveAgent('at', named, null).kind).toBe('none');
+    expect(resolveAgent('brief', named, null).kind).toBe('none');
   });
 });

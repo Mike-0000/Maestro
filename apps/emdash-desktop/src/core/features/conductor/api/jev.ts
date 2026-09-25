@@ -74,15 +74,26 @@ function scoreOf(answers: JevAnswers, id: string) {
 // ── Utterance routing ─────────────────────────────────────────────────────────
 
 /** Intents Jev may execute directly; everything else needs Claude to write text or plan. */
-export const DIRECT_INTENTS = ['focus', 'status', 'interrupt', 'overview', 'next'] as const;
+export const DIRECT_INTENTS = [
+  'focus',
+  'status',
+  'interrupt',
+  'close',
+  'overview',
+  'next',
+] as const;
 export type DirectIntent = (typeof DIRECT_INTENTS)[number];
 
 const INTENT_CRITERIA: Record<string, string> = {
   focus: 'Show, open, zoom to, or switch to one specific agent',
   status: 'Ask what one specific agent is doing, whether it is done, or what it asked',
-  interrupt: 'Stop, cancel, or interrupt what one specific agent is doing right now',
+  interrupt:
+    'Interrupt or cancel the step one specific agent is working on right now (not closing its window)',
+  close: 'Close, hide, or dismiss one specific agent window; the agent keeps running',
   overview: 'Show every agent / zoom out to see the whole board',
   next: 'Go to whichever agent is waiting for the user',
+  manage:
+    'Reopen a closed window, end or kill an agent session, archive or delete an agent, or allow or deny its permission prompt',
   message: 'Give an agent an instruction, answer, or follow-up to type into it',
   new_work: 'Start new work: a new agent, a feature, a plan, or splitting a goal across agents',
   other: 'Anything else: questions about the project, conflicts, notes, settings, or unclear',
@@ -138,7 +149,7 @@ export function interpretRouting(answers: JevAnswers, threshold: number): Routin
     return { kind: 'model', mode };
   }
   const direct = intent.choice as DirectIntent;
-  const needsAgent = direct === 'focus' || direct === 'status' || direct === 'interrupt';
+  const needsAgent = direct !== 'overview' && direct !== 'next';
   if (intent.confidence < threshold) return { kind: 'model', mode };
   if (!needsAgent)
     return { kind: 'direct', intent: direct, agent: null, confidence: intent.confidence };

@@ -30,7 +30,10 @@ export const PendingActionCard = observer(function PendingActionCard() {
       {countdown ? (
         <CountdownBar key={pending.id} durationMs={pending.durationMs} />
       ) : (
-        <p className="text-xs text-foreground-muted">Say “yes” or press Enter to confirm.</p>
+        <p className="text-xs text-foreground-muted">
+          Say “yes” or press Enter to confirm (Enter typed into a terminal or text field doesn’t
+          count).
+        </p>
       )}
     </div>
   );

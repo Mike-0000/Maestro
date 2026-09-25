@@ -50,6 +50,10 @@ export const conductorToolSchemas = {
   check_conflicts: z.object({ agents: z.array(agentRef).min(2).max(12) }),
   add_note: z.object({ text: z.string().min(1) }),
   archive_agent: z.object({ agent: agentRef }),
+  // Appended after the original tools so the cached prefix of earlier definitions is unchanged.
+  close_agent: z.object({ agent: agentRef }),
+  reopen_agent: z.object({ agent: agentRef }),
+  stop_agent: z.object({ agent: agentRef }),
 } as const;
 
 export type ConductorToolName = keyof typeof conductorToolSchemas;
@@ -78,6 +82,12 @@ const descriptions: Record<ConductorToolName, string> = {
   add_note: 'Pin a sticky note to the canvas.',
   archive_agent:
     "Archive an agent's task when its work is finished or abandoned. The worktree and branch are kept. Only when the user asked for it; the user confirms first.",
+  close_agent:
+    "Close an agent's window: hide its tile from the canvas. The agent keeps running and can be reopened. Use this for close, hide, dismiss, or get rid of a window. It does not stop or archive anything.",
+  reopen_agent:
+    'Bring a closed (hidden) agent window back onto the canvas and focus it. Closed agents are listed in the context block.',
+  stop_agent:
+    "Stop an agent's session entirely (ends its process; the conversation is kept and can be resumed). Only when the user asks to stop, kill, or shut down an agent, not to interrupt its current step; the user confirms first.",
 };
 
 function toolDefinition(name: ConductorToolName): Anthropic.Beta.BetaTool {
@@ -103,6 +113,7 @@ export function conductorToolDefinitions(): Anthropic.Beta.BetaTool[] {
 export const CONFIRM_REQUIRED_TOOLS: ReadonlySet<ConductorToolName> = new Set([
   'answer_permission',
   'archive_agent',
+  'stop_agent',
 ]);
 
 /** Tools with side effects that run after a short, cancellable countdown. */

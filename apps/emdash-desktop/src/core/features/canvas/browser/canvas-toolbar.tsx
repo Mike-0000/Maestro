@@ -50,12 +50,7 @@ export const CanvasToolbar = observer(function CanvasToolbar() {
         Frames
       </ToolbarButton>
       {hidden > 0 && (
-        <ToolbarButton
-          label="Show hidden agents"
-          onClick={() => {
-            for (const id of [...store.state.hiddenConversationIds]) store.showConversation(id);
-          }}
-        >
+        <ToolbarButton label="Show hidden agents" onClick={() => store.showAllConversations()}>
           <Eye className="size-3.5" />
           {hidden} hidden
         </ToolbarButton>

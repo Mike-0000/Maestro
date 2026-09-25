@@ -47,7 +47,7 @@ function matches(command: GrammarCommand | null, expected: Expect): boolean {
   if (expected.kind === 'model') return command === null;
   if (!command || command.kind !== expected.kind) return false;
   if ('agent' in expected) {
-    if (!('agent' in command) || command.agent.id !== expected.agent) return false;
+    if (!('agent' in command) || command.agent?.id !== expected.agent) return false;
   }
   if ('text' in expected) {
     if (!('text' in command)) return false;
@@ -67,7 +67,7 @@ describe('routing eval (grammar fast path)', () => {
     else {
       if (row.expect.kind === 'model' && command) grabbedModelRows++;
       failures.push(
-        `[${row.tag}] "${row.utterance}" expected ${JSON.stringify(row.expect)} got ${JSON.stringify(command && { ...command, agent: 'agent' in command ? command.agent.name : undefined })}`
+        `[${row.tag}] "${row.utterance}" expected ${JSON.stringify(row.expect)} got ${JSON.stringify(command && { ...command, agent: 'agent' in command ? command.agent?.name : undefined })}`
       );
     }
   }

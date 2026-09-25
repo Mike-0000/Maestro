@@ -170,7 +170,10 @@ export class CanvasStore {
       updateNote: action,
       removeNote: action,
       hideConversation: action,
+      hideConversations: action,
       showConversation: action,
+      showAllConversations: action,
+      revealConversation: action,
       setSpokenName: action,
       setProjectFilter: action,
       ensureLayout: action,
@@ -563,11 +566,20 @@ export class CanvasStore {
   // ── Agents ─────────────────────────────────────────────────────────────────
 
   hideConversation(conversationId: string): void {
-    if (this.state.hiddenConversationIds.includes(conversationId)) return;
+    this.hideConversations([conversationId]);
+  }
+
+  /** Hides agents from the board (they keep running); a hidden focused tile loses focus. */
+  hideConversations(conversationIds: readonly string[]): void {
+    const hidden = new Set(this.state.hiddenConversationIds);
+    const added = conversationIds.filter((id) => !hidden.has(id));
+    if (added.length === 0) return;
     this.updateState((current) => ({
       ...current,
-      hiddenConversationIds: [...current.hiddenConversationIds, conversationId],
+      hiddenConversationIds: [...current.hiddenConversationIds, ...added],
     }));
+    const focused = this.focusedTileId ? this.entryForTile(this.focusedTileId) : undefined;
+    if (focused && added.includes(focused.conversationId)) this.focusedTileId = null;
   }
 
   showConversation(conversationId: string): void {
@@ -575,6 +587,32 @@ export class CanvasStore {
       ...current,
       hiddenConversationIds: current.hiddenConversationIds.filter((id) => id !== conversationId),
     }));
+  }
+
+  showAllConversations(): void {
+    if (this.state.hiddenConversationIds.length === 0) return;
+    this.updateState((current) => ({ ...current, hiddenConversationIds: [] }));
+  }
+
+  /** True when an agent is off the board: hidden by the user or outside the project filter. */
+  isOffBoard(entry: AgentTileEntry): boolean {
+    const filter = this.state.projectFilter;
+    return (
+      this.state.hiddenConversationIds.includes(entry.conversationId) ||
+      (filter !== null && entry.projectId !== filter)
+    );
+  }
+
+  /**
+   * Puts an agent back on the board: unhides it and clears a project filter that excludes it.
+   * Returns false when it was already visible.
+   */
+  revealConversation(entry: AgentTileEntry): boolean {
+    if (!this.isOffBoard(entry)) return false;
+    this.showConversation(entry.conversationId);
+    const filter = this.state.projectFilter;
+    if (filter !== null && entry.projectId !== filter) this.setProjectFilter(null);
+    return true;
   }
 
   /**

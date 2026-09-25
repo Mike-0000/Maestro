@@ -92,4 +92,17 @@ describe('stripWakePhrase', () => {
     expect(stripWakePhrase('Chorus', 'chorus')).toBeNull();
     expect(stripWakePhrase('focus Claude 1', '')).toBe('focus Claude 1');
   });
+
+  it('skips a greeting before the phrase', () => {
+    expect(stripWakePhrase('Hey Chorus, close Atlas.', 'chorus')).toBe('close Atlas.');
+    expect(stripWakePhrase('okay chorus reopen', 'chorus')).toBe('reopen');
+    expect(stripWakePhrase('Hey, close Atlas', 'chorus')).toBeNull();
+  });
+
+  it('matches whole words only, preferring the longest variant', () => {
+    expect(stripWakePhrase('Choruses close all', 'chorus')).toBe('close all');
+    expect(stripWakePhrase('coursework is due', 'chorus')).toBeNull();
+    expect(stripWakePhrase('chorused along', 'chorus')).toBeNull();
+    expect(stripWakePhrase('Horus: help', 'chorus')).toBe('help');
+  });
 });

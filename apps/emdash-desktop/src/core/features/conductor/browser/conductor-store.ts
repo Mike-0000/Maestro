@@ -19,7 +19,7 @@ import {
   type ConductorStatus,
   type ConductorTurnRecord,
 } from '../api/contract';
-import { chooseMode, parseCommand, type GrammarCommand } from '../api/grammar';
+import { chooseMode, parseCommand, type CloseScope, type GrammarCommand } from '../api/grammar';
 import { trimHistory } from '../api/history';
 import {
   interpretPermissionRisk,
@@ -35,7 +35,7 @@ import {
   urgencyQuestions,
   type SubtaskSize,
 } from '../api/jev';
-import { resolveAgent } from '../api/resolver';
+import { resolveAgent, type RosterAgent } from '../api/resolver';
 import { conductorUserMessage } from '../api/system-prompt';
 import {
   CANCEL_WINDOW_TOOLS,
@@ -45,12 +45,14 @@ import {
   type ConductorToolInput,
   type ConductorToolName,
 } from '../api/tools';
+import { atPermissionPrompt, closeTargets, listNames, reopenTargets } from '../api/window-targets';
 import {
   answerPermission,
   interruptAgent,
   lastMeaningfulLine,
   readAgentOutput,
   sendToAgent,
+  stopAgentSession,
   submitAgentInput,
 } from './agent-io';
 import { deliverPromptWhenReady } from './deferred-prompt';
@@ -62,6 +64,7 @@ import {
   entryForConversation,
   focusedConversationId,
   installedProviders,
+  offBoardEntries,
   vocabulary,
 } from './roster';
 import { resolveProjectId, spawnAgentTask, startAgentSession } from './spawn';
@@ -99,6 +102,11 @@ type ActionRecord = ConductorTurnRecord['actions'][number];
 export const CANCEL_WINDOW_MS = 1_500;
 /** How long an explicit confirmation waits before it lapses. */
 const CONFIRM_TIMEOUT_MS = 30_000;
+/** Spoken (and shown) for "help" and "what can I say". */
+export const HELP_REPLY =
+  'Try "focus Atlas", "tell Bravo to run the tests", "what is Cedar doing", "next", ' +
+  '"show all", "close", "reopen", "interrupt Atlas", "allow Bravo", or "shut down Cedar".';
+
 /** Upper bound on model round trips for one utterance. */
 const MAX_TOOL_ITERATIONS = 8;
 /** Attention events arriving within this window are announced together. */
@@ -132,6 +140,8 @@ export class ConductorStore {
   private pendingSeq = 0;
   private announceQueue: AgentTileEntry[] = [];
   private announceTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The windows the conductor closed last, so a bare "reopen" or "undo" restores the batch. */
+  private lastClosed: string[] = [];
   private readonly disposers: (() => void)[] = [];
 
   constructor(
@@ -150,6 +160,7 @@ export class ConductorStore {
       | 'pendingSeq'
       | 'announceQueue'
       | 'announceTimer'
+      | 'lastClosed'
       | 'disposers'
     >(this, {
       plans: false,
@@ -162,6 +173,7 @@ export class ConductorStore {
       pendingSeq: false,
       announceQueue: false,
       announceTimer: false,
+      lastClosed: false,
       disposers: false,
     });
   }
@@ -240,6 +252,11 @@ export class ConductorStore {
       this.setReply('Focus an agent first, then dictate.', 'voice');
       return;
     }
+    const blocked = this.permissionBlock(entry);
+    if (blocked) {
+      this.setReply(blocked, 'voice');
+      return;
+    }
     try {
       await sendToAgent(entry, text, false);
       this.setReply(`Typed into ${this.nameOf(entry)}. Say "send it" to submit.`, null);
@@ -258,7 +275,8 @@ export class ConductorStore {
     const command = parseCommand(text, roster, focusedId);
     if (this.pending) {
       if (command?.kind === 'confirm') return this.confirmPending();
-      if (command?.kind === 'reject') {
+      // "Close" with something pending closes the prompt in front of the user, not a window.
+      if (command?.kind === 'reject' || (command?.kind === 'close' && !command.agent)) {
         this.cancelPending();
         this.setReply('Cancelled.', source);
         return;
@@ -295,6 +313,11 @@ export class ConductorStore {
     const entry = entryForConversation(this.canvas, conversationId);
     if (!entry) return;
     const name = this.nameOf(entry);
+    const blocked = this.permissionBlock(entry);
+    if (blocked) {
+      this.setReply(blocked, null);
+      return;
+    }
     const confirmed = await this.requestPending(
       `Send note to ${name}: “${truncate(text, 80)}”`,
       'countdown'
@@ -324,17 +347,36 @@ export class ConductorStore {
     this.phase = 'acting';
 
     switch (command.kind) {
-      case 'confirm':
-        if (!this.plans.awaitingApproval) return false;
-        reply = `Starting ${this.plans.plan?.subtasks.length ?? 0} agents.`;
-        void this.plans.approve();
-        actions.push({ tool: 'approve_plan', input: {}, outcome: 'ok' });
+      case 'confirm': {
+        if (this.plans.awaitingApproval) {
+          reply = `Starting ${this.plans.plan?.subtasks.length ?? 0} agents.`;
+          void this.plans.approve();
+          actions.push({ tool: 'approve_plan', input: {}, outcome: 'ok' });
+          break;
+        }
+        // "Allow it" while the focused agent waits on a permission prompt answers that prompt
+        // (still behind an explicit confirmation).
+        const focused = this.focusedEntry();
+        if (focused && atPermissionPrompt(focused)) {
+          reply = await this.answerEntryPermission(focused, 'allow', actions);
+          break;
+        }
+        // A yes may answer the conductor's own last question; without one there is nothing to do.
+        if (this.history.length > 0 && this.configured) return false;
+        reply = 'Nothing is waiting for a yes.';
         break;
+      }
       case 'reject':
-        if (!this.plans.awaitingApproval) return false;
-        this.plans.cancel();
-        reply = 'Plan discarded.';
-        break;
+        if (this.plans.awaitingApproval) {
+          this.plans.cancel();
+          reply = 'Plan discarded.';
+          break;
+        }
+        if (this.history.length > 0 && this.configured) return false;
+        // Shown, not spoken: saying "nothing to cancel" after a bare "stop" is just noise.
+        this.setReply('Nothing to cancel.', null);
+        this.log({ route, actions, reply: 'Nothing to cancel.', startedAt });
+        return true;
       case 'next': {
         const next = this.canvas.attentionEntries[0];
         if (!next || !this.canvas.focusNextAttention()) {
@@ -368,12 +410,49 @@ export class ConductorStore {
         this.canvas.addNote(command.text);
         reply = 'Noted.';
         break;
-      case 'focus':
-        this.canvas.requestFocus(`agent:${command.agent.id}`);
+      case 'focus': {
+        const entry = entryForConversation(this.canvas, command.agent.id);
+        if (!entry) return false;
+        if (this.canvas.revealConversation(entry)) reply = `Reopened ${this.nameOf(entry)}.`;
+        this.canvas.requestFocus(entry.tileId);
         break;
+      }
       case 'clarify':
         reply = command.question;
         break;
+      case 'help':
+        reply = HELP_REPLY;
+        break;
+      case 'close':
+        reply = this.closeCommand(command.agent, actions);
+        break;
+      case 'closeMany': {
+        const result = await this.closeMany(command.scope, actions);
+        if (result === null) return true;
+        reply = result;
+        break;
+      }
+      case 'reopen':
+        reply = this.reopen(command.target, actions);
+        break;
+      case 'kill': {
+        const entry = entryForConversation(this.canvas, command.agent.id);
+        if (!entry) return false;
+        reply = await this.stopEntry(entry, actions);
+        break;
+      }
+      case 'archive': {
+        const entry = entryForConversation(this.canvas, command.agent.id);
+        if (!entry) return false;
+        reply = await this.archiveEntry(entry, actions);
+        break;
+      }
+      case 'permission': {
+        const entry = entryForConversation(this.canvas, command.agent.id);
+        if (!entry) return false;
+        reply = await this.answerEntryPermission(entry, command.decision, actions);
+        break;
+      }
       case 'status': {
         const entry = entryForConversation(this.canvas, command.agent.id);
         if (!entry) return false;
@@ -385,6 +464,10 @@ export class ConductorStore {
       case 'interrupt': {
         const entry = entryForConversation(this.canvas, command.agent.id);
         if (!entry) return false;
+        if (!entry.sessionActive) {
+          reply = `${command.agent.name} isn't running.`;
+          break;
+        }
         const confirmed = await this.requestPending(`Interrupt ${command.agent.name}`, 'countdown');
         if (!confirmed) {
           this.setReply('Cancelled.', null);
@@ -404,6 +487,11 @@ export class ConductorStore {
       case 'send': {
         const entry = entryForConversation(this.canvas, command.agent.id);
         if (!entry) return false;
+        const blocked = this.permissionBlock(entry);
+        if (blocked) {
+          reply = blocked;
+          break;
+        }
         const confirmed = await this.requestPending(
           `Send to ${command.agent.name}: “${truncate(command.text, 90)}”`,
           'countdown'
@@ -450,7 +538,11 @@ export class ConductorStore {
     const roster = buildRoster(this.canvas);
     const focusedId = focusedConversationId(this.canvas);
     const focusedName = focusedId ? this.canvas.spokenName(focusedId) : null;
-    const decision = await jevDecide(routingState(text, focusedName), routingQuestions(roster));
+    // Visible agents first: Jev sees a bounded number of choices.
+    const ordered = [...roster].sort(
+      (a, b) => Number(a.hidden ?? false) - Number(b.hidden ?? false)
+    );
+    const decision = await jevDecide(routingState(text, focusedName), routingQuestions(ordered));
     if (!decision) return { handled: false };
     const routing = interpretRouting(
       decision.answers,
@@ -464,6 +556,7 @@ export class ConductorStore {
     let command: GrammarCommand | null = null;
     if (routing.intent === 'overview') command = { kind: 'overview' };
     else if (routing.intent === 'next') command = { kind: 'next' };
+    else if (agent && routing.intent === 'close') command = { kind: 'close', agent };
     else if (agent) command = { kind: routing.intent, agent };
     if (!command) return { handled: false };
     const handled = await this.runGrammar(command, source, startedAt, 'jev');
@@ -658,6 +751,8 @@ export class ConductorStore {
         const { agent, text, submit } = input as ConductorToolInput<'send_to_agent'>;
         const entry = this.resolveEntry(agent);
         if ('error' in entry) return { content: entry.error, isError: true };
+        const blocked = this.permissionBlock(entry.entry);
+        if (blocked) return { content: blocked, isError: true };
         const target = this.nameOf(entry.entry);
         if (
           !(await this.requestPending(`Send to ${target}: “${truncate(text, 90)}”`, confirmKind))
@@ -676,6 +771,9 @@ export class ConductorStore {
         const entry = this.resolveEntry((input as ConductorToolInput<'interrupt_agent'>).agent);
         if ('error' in entry) return { content: entry.error, isError: true };
         const target = this.nameOf(entry.entry);
+        if (!entry.entry.sessionActive) {
+          return { content: `${target} isn't running, so there is nothing to interrupt.` };
+        }
         if (!(await this.requestPending(`Interrupt ${target}`, confirmKind))) {
           return { content: 'The user cancelled the interrupt.' };
         }
@@ -686,21 +784,7 @@ export class ConductorStore {
         const { agent, decision } = input as ConductorToolInput<'answer_permission'>;
         const entry = this.resolveEntry(agent);
         if ('error' in entry) return { content: entry.error, isError: true };
-        const target = this.nameOf(entry.entry);
-        if (entry.entry.status !== 'awaiting-input') {
-          return { content: `${target} is not waiting on a prompt.`, isError: true };
-        }
-        const riskLevel = this.canvas.insight(entry.entry.conversationId)?.riskLevel;
-        const riskNote =
-          decision === 'allow' && (riskLevel === 'high' || riskLevel === 'elevated')
-            ? ` (${riskLevel === 'high' ? 'high risk' : 'has side effects'})`
-            : '';
-        const label = `${decision === 'allow' ? 'Allow' : 'Deny'} ${target}'s permission request${riskNote}`;
-        if (!(await this.requestPending(label, confirmKind))) {
-          return { content: 'The user did not confirm, so nothing was sent.' };
-        }
-        await answerPermission(entry.entry, decision);
-        return { content: `${decision === 'allow' ? 'Allowed' : 'Denied'} for ${target}.` };
+        return { content: await this.answerEntryPermission(entry.entry, decision, []) };
       }
       case 'spawn_agent': {
         const spawn = input as ConductorToolInput<'spawn_agent'>;
@@ -796,21 +880,196 @@ export class ConductorStore {
       case 'archive_agent': {
         const entry = this.resolveEntry((input as ConductorToolInput<'archive_agent'>).agent);
         if ('error' in entry) return { content: entry.error, isError: true };
-        const target = this.nameOf(entry.entry);
-        const label = `Archive ${target} (task "${truncate(entry.entry.taskName, 40)}"; the branch is kept)`;
-        if (!(await this.requestPending(label, confirmKind))) {
-          return { content: 'The user did not confirm, so nothing was archived.' };
-        }
-        const manager = getTaskManagerStore(entry.entry.projectId);
-        if (!manager) return { content: 'That project is not open.', isError: true };
-        await manager.archiveTask(entry.entry.taskId);
-        return { content: `Archived ${target}'s task. Its branch and worktree are kept.` };
+        return { content: await this.archiveEntry(entry.entry, []) };
       }
       case 'add_note':
         this.canvas.addNote((input as ConductorToolInput<'add_note'>).text);
         return { content: 'Note added.' };
+      case 'close_agent': {
+        const entry = this.resolveEntry((input as ConductorToolInput<'close_agent'>).agent);
+        if ('error' in entry) return { content: entry.error, isError: true };
+        return { content: this.closeEntries([entry.entry]) };
+      }
+      case 'reopen_agent': {
+        const entry = this.resolveEntry((input as ConductorToolInput<'reopen_agent'>).agent);
+        if ('error' in entry) return { content: entry.error, isError: true };
+        return { content: this.reopenEntries([entry.entry]) };
+      }
+      case 'stop_agent': {
+        const entry = this.resolveEntry((input as ConductorToolInput<'stop_agent'>).agent);
+        if ('error' in entry) return { content: entry.error, isError: true };
+        return { content: await this.stopEntry(entry.entry, []) };
+      }
     }
     return { content: `Unhandled tool ${name}.`, isError: true };
+  }
+
+  // ── Windows and agent management ─────────────────────────────────────────
+
+  /**
+   * "Close" / "close Atlas". Without a name it closes what is in front of the user: the focused
+   * agent's window, else a plan awaiting approval. (A pending action was already cancelled.)
+   */
+  private closeCommand(agent: RosterAgent | null, actions: ActionRecord[]): string {
+    const entry = agent ? entryForConversation(this.canvas, agent.id) : this.focusedEntry();
+    if (!entry) {
+      if (this.plans.awaitingApproval) {
+        this.plans.cancel();
+        return 'Plan discarded.';
+      }
+      return 'Nothing is focused to close. Say a name, like "close Atlas".';
+    }
+    if (this.canvas.isOffBoard(entry)) return `${this.nameOf(entry)} is already closed.`;
+    const reply = this.closeEntries([entry]);
+    actions.push({ tool: 'close_agent', input: { agent: this.nameOf(entry) }, outcome: reply });
+    return reply;
+  }
+
+  /** Hides windows (agents keep running) and remembers them for "reopen". */
+  private closeEntries(entries: readonly AgentTileEntry[]): string {
+    const open = entries.filter((entry) => !this.canvas.isOffBoard(entry));
+    if (open.length === 0) return 'Already closed.';
+    const ids = open.map((entry) => entry.conversationId);
+    this.canvas.hideConversations(ids);
+    this.lastClosed = ids;
+    const names = listNames(open.map((entry) => this.nameOf(entry)));
+    return `Closed ${names}. ${open.length === 1 ? 'It keeps' : 'They keep'} running; say "reopen" to bring ${open.length === 1 ? 'it' : 'them'} back.`;
+  }
+
+  /** "Close all" / "close the others" / "close the finished ones", behind a short countdown. */
+  private async closeMany(scope: CloseScope, actions: ActionRecord[]): Promise<string | null> {
+    const focusedId = focusedConversationId(this.canvas);
+    const visible = this.canvas.visibleAgentEntries;
+    const ids = closeTargets(visible, scope, focusedId);
+    if (ids === null) return 'Focus the agent to keep first, then say "close the others".';
+    const entries = visible.filter((entry) => ids.includes(entry.conversationId));
+    if (entries.length === 0) {
+      return scope === 'done' ? 'No finished agents are open.' : 'No other windows are open.';
+    }
+    if (entries.length > 1) {
+      const label = `Close ${entries.length} windows: ${listNames(
+        entries.map((entry) => this.nameOf(entry)),
+        4
+      )}`;
+      if (!(await this.requestPending(label, 'countdown'))) {
+        this.setReply('Cancelled.', null);
+        return null;
+      }
+    }
+    const reply = this.closeEntries(entries);
+    actions.push({ tool: 'close_agent', input: { scope }, outcome: reply });
+    return reply;
+  }
+
+  private reopen(target: RosterAgent | 'last' | 'all', actions: ActionRecord[]): string {
+    let entries: AgentTileEntry[];
+    if (target === 'all') {
+      entries = offBoardEntries(this.canvas);
+    } else if (target === 'last') {
+      const ids = reopenTargets(this.canvas.state.hiddenConversationIds, this.lastClosed);
+      entries = ids.flatMap((id) => entryForConversation(this.canvas, id) ?? []);
+      if (entries.length === 0) {
+        // Nothing hidden by hand; maybe the project filter is hiding agents.
+        const filtered = offBoardEntries(this.canvas);
+        if (filtered.length === 1 && filtered[0]) entries = filtered;
+        else if (filtered.length > 1) {
+          return `Which one: ${listNames(
+            filtered.map((entry) => this.nameOf(entry)),
+            4
+          )}? Or say "reopen all".`;
+        }
+      }
+    } else {
+      const entry = entryForConversation(this.canvas, target.id);
+      entries = entry ? [entry] : [];
+    }
+    if (entries.length === 0) return 'Nothing is closed.';
+    const reply = this.reopenEntries(entries);
+    actions.push({
+      tool: 'reopen_agent',
+      input: { target: typeof target === 'string' ? target : target.name },
+      outcome: reply,
+    });
+    return reply;
+  }
+
+  /** Puts agents back on the board and brings them into view. */
+  private reopenEntries(entries: readonly AgentTileEntry[]): string {
+    const revealed = entries.filter((entry) => this.canvas.revealConversation(entry));
+    this.lastClosed = this.lastClosed.filter(
+      (id) => !revealed.some((entry) => entry.conversationId === id)
+    );
+    const [only] = entries;
+    if (entries.length === 1 && only) this.canvas.requestFocus(only.tileId);
+    else this.canvas.requestFit(entries.map((entry) => entry.tileId));
+    if (revealed.length === 0) {
+      return entries.length === 1 && only
+        ? `${this.nameOf(only)} is already open.`
+        : 'They are already open.';
+    }
+    return `Reopened ${listNames(revealed.map((entry) => this.nameOf(entry)))}.`;
+  }
+
+  /** Ends an agent's session after an explicit confirmation. */
+  private async stopEntry(entry: AgentTileEntry, actions: ActionRecord[]): Promise<string> {
+    const target = this.nameOf(entry);
+    if (!entry.sessionActive) return `${target} isn't running.`;
+    const label = `Stop ${target}'s session (the conversation is kept and can be resumed)`;
+    if (!(await this.requestPending(label, 'confirm')))
+      return 'Not confirmed, so nothing was stopped.';
+    const reply = await this.attempt(() => stopAgentSession(entry), `Stopped ${target}.`);
+    actions.push({ tool: 'stop_agent', input: { agent: target }, outcome: reply });
+    return reply;
+  }
+
+  /** Archives an agent's task after an explicit confirmation. */
+  private async archiveEntry(entry: AgentTileEntry, actions: ActionRecord[]): Promise<string> {
+    const target = this.nameOf(entry);
+    const label = `Archive ${target} (task "${truncate(entry.taskName, 40)}"; the branch is kept)`;
+    if (!(await this.requestPending(label, 'confirm'))) {
+      return 'Not confirmed, so nothing was archived.';
+    }
+    const manager = getTaskManagerStore(entry.projectId);
+    if (!manager) return 'That project is not open.';
+    const reply = await this.attempt(
+      () => manager.archiveTask(entry.taskId),
+      `Archived ${target}'s task. Its branch and worktree are kept.`
+    );
+    actions.push({ tool: 'archive_agent', input: { agent: target }, outcome: reply });
+    return reply;
+  }
+
+  /** Answers a permission prompt after an explicit confirmation that names the risk. */
+  private async answerEntryPermission(
+    entry: AgentTileEntry,
+    decision: 'allow' | 'deny',
+    actions: ActionRecord[]
+  ): Promise<string> {
+    const target = this.nameOf(entry);
+    if (entry.status !== 'awaiting-input') return `${target} is not waiting on a prompt.`;
+    if (entry.type === 'acp') return `Answer ${target}'s request in its window.`;
+    const riskLevel = this.canvas.insight(entry.conversationId)?.riskLevel;
+    const riskNote =
+      decision === 'allow' && (riskLevel === 'high' || riskLevel === 'elevated')
+        ? ` (${riskLevel === 'high' ? 'high risk' : 'has side effects'})`
+        : '';
+    const label = `${decision === 'allow' ? 'Allow' : 'Deny'} ${target}'s permission request${riskNote}`;
+    if (!(await this.requestPending(label, 'confirm'))) {
+      return 'Not confirmed, so nothing was sent.';
+    }
+    const reply = await this.attempt(
+      () => answerPermission(entry, decision),
+      `${decision === 'allow' ? 'Allowed' : 'Denied'} for ${target}.`
+    );
+    actions.push({ tool: 'answer_permission', input: { agent: target, decision }, outcome: reply });
+    return reply;
+  }
+
+  /** Why text must not be typed into this agent right now, or null when it is safe. */
+  private permissionBlock(entry: AgentTileEntry): string | null {
+    if (!atPermissionPrompt(entry)) return null;
+    const name = this.nameOf(entry);
+    return `${name} is waiting on a permission prompt, and typing there could answer it. Say "allow ${name}" or "deny ${name}" first.`;
   }
 
   // ── Pending actions ────────────────────────────────────────────────────────

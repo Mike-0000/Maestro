@@ -173,16 +173,22 @@ export function stripWakePhrase(transcript: string, phrase: string): string | nu
   const wanted = phrase.trim().toLowerCase();
   const text = transcript.trim();
   if (!wanted) return text;
-  const normalized = text.toLowerCase().replace(/^[^a-z0-9]+/, '');
-  const leading = text.length - text.replace(/^[^a-zA-Z0-9]+/, '').length;
+  // People often greet the wake word ("hey Chorus", "okay, Chorus"); skip that lead-in.
+  const greeting = /^[^a-zA-Z0-9]*(?:(?:hey|hi|ok|okay|yo|um|uh)[\s,.!]+)?/i.exec(text)?.[0] ?? '';
+  const afterGreeting = text.slice(greeting.length);
+  const normalized = afterGreeting.toLowerCase();
   // Allow common mishearings of the default phrase.
   const variants =
-    wanted === 'chorus' ? ['chorus', 'corus', 'courses', 'chorus,', 'horus'] : [wanted];
-  for (const variant of variants) {
-    if (normalized.startsWith(variant)) {
-      const rest = text.slice(leading + variant.length).replace(/^[\s,.!?:;-]+/, '');
-      return rest || null;
-    }
+    wanted === 'chorus'
+      ? ['chorus', 'choruses', 'corus', 'courses', 'course', 'horus', 'coarse', 'chorys']
+      : [wanted];
+  // Longest first, and only whole words: "chorused" or "course correct" are not the wake word
+  // ("course" alone is accepted only as a separate word).
+  for (const variant of [...variants].sort((a, b) => b.length - a.length)) {
+    if (!normalized.startsWith(variant)) continue;
+    if (/[a-z0-9]/i.test(afterGreeting.charAt(variant.length))) continue;
+    const rest = afterGreeting.slice(variant.length).replace(/^[\s,.!?:;-]+/, '');
+    return rest || null;
   }
   return null;
 }

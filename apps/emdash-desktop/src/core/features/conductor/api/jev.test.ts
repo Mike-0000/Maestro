@@ -80,6 +80,21 @@ describe('interpretRouting', () => {
     expect(interpretRouting(answers, 0.8)).toEqual({ kind: 'model', mode: 'plan' });
   });
 
+  it('executes a confident close but leaves other window management to Claude', () => {
+    const close: JevAnswers = {
+      intent: choice('close', 0.93),
+      target: choice('Codex 1', 0.9),
+      decompose: { type: 'noul', noul: 0 },
+    };
+    expect(interpretRouting(close, 0.8)).toMatchObject({
+      kind: 'direct',
+      intent: 'close',
+      agent: 'Codex 1',
+    });
+    const manage: JevAnswers = { ...close, intent: choice('manage', 0.97) };
+    expect(interpretRouting(manage, 0.8)).toEqual({ kind: 'model', mode: 'command' });
+  });
+
   it('falls back safely on missing answers', () => {
     expect(interpretRouting({}, 0.8)).toEqual({ kind: 'model', mode: 'command' });
   });
