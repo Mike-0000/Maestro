@@ -27,6 +27,28 @@ const trayIconLabel =
     : 'Show Emdash in the system tray';
 
 export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
+  // Voice & Conductor
+  {
+    id: 'chorus-api-keys',
+    label: 'Voice & conductor API keys',
+    tab: 'chorus',
+    description: 'Anthropic, OpenAI, and Deepgram keys for the conductor and speech-to-text.',
+    keywords: ['anthropic', 'claude', 'openai', 'deepgram', 'api key', 'voice'],
+  },
+  {
+    id: 'chorus-speech-engine',
+    label: 'Speech-to-text engine',
+    tab: 'chorus',
+    description: 'Transcribe with OpenAI, Deepgram, or a local whisper.cpp server.',
+    keywords: ['stt', 'whisper', 'microphone', 'dictation', 'push to talk', 'shortcut'],
+  },
+  {
+    id: 'chorus-conductor',
+    label: 'Conductor',
+    tab: 'chorus',
+    description: 'Model, reasoning effort, plans, and the daily token budget.',
+    keywords: ['model', 'effort', 'plan', 'budget', 'tokens'],
+  },
   // General
   {
     id: 'version',
@@ -39,7 +61,7 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     id: 'privacy-telemetry',
     label: 'Privacy & Telemetry',
     tab: 'general',
-    description: 'Help improve Emdash by sending anonymous usage data.',
+    description: 'Help improve Chorus by sending anonymous usage data.',
     keywords: ['analytics', 'posthog', 'usage data', 'tracking'],
   },
   {

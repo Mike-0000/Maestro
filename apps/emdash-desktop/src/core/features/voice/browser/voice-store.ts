@@ -255,6 +255,10 @@ export class VoiceStore {
     });
   }
 
+  async openMicrophoneSettings(): Promise<void> {
+    await (await getVoiceClient()).openMicrophoneSettings();
+  }
+
   async setCredential(id: ChorusCredentialId, value: string | null): Promise<void> {
     const status = await (await getVoiceClient()).setCredential({ id, value });
     runInAction(() => (this.status = status));

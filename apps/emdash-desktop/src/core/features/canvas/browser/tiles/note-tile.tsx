@@ -35,8 +35,8 @@ export const NoteTileNode = observer(function NoteTileNode({ data, selected }: N
         isVisible={selected}
         minWidth={MIN_TILE_SIZE.w / 2}
         minHeight={MIN_TILE_SIZE.h / 2}
-        lineClassName="!border-accent/60"
-        handleClassName="!size-2.5 !rounded-sm !border-accent !bg-background"
+        lineClassName="!border-blue-500/60"
+        handleClassName="!size-2.5 !rounded-sm !border-blue-500 !bg-background"
         onResizeEnd={(_event, params) =>
           store.setTileRect(tileId, { x: params.x, y: params.y, w: params.width, h: params.height })
         }
@@ -51,7 +51,7 @@ export const NoteTileNode = observer(function NoteTileNode({ data, selected }: N
             className={cn(
               'nodrag size-3 rounded-full border border-foreground/20',
               NOTE_COLORS[color],
-              note.color === color && 'ring-2 ring-accent'
+              note.color === color && 'ring-2 ring-blue-500'
             )}
           />
         ))}

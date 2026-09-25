@@ -7,7 +7,7 @@ import {
   type AppScopedStoreContribution,
 } from '@core/primitives/scoped-stores/browser';
 
-const canvasStoreToken = scopedStoreToken<CanvasStore>('canvas.board');
+export const canvasStoreToken = scopedStoreToken<CanvasStore>('canvas.board');
 
 // Resolves the projects store at create time; register after the projects contribution.
 export const canvasAppStoreContributions: readonly AppScopedStoreContribution[] = [

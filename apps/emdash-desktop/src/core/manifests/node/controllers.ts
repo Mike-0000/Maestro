@@ -69,6 +69,7 @@ import {
   createUpdatesWireController,
   type UpdateOperations,
 } from '@core/features/updates/node/wire-controller';
+import { createVoiceWireController } from '@core/features/voice/node/wire-controller';
 import {
   createDesktopHostWireController,
   type DesktopHostControllerOperations,
@@ -86,11 +87,10 @@ import {
   createWorkspacesWireController,
   type CreateWorkspacesWireControllerOptions,
 } from '@core/features/workspaces/node/wire-controller';
-import { createVoiceWireController } from '@core/features/voice/node/wire-controller';
 import { WorkspaceMutationService } from '@core/features/workspaces/node/workspace-mutation-service';
 import type { SshServiceHandle } from '@core/manifests/node/ssh-service-handle';
-import type { ChorusHostServices } from '@core/primitives/chorus-host/api/host-services';
 import { desktopDomainContracts } from '@core/manifests/shared/domain-contracts';
+import type { ChorusHostServices } from '@core/primitives/chorus-host/api/host-services';
 import type { HostReachabilityProbe } from '@core/primitives/ssh/api';
 import type { TelemetryService } from '@core/primitives/telemetry/api/telemetry';
 import type { AppDb } from '@core/services/app-db/node/db';

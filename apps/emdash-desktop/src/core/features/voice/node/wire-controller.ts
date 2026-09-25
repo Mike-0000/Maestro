@@ -42,6 +42,7 @@ export function createVoiceWireController(options: {
     getStatus: () => service.status(),
     updateSettings: (patch) => service.updateSettings(patch),
     setCredential: ({ id, value }) => service.setCredential(id, value),
+    openMicrophoneSettings: () => options.host.openMicrophoneSettings(),
     events: voiceEvents,
   });
   return { controller, service };

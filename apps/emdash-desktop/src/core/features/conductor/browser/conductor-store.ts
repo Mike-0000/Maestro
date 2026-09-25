@@ -1,0 +1,887 @@
+import type Anthropic from '@anthropic-ai/sdk';
+import { makeAutoObservable, reaction, runInAction } from 'mobx';
+import type {
+  AgentTileEntry,
+  CanvasStore,
+} from '@core/features/canvas/api/browser/stores/canvas-store';
+import { assignSpokenName } from '@core/features/canvas/api/canvas-model';
+import { spokenProviderLabel } from '@core/features/canvas/api/provider-names';
+import { getTaskStore } from '@core/features/tasks/api/browser/task-state/task-selectors';
+import { log } from '@core/primitives/logging/browser/logger';
+import { getConductorClient } from '../api/browser/client';
+import type {
+  ConductorError,
+  ConductorMode,
+  ConductorSettings,
+  ConductorStatus,
+  ConductorTurnRecord,
+} from '../api/contract';
+import { chooseMode, parseCommand, type GrammarCommand } from '../api/grammar';
+import { trimHistory } from '../api/history';
+import { resolveAgent } from '../api/resolver';
+import { conductorUserMessage } from '../api/system-prompt';
+import {
+  CANCEL_WINDOW_TOOLS,
+  CONFIRM_REQUIRED_TOOLS,
+  conductorToolNames,
+  conductorToolSchemas,
+  type ConductorToolInput,
+  type ConductorToolName,
+} from '../api/tools';
+import {
+  answerPermission,
+  interruptAgent,
+  lastMeaningfulLine,
+  readAgentOutput,
+  sendToAgent,
+  submitAgentInput,
+} from './agent-io';
+import { deliverPromptWhenReady } from './deferred-prompt';
+import { PlanStore } from './plan-store';
+import {
+  buildContext,
+  buildRoster,
+  entryForConversation,
+  focusedConversationId,
+  installedProviders,
+  vocabulary,
+} from './roster';
+import { resolveProjectId, spawnAgentTask, startAgentSession } from './spawn';
+
+/** What the conductor needs from the voice slice (kept structural to avoid a slice dependency). */
+export interface ConductorVoicePort {
+  readonly muted: boolean;
+  say(text: string): void;
+  announce(text: string): void;
+  setMuted(muted: boolean): void;
+  setTranscriptHandler(
+    handler: (text: string, intent: 'command' | 'dictation') => Promise<void> | void
+  ): void;
+  setVocabularyProvider(provider: () => string[]): void;
+}
+
+export type ConductorPhase = 'idle' | 'thinking' | 'acting';
+export type UtteranceSource = 'voice' | 'typed';
+
+export type PendingAction = {
+  readonly id: number;
+  readonly label: string;
+  /** "countdown" runs unless cancelled; "confirm" runs only when confirmed. */
+  readonly kind: 'countdown' | 'confirm';
+  readonly startedAt: number;
+  readonly durationMs: number;
+};
+
+export type ConductorErrorState = { message: string; kind: ConductorError['type'] | 'other' };
+
+type ToolOutcome = { content: string; isError?: boolean };
+type ActionRecord = ConductorTurnRecord['actions'][number];
+
+/** Short cancel window before side-effecting commands run. */
+export const CANCEL_WINDOW_MS = 1_500;
+/** How long an explicit confirmation waits before it lapses. */
+const CONFIRM_TIMEOUT_MS = 30_000;
+/** Upper bound on model round trips for one utterance. */
+const MAX_TOOL_ITERATIONS = 8;
+/** Attention events arriving within this window are announced together. */
+const ANNOUNCE_BATCH_MS = 900;
+const READ_AGENT_MAX_CHARS = 6_000;
+
+/**
+ * The conductor turns utterances into actions on agents. A deterministic grammar handles common
+ * commands instantly; everything else goes to Claude with tools that execute here in the renderer
+ * against the live canvas and task stores. Side effects run behind a cancel window, and answering
+ * permission prompts always needs an explicit yes.
+ */
+export class ConductorStore {
+  phase: ConductorPhase = 'idle';
+  activity = '';
+  lastUtterance = '';
+  lastRoute: 'grammar' | 'llm' | null = null;
+  reply = '';
+  replyAt = 0;
+  error: ConductorErrorState | null = null;
+  pending: PendingAction | null = null;
+  status: ConductorStatus | null = null;
+  readonly plans: PlanStore;
+
+  private history: Anthropic.Beta.BetaMessageParam[] = [];
+  private queued: { text: string; source: UtteranceSource } | null = null;
+  private pendingResolve: ((confirmed: boolean) => void) | null = null;
+  private pendingTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingSeq = 0;
+  private announceQueue: AgentTileEntry[] = [];
+  private announceTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly disposers: (() => void)[] = [];
+
+  constructor(
+    private readonly canvas: CanvasStore,
+    private readonly voice: ConductorVoicePort
+  ) {
+    this.plans = new PlanStore(canvas, { notify: (text) => this.notify(text) });
+    makeAutoObservable<
+      ConductorStore,
+      | 'canvas'
+      | 'voice'
+      | 'history'
+      | 'queued'
+      | 'pendingResolve'
+      | 'pendingTimer'
+      | 'pendingSeq'
+      | 'announceQueue'
+      | 'announceTimer'
+      | 'disposers'
+    >(this, {
+      plans: false,
+      canvas: false,
+      voice: false,
+      history: false,
+      queued: false,
+      pendingResolve: false,
+      pendingTimer: false,
+      pendingSeq: false,
+      announceQueue: false,
+      announceTimer: false,
+      disposers: false,
+    });
+  }
+
+  activate(): void {
+    this.voice.setTranscriptHandler((text, intent) =>
+      intent === 'dictation' ? this.dictate(text) : this.handleUtterance(text, 'voice')
+    );
+    this.voice.setVocabularyProvider(() => this.vocabulary());
+    void this.refreshStatus();
+    void installedProviders();
+    let known = new Set(this.canvas.attentionEntries.map((entry) => entry.tileId));
+    this.disposers.push(
+      reaction(
+        () => this.canvas.attentionEntries,
+        (entries) => {
+          const fresh = entries.filter((entry) => !known.has(entry.tileId));
+          known = new Set(entries.map((entry) => entry.tileId));
+          if (fresh.length > 0) this.queueAnnouncements(fresh);
+        }
+      )
+    );
+  }
+
+  dispose(): void {
+    for (const dispose of this.disposers.splice(0)) dispose();
+    this.plans.dispose();
+    this.settlePending(false);
+    if (this.announceTimer) clearTimeout(this.announceTimer);
+  }
+
+  get busy(): boolean {
+    return this.phase !== 'idle';
+  }
+
+  get configured(): boolean {
+    return this.status?.configured ?? false;
+  }
+
+  get settings(): ConductorSettings | null {
+    return this.status?.settings ?? null;
+  }
+
+  /** Words for the speech engine's vocabulary hint. */
+  vocabulary(): string[] {
+    return vocabulary(this.canvas);
+  }
+
+  // ── Entry points ───────────────────────────────────────────────────────────
+
+  /** Voice dictation: types the text into the focused agent without pressing Enter. */
+  async dictate(text: string): Promise<void> {
+    const entry = this.focusedEntry();
+    if (!entry) {
+      this.setReply('Focus an agent first, then dictate.', 'voice');
+      return;
+    }
+    try {
+      await sendToAgent(entry, text, false);
+      this.setReply(`Typed into ${this.nameOf(entry)}. Say "send it" to submit.`, null);
+    } catch (error) {
+      this.setReply(errorMessage(error), 'voice');
+    }
+  }
+
+  async handleUtterance(raw: string, source: UtteranceSource): Promise<void> {
+    const text = raw.trim();
+    if (!text) return;
+
+    // A pending action is answered before anything else, even while a turn is running.
+    const roster = buildRoster(this.canvas);
+    const focusedId = focusedConversationId(this.canvas);
+    const command = parseCommand(text, roster, focusedId);
+    if (this.pending) {
+      if (command?.kind === 'confirm') return this.confirmPending();
+      if (command?.kind === 'reject') {
+        this.cancelPending();
+        this.setReply('Cancelled.', source);
+        return;
+      }
+      this.cancelPending();
+    }
+
+    if (this.busy) {
+      this.queued = { text, source };
+      return;
+    }
+
+    this.lastUtterance = text;
+    this.error = null;
+    const startedAt = performance.now();
+    try {
+      if (command && (await this.runGrammar(command, source, startedAt))) return;
+      await this.runModel(text, source, startedAt);
+    } finally {
+      runInAction(() => {
+        this.phase = 'idle';
+        this.activity = '';
+      });
+      const next = this.queued;
+      this.queued = null;
+      if (next) void this.handleUtterance(next.text, next.source);
+    }
+  }
+
+  // ── Fast path ──────────────────────────────────────────────────────────────
+
+  /** Runs a grammar command. Returns false when the utterance should go to the model instead. */
+  private async runGrammar(
+    command: GrammarCommand,
+    source: UtteranceSource,
+    startedAt: number
+  ): Promise<boolean> {
+    const actions: ActionRecord[] = [];
+    let reply = '';
+    this.lastRoute = 'grammar';
+    this.phase = 'acting';
+
+    switch (command.kind) {
+      case 'confirm':
+        if (!this.plans.awaitingApproval) return false;
+        reply = `Starting ${this.plans.plan?.subtasks.length ?? 0} agents.`;
+        void this.plans.approve();
+        actions.push({ tool: 'approve_plan', input: {}, outcome: 'ok' });
+        break;
+      case 'reject':
+        if (!this.plans.awaitingApproval) return false;
+        this.plans.cancel();
+        reply = 'Plan discarded.';
+        break;
+      case 'next': {
+        const next = this.canvas.attentionEntries[0];
+        if (!next || !this.canvas.focusNextAttention()) {
+          reply = 'Nobody needs you right now.';
+        } else {
+          const focused = this.focusedEntry() ?? next;
+          reply = `${this.nameOf(focused)} ${attentionPhrase(focused)}.`;
+        }
+        break;
+      }
+      case 'overview':
+        this.canvas.requestFit();
+        break;
+      case 'submit': {
+        const entry = this.focusedEntry();
+        if (!entry) {
+          reply = 'No agent is focused.';
+          break;
+        }
+        reply = await this.attempt(() => submitAgentInput(entry), `Sent.`);
+        break;
+      }
+      case 'mute':
+        this.voice.setMuted(true);
+        break;
+      case 'unmute':
+        this.voice.setMuted(false);
+        reply = "I'm back.";
+        break;
+      case 'note':
+        this.canvas.addNote(command.text);
+        reply = 'Noted.';
+        break;
+      case 'focus':
+        this.canvas.requestFocus(`agent:${command.agent.id}`);
+        break;
+      case 'clarify':
+        reply = command.question;
+        break;
+      case 'status': {
+        const entry = entryForConversation(this.canvas, command.agent.id);
+        if (!entry) return false;
+        this.activity = `Reading ${command.agent.name}…`;
+        const line = await lastMeaningfulLine(entry).catch(() => null);
+        reply = `${command.agent.name} is ${spokenStatus(entry)}.${line ? ` Last line: ${truncate(line, 140)}` : ''}`;
+        break;
+      }
+      case 'interrupt': {
+        const entry = entryForConversation(this.canvas, command.agent.id);
+        if (!entry) return false;
+        const confirmed = await this.requestPending(`Interrupt ${command.agent.name}`, 'countdown');
+        if (!confirmed) {
+          this.setReply('Cancelled.', null);
+          return true;
+        }
+        reply = await this.attempt(
+          () => interruptAgent(entry),
+          `Interrupted ${command.agent.name}.`
+        );
+        actions.push({
+          tool: 'interrupt_agent',
+          input: { agent: command.agent.name },
+          outcome: reply,
+        });
+        break;
+      }
+      case 'send': {
+        const entry = entryForConversation(this.canvas, command.agent.id);
+        if (!entry) return false;
+        const confirmed = await this.requestPending(
+          `Send to ${command.agent.name}: “${truncate(command.text, 90)}”`,
+          'countdown'
+        );
+        if (!confirmed) {
+          this.setReply('Cancelled.', null);
+          return true;
+        }
+        reply = await this.attempt(
+          () => this.deliver(entry, command.text, true),
+          this.deliveryReply(entry)
+        );
+        actions.push({
+          tool: 'send_to_agent',
+          input: { agent: command.agent.name, text: command.text },
+          outcome: reply,
+        });
+        break;
+      }
+    }
+
+    this.setReply(reply, source);
+    this.log({ route: 'grammar', actions, reply, startedAt });
+    return true;
+  }
+
+  // ── Model path ─────────────────────────────────────────────────────────────
+
+  private async runModel(text: string, source: UtteranceSource, startedAt: number): Promise<void> {
+    this.lastRoute = 'llm';
+    if (this.status && !this.status.configured) {
+      runInAction(() => {
+        this.error = {
+          kind: 'not-configured',
+          message: 'Add an Anthropic API key in Settings → Voice & Conductor to use the conductor.',
+        };
+      });
+      this.setReply("I didn't catch a command I know, and the conductor has no API key.", source);
+      return;
+    }
+
+    this.phase = 'thinking';
+    this.activity = 'Thinking…';
+    const mode: ConductorMode = chooseMode(text);
+    const providers = await installedProviders();
+    const planLine = this.plans.contextLine;
+    const context = buildContext(this.canvas, providers, planLine ? [planLine] : []);
+    const messages: Anthropic.Beta.BetaMessageParam[] = [
+      ...this.history,
+      { role: 'user', content: conductorUserMessage(context, text) },
+    ];
+    const actions: ActionRecord[] = [];
+    let tokens = 0;
+    let reply = '';
+    let completed = false;
+
+    try {
+      const client = await getConductorClient();
+      for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+        runInAction(() => {
+          this.phase = 'thinking';
+          this.activity = iteration === 0 ? 'Thinking…' : 'Thinking about the results…';
+        });
+        const result = await client.runTurn({ mode, messages });
+        if (!result.success) {
+          runInAction(
+            () => (this.error = { kind: result.error.type, message: result.error.message })
+          );
+          reply = spokenError(result.error);
+          break;
+        }
+        const turn = result.data;
+        tokens += turn.usage.inputTokens + turn.usage.outputTokens;
+        messages.push({
+          role: 'assistant',
+          content: turn.content as Anthropic.Beta.BetaContentBlockParam[],
+        });
+        const toolUses = turn.content.filter(
+          (block): block is Anthropic.Beta.BetaToolUseBlock => block.type === 'tool_use'
+        );
+        const text = turn.content
+          .filter((block): block is Anthropic.Beta.BetaTextBlock => block.type === 'text')
+          .map((block) => block.text)
+          .join(' ')
+          .trim();
+        if (turn.stopReason !== 'tool_use' || toolUses.length === 0) {
+          reply = text || (turn.stopReason === 'max_tokens' ? 'That took too long to answer.' : '');
+          completed = true;
+          break;
+        }
+        const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
+        for (const use of toolUses) {
+          runInAction(() => {
+            this.phase = 'acting';
+            this.activity = describeTool(use.name);
+          });
+          const outcome = await this.executeTool(use.name, use.input);
+          actions.push({
+            tool: use.name,
+            input: use.input,
+            outcome: truncate(outcome.content, 300),
+          });
+          results.push({
+            type: 'tool_result',
+            tool_use_id: use.id,
+            content: outcome.content,
+            ...(outcome.isError ? { is_error: true } : {}),
+          });
+        }
+        messages.push({ role: 'user', content: results });
+      }
+      if (!completed && !reply) reply = 'I stopped after several steps. Check the canvas.';
+    } catch (error) {
+      log.error('conductor: turn failed', { error });
+      runInAction(() => (this.error = { kind: 'other', message: errorMessage(error) }));
+      reply = 'Something went wrong talking to the conductor.';
+    }
+
+    // Keep history only for turns that ended on an assistant message (valid to resume from).
+    if (completed) this.history = trimHistory(messages);
+    this.setReply(reply, source);
+    this.log({ route: 'llm', actions, reply, startedAt, tokens });
+  }
+
+  private async executeTool(name: string, rawInput: unknown): Promise<ToolOutcome> {
+    if (!isToolName(name)) return { content: `Unknown tool ${name}.`, isError: true };
+    const parsed = conductorToolSchemas[name].safeParse(rawInput ?? {});
+    if (!parsed.success) {
+      return { content: `Invalid input: ${parsed.error.message}`, isError: true };
+    }
+    try {
+      return await this.runTool(name, parsed.data as ConductorToolInput<typeof name>);
+    } catch (error) {
+      log.warn('conductor: tool failed', { error, tool: name });
+      return { content: errorMessage(error), isError: true };
+    }
+  }
+
+  private async runTool<Name extends ConductorToolName>(
+    name: Name,
+    input: ConductorToolInput<Name>
+  ): Promise<ToolOutcome> {
+    const confirmKind = CONFIRM_REQUIRED_TOOLS.has(name)
+      ? 'confirm'
+      : CANCEL_WINDOW_TOOLS.has(name)
+        ? 'countdown'
+        : null;
+
+    switch (name) {
+      case 'list_agents': {
+        const providers = await installedProviders();
+        return { content: buildContext(this.canvas, providers) };
+      }
+      case 'read_agent': {
+        const { agent, lines } = input as ConductorToolInput<'read_agent'>;
+        const entry = this.resolveEntry(agent);
+        if ('error' in entry) return { content: entry.error, isError: true };
+        const output = await readAgentOutput(entry.entry, lines ?? 40);
+        const compact = output.replace(/\n{3,}/g, '\n\n').trim();
+        return {
+          content: `${this.nameOf(entry.entry)} is ${spokenStatus(entry.entry)}. Recent output:\n${compact.slice(-READ_AGENT_MAX_CHARS) || '(empty)'}`,
+        };
+      }
+      case 'focus_agent': {
+        const entry = this.resolveEntry((input as ConductorToolInput<'focus_agent'>).agent);
+        if ('error' in entry) return { content: entry.error, isError: true };
+        this.canvas.requestFocus(entry.entry.tileId);
+        return { content: `Focused ${this.nameOf(entry.entry)}.` };
+      }
+      case 'show_all':
+        this.canvas.requestFit();
+        return { content: 'Showing all agents.' };
+      case 'send_to_agent': {
+        const { agent, text, submit } = input as ConductorToolInput<'send_to_agent'>;
+        const entry = this.resolveEntry(agent);
+        if ('error' in entry) return { content: entry.error, isError: true };
+        const target = this.nameOf(entry.entry);
+        if (
+          !(await this.requestPending(`Send to ${target}: “${truncate(text, 90)}”`, confirmKind))
+        ) {
+          return { content: 'The user cancelled this before it was sent.' };
+        }
+        const wasRunning = this.isRunning(entry.entry);
+        await this.deliver(entry.entry, text, submit ?? true);
+        return {
+          content: wasRunning
+            ? `Sent to ${target}.`
+            : `${target} was not running; it is starting and will get the message when ready.`,
+        };
+      }
+      case 'interrupt_agent': {
+        const entry = this.resolveEntry((input as ConductorToolInput<'interrupt_agent'>).agent);
+        if ('error' in entry) return { content: entry.error, isError: true };
+        const target = this.nameOf(entry.entry);
+        if (!(await this.requestPending(`Interrupt ${target}`, confirmKind))) {
+          return { content: 'The user cancelled the interrupt.' };
+        }
+        await interruptAgent(entry.entry);
+        return { content: `Interrupted ${target}.` };
+      }
+      case 'answer_permission': {
+        const { agent, decision } = input as ConductorToolInput<'answer_permission'>;
+        const entry = this.resolveEntry(agent);
+        if ('error' in entry) return { content: entry.error, isError: true };
+        const target = this.nameOf(entry.entry);
+        if (entry.entry.status !== 'awaiting-input') {
+          return { content: `${target} is not waiting on a prompt.`, isError: true };
+        }
+        const label = `${decision === 'allow' ? 'Allow' : 'Deny'} ${target}'s permission request`;
+        if (!(await this.requestPending(label, confirmKind))) {
+          return { content: 'The user did not confirm, so nothing was sent.' };
+        }
+        await answerPermission(entry.entry, decision);
+        return { content: `${decision === 'allow' ? 'Allowed' : 'Denied'} for ${target}.` };
+      }
+      case 'spawn_agent': {
+        const spawn = input as ConductorToolInput<'spawn_agent'>;
+        const providers = await installedProviders();
+        if (providers.length > 0 && !providers.some((p) => p.id === spawn.provider)) {
+          return {
+            content: `Provider "${spawn.provider}" is not installed. Installed: ${providers.map((p) => p.id).join(', ')}.`,
+            isError: true,
+          };
+        }
+        const projectId = resolveProjectId(spawn.project, this.focusedEntry()?.projectId);
+        if (!projectId) return { content: 'No project is open.', isError: true };
+        const label = `Start ${spawn.provider} on “${truncate(spawn.task_name, 60)}”`;
+        if (!(await this.requestPending(label, confirmKind))) {
+          return { content: 'The user cancelled the new agent.' };
+        }
+        runInAction(() => (this.activity = 'Creating a worktree…'));
+        const result = await spawnAgentTask({
+          projectId,
+          providerId: spawn.provider,
+          taskName: spawn.task_name,
+          prompt: spawn.prompt,
+        });
+        void startAgentSession(projectId, result.taskId, result.conversationId).then((started) => {
+          if (started && result.promptDeferred && spawn.prompt.trim()) {
+            void deliverPromptWhenReady(this.canvas, result.conversationId, spawn.prompt);
+          }
+        });
+        return {
+          content: `Created task "${spawn.task_name}" in a new worktree; the agent is starting. It will appear on the canvas as ${this.predictedName(spawn.provider)}.`,
+        };
+      }
+      case 'propose_plan': {
+        const settings = this.settings;
+        const providers = await installedProviders();
+        const proposal = this.plans.propose(input as ConductorToolInput<'propose_plan'>, {
+          providers,
+          maxAgents: settings?.maxAgentsPerPlan ?? 4,
+          preferredProjectId: this.focusedEntry()?.projectId,
+        });
+        if (!proposal.ok) return { content: proposal.reason, isError: true };
+        if (settings?.autoApprovePlans) {
+          void this.plans.approve();
+          return {
+            content: `Plan started: ${proposal.plan.subtasks.length} agents in ${proposal.plan.projectName}.`,
+          };
+        }
+        return {
+          content:
+            'The plan is shown to the user for approval. Tell them briefly what it does and that they can say yes to start it.',
+        };
+      }
+      case 'check_conflicts': {
+        const { agents } = input as ConductorToolInput<'check_conflicts'>;
+        const worktrees: { label: string; path: string }[] = [];
+        for (const agent of agents) {
+          const entry = this.resolveEntry(agent);
+          if ('error' in entry) return { content: entry.error, isError: true };
+          const path = getTaskStore(entry.entry.projectId, entry.entry.taskId)?.workspacePath;
+          if (!path) return { content: `${agent} has no worktree yet.`, isError: true };
+          worktrees.push({ label: this.nameOf(entry.entry), path });
+        }
+        const result = await (await getConductorClient()).checkConflicts({ worktrees });
+        if (!result.success) return { content: result.error.message, isError: true };
+        const conflicted = result.data.pairs.filter((pair) => pair.conflicted);
+        if (conflicted.length === 0) return { content: 'All branches merge cleanly.' };
+        return {
+          content: conflicted
+            .map((pair) => `${pair.a} and ${pair.b} conflict in ${pair.files.join(', ')}`)
+            .join('\n'),
+        };
+      }
+      case 'add_note':
+        this.canvas.addNote((input as ConductorToolInput<'add_note'>).text);
+        return { content: 'Note added.' };
+    }
+    return { content: `Unhandled tool ${name}.`, isError: true };
+  }
+
+  // ── Pending actions ────────────────────────────────────────────────────────
+
+  /** Shows a cancellable (or confirmable) action and resolves whether it should run. */
+  requestPending(label: string, kind: 'countdown' | 'confirm' | null): Promise<boolean> {
+    if (!kind) return Promise.resolve(true);
+    this.settlePending(false);
+    const durationMs = kind === 'countdown' ? CANCEL_WINDOW_MS : CONFIRM_TIMEOUT_MS;
+    this.pending = { id: ++this.pendingSeq, label, kind, startedAt: Date.now(), durationMs };
+    return new Promise<boolean>((resolve) => {
+      this.pendingResolve = resolve;
+      this.pendingTimer = setTimeout(() => this.settlePending(kind === 'countdown'), durationMs);
+    });
+  }
+
+  confirmPending(): void {
+    this.settlePending(true);
+  }
+
+  cancelPending(): void {
+    this.settlePending(false);
+  }
+
+  private settlePending(confirmed: boolean): void {
+    if (this.pendingTimer) clearTimeout(this.pendingTimer);
+    this.pendingTimer = null;
+    const resolve = this.pendingResolve;
+    this.pendingResolve = null;
+    this.pending = null;
+    resolve?.(confirmed);
+  }
+
+  // ── Announcements ──────────────────────────────────────────────────────────
+
+  private queueAnnouncements(entries: AgentTileEntry[]): void {
+    this.announceQueue.push(...entries);
+    if (this.announceTimer) return;
+    this.announceTimer = setTimeout(() => {
+      this.announceTimer = null;
+      const batch = this.announceQueue.splice(0);
+      const unique = [...new Map(batch.map((entry) => [entry.tileId, entry])).values()];
+      if (unique.length === 0) return;
+      const sentence =
+        unique.length <= 3
+          ? unique.map((entry) => `${this.nameOf(entry)} ${attentionPhrase(entry)}`).join(', ')
+          : `${unique.length} agents need you`;
+      this.voice.announce(`${sentence}.`);
+    }, ANNOUNCE_BATCH_MS);
+  }
+
+  private notify(text: string): void {
+    runInAction(() => {
+      this.reply = text;
+      this.replyAt = Date.now();
+    });
+    this.voice.announce(text);
+  }
+
+  // ── Settings ───────────────────────────────────────────────────────────────
+
+  async refreshStatus(): Promise<void> {
+    try {
+      const status = await (await getConductorClient()).getStatus();
+      runInAction(() => (this.status = status));
+    } catch (error) {
+      log.warn('conductor: status unavailable', { error });
+    }
+  }
+
+  async updateSettings(patch: Partial<ConductorSettings>): Promise<void> {
+    const status = await (await getConductorClient()).updateSettings(patch);
+    runInAction(() => (this.status = status));
+  }
+
+  clearHistory(): void {
+    this.history = [];
+    this.reply = '';
+    this.error = null;
+  }
+
+  dismissError(): void {
+    this.error = null;
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  private focusedEntry(): AgentTileEntry | undefined {
+    const id = focusedConversationId(this.canvas);
+    return id ? entryForConversation(this.canvas, id) : undefined;
+  }
+
+  private nameOf(entry: AgentTileEntry): string {
+    return this.canvas.spokenName(entry.conversationId);
+  }
+
+  private predictedName(providerId: string): string {
+    const taken = this.canvas.agentEntries.map((entry) => this.nameOf(entry));
+    return assignSpokenName(spokenProviderLabel(providerId), taken);
+  }
+
+  private resolveEntry(reference: string): { entry: AgentTileEntry } | { error: string } {
+    const roster = buildRoster(this.canvas);
+    const resolution = resolveAgent(reference, roster, focusedConversationId(this.canvas));
+    if (resolution.kind === 'ambiguous') {
+      return {
+        error: `"${reference}" is ambiguous: ${resolution.candidates.map((agent) => agent.name).join(', ')}. Ask the user which one.`,
+      };
+    }
+    if (resolution.kind === 'none') {
+      return {
+        error: `No agent called "${reference}". Agents: ${roster.map((a) => a.name).join(', ') || 'none'}.`,
+      };
+    }
+    const entry = entryForConversation(this.canvas, resolution.agent.id);
+    return entry ? { entry } : { error: `${resolution.agent.name} is no longer on the canvas.` };
+  }
+
+  private isRunning(entry: AgentTileEntry): boolean {
+    return entry.type === 'acp' || entry.sessionActive;
+  }
+
+  private deliveryReply(entry: AgentTileEntry): string {
+    const name = this.nameOf(entry);
+    return this.isRunning(entry)
+      ? `Sent to ${name}.`
+      : `Starting ${name}; it gets the message when it is ready.`;
+  }
+
+  /** Sends text to an agent, starting (or resuming) it first when its terminal is not running. */
+  private async deliver(entry: AgentTileEntry, text: string, submit: boolean): Promise<void> {
+    if (this.isRunning(entry)) {
+      await sendToAgent(entry, text, submit);
+      return;
+    }
+    const started = await startAgentSession(entry.projectId, entry.taskId, entry.conversationId);
+    if (!started) throw new Error(`${this.nameOf(entry)} could not be started.`);
+    void deliverPromptWhenReady(this.canvas, entry.conversationId, text, submit);
+  }
+
+  private async attempt(run: () => Promise<void>, success: string): Promise<string> {
+    try {
+      await run();
+      return success;
+    } catch (error) {
+      return errorMessage(error);
+    }
+  }
+
+  private setReply(text: string, source: UtteranceSource | null): void {
+    runInAction(() => {
+      this.reply = text;
+      this.replyAt = Date.now();
+    });
+    if (text && source === 'voice') this.voice.say(text);
+  }
+
+  private log(entry: {
+    route: 'grammar' | 'llm';
+    actions: ActionRecord[];
+    reply: string;
+    startedAt: number;
+    tokens?: number;
+  }): void {
+    const record: ConductorTurnRecord = {
+      at: new Date().toISOString(),
+      utterance: this.lastUtterance,
+      route: entry.route,
+      actions: entry.actions,
+      reply: entry.reply,
+      latencyMs: Math.round(performance.now() - entry.startedAt),
+      ...(entry.tokens ? { tokens: entry.tokens } : {}),
+    };
+    void getConductorClient()
+      .then((client) => client.appendLog(record))
+      .catch((error: unknown) => log.warn('conductor: log write failed', { error }));
+  }
+}
+
+function isToolName(name: string): name is ConductorToolName {
+  return (conductorToolNames as string[]).includes(name);
+}
+
+export function attentionPhrase(entry: Pick<AgentTileEntry, 'status' | 'notificationType'>) {
+  switch (entry.status) {
+    case 'awaiting-input':
+      return entry.notificationType === 'permission_prompt' ? 'needs permission' : 'needs you';
+    case 'completed':
+      return 'is done';
+    case 'error':
+      return 'hit an error';
+    default:
+      return 'is ready';
+  }
+}
+
+function spokenStatus(entry: AgentTileEntry): string {
+  if (entry.type === 'pty' && !entry.sessionActive) return 'not running';
+  switch (entry.status) {
+    case 'awaiting-input':
+      return entry.notificationType === 'permission_prompt'
+        ? 'waiting on a permission prompt'
+        : 'waiting for you';
+    case 'working':
+      return 'working';
+    case 'completed':
+      return 'done';
+    case 'error':
+      return 'stopped with an error';
+    default:
+      return 'idle';
+  }
+}
+
+function describeTool(name: string): string {
+  switch (name) {
+    case 'read_agent':
+      return 'Reading agent output…';
+    case 'send_to_agent':
+      return 'Sending…';
+    case 'spawn_agent':
+      return 'Starting an agent…';
+    case 'propose_plan':
+      return 'Drafting a plan…';
+    case 'check_conflicts':
+      return 'Checking for conflicts…';
+    default:
+      return 'Working…';
+  }
+}
+
+function spokenError(error: ConductorError): string {
+  switch (error.type) {
+    case 'not-configured':
+      return 'The conductor needs an Anthropic API key.';
+    case 'budget-exceeded':
+      return "Today's conductor token budget is used up.";
+    case 'rate-limited':
+      return 'The conductor is rate limited. Try again in a moment.';
+    case 'refused':
+      return "I can't help with that one.";
+    default:
+      return 'The conductor hit an API error.';
+  }
+}
+
+function truncate(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}

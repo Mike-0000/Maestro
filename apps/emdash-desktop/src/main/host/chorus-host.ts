@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { app, globalShortcut } from 'electron';
+import { app, globalShortcut, shell } from 'electron';
 import type { ChorusHostServices } from '@core/primitives/chorus-host/api/host-services';
 import { encryptedAppSecretsStore } from '@main/host/secrets/encrypted-app-secrets-store';
 
@@ -11,6 +11,15 @@ export function createChorusHostServices(): ChorusHostServices {
     globalShortcuts: {
       register: (accelerator, onPress) => globalShortcut.register(accelerator, onPress),
       unregister: (accelerator) => globalShortcut.unregister(accelerator),
+    },
+    openMicrophoneSettings: async () => {
+      const url =
+        process.platform === 'win32'
+          ? 'ms-settings:privacy-microphone'
+          : process.platform === 'darwin'
+            ? 'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone'
+            : null;
+      if (url) await shell.openExternal(url);
     },
   };
 }

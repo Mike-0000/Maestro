@@ -81,6 +81,8 @@ export const voiceContract = defineContract({
     input: z.object({ id: chorusCredentialIdSchema, value: z.string().nullable() }),
     output: voiceStatusSchema,
   }),
+  /** Opens the OS microphone privacy page (when Windows blocks desktop apps from the mic). */
+  openMicrophoneSettings: procedure({ input: z.void(), output: z.void() }),
   events: eventStream({ key: z.void(), event: voiceEventSchema }),
 });
 

@@ -1,4 +1,5 @@
 import { getAgentsClient } from '@core/features/agents/api/browser/client';
+import { conversationRegistry } from '@core/features/conversations/api/browser/stores/conversation-registry';
 import {
   asAvailableProject,
   getProjectManagerStore,
@@ -8,7 +9,10 @@ import {
   prefetchAppSettingsKey,
 } from '@core/features/settings/api/browser/app-settings-client';
 import { getGitRepositoryStore } from '@core/features/source-control/api/browser/stores/source-control-selectors';
-import { getTaskManagerStore } from '@core/features/tasks/api/browser/task-state/task-selectors';
+import {
+  getTaskManagerStore,
+  getTaskStore,
+} from '@core/features/tasks/api/browser/task-state/task-selectors';
 import {
   agentSupportsInitialPromptDelivery,
   type AgentMetadata,
@@ -125,4 +129,35 @@ export async function spawnAgentTask(request: SpawnRequest): Promise<SpawnResult
   };
   await taskManager.createTask(params);
   return { taskId, conversationId, promptDeferred: Boolean(prompt) && !canDeliverPrompt };
+}
+
+const START_POLL_MS = 400;
+const START_TIMEOUT_MS = 90_000;
+
+/**
+ * Starts an agent's terminal session without opening its task view: provisions the task workspace
+ * when it is asleep, waits for it and the conversation to load, then hydrates the conversation
+ * (which launches or resumes the CLI in the worktree). Resolves false if it never becomes ready.
+ */
+export async function startAgentSession(
+  projectId: string,
+  taskId: string,
+  conversationId: string
+): Promise<boolean> {
+  const deadline = Date.now() + START_TIMEOUT_MS;
+  const initial = getTaskStore(projectId, taskId);
+  if (initial && initial.state === 'unprovisioned') {
+    void getTaskManagerStore(projectId)?.provisionTask(taskId);
+  }
+  while (Date.now() < deadline) {
+    const task = getTaskStore(projectId, taskId);
+    const manager = conversationRegistry.get(taskId);
+    if (task?.state === 'provisioned' && manager?.conversations.has(conversationId)) {
+      if (manager.isSessionActive(conversationId)) return true;
+      await manager.hydrateConversation(conversationId);
+      return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, START_POLL_MS));
+  }
+  return false;
 }

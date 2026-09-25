@@ -1,3 +1,4 @@
+import { chorusSettingsPage } from '@core/features/conductor/contributions/settings-page';
 import { promptsSettingsPage } from '@core/features/library/contributions/settings-page';
 import {
   conversationsSettingsPage,
@@ -20,6 +21,7 @@ import type { SettingsPageContribution } from '@core/primitives/settings/api/pag
 
 export const settingsPageContributions = [
   generalSettingsPage,
+  chorusSettingsPage,
   integrationsSettingsPage,
   interfaceSettingsPage,
   browserSettingsPage,

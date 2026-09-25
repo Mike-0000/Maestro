@@ -182,3 +182,19 @@ export function parseCommand(
   }
   return null;
 }
+
+const PLAN_CUES =
+  /\b(?:plan|split|parallel|in parallel|break (?:it|this|that) (?:down|up)|spin up|several agents|multiple agents|a few agents|team of|fan out|divide)\b/i;
+const BUILD_VERBS =
+  /^(?:(?:let'?s|we need to|i want to|i'd like to|can you|could you|go|please)\s+)*(?:build|implement|add|create|refactor|migrate|rewrite|port|redesign|set up)\b/i;
+
+/**
+ * Chooses the conductor's reasoning effort for an utterance: "plan" for goals that likely need
+ * decomposing into several agents, "command" (fast) for everything else.
+ */
+export function chooseMode(utterance: string): 'command' | 'plan' {
+  const text = clean(utterance);
+  if (PLAN_CUES.test(text)) return 'plan';
+  const words = text.split(/\s+/).filter(Boolean).length;
+  return BUILD_VERBS.test(text) && words >= 8 ? 'plan' : 'command';
+}

@@ -14,4 +14,6 @@ export type ChorusHostServices = {
     register(accelerator: string, onPress: () => void): boolean;
     unregister(accelerator: string): void;
   };
+  /** Opens the OS microphone privacy settings (a fixed system URL, never caller-supplied). */
+  openMicrophoneSettings(): Promise<void>;
 };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseCommand, type GrammarCommand } from './grammar';
+import { chooseMode, parseCommand, type GrammarCommand } from './grammar';
 import type { RosterAgent } from './resolver';
 
 const roster: RosterAgent[] = [
@@ -145,5 +145,20 @@ describe('parseCommand routing eval', () => {
   it('keeps the original casing of the instruction text', () => {
     const command = parseCommand('Tell Codex to update README.md', roster, null);
     expect(command).toMatchObject({ kind: 'send', text: 'update README.md' });
+  });
+});
+
+describe('chooseMode', () => {
+  it.each([
+    ['plan the auth rewrite across three agents', 'plan'],
+    ['split this into parallel tasks', 'plan'],
+    ['build a settings page with dark mode and keyboard shortcuts for the editor', 'plan'],
+    ["let's implement OAuth login with GitHub and Google plus refresh tokens", 'plan'],
+    ['tell codex to run the tests', 'command'],
+    ['what is claude 2 doing', 'command'],
+    ['add a note', 'command'],
+    ['build it', 'command'],
+  ] as const)('%s -> %s', (utterance, mode) => {
+    expect(chooseMode(utterance)).toBe(mode);
   });
 });

@@ -55,7 +55,7 @@ export const AgentTileNode = observer(function AgentTileNode({ data, selected }:
     <div
       className={cn(
         'flex h-full w-full flex-col overflow-hidden rounded-xl border bg-background shadow-lg transition-[box-shadow,border-color]',
-        focused ? 'border-accent ring-2 ring-accent/40' : 'border-border',
+        focused ? 'border-blue-500 ring-2 ring-blue-500/40' : 'border-border',
         attention && !focused && 'border-amber-500/70 ring-2 ring-amber-500/30'
       )}
       onPointerDownCapture={() => store.focusTile(tileId)}
@@ -64,8 +64,8 @@ export const AgentTileNode = observer(function AgentTileNode({ data, selected }:
         isVisible={selected && band !== 'glyph'}
         minWidth={MIN_TILE_SIZE.w}
         minHeight={MIN_TILE_SIZE.h}
-        lineClassName="!border-accent/60"
-        handleClassName="!size-2.5 !rounded-sm !border-accent !bg-background"
+        lineClassName="!border-blue-500/60"
+        handleClassName="!size-2.5 !rounded-sm !border-blue-500 !bg-background"
         onResizeEnd={(_event, params) =>
           store.setTileRect(tileId, { x: params.x, y: params.y, w: params.width, h: params.height })
         }
