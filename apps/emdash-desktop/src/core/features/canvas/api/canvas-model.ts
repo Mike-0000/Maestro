@@ -120,6 +120,23 @@ export function boundsOf(rects: readonly TileRect[]): TileRect | null {
   return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
 }
 
+/** Space between a task frame and its tiles; fits inside TILE_GAP with the header. */
+export const FRAME_PADDING = 10;
+/** Height of a task frame's header strip above its tiles. */
+export const FRAME_HEADER = 26;
+
+/** A task frame around the given tile rects (header on top), or null when there are none. */
+export function frameRect(rects: readonly TileRect[]): TileRect | null {
+  const bounds = boundsOf(rects);
+  if (!bounds) return null;
+  return {
+    x: bounds.x - FRAME_PADDING,
+    y: bounds.y - FRAME_PADDING - FRAME_HEADER,
+    w: bounds.w + FRAME_PADDING * 2,
+    h: bounds.h + FRAME_PADDING * 2 + FRAME_HEADER,
+  };
+}
+
 /** Anchor for new tiles: to the right of everything already on the board. */
 export function nextFreeAnchor(existing: readonly TileRect[]): { x: number; y: number } {
   const bounds = boundsOf(existing);

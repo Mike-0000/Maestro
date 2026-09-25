@@ -25,6 +25,7 @@ export const AgentTerminal = observer(function AgentTerminal({
   interactive,
   autoFocus,
   onActivate,
+  onReleaseFocus,
 }: {
   entry: AgentTileEntry;
   /** Start or resume the agent's session (only when the user asked to). */
@@ -33,6 +34,8 @@ export const AgentTerminal = observer(function AgentTerminal({
   interactive: boolean;
   autoFocus: boolean;
   onActivate: () => void;
+  /** Shift+Esc inside the terminal: give keyboard focus back to the canvas. */
+  onReleaseFocus: () => void;
 }) {
   const { taskId, conversationId, workspaceId, taskProvisioned } = entry;
   useEffect(() => {
@@ -67,7 +70,17 @@ export const AgentTerminal = observer(function AgentTerminal({
 
   return (
     // At interactive zoom the terminal owns drag (text selection) and wheel (scrollback).
-    <div className={cn('relative h-full min-h-0 bg-(--xterm-bg)', interactive && 'nodrag nowheel')}>
+    <div
+      className={cn('relative h-full min-h-0 bg-(--xterm-bg)', interactive && 'nodrag nowheel')}
+      onKeyDownCapture={(event) => {
+        // Esc belongs to the agent (it interrupts); Shift+Esc hands focus back to the canvas.
+        if (event.key !== 'Escape' || !event.shiftKey) return;
+        event.preventDefault();
+        event.stopPropagation();
+        (document.activeElement as HTMLElement | null)?.blur();
+        onReleaseFocus();
+      }}
+    >
       <PaneDimensionProvider sink={sink}>
         <PaneSizingContextProvider sessionIds={[session.sessionId]}>
           <PtyPane

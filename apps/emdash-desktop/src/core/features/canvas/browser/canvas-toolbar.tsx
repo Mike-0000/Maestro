@@ -1,4 +1,4 @@
-import { BellRing, Eye, Maximize, StickyNote } from 'lucide-react';
+import { BellRing, Eye, Group, Maximize, StickyNote } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { cn } from '@core/primitives/styling/browser/cn';
 import { getCanvasStore } from '../contributions/browser/app-stores';
@@ -40,6 +40,14 @@ export const CanvasToolbar = observer(function CanvasToolbar() {
       >
         <BellRing className="size-3.5" />
         {attention > 0 ? `${attention} need${attention === 1 ? 's' : ''} you` : 'All clear'}
+      </ToolbarButton>
+      <ToolbarButton
+        label={store.showTaskFrames ? 'Hide task frames' : 'Show task frames'}
+        onClick={() => store.setShowTaskFrames(!store.showTaskFrames)}
+        className={store.showTaskFrames ? undefined : 'text-foreground-muted'}
+      >
+        <Group className="size-3.5" />
+        Frames
       </ToolbarButton>
       {hidden > 0 && (
         <ToolbarButton

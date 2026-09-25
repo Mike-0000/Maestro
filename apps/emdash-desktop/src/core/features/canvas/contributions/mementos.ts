@@ -29,7 +29,23 @@ const canvasBoardV1Schema = z.object({
   projectFilter: z.string().nullable(),
 });
 
-export const canvasBoardSchema = defineVersionedSchema().initial('1', canvasBoardV1Schema).build();
+const canvasBoardV2Schema = canvasBoardV1Schema.extend({
+  version: z.literal('2'),
+  /** Open the canvas when the app starts instead of the last view. */
+  openOnLaunch: z.boolean(),
+  /** Draw a frame around each task's agents with its diff stats. */
+  showTaskFrames: z.boolean(),
+});
+
+export const canvasBoardSchema = defineVersionedSchema()
+  .initial('1', canvasBoardV1Schema)
+  .version('2', canvasBoardV2Schema, (v1) => ({
+    ...v1,
+    version: '2' as const,
+    openOnLaunch: false,
+    showTaskFrames: true,
+  }))
+  .build();
 
 export type CanvasBoardState = typeof canvasBoardSchema.Type;
 
@@ -38,13 +54,15 @@ export const canvasBoardMemento = defineMemento({
   subject: appSubject,
   schema: canvasBoardSchema,
   default: {
-    version: '1' as const,
+    version: '2' as const,
     viewport: { x: 80, y: 80, zoom: 0.6 },
     tiles: {},
     notes: {},
     spokenNames: {},
     hiddenConversationIds: [],
     projectFilter: null,
+    openOnLaunch: false,
+    showTaskFrames: true,
   },
   retention: { tier: 'persisted', maxAge: days(365), maxEntries: 4 },
 });

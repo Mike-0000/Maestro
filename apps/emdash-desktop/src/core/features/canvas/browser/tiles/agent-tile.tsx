@@ -83,6 +83,7 @@ export const AgentTileNode = observer(function AgentTileNode({ data, selected }:
             interactive={band === 'interactive'}
             autoFocus={focused}
             onActivate={() => store.requestFocus(tileId)}
+            onReleaseFocus={() => store.requestFit()}
           />
         ) : (
           <AgentPreview entry={entry} onActivate={() => store.requestFocus(tileId)} />

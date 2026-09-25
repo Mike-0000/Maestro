@@ -3,12 +3,16 @@ import {
   AGENT_TILE_SIZE,
   assignSpokenName,
   boundsOf,
+  FRAME_HEADER,
+  FRAME_PADDING,
+  frameRect,
   GLYPH_ZOOM_THRESHOLD,
   isInteractiveZoom,
   nextFreeAnchor,
   placeTiles,
   rectsOverlap,
   resolveTileDetail,
+  TILE_GAP,
   viewportRect,
   type TileRect,
 } from './canvas-model';
@@ -97,5 +101,22 @@ describe('spoken names', () => {
     expect(spokenProviderLabel('claude')).toBe('Claude');
     expect(spokenProviderLabel('opencode')).toBe('OpenCode');
     expect(spokenProviderLabel('some-new_agent')).toBe('Some new agent');
+  });
+});
+
+describe('frameRect', () => {
+  it('wraps tiles with padding and a header, staying inside the tile gap', () => {
+    const frame = frameRect([
+      { x: 0, y: 0, w: 100, h: 50 },
+      { x: 148, y: 0, w: 100, h: 50 },
+    ]);
+    expect(frame).toEqual({
+      x: -FRAME_PADDING,
+      y: -FRAME_PADDING - FRAME_HEADER,
+      w: 248 + FRAME_PADDING * 2,
+      h: 50 + FRAME_PADDING * 2 + FRAME_HEADER,
+    });
+    expect(FRAME_PADDING * 2 + FRAME_HEADER).toBeLessThanOrEqual(TILE_GAP);
+    expect(frameRect([])).toBeNull();
   });
 });

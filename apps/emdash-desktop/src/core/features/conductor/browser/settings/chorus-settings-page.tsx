@@ -2,6 +2,7 @@ import { PageLayout, SettingsRow, SettingsSection } from '@emdash/ui/react/patte
 import { Button, Input, Select, Switch } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
 import { useEffect, useState } from 'react';
+import { getCanvasStore } from '@core/features/canvas/contributions/browser/app-stores';
 import { getVoiceStore } from '@core/features/voice/contributions/browser/app-stores';
 import type { ChorusCredentialId } from '@core/primitives/chorus-host/api/credentials';
 import { getConductorClient } from '../../api/browser/client';
@@ -67,6 +68,10 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
           description="Speech-to-text with Nova-3 and keyterm boosting for agent names."
           present={credentials?.deepgram}
         />
+      </SettingsSection>
+
+      <SettingsSection title="Canvas">
+        <CanvasSettings />
       </SettingsSection>
 
       <SettingsSection title="Voice">
@@ -484,3 +489,31 @@ function WindowsChecks() {
     </SettingsSection>
   );
 }
+
+const CanvasSettings = observer(function CanvasSettings() {
+  const canvas = getCanvasStore();
+  return (
+    <>
+      <SettingsRow
+        label="Open on the canvas"
+        description="Start Chorus on the agent canvas instead of the last view you had open."
+        control={
+          <Switch
+            checked={canvas.openOnLaunch}
+            onCheckedChange={(next) => canvas.setOpenOnLaunch(next)}
+          />
+        }
+      />
+      <SettingsRow
+        label="Task frames"
+        description="Group each task's agents in a frame showing its diff size and a shortcut to review changes."
+        control={
+          <Switch
+            checked={canvas.showTaskFrames}
+            onCheckedChange={(next) => canvas.setShowTaskFrames(next)}
+          />
+        }
+      />
+    </>
+  );
+});

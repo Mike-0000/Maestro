@@ -14,6 +14,7 @@ import { canvasBoardMemento, type CanvasBoardState } from '../../../contribution
 import {
   AGENT_TILE_SIZE,
   assignSpokenName,
+  frameRect,
   NOTE_TILE_SIZE,
   nextFreeAnchor,
   placeTiles,
@@ -58,6 +59,25 @@ export type NoteDrop = {
   readonly conversationId: string;
   readonly text: string;
 };
+
+/** A frame around one task's agents: its worktree, diff stats, and a way into diff review. */
+export type TaskFrameEntry = {
+  readonly frameId: string;
+  readonly taskId: string;
+  readonly projectId: string;
+  readonly taskName: string;
+  readonly projectName: string;
+  readonly rect: TileRect;
+  readonly tileIds: readonly string[];
+  readonly linesAdded: number;
+  readonly linesDeleted: number;
+  readonly working: number;
+  readonly waiting: number;
+};
+
+export function taskFrameId(taskId: string): string {
+  return `frame:${taskId}`;
+}
 
 export type ViewportCommand =
   | { readonly id: number; readonly kind: 'focus'; readonly tileId: string }
@@ -117,6 +137,10 @@ export class CanvasStore {
       agentEntries: computed,
       visibleAgentEntries: computed,
       noteEntries: computed,
+      taskFrames: computed,
+      setOpenOnLaunch: action,
+      setShowTaskFrames: action,
+      moveTiles: action,
       attentionEntries: computed,
       projectOptions: computed,
       updateState: action,
@@ -224,6 +248,66 @@ export class CanvasStore {
       text: note.text,
       color: note.color ?? 'yellow',
     }));
+  }
+
+  /** One frame per task with visible agents (empty when frames are turned off). */
+  get taskFrames(): TaskFrameEntry[] {
+    if (!this.state.showTaskFrames) return [];
+    const byTask = new Map<string, AgentTileEntry[]>();
+    for (const entry of this.visibleAgentEntries) {
+      const group = byTask.get(entry.taskId) ?? [];
+      group.push(entry);
+      byTask.set(entry.taskId, group);
+    }
+    const frames: TaskFrameEntry[] = [];
+    for (const [taskId, entries] of byTask) {
+      const first = entries[0];
+      const rect = frameRect(entries.map((entry) => this.tileRect(entry.tileId)));
+      if (!first || !rect) continue;
+      frames.push({
+        frameId: taskFrameId(taskId),
+        taskId,
+        projectId: first.projectId,
+        taskName: first.taskName,
+        projectName: first.projectName,
+        rect,
+        tileIds: entries.map((entry) => entry.tileId),
+        linesAdded: first.linesAdded,
+        linesDeleted: first.linesDeleted,
+        working: entries.filter((entry) => entry.status === 'working').length,
+        waiting: entries.filter(needsAttention).length,
+      });
+    }
+    return frames;
+  }
+
+  get openOnLaunch(): boolean {
+    return this.state.openOnLaunch;
+  }
+
+  get showTaskFrames(): boolean {
+    return this.state.showTaskFrames;
+  }
+
+  setOpenOnLaunch(openOnLaunch: boolean): void {
+    this.updateState((current) => ({ ...current, openOnLaunch }));
+  }
+
+  setShowTaskFrames(showTaskFrames: boolean): void {
+    this.updateState((current) => ({ ...current, showTaskFrames }));
+  }
+
+  /** Moves several tiles by the same offset (dragging a task frame moves its agents). */
+  moveTiles(tileIds: readonly string[], dx: number, dy: number): void {
+    if (dx === 0 && dy === 0) return;
+    this.updateState((current) => {
+      const tiles = { ...current.tiles };
+      for (const tileId of tileIds) {
+        const rect = this.tileRect(tileId);
+        tiles[tileId] = { ...rect, x: rect.x + dx, y: rect.y + dy };
+      }
+      return { ...current, tiles };
+    });
   }
 
   /** Visible agents needing the user, oldest attention first. */

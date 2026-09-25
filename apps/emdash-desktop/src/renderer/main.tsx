@@ -8,6 +8,7 @@ import {
 import ReactDOM from 'react-dom/client';
 import { getCanvasStore } from '@core/features/canvas/contributions/browser/app-stores';
 import { canvasBoardMemento } from '@core/features/canvas/contributions/mementos';
+import { canvasViewDef } from '@core/features/canvas/contributions/views';
 import { installChatUiRuntime } from '@core/features/conversations/api/browser/chat/chat-ui-runtime';
 import { configureDevPerfClient } from '@core/features/dev-perf/api/browser/client';
 import { installMonacoFacetBinder } from '@core/features/editor/browser/monaco/install-monaco-facet-binder';
@@ -148,6 +149,7 @@ async function bootstrap() {
     getNavigation().attachMemento(historyHandle, legacyNavigationHandle);
     getSidebarStore().attachMemento(sidebarHandle);
     getCanvasStore().attachMemento(canvasHandle);
+    if (getCanvasStore().openOnLaunch) getNavigation().navigate(canvasViewDef({}));
     wireNavigationTelemetry(getNavigation());
   });
   const sidebarInitialized = Promise.all([navigationRestored, projectsLoaded]).then(() => {
