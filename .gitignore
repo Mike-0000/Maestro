@@ -70,8 +70,15 @@ Thumbs.db
 # AI assistant instructions
 .notes/
 .notes
-.claude/
+# Local Claude state stays ignored; the Chorus install skill is shared with every worktree.
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/chorus-install/
 .scratch/
+
+# Written by Windows when a process runs with %SystemDrive% unset (e.g. packaging, WMI helpers)
+%SystemDrive%/
 
 # Checkouts directory
 .checkouts/
