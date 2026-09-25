@@ -16,7 +16,8 @@ export const sourceControlWorkspaceStoreContributions: readonly ScopedStoreContr
       token: gitCheckoutStoreToken,
       create: ({ projectId, workspaceId, path, sshConnectionId }) =>
         new GitCheckoutStore(projectId, workspaceId, path, sshConnectionId),
-      activate: (store) => store.start(),
+      // Do not auto-start: canvas/sidebar use cached workspaceGit. Task view,
+      // changes, file tree, and git commands call start() when they need live status.
       dispose: (store) => store.dispose(),
     }),
     contributeScopedStore({

@@ -49,7 +49,7 @@ describe('renameConversation', () => {
     // The cache holds the host-acknowledged value, not the requested one.
     expect(cacheWrites[0]?.title).toBe('Trimmed by host');
     expect(emitWire).toHaveBeenCalledWith(
-      undefined,
+      { taskId: 'task-1' },
       expect.objectContaining({ changes: { title: 'Trimmed by host' } })
     );
   });

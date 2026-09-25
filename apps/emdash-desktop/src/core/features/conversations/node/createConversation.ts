@@ -195,7 +195,7 @@ export async function createConversation(
   }
 
   conversationEvents._emit('conversation:created', conversation);
-  conversationWireEvents.emit(undefined, { type: 'created', conversation });
+  conversationWireEvents.emit({ taskId: conversation.taskId }, { type: 'created', conversation });
   appDbPokes.conversations.poke({ projectId: params.projectId, taskId: params.taskId });
   telemetry.capture('conversation_created', {
     provider: params.provider,

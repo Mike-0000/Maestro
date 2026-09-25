@@ -95,6 +95,14 @@ describe('GitCheckoutStore', () => {
     vi.clearAllMocks();
   });
 
+  it('does not bind checkout remotes until start() is called', () => {
+    const store = new GitCheckoutStore('project-1', 'workspace-1', '/repo');
+    flushStateTurn();
+    expect(store.hasData).toBe(false);
+    expect(mocks.getChangedFiles).not.toHaveBeenCalled();
+    store.dispose();
+  });
+
   it('binds status and head through remote and refreshes changed files on status updates', async () => {
     const store = new GitCheckoutStore('project-1', 'workspace-1', '/repo');
     store.start();

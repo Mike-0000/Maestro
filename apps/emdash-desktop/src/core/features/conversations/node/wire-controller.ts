@@ -353,13 +353,16 @@ function createDefaultRuntimeHooks(
       }
       if (!result.data.changed || value === null) return;
       if (result.data.taskId === null || result.data.projectId === null) return;
-      conversationWireEvents.emit(undefined, {
-        type: 'changed',
-        conversationId: target.conversationId,
-        taskId: result.data.taskId,
-        projectId: result.data.projectId,
-        changes: { [key]: value },
-      });
+      conversationWireEvents.emit(
+        { taskId: result.data.taskId },
+        {
+          type: 'changed',
+          conversationId: target.conversationId,
+          taskId: result.data.taskId,
+          projectId: result.data.projectId,
+          changes: { [key]: value },
+        }
+      );
     },
     // Recency is a host fact now: the runtime's activity report feeds
     // `lastSessionActivityAt` and convergence caches it — only telemetry stays client-side.

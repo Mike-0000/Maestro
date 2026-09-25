@@ -15,14 +15,15 @@ export function useTaskGitDiffStats(task: TaskStore): {
   const projectId = isRegistered(task) ? task.data.projectId : undefined;
   const observation = projectId ? getTaskManagerStore(projectId)?.taskStatsObservation : undefined;
   const git = projectId ? getTaskGitCheckoutStore(projectId, task.data.id) : undefined;
+  const live = git?.hasData ? git : undefined;
   const cachedGit = isRegistered(task) ? task.data.workspaceGit : undefined;
-  const linesAdded = git?.totalLinesAdded ?? cachedGit?.linesAdded ?? 0;
-  const linesDeleted = git?.totalLinesDeleted ?? cachedGit?.linesDeleted ?? 0;
+  const linesAdded = live?.totalLinesAdded ?? cachedGit?.linesAdded ?? 0;
+  const linesDeleted = live?.totalLinesDeleted ?? cachedGit?.linesDeleted ?? 0;
   const hasObservedCachedGit =
     (observation?.kind === 'fresh' || observation?.kind === 'stale') && cachedGit !== undefined;
   const visible =
-    (git !== undefined || hasObservedCachedGit) &&
-    !git?.error &&
+    (live !== undefined || hasObservedCachedGit) &&
+    !live?.error &&
     (linesAdded > 0 || linesDeleted > 0);
   return {
     linesAdded,
@@ -34,8 +35,8 @@ export function useTaskGitDiffStats(task: TaskStore): {
 
 /**
  * Working-tree line add/remove totals for a task.
- * Uses live GitCheckoutStore data when the task is provisioned; falls back to the
- * cached workspaceGit snapshot (stored in SQLite) for unprovisioned tasks.
+ * Uses live GitCheckoutStore data when that store has been started (task view);
+ * otherwise the cached workspaceGit snapshot from the workspace-registry scan.
  * Renders nothing when loading, in error, or clean.
  */
 export const TaskGitDiffStats = observer(function TaskGitDiffStats({

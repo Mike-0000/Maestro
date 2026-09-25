@@ -58,6 +58,7 @@ export const ChangesPanel = observer(function ChangesPanel() {
   const taskView = useTaskComposition();
   const workspace = useWorkspace();
   const gitCheckout = workspace.get(gitCheckoutStoreToken);
+  gitCheckout.start();
   const project = asAvailableProject(getProjectStore(projectId))?.project;
   const diffView = taskView.diffView;
   const changesView = diffView?.changesView;

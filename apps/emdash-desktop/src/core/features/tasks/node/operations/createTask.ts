@@ -389,10 +389,13 @@ export function finalizeCreateTask(
   if (convRow) {
     initialConversation = mapConversationRowToConversation(convRow) ?? undefined;
     if (initialConversation) {
-      conversationWireEvents.emit(undefined, {
-        type: 'created',
-        conversation: initialConversation,
-      });
+      conversationWireEvents.emit(
+        { taskId: initialConversation.taskId },
+        {
+          type: 'created',
+          conversation: initialConversation,
+        }
+      );
       appDbPokes.conversations.poke({
         projectId: prepared.params.projectId,
         taskId: prepared.params.id,

@@ -113,6 +113,7 @@ const ActiveTaskTitlebar = observer(function ActiveTaskTitlebar({
   const workspace = useWorkspace();
   const taskView = useTaskComposition();
   const gitCheckout = workspace.get(gitCheckoutStoreToken);
+  gitCheckout.start();
 
   const {
     isPublished,

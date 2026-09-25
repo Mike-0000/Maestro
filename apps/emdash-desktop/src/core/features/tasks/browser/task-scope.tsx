@@ -255,7 +255,10 @@ const taskScopeImplementation = {
       ),
     execute: () => {
       const git = getTaskGitCheckoutStore(params.projectId, params.taskId);
-      if (git) void runGitPull(git);
+      if (git) {
+        git.start();
+        void runGitPull(git);
+      }
     },
   }),
   'task.gitPush': (params) => ({
@@ -274,6 +277,7 @@ const taskScopeImplementation = {
     execute: () => {
       const git = getTaskGitCheckoutStore(params.projectId, params.taskId);
       if (!git) return;
+      git.start();
       if (git.isPublished) {
         void runGitPush(git);
         return;

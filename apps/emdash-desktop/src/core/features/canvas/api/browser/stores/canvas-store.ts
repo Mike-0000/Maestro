@@ -474,6 +474,28 @@ export class CanvasStore {
     return this.agentEntries.find((entry) => entry.tileId === tileId);
   }
 
+  /**
+   * Per-conversation lookup so a tile observer does not subscribe to every agent
+   * in `agentEntries` (status/git churn on one task would otherwise re-render all tiles).
+   */
+  entryForConversation(
+    projectId: string,
+    taskId: string,
+    conversationId: string
+  ): AgentTileEntry | undefined {
+    const project = this.projectManager.projects.get(projectId);
+    const context = asAvailableProject(project);
+    if (!project || !context) return undefined;
+    const task = context.get(taskManagerStoreToken).tasks.get(taskId);
+    if (!task || !isCanvasTask(task)) return undefined;
+    const manager = conversationRegistry.get(taskId);
+    const conversation = manager?.conversations.get(conversationId);
+    if (!manager || !conversation) return undefined;
+    return toAgentEntry(project.name ?? 'Project', task, conversation, {
+      sessionActive: manager.isSessionActive(conversationId),
+    });
+  }
+
   focusRank(tileId: string): number {
     const index = this.focusOrder.indexOf(tileId);
     return index === -1 ? Number.MAX_SAFE_INTEGER : index;

@@ -4,7 +4,12 @@ import { useTaskGitDiffStats } from './task-git-diff-stats';
 
 const mocks = vi.hoisted(() => ({
   git: undefined as
-    | { totalLinesAdded: number; totalLinesDeleted: number; error: string | undefined }
+    | {
+        hasData: boolean;
+        totalLinesAdded: number;
+        totalLinesDeleted: number;
+        error: string | undefined;
+      }
     | undefined,
   taskStatsObservation: { kind: 'unavailable' } as { kind: 'unavailable' } | { kind: 'fresh' },
 }));
@@ -25,6 +30,7 @@ describe('useTaskGitDiffStats', () => {
 
   it('shows live checkout totals before cached task stats have been observed', () => {
     mocks.git = {
+      hasData: true,
       totalLinesAdded: 7,
       totalLinesDeleted: 2,
       error: undefined,
@@ -55,5 +61,29 @@ describe('useTaskGitDiffStats', () => {
 
     mocks.taskStatsObservation = { kind: 'fresh' };
     expect(useTaskGitDiffStats(task).visible).toBe(true);
+  });
+
+  it('uses cached workspaceGit when the checkout store exists but has not started', () => {
+    mocks.git = {
+      hasData: false,
+      totalLinesAdded: 0,
+      totalLinesDeleted: 0,
+      error: undefined,
+    };
+    mocks.taskStatsObservation = { kind: 'fresh' };
+    const task = {
+      state: 'provisioned',
+      data: {
+        id: 'task-1',
+        projectId: 'project-1',
+        workspaceGit: { linesAdded: 4, linesDeleted: 1 },
+      },
+    } as TaskStore;
+
+    expect(useTaskGitDiffStats(task)).toMatchObject({
+      linesAdded: 4,
+      linesDeleted: 1,
+      visible: true,
+    });
   });
 });

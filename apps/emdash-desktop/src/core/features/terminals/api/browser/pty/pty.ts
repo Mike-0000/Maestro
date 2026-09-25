@@ -11,6 +11,7 @@ import { log } from '@core/primitives/logging/browser/logger';
 import { cssColorToHex, cssVar } from '@core/primitives/styling/browser/cssVars';
 import { decodeOsc52ClipboardData } from '../../../browser/pty/pty-clipboard';
 import { ensureXtermHost } from '../../../browser/pty/xterm-host';
+import { attachWebglRenderer } from './canvas-webgl';
 
 /**
  * Task-terminal scrollback. The main side retains only 1 MB of output per PTY
@@ -96,6 +97,8 @@ export class FrontendPty {
   readonly ownedContainer: HTMLDivElement;
   private theme?: SessionTheme;
   private offData: (() => void) | null = null;
+  private webglRefCount = 0;
+  private detachWebgl: (() => void) | null = null;
 
   constructor(
     readonly sessionId: string,
@@ -137,8 +140,9 @@ export class FrontendPty {
       theme: buildTheme(theme),
     });
 
-    // Keep xterm on its DOM renderer: CanvasAddon repaints the full canvas on resize,
-    // which makes panel/sidebar transitions visibly flicker.
+    // Keep xterm on its DOM renderer by default: CanvasAddon repaints the full
+    // canvas on resize, which makes panel/sidebar transitions visibly flicker.
+    // Canvas live tiles opt into WebGL via enableWebgl().
 
     const webLinksAddon = new WebLinksAddon((event, uri) => {
       if (!isPrimaryMouseButton(event)) return;
@@ -223,6 +227,23 @@ export class FrontendPty {
   }
 
   /**
+   * Opt-in WebGL renderer for canvas live tiles. Task-view terminals stay on
+   * the DOM renderer. Ref-counted so a shared FrontendPty can be shown in both.
+   */
+  enableWebgl(): () => void {
+    this.webglRefCount += 1;
+    if (this.webglRefCount === 1 && !this.detachWebgl) {
+      this.detachWebgl = attachWebglRenderer(this.terminal);
+    }
+    return () => {
+      this.webglRefCount = Math.max(0, this.webglRefCount - 1);
+      if (this.webglRefCount > 0) return;
+      this.detachWebgl?.();
+      this.detachWebgl = null;
+    };
+  }
+
+  /**
    * Append ownedContainer to a visible mount target.
    * If targetDims are provided the terminal is resized BEFORE the appendChild
    * to eliminate the flash caused by a post-mount resize.
@@ -269,6 +290,9 @@ export class FrontendPty {
     FrontendPty.bySession.delete(this.sessionId);
     this.offData?.();
     this.offData = null;
+    this.detachWebgl?.();
+    this.detachWebgl = null;
+    this.webglRefCount = 0;
     try {
       this.terminal.dispose();
     } catch {}

@@ -401,6 +401,7 @@ export class TaskComposition {
       return;
     }
     const gitCheckout = workspace.get(gitCheckoutStoreToken);
+    gitCheckout.start();
     this.prStore = new PrStore(
       this.projectId,
       workspaceId,

@@ -40,13 +40,16 @@ export async function renameConversation(
       row.taskId,
       renamed.data.title
     );
-    conversationWireEvents.emit(undefined, {
-      type: 'changed',
-      conversationId,
-      taskId: row.taskId,
-      projectId: row.projectId,
-      changes: { title: renamed.data.title },
-    });
+    conversationWireEvents.emit(
+      { taskId: row.taskId },
+      {
+        type: 'changed',
+        conversationId,
+        taskId: row.taskId,
+        projectId: row.projectId,
+        changes: { title: renamed.data.title },
+      }
+    );
   }
   appDbPokes.conversations.poke({
     projectId: row.projectId ?? undefined,

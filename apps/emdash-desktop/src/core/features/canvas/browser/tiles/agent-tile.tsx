@@ -13,36 +13,37 @@ import { getNavigation } from '@core/primitives/navigation/browser/navigation-se
 import { cn } from '@core/primitives/styling/browser/cn';
 import {
   DEFAULT_LIVE_TILE_BUDGET,
-  GLYPH_ZOOM_THRESHOLD,
-  isInteractiveZoom,
+  detailZoomForBand,
   MIN_TILE_SIZE,
   resolveTileDetail,
+  zoomBand,
 } from '../../api/canvas-model';
 import { getCanvasStore } from '../../contributions/browser/app-stores';
+import { AgentAcpLive, AgentAcpPreview } from './agent-acp';
 import { AgentPreview } from './agent-preview';
 import { AgentTerminal, TerminalPlaceholder } from './agent-terminal';
 import { statusPresentation } from './status-presentation';
 
-export type AgentTileData = { tileId: string };
-
-type ZoomBand = 'glyph' | 'scaled' | 'interactive';
-
-function zoomBand(zoom: number): ZoomBand {
-  if (zoom < GLYPH_ZOOM_THRESHOLD) return 'glyph';
-  return isInteractiveZoom(zoom) ? 'interactive' : 'scaled';
-}
+export type AgentTileData = {
+  tileId: string;
+  projectId: string;
+  taskId: string;
+  conversationId: string;
+};
 
 export const AgentTileNode = observer(function AgentTileNode({ data, selected }: NodeProps) {
-  const { tileId } = data as AgentTileData;
+  const { tileId, projectId, taskId, conversationId } = data as AgentTileData;
   const store = getCanvasStore();
-  const entry = store.entryForTile(tileId);
+  const entry =
+    store.entryForConversation(projectId, taskId, conversationId) ?? store.entryForTile(tileId);
   // Subscribe to zoom bands, not raw zoom, so pan/zoom does not re-render every tile per frame.
   const band = useStore((state) => zoomBand(state.transform[2]));
 
   if (!entry) return null;
 
   const detail = resolveTileDetail({
-    zoom: band === 'glyph' ? 0 : 1,
+    zoom: detailZoomForBand(band),
+    // onlyRenderVisibleElements unmounts off-screen nodes; a mounted tile is visible.
     visible: true,
     focusRank: store.focusRank(tileId),
     liveBudget: DEFAULT_LIVE_TILE_BUDGET,
@@ -76,6 +77,16 @@ export const AgentTileNode = observer(function AgentTileNode({ data, selected }:
           <AgentGlyph entry={entry} />
         ) : !store.shouldAttach(entry) ? (
           <ResumePrompt entry={entry} />
+        ) : entry.type === 'acp' ? (
+          detail === 'live' ? (
+            <AgentAcpLive
+              entry={entry}
+              interactive={band === 'interactive'}
+              onActivate={() => store.requestFocus(tileId)}
+            />
+          ) : (
+            <AgentAcpPreview entry={entry} onActivate={() => store.requestFocus(tileId)} />
+          )
         ) : detail === 'live' ? (
           <AgentTerminal
             entry={entry}

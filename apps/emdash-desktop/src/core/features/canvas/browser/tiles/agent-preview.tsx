@@ -1,42 +1,11 @@
-import type { Terminal } from '@xterm/xterm';
 import { observer } from 'mobx-react-lite';
-import { useEffect, useState } from 'react';
 import type { AgentTileEntry } from '@core/features/canvas/api/browser/stores/canvas-store';
-import { conversationRegistry } from '@core/features/conversations/api/browser/stores/conversation-registry';
-import { readTerminalTail } from '../../api/browser/terminal-tail';
-
-const PREVIEW_REFRESH_MS = 250;
-const PREVIEW_MAX_ROWS = 60;
-
-function useTerminalTail(terminal: Terminal | undefined, rows: number): string[] {
-  const [lines, setLines] = useState<string[]>(() =>
-    terminal ? readTerminalTail(terminal, rows) : []
-  );
-  useEffect(() => {
-    if (!terminal) {
-      setLines([]);
-      return;
-    }
-    setLines(readTerminalTail(terminal, rows));
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const subscription = terminal.onWriteParsed(() => {
-      if (timer) return;
-      timer = setTimeout(() => {
-        timer = null;
-        setLines(readTerminalTail(terminal, rows));
-      }, PREVIEW_REFRESH_MS);
-    });
-    return () => {
-      subscription.dispose();
-      if (timer) clearTimeout(timer);
-    };
-  }, [terminal, rows]);
-  return lines;
-}
+import { useTuiOutputTail } from '../../api/browser/use-tui-output-tail';
 
 /**
- * Read-only tail of an agent's terminal. Cheap enough to render for every tile at any zoom:
- * it reads the already-live xterm buffer rather than mounting a second terminal.
+ * Read-only tail of an agent's TUI output. Does not observe PtySession.status, so it
+ * never lazy-connects a FrontendPty / xterm. Working agents refresh at 4 Hz from the
+ * retained live-log snapshot; idle agents keep the first snapshot.
  */
 export const AgentPreview = observer(function AgentPreview({
   entry,
@@ -45,12 +14,11 @@ export const AgentPreview = observer(function AgentPreview({
   entry: AgentTileEntry;
   onActivate: () => void;
 }) {
-  const session = entry.sessionActive
-    ? conversationRegistry.get(entry.taskId)?.sessions.get(entry.conversationId)
-    : undefined;
-  // Observing `status` lazily connects the passive output subscription (it never starts the agent).
-  const ready = session?.status === 'ready';
-  const lines = useTerminalTail(ready ? session?.pty?.terminal : undefined, PREVIEW_MAX_ROWS);
+  const lines = useTuiOutputTail(
+    entry.conversationId,
+    entry.sessionActive,
+    entry.status === 'working'
+  );
 
   return (
     <button

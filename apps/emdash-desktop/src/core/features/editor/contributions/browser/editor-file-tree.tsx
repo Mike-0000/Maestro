@@ -228,6 +228,7 @@ async function importLocalFiles(args: {
 export const EditorFileTree = observer(function EditorFileTree() {
   const workspace = useWorkspace();
   const gitCheckout = workspace.get(gitCheckoutStoreToken);
+  gitCheckout.start();
   const workspaceId = useWorkspaceId();
   const taskView = useTaskComposition();
   const tabLayout = useTabLayout();

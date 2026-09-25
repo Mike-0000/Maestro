@@ -72,7 +72,12 @@ describe('ConversationManagerStore session hydration', () => {
   });
 
   it('marks only starting and running TUI sessions active', () => {
-    const store = new ConversationManagerStore('project-1', 'task-1', [], localSessionHost);
+    const store = new ConversationManagerStore(
+      'project-1',
+      'task-1',
+      [conversation('starting'), conversation('running'), conversation('exited')],
+      localSessionHost
+    );
 
     (
       store as unknown as {
@@ -109,17 +114,33 @@ describe('ConversationManagerStore session hydration', () => {
         resume: null,
         startedAt: 1,
       },
+      otherTask: {
+        conversationId: 'otherTask',
+        providerId: 'codex',
+        sessionId: null,
+        status: 'running',
+        cols: 80,
+        rows: 24,
+        resume: null,
+        startedAt: 1,
+      },
     });
 
     expect(store.activeTuiSessionIds.has('starting')).toBe(true);
     expect(store.activeTuiSessionIds.has('running')).toBe(true);
     expect(store.activeTuiSessionIds.has('exited')).toBe(false);
+    expect(store.activeTuiSessionIds.has('otherTask')).toBe(false);
 
     store.dispose();
   });
 
   it('marks closed ACP sessions inactive', () => {
-    const store = new ConversationManagerStore('project-1', 'task-1', [], localSessionHost);
+    const store = new ConversationManagerStore(
+      'project-1',
+      'task-1',
+      [conversation('ready'), conversation('closed')],
+      localSessionHost
+    );
 
     (
       store as unknown as {
@@ -152,7 +173,13 @@ describe('ConversationManagerStore session hydration', () => {
         },
       },
     } as ProjectHostAccess;
-    const store = new ConversationManagerStore('project-1', 'task-1', [], localSessionHost, host);
+    const store = new ConversationManagerStore(
+      'project-1',
+      'task-1',
+      [conversation('ready')],
+      localSessionHost,
+      host
+    );
 
     expect(store.runtimeObservation).toEqual({ kind: 'unavailable' });
     (
@@ -219,6 +246,18 @@ describe('ConversationManagerStore session hydration', () => {
     store.dispose();
   });
 });
+
+function conversation(id: string) {
+  return {
+    id,
+    projectId: 'project-1',
+    taskId: 'task-1',
+    providerId: 'codex' as const,
+    title: id,
+    lastInteractedAt: null,
+    isInitialConversation: false,
+  };
+}
 
 function acpSession(conversationId: string, lifecycle: 'ready' | 'closed') {
   return {

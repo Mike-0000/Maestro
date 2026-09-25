@@ -47,7 +47,7 @@ export async function deleteConversation(
   await removeConversationOrTombstone(db, runtimes, convRow);
 
   conversationEvents._emit('conversation:deleted', conversationId);
-  conversationWireEvents.emit(undefined, { type: 'deleted', conversationId, projectId, taskId });
+  conversationWireEvents.emit({ taskId }, { type: 'deleted', conversationId, projectId, taskId });
   appDbPokes.conversations.poke({ projectId, taskId });
   telemetry.capture('conversation_deleted', {
     project_id: projectId,

@@ -123,8 +123,8 @@ One board per project by default, plus an "All projects" board. A new conversati
 
 **Tile types**
 - **AgentTile** (the core one): header shows spoken name ("Codex‑2"), provider icon, branch, status pill driven by `TuiAgentState.status`, attention badge when `notificationType ∈ ATTENTION_NOTIFICATION_TYPES`, and a one-line `lastAssistantMessage`. The body has three levels of detail:
-  - **Live**: the real `FrontendPty` mounted into the tile via `mount()`. Only when effective zoom is 1.0 (±0.02) and the tile is on screen, capped at N live tiles (default 6, least-recently-focused get demoted).
-  - **Preview**: a read-only DOM `<pre>` of the last ~40 visible buffer lines (read from the same xterm buffer, ANSI colors mapped to spans), refreshed at ≤ 4 Hz while the agent is working and not at all while it's idle. Cheap and fine under CSS scale.
+  - **Live**: the real `FrontendPty` mounted into the tile via `mount()`, with WebGL enabled for canvas tiles only. Only when effective zoom is 1.0 (±0.02) and the tile is on screen, capped at N live tiles (default 4, least-recently-focused get demoted).
+  - **Preview**: a read-only DOM `<pre>` of the last ~40 printable live-log lines (no xterm connect), refreshed at ≤ 4 Hz while the agent is working and not at all while it's idle. Cheap and fine under CSS scale.
   - **Glyph** (zoom < 0.35): header and status only.
   - ACP agents render `@emdash/chat-ui` in live mode, and their last message in preview.
 - **GroupTile**: a frame around all tiles in one task/worktree, with branch name and diff stats (+/−, files).

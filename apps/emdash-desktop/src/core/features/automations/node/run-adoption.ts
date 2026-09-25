@@ -245,7 +245,10 @@ async function adoptRunOnce(
       const conversation = mapConversationRowToConversation(conversationRow);
       if (conversation !== null) {
         conversationEvents._emit('conversation:created', conversation);
-        conversationWireEvents.emit(undefined, { type: 'created', conversation });
+        conversationWireEvents.emit(
+          { taskId: conversation.taskId },
+          { type: 'created', conversation }
+        );
         appDbPokes.conversations.poke({ projectId: task.projectId, taskId: task.id });
       }
     }

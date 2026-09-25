@@ -1,12 +1,10 @@
 import type { SerializedHostRef } from '@emdash/core/primitives/host/api';
 import type { SessionSummary } from '@emdash/core/runtimes/acp/api/client';
 import type { TuiSessionList } from '@emdash/core/runtimes/tui-agents/api';
-import { createScope, type Disposable } from '@emdash/shared/concurrency';
+import type { Disposable } from '@emdash/shared/concurrency';
 import { ReplicaLog } from '@emdash/wire/live';
-import { observe, remote } from '@emdash/wire/state';
 import type { Terminal } from '@xterm/xterm';
 import { action, computed, makeObservable, observable, reaction, runInAction } from 'mobx';
-import { conversationsContract } from '@core/features/conversations/api';
 // TODO(conversations-extraction): Inject file-link handlers instead of importing task editor plumbing.
 import { makeFileLinkHandlers } from '@core/features/editor/api/browser/open-file-in-file-editor';
 import {
@@ -27,6 +25,7 @@ import {
 import { log } from '@core/primitives/logging/browser/logger';
 import { makePtySessionId } from '@core/primitives/pty/api';
 import { getConversationsClient } from './client';
+import { acquireProjectSessionLists } from './project-session-lists';
 
 /**
  * Supplies measured terminal dimensions for a conversation's PTY spawn.
@@ -41,12 +40,10 @@ export type ConversationInitialSizeResolver = (
 
 export class ConversationManagerStore implements Disposable {
   private _initialSizeResolver: ConversationInitialSizeResolver | null = null;
-  private offAgentStatusChanged: (() => void) | null = null;
-  private offTuiSessionState: (() => void) | null = null;
-  private offAcpSessionState: (() => void) | null = null;
-  private offConversationCreated: (() => void) | null = null;
-  private offConversationChanges: (() => void) | null = null;
-  private offConversationDeleted: (() => void) | null = null;
+  private offConversationEvents: (() => void) | null = null;
+  private offSessionLists: (() => void) | null = null;
+  private lastTuiList: TuiSessionList = {};
+  private lastAcpList: Record<string, SessionSummary> = {};
   private readonly _disposeHostReaction: () => void;
   private _hasObservedTuiSessions = false;
   private _hasObservedAcpSessions = false;
@@ -109,12 +106,8 @@ export class ConversationManagerStore implements Disposable {
       }
     );
 
-    this.offAgentStatusChanged = this.listenToAgentStatusChanged();
-    this.offTuiSessionState = this.listenToTuiSessionState();
-    this.offAcpSessionState = this.listenToAcpSessionState();
-    this.offConversationCreated = this.listenToConversationCreated();
-    this.offConversationChanges = this.listenToConversationChanges();
-    this.offConversationDeleted = this.listenToConversationDeleted();
+    this.offConversationEvents = this.listenToConversationEvents();
+    this.offSessionLists = this.listenToProjectSessionLists();
     if (!hasPreloaded) void this.list.load();
   }
 
@@ -127,6 +120,7 @@ export class ConversationManagerStore implements Disposable {
     if (!this.sessions.has(conversation.id)) {
       this.sessions.set(conversation.id, this.createSession(conversation));
     }
+    this.syncActiveSessionMembership(conversation.id);
   }
 
   private removeConversation(conversationId: string, dispose = true): void {
@@ -135,6 +129,8 @@ export class ConversationManagerStore implements Disposable {
     const session = this.sessions.get(conversationId);
     this.conversations.delete(conversationId);
     this.sessions.delete(conversationId);
+    this.activeTuiSessionIds.delete(conversationId);
+    this.activeAcpSessionIds.delete(conversationId);
     if (dispose) {
       conversation?.dispose();
       session?.destroy();
@@ -172,14 +168,17 @@ export class ConversationManagerStore implements Disposable {
     let disposed = false;
     let unsubscribe: (() => void) | undefined;
     void getConversationsClient().then(async (client) => {
-      const nextUnsubscribe = await client.events.subscribe(undefined, {
-        onEvent: (event) => {
-          if (!disposed) onEvent(event);
-        },
-        onGap: () => {
-          if (!disposed) this.list.invalidate();
-        },
-      });
+      const nextUnsubscribe = await client.events.subscribe(
+        { taskId: this.taskId },
+        {
+          onEvent: (event) => {
+            if (!disposed) onEvent(event);
+          },
+          onGap: () => {
+            if (!disposed) this.list.invalidate();
+          },
+        }
+      );
       if (disposed) nextUnsubscribe();
       else unsubscribe = nextUnsubscribe;
     });
@@ -189,64 +188,46 @@ export class ConversationManagerStore implements Disposable {
     };
   }
 
-  private listenToAgentStatusChanged(): () => void {
-    return this.subscribeConversationEvents((payload) => {
-      if (payload.type !== 'agent-status-changed') return;
-      if (payload.taskId !== this.taskId) return;
-      const conversationStore = this.conversations.get(payload.conversationId);
-      if (!conversationStore) return;
-
-      runInAction(() => {
-        conversationStore.status = payload.status;
-        conversationStore.seen = payload.seen;
-        if (payload.status !== 'awaiting-input') {
-          conversationStore.lastNotificationType = null;
-        }
-        conversationStore.completionSummary =
-          payload.status === 'completed' ? (payload.completionSummary ?? null) : null;
-      });
-    });
+  private listenToConversationEvents(): () => void {
+    return this.subscribeConversationEvents((event) => this.applyConversationEvent(event));
   }
 
-  private listenToTuiSessionState(): () => void {
-    if (typeof window === 'undefined') return () => {};
-    let currentScope: ReturnType<typeof createScope> | undefined;
-    const disposeReaction = reaction(
-      () => ({ host: this.sessionHost(), accessKind: this.hostAccess?.state.kind }),
-      ({ host, accessKind }) => {
-        void currentScope?.dispose();
-        currentScope = undefined;
-        if (accessKind !== undefined && accessKind !== 'ready') return;
-        currentScope = createScope({ label: `conversation-manager:tui-sessions:${host}` });
-        const scope = currentScope;
-        void (async () => {
-          const client = await getConversationsClient();
-          if (scope.disposed) return;
-          const sessions = remote(conversationsContract.tui.sessions, client.tui.sessions, {
-            scope,
-            lingerMs: 15_000,
-          });
-          const member = sessions({ host, projectId: this.projectId });
-          observe(
-            member.states.list,
-            (snapshot) => this.handleTuiSessionListChanged(snapshot.value ?? {}),
-            { scope }
-          );
-        })();
-      },
-      { fireImmediately: true }
+  private applyConversationEvent(event: ConversationEvent): void {
+    switch (event.type) {
+      case 'agent-status-changed':
+        this.applyAgentStatusChanged(event);
+        return;
+      case 'created':
+        this.applyConversationCreated(event);
+        return;
+      case 'changed':
+        this.applyConversationChanged(event);
+        return;
+      case 'deleted':
+        this.applyConversationDeleted(event);
+        return;
+    }
+  }
+
+  private listenToProjectSessionLists(): () => void {
+    return acquireProjectSessionLists(
+      this.projectId,
+      this.sessionHost,
+      this.hostAccess,
+      (lists) => {
+        if (lists.hasObservedTui) this.handleTuiSessionListChanged(lists.tui);
+        if (lists.hasObservedAcp) this.handleAcpSessionListChanged(lists.acp);
+      }
     );
-    return () => {
-      disposeReaction();
-      void currentScope?.dispose();
-    };
   }
 
   private handleTuiSessionListChanged(list: TuiSessionList): void {
     runInAction(() => {
       this._hasObservedTuiSessions = true;
+      this.lastTuiList = list;
       this.activeTuiSessionIds.clear();
       for (const [conversationId, session] of Object.entries(list)) {
+        if (!this.conversations.has(conversationId)) continue;
         if (session.status === 'starting' || session.status === 'running') {
           this.activeTuiSessionIds.add(conversationId);
         }
@@ -254,45 +235,13 @@ export class ConversationManagerStore implements Disposable {
     });
   }
 
-  private listenToAcpSessionState(): () => void {
-    if (typeof window === 'undefined') return () => {};
-    let currentScope: ReturnType<typeof createScope> | undefined;
-    const disposeReaction = reaction(
-      () => ({ host: this.sessionHost(), accessKind: this.hostAccess?.state.kind }),
-      ({ host, accessKind }) => {
-        void currentScope?.dispose();
-        currentScope = undefined;
-        if (accessKind !== undefined && accessKind !== 'ready') return;
-        currentScope = createScope({ label: `conversation-manager:acp-sessions:${host}` });
-        const scope = currentScope;
-        void (async () => {
-          const client = await getConversationsClient();
-          if (scope.disposed) return;
-          const sessions = remote(conversationsContract.acp.sessions, client.acp.sessions, {
-            scope,
-            lingerMs: 15_000,
-          });
-          const member = sessions({ host, projectId: this.projectId });
-          observe(
-            member.states.list,
-            (snapshot) => this.handleAcpSessionListChanged(snapshot.value ?? {}),
-            { scope }
-          );
-        })();
-      },
-      { fireImmediately: true }
-    );
-    return () => {
-      disposeReaction();
-      void currentScope?.dispose();
-    };
-  }
-
   private handleAcpSessionListChanged(list: Record<string, SessionSummary>): void {
     runInAction(() => {
       this._hasObservedAcpSessions = true;
+      this.lastAcpList = list;
       this.activeAcpSessionIds.clear();
       for (const [conversationId, session] of Object.entries(list)) {
+        if (!this.conversations.has(conversationId)) continue;
         if (session.lifecycle !== 'closed') {
           this.activeAcpSessionIds.add(conversationId);
         }
@@ -300,37 +249,57 @@ export class ConversationManagerStore implements Disposable {
     });
   }
 
-  private listenToConversationCreated(): () => void {
-    return this.subscribeConversationEvents((event) => {
-      if (event.type !== 'created') return;
-      const { conversation } = event;
-      if (conversation.taskId !== this.taskId || conversation.projectId !== this.projectId) return;
-      runInAction(() => {
-        this.addConversation(conversation);
-      });
+  private syncActiveSessionMembership(conversationId: string): void {
+    const tui = this.lastTuiList[conversationId];
+    if (tui && (tui.status === 'starting' || tui.status === 'running')) {
+      this.activeTuiSessionIds.add(conversationId);
+    }
+    const acp = this.lastAcpList[conversationId];
+    if (acp && acp.lifecycle !== 'closed') {
+      this.activeAcpSessionIds.add(conversationId);
+    }
+  }
+
+  private applyAgentStatusChanged(
+    payload: Extract<ConversationEvent, { type: 'agent-status-changed' }>
+  ): void {
+    if (payload.taskId !== this.taskId) return;
+    const conversationStore = this.conversations.get(payload.conversationId);
+    if (!conversationStore) return;
+
+    runInAction(() => {
+      conversationStore.status = payload.status;
+      conversationStore.seen = payload.seen;
+      if (payload.status !== 'awaiting-input') {
+        conversationStore.lastNotificationType = null;
+      }
+      conversationStore.completionSummary =
+        payload.status === 'completed' ? (payload.completionSummary ?? null) : null;
     });
   }
 
-  private listenToConversationChanges(): () => void {
-    return this.subscribeConversationEvents((event) => {
-      if (event.type !== 'changed') return;
-      if (event.taskId !== this.taskId) return;
-      const store = this.conversations.get(event.conversationId);
-      if (!store) return;
-      runInAction(() => {
-        Object.assign(store.data, event.changes);
-      });
+  private applyConversationCreated(event: Extract<ConversationEvent, { type: 'created' }>): void {
+    const { conversation } = event;
+    if (conversation.taskId !== this.taskId || conversation.projectId !== this.projectId) return;
+    runInAction(() => {
+      this.addConversation(conversation);
     });
   }
 
-  private listenToConversationDeleted(): () => void {
-    return this.subscribeConversationEvents((event) => {
-      if (event.type !== 'deleted') return;
-      if (event.taskId !== this.taskId || event.projectId !== this.projectId) return;
-      const pending = this._pendingDeletions.get(event.conversationId);
-      if (pending) pending.confirmed = true;
-      runInAction(() => this.removeConversation(event.conversationId));
+  private applyConversationChanged(event: Extract<ConversationEvent, { type: 'changed' }>): void {
+    if (event.taskId !== this.taskId) return;
+    const store = this.conversations.get(event.conversationId);
+    if (!store) return;
+    runInAction(() => {
+      Object.assign(store.data, event.changes);
     });
+  }
+
+  private applyConversationDeleted(event: Extract<ConversationEvent, { type: 'deleted' }>): void {
+    if (event.taskId !== this.taskId || event.projectId !== this.projectId) return;
+    const pending = this._pendingDeletions.get(event.conversationId);
+    if (pending) pending.confirmed = true;
+    runInAction(() => this.removeConversation(event.conversationId));
   }
 
   get taskStatus(): AgentStatus | null {
@@ -537,18 +506,10 @@ export class ConversationManagerStore implements Disposable {
     this._disposed = true;
     this.list.dispose();
     this._disposeHostReaction();
-    this.offAgentStatusChanged?.();
-    this.offAgentStatusChanged = null;
-    this.offTuiSessionState?.();
-    this.offTuiSessionState = null;
-    this.offAcpSessionState?.();
-    this.offAcpSessionState = null;
-    this.offConversationCreated?.();
-    this.offConversationCreated = null;
-    this.offConversationChanges?.();
-    this.offConversationChanges = null;
-    this.offConversationDeleted?.();
-    this.offConversationDeleted = null;
+    this.offConversationEvents?.();
+    this.offConversationEvents = null;
+    this.offSessionLists?.();
+    this.offSessionLists = null;
     for (const session of this.sessions.values()) {
       session.destroy();
     }

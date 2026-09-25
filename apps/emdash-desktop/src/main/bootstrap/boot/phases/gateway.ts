@@ -1,5 +1,5 @@
 import { conversationEvents } from '@core/features/conversations/api/node/conversation-events';
-import { conversationWireEvents } from '@core/features/conversations/node/event-host';
+import { emitConversationWireEvent } from '@core/features/conversations/node/event-host';
 import { loadActiveAgentStatusConversationIds } from '@core/features/conversations/node/load-active-agent-status-conversation-ids';
 import { renameConversation } from '@core/features/conversations/node/renameConversation';
 import { acpAgentStatusBridge } from '@main/core/acp/agent-status-bridge';
@@ -47,8 +47,7 @@ export function installGateway(
         ),
     }
   );
-  const publishConversationEvent = (event: Parameters<typeof conversationWireEvents.emit>[1]) =>
-    conversationWireEvents.emit(undefined, event);
+  const publishConversationEvent = emitConversationWireEvent;
   setAgentStatusConversationEventPublisher(publishConversationEvent);
   tuiAgentStatusBridge.initialize({
     runtimes: runtimes.broker,

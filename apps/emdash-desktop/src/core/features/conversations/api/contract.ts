@@ -245,7 +245,10 @@ export const conversationsContract = defineContract({
     input: z.object({ conversationId: z.string() }),
     output: z.void(),
   }),
-  events: eventStream({ key: z.void(), event: z.custom<ConversationEvent>() }),
+  events: eventStream({
+    key: z.object({ taskId: z.string() }),
+    event: z.custom<ConversationEvent>(),
+  }),
   acp: conversationsAcpContract,
   tui: conversationsTuiContract,
 });

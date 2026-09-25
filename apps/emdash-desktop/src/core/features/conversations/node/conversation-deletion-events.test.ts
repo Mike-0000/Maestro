@@ -62,12 +62,15 @@ describe.each(['task', 'machine'] as const)('%s conversation deletion events', (
     async (outcome) => {
       remove.mockResolvedValue(outcome);
       await deleteFromSurface();
-      expect(emit).toHaveBeenCalledExactlyOnceWith(undefined, {
-        type: 'deleted',
-        conversationId: row.id,
-        projectId: row.projectId,
-        taskId: row.taskId,
-      });
+      expect(emit).toHaveBeenCalledExactlyOnceWith(
+        { taskId: row.taskId },
+        {
+          type: 'deleted',
+          conversationId: row.id,
+          projectId: row.projectId,
+          taskId: row.taskId,
+        }
+      );
     }
   );
 

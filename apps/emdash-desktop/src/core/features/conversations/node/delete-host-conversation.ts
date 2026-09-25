@@ -27,12 +27,15 @@ export async function deleteHostConversation(
 
   conversationEvents._emit('conversation:deleted', conversationId);
   if (row.projectId !== null && row.taskId !== null) {
-    conversationWireEvents.emit(undefined, {
-      type: 'deleted',
-      conversationId,
-      projectId: row.projectId,
-      taskId: row.taskId,
-    });
+    conversationWireEvents.emit(
+      { taskId: row.taskId },
+      {
+        type: 'deleted',
+        conversationId,
+        projectId: row.projectId,
+        taskId: row.taskId,
+      }
+    );
   }
   appDbPokes.conversations.poke({
     projectId: row.projectId ?? undefined,

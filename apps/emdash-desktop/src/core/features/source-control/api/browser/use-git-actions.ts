@@ -10,6 +10,7 @@ import { getTaskGitCheckoutStore } from '@core/features/source-control/api/brows
 
 export function useGitActions(projectId: string, taskId: string) {
   const git = getTaskGitCheckoutStore(projectId, taskId)!;
+  git.start();
   const repository = getGitRepositoryStore(projectId)!;
   const isPublished = git.isPublished;
 

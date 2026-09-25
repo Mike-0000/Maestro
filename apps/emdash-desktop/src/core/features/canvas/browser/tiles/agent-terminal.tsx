@@ -58,6 +58,11 @@ export const AgentTerminal = observer(function AgentTerminal({
   const pty = session?.pty;
 
   useEffect(() => {
+    if (!pty) return;
+    return pty.enableWebgl();
+  }, [pty]);
+
+  useEffect(() => {
     if (autoFocus && interactive && status === 'ready') terminalRef.current?.focus();
   }, [autoFocus, interactive, status]);
 

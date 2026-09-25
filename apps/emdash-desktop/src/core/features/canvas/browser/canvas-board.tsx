@@ -60,7 +60,12 @@ function buildNodes(store: CanvasStore): Node[] {
       position: { x: rect.x, y: rect.y },
       width: rect.w,
       height: rect.h,
-      data: { tileId: entry.tileId },
+      data: {
+        tileId: entry.tileId,
+        projectId: entry.projectId,
+        taskId: entry.taskId,
+        conversationId: entry.conversationId,
+      },
     });
   }
   for (const browser of store.visibleBrowserEntries) {

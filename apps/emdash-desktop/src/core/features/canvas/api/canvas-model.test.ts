@@ -4,6 +4,8 @@ import {
   assignSpokenName,
   boundsOf,
   browsersToSuspend,
+  DEFAULT_LIVE_TILE_BUDGET,
+  detailZoomForBand,
   FRAME_HEADER,
   FRAME_PADDING,
   frameRect,
@@ -18,6 +20,7 @@ import {
   resolveTileDetail,
   TILE_GAP,
   viewportRect,
+  zoomBand,
   type TileRect,
 } from './canvas-model';
 import { spokenProviderLabel } from './provider-names';
@@ -32,16 +35,56 @@ describe('isInteractiveZoom', () => {
   });
 });
 
+describe('zoomBand', () => {
+  it('splits glyph, scaled overview, and interactive zoom', () => {
+    expect(zoomBand(0.2)).toBe('glyph');
+    expect(zoomBand(0.6)).toBe('scaled');
+    expect(zoomBand(1)).toBe('interactive');
+  });
+
+  it('does not treat scaled overview as zoom 1 for LOD', () => {
+    expect(isInteractiveZoom(detailZoomForBand('scaled'))).toBe(false);
+    expect(detailZoomForBand('interactive')).toBe(1);
+    expect(detailZoomForBand('glyph')).toBe(0);
+  });
+});
+
 describe('resolveTileDetail', () => {
-  const base = { zoom: 1, visible: true, focusRank: 0, liveBudget: 6, hasSession: true };
+  const base = {
+    zoom: 1,
+    visible: true,
+    focusRank: 0,
+    liveBudget: DEFAULT_LIVE_TILE_BUDGET,
+    hasSession: true,
+  };
 
   it('renders a glyph when zoomed far out, regardless of focus', () => {
     expect(resolveTileDetail({ ...base, zoom: GLYPH_ZOOM_THRESHOLD - 0.01 })).toBe('glyph');
   });
 
-  it('keeps recently focused visible tiles live within the budget', () => {
-    expect(resolveTileDetail({ ...base, focusRank: 5 })).toBe('live');
-    expect(resolveTileDetail({ ...base, focusRank: 6 })).toBe('preview');
+  it('keeps recently focused visible tiles live within the budget at zoom 1', () => {
+    expect(resolveTileDetail({ ...base, focusRank: 3 })).toBe('live');
+    expect(resolveTileDetail({ ...base, focusRank: 4 })).toBe('preview');
+  });
+
+  it('uses preview at overview zoom so CSS-scaled xterms are not mounted', () => {
+    expect(resolveTileDetail({ ...base, zoom: 0.6, focusRank: 0 })).toBe('preview');
+    expect(resolveTileDetail({ ...base, zoom: detailZoomForBand('scaled') })).toBe('preview');
+  });
+
+  it('caps a 16-agent board at four live tiles at interactive zoom', () => {
+    const details = Array.from({ length: 16 }, (_, focusRank) =>
+      resolveTileDetail({ ...base, focusRank })
+    );
+    expect(details.filter((detail) => detail === 'live')).toHaveLength(4);
+    expect(details.filter((detail) => detail === 'preview')).toHaveLength(12);
+  });
+
+  it('mounts no live tiles at overview zoom even when all 16 are focused and visible', () => {
+    const details = Array.from({ length: 16 }, (_, focusRank) =>
+      resolveTileDetail({ ...base, zoom: 0.6, focusRank })
+    );
+    expect(details.every((detail) => detail === 'preview')).toBe(true);
   });
 
   it('falls back to preview offscreen or without a session', () => {

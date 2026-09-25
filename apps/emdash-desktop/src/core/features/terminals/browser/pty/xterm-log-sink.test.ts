@@ -1,30 +1,49 @@
 import { describe, expect, it } from 'vitest';
 import { createXtermLogSink } from '@core/features/terminals/api/browser/pty/xterm-log-sink';
 
+function manualScheduler() {
+  const pending: Array<() => void> = [];
+  return {
+    schedule: (flush: () => void) => {
+      pending.push(flush);
+    },
+    runAll() {
+      for (const flush of pending.splice(0)) flush();
+    },
+    get scheduledCount() {
+      return pending.length;
+    },
+  };
+}
+
 describe('createXtermLogSink', () => {
-  it('passes each live chunk directly to xterm without waiting or coalescing', () => {
+  it('coalesces burst appends into one write per scheduled flush', () => {
     const writes: string[] = [];
+    const scheduler = manualScheduler();
     const terminal = {
-      options: { disableStdin: false },
       reset() {},
-      // xterm owns the asynchronous buffer; leave its callbacks pending.
       write(chunk: string) {
         writes.push(chunk);
       },
     };
-    const sink = createXtermLogSink(terminal);
+    const sink = createXtermLogSink(terminal, { scheduleFlush: scheduler.schedule });
     const chunk = 'x'.repeat(64 * 1024);
     for (let i = 0; i < 128; i++) sink.append(chunk);
-    expect(writes).toHaveLength(128);
-    expect(writes.every((write) => write.length === chunk.length)).toBe(true);
+    expect(writes).toEqual([]);
+    expect(scheduler.scheduledCount).toBe(1);
+    scheduler.runAll();
+    expect(writes).toHaveLength(1);
+    expect(writes[0]?.length).toBe(chunk.length * 128);
   });
 
-  it('resets xterm and writes retained text', () => {
+  it('resets xterm and writes retained text immediately', () => {
     const terminal = new FakeTerminal();
-    const sink = createXtermLogSink(terminal);
+    const scheduler = manualScheduler();
+    const sink = createXtermLogSink(terminal, { scheduleFlush: scheduler.schedule });
 
     sink.reset({ baseOffset: 0, text: 'hello', truncated: false });
     sink.append('\nworld');
+    scheduler.runAll();
 
     expect(terminal.events).toEqual(['reset', 'write:hello', 'write:\nworld']);
   });
@@ -36,6 +55,18 @@ describe('createXtermLogSink', () => {
     sink.reset({ baseOffset: 1024, text: 'tail', truncated: true });
 
     expect(terminal.events).toEqual(['reset', 'write:\r\n[output truncated]\r\n', 'write:tail']);
+  });
+
+  it('drops coalesced writes that were queued before a reset', () => {
+    const terminal = new FakeTerminal();
+    const scheduler = manualScheduler();
+    const sink = createXtermLogSink(terminal, { scheduleFlush: scheduler.schedule });
+
+    sink.append('stale');
+    sink.reset({ baseOffset: 0, text: 'fresh', truncated: false });
+    scheduler.runAll();
+
+    expect(terminal.events).toEqual(['reset', 'write:fresh']);
   });
 });
 
