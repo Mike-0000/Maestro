@@ -10,6 +10,7 @@ export const APP_ID = isCanary ? 'dev.chorus.canary' : 'dev.chorus.app';
 export const PRODUCT_NAME = isCanary ? 'Chorus Canary' : 'Chorus';
 export const APP_NAME_LOWER = isCanary ? 'chorus-canary' : 'chorus';
 export const LINUX_DESKTOP_ID = isCanary ? 'chorus-canary' : 'Chorus';
+// Never rename: a new directory name starts an empty profile (projects, settings, API keys).
 export const USER_DATA_DIR_NAME = isDev ? 'chorus-dev' : isCanary ? 'chorus-canary' : 'chorus';
 export const UPDATE_CHANNEL = isCanary ? 'v1-canary' : 'v1-stable';
 export const ARTIFACT_PREFIX = isCanary ? 'chorus-canary' : 'chorus';
