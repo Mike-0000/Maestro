@@ -76,6 +76,25 @@ const ENGINE_LABELS = {
   openrouter: 'OpenRouter (audio model)',
 } as const;
 
+const TTS_ENGINE_LABELS = {
+  platform: 'Windows (offline)',
+  kitten: 'Kitten Mini (offline)',
+  'gemini-flash': 'Gemini 3.8 Flash (quality)',
+  'gemini-flash-lite': 'Gemini 3.8 Flash-Lite (fast)',
+  'openrouter-gemini-flash': 'Gemini 3.8 Flash via OpenRouter',
+  'openrouter-gemini-flash-lite': 'Gemini 3.8 Flash-Lite via OpenRouter',
+} as const;
+type TtsEngine = keyof typeof TTS_ENGINE_LABELS;
+
+function isTtsEngine(value: unknown): value is TtsEngine {
+  return typeof value === 'string' && value in TTS_ENGINE_LABELS;
+}
+
+/** Cloud engines speak with Gemini's prebuilt voices, whichever key they use. */
+function usesGeminiVoice(engine: TtsEngine | undefined): boolean {
+  return engine !== undefined && engine !== 'platform' && engine !== 'kitten';
+}
+
 const JEV_SOURCE_LABELS = {
   auto: 'Auto',
   openrouter: 'OpenRouter',
@@ -189,7 +208,7 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
         <KeyRow
           id="openrouter"
           label="OpenRouter"
-          description="Runs the conductor, speech-to-text, and Jev through OpenRouter instead of the direct APIs."
+          description="Runs the conductor, speech-to-text, Jev, and optional Gemini speech output through OpenRouter."
           present={credentials?.openrouter}
           onSaved={() => void conductor.refreshStatus()}
         />
@@ -394,38 +413,30 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
         />
         <SettingsRow
           label="Spoken output"
-          description="Kitten Mini runs offline on your CPU; Gemini sends reply text to Google. Windows speech is the fallback."
+          description={
+            voiceSettings?.ttsEngine.startsWith('openrouter-') && !credentials?.openrouter
+              ? 'Add an OpenRouter API key above; until then, replies use the Windows voice.'
+              : 'Kitten Mini runs offline on your CPU; Gemini (direct or via OpenRouter) sends reply text to Google. Windows speech is the fallback.'
+          }
           control={
             <Select.Root
               value={voiceSettings?.ttsEngine ?? 'platform'}
               disabled={!voiceSettings}
               onValueChange={(engine) => {
-                if (
-                  engine === 'platform' ||
-                  engine === 'kitten' ||
-                  engine === 'gemini-flash' ||
-                  engine === 'gemini-flash-lite'
-                ) {
-                  void voice.updateSettings({ ttsEngine: engine });
-                }
+                if (isTtsEngine(engine)) void voice.updateSettings({ ttsEngine: engine });
               }}
             >
-              <Select.Trigger className="w-[230px]">
+              <Select.Trigger className="w-[280px]">
                 <Select.Value>
-                  {voiceSettings?.ttsEngine === 'kitten'
-                    ? 'Kitten Mini (offline)'
-                    : voiceSettings?.ttsEngine === 'gemini-flash'
-                      ? 'Gemini 3.8 Flash (quality)'
-                      : voiceSettings?.ttsEngine === 'gemini-flash-lite'
-                        ? 'Gemini 3.8 Flash-Lite (fast)'
-                        : 'Windows (offline)'}
+                  {TTS_ENGINE_LABELS[voiceSettings?.ttsEngine ?? 'platform']}
                 </Select.Value>
               </Select.Trigger>
               <Select.Content align="end">
-                <Select.Item value="platform">Windows (offline)</Select.Item>
-                <Select.Item value="kitten">Kitten Mini (offline)</Select.Item>
-                <Select.Item value="gemini-flash">Gemini 3.8 Flash (quality)</Select.Item>
-                <Select.Item value="gemini-flash-lite">Gemini 3.8 Flash-Lite (fast)</Select.Item>
+                {(Object.keys(TTS_ENGINE_LABELS) as TtsEngine[]).map((engine) => (
+                  <Select.Item key={engine} value={engine}>
+                    {TTS_ENGINE_LABELS[engine]}
+                  </Select.Item>
+                ))}
               </Select.Content>
             </Select.Root>
           }
@@ -468,8 +479,7 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
             }
           />
         )}
-        {(voiceSettings?.ttsEngine === 'gemini-flash' ||
-          voiceSettings?.ttsEngine === 'gemini-flash-lite') && (
+        {usesGeminiVoice(voiceSettings?.ttsEngine) && (
           <SettingsRow
             label="Gemini voice"
             description="A prebuilt English voice for spoken replies and notifications."

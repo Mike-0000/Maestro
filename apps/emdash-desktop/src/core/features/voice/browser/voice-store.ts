@@ -506,7 +506,7 @@ export class VoiceStore {
       const status = await (await getVoiceClient()).getStatus();
       runInAction(() => {
         this.status = status;
-        this.speech.configure(status.settings, status.credentials.gemini);
+        this.speech.configure(status.settings, status.credentials);
       });
       void this.applyHandsFree();
     } catch (error) {
@@ -518,7 +518,7 @@ export class VoiceStore {
     const status = await (await getVoiceClient()).updateSettings(patch);
     runInAction(() => {
       this.status = status;
-      this.speech.configure(status.settings, status.credentials.gemini);
+      this.speech.configure(status.settings, status.credentials);
     });
     if ('handsFree' in patch) void this.applyHandsFree();
   }
@@ -531,7 +531,7 @@ export class VoiceStore {
     const status = await (await getVoiceClient()).setCredential({ id, value });
     runInAction(() => {
       this.status = status;
-      this.speech.configure(status.settings, status.credentials.gemini);
+      this.speech.configure(status.settings, status.credentials);
     });
   }
 }

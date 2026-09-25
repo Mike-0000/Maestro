@@ -20,6 +20,7 @@ import { OpenRouterSttEngine } from './engines/openrouter';
 import { WhisperLocalSttEngine } from './engines/whisper-local';
 import { streamGeminiTts } from './gemini-tts';
 import { LocalTts } from './local-tts';
+import { OPENROUTER_TTS_MODELS, streamOpenRouterTts } from './openrouter-tts';
 
 /** RIFF header (44 bytes) plus at least ~0.2 s of 16 kHz 16-bit audio. */
 const MIN_WAV_BYTES = 44 + 6400;
@@ -116,11 +117,16 @@ export class VoiceService {
     return this.status();
   }
 
-  /** Synthesis runs in the main process; Gemini credentials never reach the renderer. */
+  /** Synthesis runs in the main process; cloud credentials never reach the renderer. */
   async startTts(
     requestId: string,
     text: string,
-    emit: (event: { type: 'chunk'; pcm: string } | { type: 'done' } | { type: 'error' }) => void
+    emit: (
+      event:
+        | { type: 'chunk'; pcm: string; sampleRate?: number }
+        | { type: 'done' }
+        | { type: 'error' }
+    ) => void
   ): Promise<void> {
     // Replies replace one another; never generate several billable utterances concurrently.
     for (const id of [...this.ttsRequests.keys()]) this.stopTts(id);
@@ -134,7 +140,9 @@ export class VoiceService {
         this.ttsRequests.delete(requestId);
         return;
       }
-      const forward = (event: { type: 'chunk'; pcm: string } | { type: 'done' }) => {
+      const forward = (
+        event: { type: 'chunk'; pcm: string; sampleRate?: number } | { type: 'done' }
+      ) => {
         if (!controller.signal.aborted) emit(event);
       };
       let synthesis: Promise<void>;
@@ -143,6 +151,27 @@ export class VoiceService {
           text,
           settings.localVoice,
           controller.signal,
+          forward
+        );
+      } else if (
+        settings.ttsEngine === 'openrouter-gemini-flash' ||
+        settings.ttsEngine === 'openrouter-gemini-flash-lite'
+      ) {
+        const key = await this.credentials.get('openrouter');
+        if (controller.signal.aborted) return;
+        if (!key) {
+          emit({ type: 'error' });
+          this.ttsRequests.delete(requestId);
+          return;
+        }
+        synthesis = streamOpenRouterTts(
+          {
+            key,
+            model: OPENROUTER_TTS_MODELS[settings.ttsEngine],
+            voice: settings.geminiVoice,
+            text,
+            signal: controller.signal,
+          },
           forward
         );
       } else {

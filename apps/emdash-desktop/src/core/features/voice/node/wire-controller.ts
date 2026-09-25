@@ -78,7 +78,12 @@ export function createVoiceWireController(options: {
     startTts: ({ requestId, text }) =>
       service.startTts(requestId, text, (event) => {
         if (event.type === 'chunk') {
-          voiceEvents.emit(undefined, { type: 'tts-chunk', requestId, pcm: event.pcm });
+          voiceEvents.emit(undefined, {
+            type: 'tts-chunk',
+            requestId,
+            pcm: event.pcm,
+            ...(event.sampleRate ? { sampleRate: event.sampleRate } : {}),
+          });
         } else {
           voiceEvents.emit(undefined, {
             type: event.type === 'done' ? 'tts-done' : 'tts-error',

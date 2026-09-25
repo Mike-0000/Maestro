@@ -23,7 +23,14 @@ export const voiceSettingsSchema = z.object({
   speakAttention: z.boolean(),
   ttsVoice: z.string(),
   /** Spoken output is independent of the speech-to-text engine. */
-  ttsEngine: z.enum(['platform', 'kitten', 'gemini-flash', 'gemini-flash-lite']),
+  ttsEngine: z.enum([
+    'platform',
+    'kitten',
+    'gemini-flash',
+    'gemini-flash-lite',
+    'openrouter-gemini-flash',
+    'openrouter-gemini-flash-lite',
+  ]),
   /** Kitten TTS Mini 0.8 English voice (runs entirely on the CPU). */
   localVoice: z.enum(['Bella', 'Jasper', 'Luna', 'Bruno', 'Rosie', 'Hugo', 'Kiki', 'Leo']),
   geminiVoice: z.enum(['Kore', 'Puck', 'Aoede', 'Zephyr']),
@@ -98,8 +105,16 @@ export const voiceEventSchema = z.discriminatedUnion('type', [
     text: z.string(),
     confidence: z.number().min(0).max(1).optional(),
   }),
-  /** 24 kHz mono signed 16-bit little-endian PCM from Gemini or the local Kitten model. */
-  z.object({ type: z.literal('tts-chunk'), requestId: z.string(), pcm: z.string() }),
+  /**
+   * Mono signed 16-bit little-endian PCM from Gemini, OpenRouter, or the local Kitten model;
+   * 24 kHz unless `sampleRate` says otherwise.
+   */
+  z.object({
+    type: z.literal('tts-chunk'),
+    requestId: z.string(),
+    pcm: z.string(),
+    sampleRate: z.number().int().min(8000).max(48_000).optional(),
+  }),
   z.object({ type: z.literal('tts-done'), requestId: z.string() }),
   z.object({ type: z.literal('tts-error'), requestId: z.string() }),
 ]);

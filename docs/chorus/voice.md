@@ -121,6 +121,16 @@ engines stream 24 kHz PCM and stop when you start talking, mute, or another repl
 synthesis fails or times out, Chorus uses the chosen Windows fallback voice. The **Test** button
 previews the active output engine.
 
+The same two models are also available **through OpenRouter**: choose **Gemini 3.8 Flash via
+OpenRouter** (`google/gemini-3.8-flash-tts`) or **Gemini 3.8 Flash-Lite via OpenRouter**
+(`google/gemini-3.8-flash-lite-tts`). They use the OpenRouter key that already runs the conductor,
+STT, and Jev (or `OPENROUTER_API_KEY`), so no Google key is needed, and are billed to your
+OpenRouter account. Chorus calls OpenRouter's OpenAI-compatible `POST /api/v1/audio/speech` with
+`response_format: "pcm"` from the main process and plays the audio as it arrives, honouring any
+`rate`/`channels` in the response's `Content-Type` (24 kHz mono by default). Reply text is sent to
+OpenRouter and Google. Because OpenRouter may buffer audio before the first byte, Chorus waits up
+to 8 seconds before falling back to the Windows voice.
+
 For developers, `pnpm --dir apps/emdash-desktop run voice:model` downloads the model for local
 development. `electron-builder` does this automatically when packaging and verifies the pinned
 SHA-256 before including the model in every installer; end users never need to run that command.

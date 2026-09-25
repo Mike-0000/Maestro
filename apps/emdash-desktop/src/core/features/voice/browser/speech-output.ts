@@ -3,12 +3,14 @@ import type { VoiceEvent, VoiceSettings } from '../api/contract';
 
 export type SpeechStatus = 'started' | 'ended' | 'cancelled' | 'failed';
 type SpeechStatusListener = (status: SpeechStatus) => void;
+/** Which cloud speech keys are configured; the renderer only ever sees presence, never keys. */
+export type SpeechCredentials = { gemini?: boolean; openrouter?: boolean };
 
-/** Cancellable spoken output: local or Gemini PCM, otherwise the installed system voice. */
+/** Cancellable spoken output: local, Gemini or OpenRouter PCM, otherwise the system voice. */
 export class SpeechOutput {
   private preferredVoice = '';
   private engine: VoiceSettings['ttsEngine'] = 'platform';
-  private geminiAvailable = false;
+  private credentials: SpeechCredentials = {};
   private requestId: string | null = null;
   private starting: Promise<void> | null = null;
   private context: AudioContext | null = null;
@@ -22,10 +24,34 @@ export class SpeechOutput {
   /** Trace listener for the utterance in flight; notified once per terminal status. */
   private active: SpeechStatusListener | null = null;
 
-  configure(settings: VoiceSettings, geminiAvailable: boolean): void {
+  configure(settings: VoiceSettings, credentials: SpeechCredentials): void {
     this.preferredVoice = settings.ttsVoice;
     this.engine = settings.ttsEngine;
-    this.geminiAvailable = geminiAvailable;
+    this.credentials = credentials;
+  }
+
+  /** Whether the selected model engine can run; otherwise speech uses the system voice. */
+  private engineAvailable(): boolean {
+    switch (this.engine) {
+      case 'platform':
+        return false;
+      case 'kitten':
+        return true;
+      case 'gemini-flash':
+      case 'gemini-flash-lite':
+        return this.credentials.gemini === true;
+      case 'openrouter-gemini-flash':
+      case 'openrouter-gemini-flash-lite':
+        return this.credentials.openrouter === true;
+    }
+  }
+
+  /** How long to wait for the first audio before falling back to the system voice. */
+  private firstAudioTimeoutMs(): number {
+    if (this.engine === 'kitten') return 12_000;
+    // OpenRouter may buffer the provider's audio before the first byte arrives.
+    if (this.engine.startsWith('openrouter-')) return 8000;
+    return 3500;
   }
 
   static voices(): SpeechSynthesisVoice[] {
@@ -40,11 +66,7 @@ export class SpeechOutput {
     this.stop();
     this.active = onceStarted(onStatus ?? (() => {}));
     const generation = this.generation;
-    if (
-      this.engine === 'platform' ||
-      (this.engine !== 'kitten' && !this.geminiAvailable) ||
-      text.length > 1200
-    ) {
+    if (!this.engineAvailable() || text.length > 1200) {
       this.speakPlatform(text, generation);
       return;
     }
@@ -54,7 +76,7 @@ export class SpeechOutput {
     // A stalled connection must not leave the reply silent indefinitely.
     this.fallbackTimer = setTimeout(
       () => this.fallback(text, generation),
-      this.engine === 'kitten' ? 12_000 : 3500
+      this.firstAudioTimeoutMs()
     );
     const starting = getVoiceClient().then(async (client) => {
       if (this.requestId !== requestId) return;
@@ -78,7 +100,7 @@ export class SpeechOutput {
       else this.finishCloud();
     } else if (event.type === 'tts-chunk') {
       try {
-        this.playChunk(event.pcm);
+        this.playChunk(event.pcm, event.sampleRate ?? 24_000);
       } catch {
         if (!this.receivedAudio) this.fallbackToPlatform();
         else this.stop();
@@ -86,11 +108,12 @@ export class SpeechOutput {
     }
   }
 
-  private playChunk(pcm: string): void {
+  private playChunk(pcm: string, sampleRate: number): void {
     const bytes = Uint8Array.from(atob(pcm), (char) => char.charCodeAt(0));
     if (!bytes.length || bytes.length % 2) throw new Error('Invalid PCM chunk');
     const context = (this.context ??= new AudioContext({ sampleRate: 24_000 }));
-    const buffer = context.createBuffer(1, bytes.length / 2, 24_000);
+    // A buffer at another rate is resampled by the context on playback.
+    const buffer = context.createBuffer(1, bytes.length / 2, sampleRate);
     const samples = buffer.getChannelData(0);
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     for (let i = 0; i < samples.length; i++) samples[i] = view.getInt16(i * 2, true) / 32768;
