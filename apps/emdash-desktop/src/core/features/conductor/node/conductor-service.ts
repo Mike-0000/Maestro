@@ -97,7 +97,7 @@ export class ConductorService {
     if (!key) {
       return err({
         type: 'not-configured',
-        message: 'Add an Anthropic API key in Chorus settings to use the conductor.',
+        message: 'Add an Anthropic API key in Settings → Voice & Conductor to use the conductor.',
       });
     }
     const settings = await this.settings.read();
@@ -108,7 +108,8 @@ export class ConductorService {
     ) {
       return err({
         type: 'budget-exceeded',
-        message: "Today's conductor token budget is used up. Raise it in Chorus settings.",
+        message:
+          "Today's conductor token budget is used up. Raise it in Settings → Voice & Conductor.",
       });
     }
 
