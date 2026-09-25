@@ -6,7 +6,7 @@
 //
 // A steps module default-exports `async ({ app, page, shot, log, profileDir }) => {}`.
 import { spawnSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -25,6 +25,9 @@ const { values } = parseArgs({
     timeout: { type: 'string', default: '600000' },
     // Feed Chromium's synthetic audio/video devices (a beeping tone) and auto-grant media access.
     'fake-mic': { type: 'boolean', default: false },
+    // With --fake-mic: feed speech-like bursts (tone, then silence, looped) instead of a steady
+    // tone, so onset and end-of-speech detection behave as they would with a person talking.
+    'fake-mic-bursts': { type: 'boolean', default: false },
   },
 });
 
@@ -57,6 +60,9 @@ const app = await electron.launch({
   args: [
     ...(values['fake-mic']
       ? ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream']
+      : []),
+    ...(values['fake-mic'] && values['fake-mic-bursts']
+      ? [`--use-file-for-fake-audio-capture=${writeBurstsWav(join(outDir, 'bursts.wav'))}`]
       : []),
     appDir,
   ],
@@ -139,4 +145,35 @@ async function quitApp() {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** 1.2 s of a modulated tone then 2.5 s of silence, 48 kHz mono 16-bit, as a WAV file. */
+function writeBurstsWav(path) {
+  const rate = 48_000;
+  const samples = Math.round(rate * 3.7);
+  const data = Buffer.alloc(samples * 2);
+  for (let i = 0; i < samples; i++) {
+    const t = i / rate;
+    const voiced = t < 1.2;
+    const envelope = voiced ? 0.35 * (0.6 + 0.4 * Math.sin(2 * Math.PI * 4 * t)) : 0;
+    const value =
+      envelope * Math.sin(2 * Math.PI * 220 * t) * (1 + 0.3 * Math.sin(2 * Math.PI * 660 * t));
+    data.writeInt16LE(Math.round(Math.max(-1, Math.min(1, value)) * 0x7fff), i * 2);
+  }
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + data.length, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(rate, 24);
+  header.writeUInt32LE(rate * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(data.length, 40);
+  writeFileSync(path, Buffer.concat([header, data]));
+  return path;
 }

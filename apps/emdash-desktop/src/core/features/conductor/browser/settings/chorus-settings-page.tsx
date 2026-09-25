@@ -148,6 +148,43 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
           }
         />
         <SettingsRow
+          label="Live transcript"
+          description="Stream audio while you speak and show words as they are recognized (Deepgram)."
+          control={
+            <Switch
+              checked={voiceSettings?.streaming ?? true}
+              disabled={!voiceSettings}
+              onCheckedChange={(streaming) => void voice.updateSettings({ streaming })}
+            />
+          }
+        />
+        <SettingsRow
+          label="Hands-free"
+          description="Keep listening and start on speech. Only utterances that begin with the wake phrase are acted on; every utterance is transcribed, so this uses more STT."
+          control={
+            <Switch
+              checked={voiceSettings?.handsFree ?? false}
+              disabled={!voiceSettings}
+              onCheckedChange={(handsFree) => void voice.updateSettings({ handsFree })}
+            />
+          }
+        />
+        {voiceSettings?.handsFree && (
+          <SettingsRow
+            label="Wake phrase"
+            description="Say it first: “Chorus, focus Claude 1”. Leave empty to act on everything (not recommended)."
+            control={
+              <CommitInput
+                value={voiceSettings.wakePhrase}
+                ariaLabel="Wake phrase"
+                className="w-40"
+                allowEmpty
+                onCommit={(wakePhrase) => void voice.updateSettings({ wakePhrase })}
+              />
+            }
+          />
+        )}
+        <SettingsRow
           label="Speak replies"
           description="Read the conductor's answers aloud."
           control={
@@ -388,12 +425,14 @@ function CommitInput({
   ariaLabel,
   placeholder,
   className = 'w-56',
+  allowEmpty = false,
   onCommit,
 }: {
   value: string;
   ariaLabel: string;
   placeholder?: string;
   className?: string;
+  allowEmpty?: boolean;
   onCommit: (value: string) => void;
 }) {
   return (
@@ -405,7 +444,7 @@ function CommitInput({
       className={className}
       onBlur={(event) => {
         const next = event.currentTarget.value.trim();
-        if (next && next !== value) onCommit(next);
+        if ((next || allowEmpty) && next !== value) onCommit(next);
       }}
       onKeyDown={(event) => {
         if (event.key === 'Enter') event.currentTarget.blur();

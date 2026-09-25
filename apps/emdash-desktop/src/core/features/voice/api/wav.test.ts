@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { concatFloat32, downsample, encodeWav, rms, SilenceDetector } from './wav';
+import {
+  base64ToBytes,
+  bytesToBase64,
+  concatFloat32,
+  downsample,
+  encodeWav,
+  pcm16Bytes,
+  rms,
+  SilenceDetector,
+  SpeechOnsetDetector,
+  stripWakePhrase,
+} from './wav';
 
 describe('downsample', () => {
   it('reduces 48 kHz to 16 kHz by averaging', () => {
@@ -50,5 +61,35 @@ describe('levels', () => {
     for (let i = 0; i < 9; i++) expect(detector.push(0.004, 100)).toBe(false);
     expect(detector.push(0.004, 100)).toBe(true);
     expect(detector.hasSpeech).toBe(true);
+  });
+});
+
+describe('streaming helpers', () => {
+  it('encodes PCM16 little-endian and round-trips base64', () => {
+    const bytes = pcm16Bytes(new Float32Array([0, 1, -1]));
+    expect([...bytes]).toEqual([0, 0, 0xff, 0x7f, 0x00, 0x80]);
+    expect([...base64ToBytes(bytesToBase64(bytes))]).toEqual([...bytes]);
+  });
+});
+
+describe('SpeechOnsetDetector', () => {
+  it('ignores short bursts and fires on sustained speech', () => {
+    const detector = new SpeechOnsetDetector(160);
+    for (let i = 0; i < 20; i++) expect(detector.push(0.005, 20)).toBe(false);
+    expect(detector.push(0.2, 20)).toBe(false);
+    expect(detector.push(0.005, 20)).toBe(false);
+    let fired = false;
+    for (let i = 0; i < 10 && !fired; i++) fired = detector.push(0.2, 20);
+    expect(fired).toBe(true);
+  });
+});
+
+describe('stripWakePhrase', () => {
+  it('requires and strips the phrase', () => {
+    expect(stripWakePhrase('Chorus, focus Claude 1.', 'chorus')).toBe('focus Claude 1.');
+    expect(stripWakePhrase('courses show all', 'chorus')).toBe('show all');
+    expect(stripWakePhrase('focus Claude 1', 'chorus')).toBeNull();
+    expect(stripWakePhrase('Chorus', 'chorus')).toBeNull();
+    expect(stripWakePhrase('focus Claude 1', '')).toBe('focus Claude 1');
   });
 });

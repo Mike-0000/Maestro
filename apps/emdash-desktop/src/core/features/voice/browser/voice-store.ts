@@ -3,7 +3,7 @@ import type { ChorusCredentialId } from '@core/primitives/chorus-host/api/creden
 import { log } from '@core/primitives/logging/browser/logger';
 import { getVoiceClient } from '../api/browser/client';
 import type { VoiceSettings, VoiceStatus } from '../api/contract';
-import { SilenceDetector } from '../api/wav';
+import { bytesToBase64, SilenceDetector, SpeechOnsetDetector, stripWakePhrase } from '../api/wav';
 import { MicError, MicRecorder } from './mic-recorder';
 import { SpeechOutput } from './speech-output';
 
@@ -11,6 +11,8 @@ export type VoicePhase = 'idle' | 'listening' | 'transcribing' | 'error';
 /** "command" goes to the conductor; "dictation" types into the focused agent. */
 export type TranscriptIntent = 'command' | 'dictation';
 export type ListenMode = 'hold' | 'toggle';
+/** Who started listening: the user (key, click, shortcut) or hands-free speech detection. */
+export type ListenOrigin = 'user' | 'hands-free';
 export type TranscriptHandler = (text: string, intent: TranscriptIntent) => Promise<void> | void;
 
 export type VoiceErrorState = {
@@ -29,6 +31,11 @@ export class VoiceStore {
   intent: TranscriptIntent = 'command';
   level = 0;
   lastTranscript = '';
+  /** Live partial transcript while streaming (Deepgram). */
+  partial = '';
+  origin: ListenOrigin = 'user';
+  /** Set when a hands-free utterance was ignored for lacking the wake phrase. */
+  ignoredUtterance: string | null = null;
   lastLatencyMs: number | null = null;
   error: VoiceErrorState | null = null;
   speaking = false;
@@ -38,6 +45,11 @@ export class VoiceStore {
   readonly speech = new SpeechOutput();
   private readonly recorder = new MicRecorder();
   private silence: SilenceDetector | null = null;
+  private readonly onset = new SpeechOnsetDetector();
+  private streamId: string | null = null;
+  private streamPending: string[] = [];
+  private streamOpening: Promise<void> | null = null;
+  private captureNext: ((text: string) => void) | null = null;
   private maxTimer: ReturnType<typeof setTimeout> | null = null;
   private handler: TranscriptHandler | null = null;
   private vocabulary: () => string[] = () => [];
@@ -46,17 +58,33 @@ export class VoiceStore {
   constructor() {
     makeAutoObservable<
       VoiceStore,
-      'recorder' | 'silence' | 'maxTimer' | 'handler' | 'vocabulary' | 'disposers'
+      | 'recorder'
+      | 'silence'
+      | 'maxTimer'
+      | 'handler'
+      | 'vocabulary'
+      | 'disposers'
+      | 'onset'
+      | 'streamId'
+      | 'streamPending'
+      | 'streamOpening'
+      | 'captureNext'
     >(this, {
       speech: false,
       recorder: false,
       silence: false,
+      onset: false,
+      streamId: false,
+      streamPending: false,
+      streamOpening: false,
+      captureNext: false,
       maxTimer: false,
       handler: false,
       vocabulary: false,
       disposers: false,
     });
     this.recorder.onChunk = (level, durationMs) => this.onChunk(level, durationMs);
+    this.recorder.onPcm = (pcm) => this.onPcm(pcm);
     this.speech.onSpeakingChange = (speaking) => runInAction(() => (this.speaking = speaking));
   }
 
@@ -69,6 +97,9 @@ export class VoiceStore {
         const next = await client.events.subscribe(undefined, {
           onEvent: (event) => {
             if (event.type === 'global-toggle') void this.toggle();
+            else if (event.type === 'partial' && event.streamId === this.streamId) {
+              runInAction(() => (this.partial = event.text));
+            }
           },
         });
         if (disposed) next();
@@ -105,18 +136,27 @@ export class VoiceStore {
 
   // ── Capture ────────────────────────────────────────────────────────────────
 
-  async startListening(mode: ListenMode, intent: TranscriptIntent = 'command'): Promise<void> {
+  async startListening(
+    mode: ListenMode,
+    intent: TranscriptIntent = 'command',
+    origin: ListenOrigin = 'user'
+  ): Promise<void> {
     if (this.phase === 'listening' || this.phase === 'transcribing') return;
     this.speech.stop(); // barge-in
     this.mode = mode;
     this.intent = intent;
+    this.origin = origin;
     this.error = null;
+    this.ignoredUtterance = null;
     this.level = 0;
+    this.partial = '';
     this.silence = mode === 'toggle' ? new SilenceDetector() : null;
     this.phase = 'listening';
+    this.openStream();
     try {
-      await this.recorder.start();
+      await this.recorder.start({ withPreRoll: origin === 'hands-free' });
     } catch (error) {
+      this.abortStream();
       runInAction(() => {
         this.phase = 'error';
         this.error = describeMicError(error);
@@ -144,6 +184,12 @@ export class VoiceStore {
       this.level = 0;
     });
     const intent = this.intent;
+    const origin = this.origin;
+    const streamed = await this.closeStream();
+    if (streamed !== null) {
+      await this.finishTranscript(streamed.text, streamed.latencyMs, intent, origin);
+      return;
+    }
     try {
       const client = await getVoiceClient();
       const result = await client.transcribe(
@@ -167,13 +213,7 @@ export class VoiceStore {
         });
         return;
       }
-      const text = result.data.text;
-      runInAction(() => {
-        this.phase = 'idle';
-        this.lastTranscript = text;
-        this.lastLatencyMs = result.data.latencyMs;
-      });
-      if (text) await this.handler?.(text, intent);
+      await this.finishTranscript(result.data.text, result.data.latencyMs, intent, origin);
     } catch (error) {
       log.error('voice: transcription request failed', { error });
       runInAction(() => {
@@ -185,6 +225,8 @@ export class VoiceStore {
 
   cancelListening(): void {
     this.clearMaxTimer();
+    this.abortStream();
+    this.partial = '';
     this.recorder.cancel();
     this.phase = 'idle';
     this.level = 0;
@@ -201,12 +243,144 @@ export class VoiceStore {
   }
 
   private onChunk(level: number, durationMs: number): void {
+    if (this.phase === 'idle' && this.settings?.handsFree && !this.speaking && !this.muted) {
+      if (this.onset.push(level, durationMs)) {
+        this.onset.reset();
+        void this.startListening('toggle', 'command', 'hands-free');
+      }
+      return;
+    }
     if (this.phase !== 'listening') return;
     runInAction(() => {
       // Smooth for the HUD meter.
       this.level = this.level * 0.6 + Math.min(1, level * 6) * 0.4;
     });
     if (this.silence?.push(level, durationMs)) void this.stopListening();
+  }
+
+  /** Applies the wake phrase to hands-free speech, records the transcript, and hands it off. */
+  private async finishTranscript(
+    raw: string,
+    latencyMs: number,
+    intent: TranscriptIntent,
+    origin: ListenOrigin
+  ): Promise<void> {
+    const text = raw.trim();
+    let command: string | null = text;
+    if (origin === 'hands-free') {
+      command = stripWakePhrase(text, this.settings?.wakePhrase ?? 'chorus');
+    }
+    runInAction(() => {
+      this.phase = 'idle';
+      this.partial = '';
+      this.lastTranscript = text;
+      this.lastLatencyMs = latencyMs;
+      this.ignoredUtterance = command === null && text ? text : null;
+    });
+    const capture = this.captureNext;
+    if (capture) {
+      this.captureNext = null;
+      capture(text);
+      return;
+    }
+    if (command) await this.handler?.(command, intent);
+  }
+
+  /**
+   * Records one utterance and returns its transcript without sending it to the conductor (voice
+   * setup's "say hello" test). Resolves '' if nothing was heard.
+   */
+  async captureOnce(): Promise<string> {
+    const result = new Promise<string>((resolve) => (this.captureNext = resolve));
+    await this.startListening('toggle', 'command', 'user');
+    if (this.phase === 'error') {
+      this.captureNext = null;
+      return '';
+    }
+    return result;
+  }
+
+  // ── Live streaming ─────────────────────────────────────────────────────────
+
+  private openStream(): void {
+    this.streamId = null;
+    this.streamPending = [];
+    if (this.settings?.engine !== 'deepgram' || this.settings.streaming === false) {
+      this.streamOpening = null;
+      return;
+    }
+    this.streamOpening = getVoiceClient()
+      .then((client) => client.openStream({ vocabulary: this.vocabulary().slice(0, 200) }))
+      .then(async (opened) => {
+        if (!opened.supported || !opened.streamId || this.phase !== 'listening') {
+          if (opened.streamId)
+            await (await getVoiceClient()).abortStream({ streamId: opened.streamId });
+          this.streamPending = [];
+          return;
+        }
+        this.streamId = opened.streamId;
+        const client = await getVoiceClient();
+        for (const pcm of this.streamPending.splice(0)) {
+          void client.pushAudio({ streamId: opened.streamId, pcm });
+        }
+      })
+      .catch((error: unknown) => {
+        log.warn('voice: live stream unavailable; will upload instead', { error });
+        this.streamPending = [];
+      });
+  }
+
+  private onPcm(pcm: Uint8Array<ArrayBuffer>): void {
+    if (this.phase !== 'listening' || !this.streamOpening) return;
+    const encoded = bytesToBase64(pcm);
+    const streamId = this.streamId;
+    if (!streamId) {
+      this.streamPending.push(encoded);
+      return;
+    }
+    void getVoiceClient().then((client) => client.pushAudio({ streamId, pcm: encoded }));
+  }
+
+  /** Final text from the live stream, or null to fall back to uploading the recording. */
+  private async closeStream(): Promise<{ text: string; latencyMs: number } | null> {
+    const opening = this.streamOpening;
+    this.streamOpening = null;
+    if (!opening) return null;
+    await opening;
+    const streamId = this.streamId;
+    this.streamId = null;
+    if (!streamId) return null;
+    try {
+      const result = await (await getVoiceClient()).closeStream({ streamId });
+      if (result.success) return result.data;
+      log.warn('voice: live stream failed; uploading instead', { error: result.error });
+    } catch (error) {
+      log.warn('voice: live stream failed; uploading instead', { error });
+    }
+    return null;
+  }
+
+  private abortStream(): void {
+    const streamId = this.streamId;
+    this.streamId = null;
+    this.streamOpening = null;
+    this.streamPending = [];
+    if (streamId) void getVoiceClient().then((client) => client.abortStream({ streamId }));
+  }
+
+  // ── Hands-free ─────────────────────────────────────────────────────────────
+
+  /** Starts or stops continuous listening to match the setting. */
+  async applyHandsFree(): Promise<void> {
+    const on = this.settings?.handsFree ?? false;
+    try {
+      await this.recorder.setMonitoring(on);
+    } catch (error) {
+      runInAction(() => {
+        this.phase = 'error';
+        this.error = describeMicError(error);
+      });
+    }
   }
 
   private clearMaxTimer(): void {
@@ -242,6 +416,7 @@ export class VoiceStore {
         this.status = status;
         this.speech.setPreferredVoice(status.settings.ttsVoice);
       });
+      void this.applyHandsFree();
     } catch (error) {
       log.warn('voice: status unavailable', { error });
     }
@@ -253,6 +428,7 @@ export class VoiceStore {
       this.status = status;
       this.speech.setPreferredVoice(status.settings.ttsVoice);
     });
+    if ('handsFree' in patch) void this.applyHandsFree();
   }
 
   async openMicrophoneSettings(): Promise<void> {

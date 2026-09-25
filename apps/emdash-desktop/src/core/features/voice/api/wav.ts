@@ -105,3 +105,84 @@ export class SilenceDetector {
     return this.heardSpeech;
   }
 }
+
+/** Float samples (-1..1) to 16-bit little-endian PCM bytes, as streaming STT expects. */
+export function pcm16Bytes(samples: Float32Array): Uint8Array<ArrayBuffer> {
+  const buffer = new ArrayBuffer(samples.length * 2);
+  const view = new DataView(buffer);
+  samples.forEach((sample, index) => {
+    const clamped = Math.max(-1, Math.min(1, sample));
+    view.setInt16(index * 2, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
+  });
+  return new Uint8Array(buffer);
+}
+
+/** Base64 without Node's Buffer (works in the renderer and in main). */
+export function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(binary);
+}
+
+export function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+/**
+ * Speech-onset detector for hands-free mode: fires once the level stays well above an adaptive
+ * noise floor for `onsetMs`, so a cough or a door slam does not start an utterance.
+ */
+export class SpeechOnsetDetector {
+  private noiseFloor = 0.01;
+  private loudForMs = 0;
+
+  constructor(
+    private readonly onsetMs = 160,
+    private readonly speechRatio = 3.5,
+    private readonly minLevel = 0.025
+  ) {}
+
+  /** Feed one chunk's level and duration; returns true when speech has started. */
+  push(level: number, durationMs: number): boolean {
+    const isSpeech = level > Math.max(this.minLevel, this.noiseFloor * this.speechRatio);
+    if (isSpeech) {
+      this.loudForMs += durationMs;
+    } else {
+      this.loudForMs = 0;
+      this.noiseFloor = this.noiseFloor * 0.97 + level * 0.03;
+    }
+    return this.loudForMs >= this.onsetMs;
+  }
+
+  reset(): void {
+    this.loudForMs = 0;
+  }
+}
+
+/**
+ * Hands-free wake phrase: returns the command after the phrase ("Chorus, focus Claude 1" →
+ * "focus Claude 1"), or null when the utterance does not start with it. An empty phrase accepts
+ * everything.
+ */
+export function stripWakePhrase(transcript: string, phrase: string): string | null {
+  const wanted = phrase.trim().toLowerCase();
+  const text = transcript.trim();
+  if (!wanted) return text;
+  const normalized = text.toLowerCase().replace(/^[^a-z0-9]+/, '');
+  const leading = text.length - text.replace(/^[^a-zA-Z0-9]+/, '').length;
+  // Allow common mishearings of the default phrase.
+  const variants =
+    wanted === 'chorus' ? ['chorus', 'corus', 'courses', 'chorus,', 'horus'] : [wanted];
+  for (const variant of variants) {
+    if (normalized.startsWith(variant)) {
+      const rest = text.slice(leading + variant.length).replace(/^[\s,.!?:;-]+/, '');
+      return rest || null;
+    }
+  }
+  return null;
+}

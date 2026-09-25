@@ -1,4 +1,4 @@
-import { defineContract, eventStream, procedure, uploadFile } from '@emdash/wire/rpc';
+import { defineContract, eventStream, fallible, procedure, uploadFile } from '@emdash/wire/rpc';
 import { z } from 'zod';
 import { chorusCredentialIdSchema } from '@core/primitives/chorus-host/api/credentials';
 
@@ -18,6 +18,14 @@ export const voiceSettingsSchema = z.object({
   speakReplies: z.boolean(),
   speakAttention: z.boolean(),
   ttsVoice: z.string(),
+  /** Stream audio while speaking for live partial transcripts (Deepgram only). */
+  streaming: z.boolean(),
+  /** Listen continuously and start on speech; only acts after the wake phrase. */
+  handsFree: z.boolean(),
+  /** Phrase that must start a hands-free command ("Chorus, focus Claude 1"). */
+  wakePhrase: z.string(),
+  /** The first-run voice setup was completed or dismissed. */
+  onboarded: z.boolean(),
 });
 export type VoiceSettings = z.infer<typeof voiceSettingsSchema>;
 
@@ -29,6 +37,10 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   speakReplies: true,
   speakAttention: true,
   ttsVoice: '',
+  streaming: true,
+  handsFree: false,
+  wakePhrase: 'chorus',
+  onboarded: false,
 };
 
 export const transcriptionSchema = z.object({
@@ -54,7 +66,9 @@ export type VoiceStatus = z.infer<typeof voiceStatusSchema>;
 
 export const voiceEventSchema = z.discriminatedUnion('type', [
   /** The global toggle-to-talk shortcut fired (the app may be unfocused). */
-  z.object({ type: 'global-toggle' }),
+  z.object({ type: z.literal('global-toggle') }),
+  /** Live partial transcript of an open stream. */
+  z.object({ type: z.literal('partial'), streamId: z.string(), text: z.string() }),
 ]);
 export type VoiceEvent = z.infer<typeof voiceEventSchema>;
 
@@ -73,6 +87,25 @@ export const voiceContract = defineContract({
     error: voiceErrorSchema,
   }),
   getStatus: procedure({ input: z.void(), output: voiceStatusSchema }),
+  /**
+   * Opens a live transcription stream when the engine supports one (Deepgram). `supported: false`
+   * means the caller should upload the finished utterance instead.
+   */
+  openStream: procedure({
+    input: z.object({ vocabulary: z.array(z.string()).max(200) }),
+    output: z.object({ supported: z.boolean(), streamId: z.string().nullable() }),
+  }),
+  /** Appends base64 16 kHz PCM16 audio to an open stream. */
+  pushAudio: procedure({
+    input: z.object({ streamId: z.string(), pcm: z.string() }),
+    output: z.void(),
+  }),
+  closeStream: fallible({
+    input: z.object({ streamId: z.string() }),
+    data: transcriptionSchema,
+    error: voiceErrorSchema,
+  }),
+  abortStream: procedure({ input: z.object({ streamId: z.string() }), output: z.void() }),
   updateSettings: procedure({
     input: voiceSettingsSchema.partial(),
     output: voiceStatusSchema,

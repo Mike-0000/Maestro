@@ -20,6 +20,7 @@ import { getConductorStore } from '../../contributions/browser/app-stores';
 import { ConductorLogPanel } from './conductor-log-panel';
 import { PendingActionCard } from './pending-action-card';
 import { PlanPanel } from './plan-panel';
+import { VoiceSetupPanel } from './voice-setup';
 
 /** How long a conductor reply stays on screen. */
 const REPLY_VISIBLE_MS = 10_000;
@@ -34,6 +35,8 @@ export const ConductorHud = observer(function ConductorHud() {
   const conductor = getConductorStore();
   const [typing, setTyping] = useState(false);
   const [showLog, setShowLog] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(false);
+  const needsSetup = voice.settings !== null && !voice.settings.onboarded;
   const replyVisible = useRecentlyChanged(conductor.replyAt, REPLY_VISIBLE_MS);
 
   useEffect(() => {
@@ -67,6 +70,7 @@ export const ConductorHud = observer(function ConductorHud() {
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex flex-col items-center gap-2 px-4">
       <PlanPanel />
+      {setupOpen && <VoiceSetupPanel onClose={() => setSetupOpen(false)} />}
       <div
         role="status"
         aria-live="polite"
@@ -80,6 +84,15 @@ export const ConductorHud = observer(function ConductorHud() {
           <div className="min-w-0 flex-1 text-sm">
             <StatusLine />
           </div>
+          {needsSetup && !setupOpen && (
+            <button
+              type="button"
+              onClick={() => setSetupOpen(true)}
+              className="shrink-0 rounded-md bg-blue-500/10 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-500/20 dark:text-blue-300"
+            >
+              Set up voice
+            </button>
+          )}
           <HudIconButton
             label={voice.muted ? 'Unmute spoken replies' : 'Mute spoken replies'}
             onClick={() => voice.setMuted(!voice.muted)}
@@ -111,6 +124,12 @@ export const ConductorHud = observer(function ConductorHud() {
         {showUtterance && (
           <p className="truncate px-1 text-xs text-foreground-muted italic">
             “{conductor.lastUtterance}”
+          </p>
+        )}
+
+        {voice.ignoredUtterance && !conductor.busy && (
+          <p className="truncate px-1 text-xs text-foreground-muted">
+            Ignored “{voice.ignoredUtterance}” (no wake phrase)
           </p>
         )}
 
@@ -173,11 +192,17 @@ const StatusLine = observer(function StatusLine() {
     return (
       <span className="flex items-center gap-2 text-foreground">
         <LevelMeter level={voice.level} />
-        {voice.intent === 'dictation'
-          ? 'Dictating into the focused agent…'
-          : voice.mode === 'hold'
-            ? 'Listening… release to send'
-            : 'Listening… pause when you are done'}
+        {voice.partial ? (
+          <span className="min-w-0 truncate italic">{voice.partial}</span>
+        ) : voice.intent === 'dictation' ? (
+          'Dictating into the focused agent…'
+        ) : voice.origin === 'hands-free' ? (
+          'Listening (hands-free)…'
+        ) : voice.mode === 'hold' ? (
+          'Listening… release to send'
+        ) : (
+          'Listening… pause when you are done'
+        )}
       </span>
     );
   }
@@ -206,7 +231,13 @@ const StatusLine = observer(function StatusLine() {
   }
   return (
     <span className="px-1 text-xs whitespace-nowrap text-foreground-muted">
-      Hold <Key>Right Ctrl</Key> to talk
+      {voice.settings?.handsFree ? (
+        <>Hands-free: say “{capitalize(voice.settings.wakePhrase || 'Chorus')}, …”</>
+      ) : (
+        <>
+          Hold <Key>Right Ctrl</Key> to talk
+        </>
+      )}
       {voice.lastLatencyMs !== null && (
         <span className="ml-2 tabular-nums opacity-70">STT {voice.lastLatencyMs} ms</span>
       )}
@@ -386,4 +417,8 @@ function formatCompact(count: number): string {
   if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
   if (count >= 1_000) return `${Math.round(count / 1_000)}k`;
   return String(count);
+}
+
+function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }

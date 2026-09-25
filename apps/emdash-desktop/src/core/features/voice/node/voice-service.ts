@@ -12,18 +12,25 @@ import {
   type VoiceStatus,
 } from '../api/contract';
 import { DeepgramSttEngine } from './engines/deepgram';
+import { DeepgramStream } from './engines/deepgram-stream';
 import { SttEngineError, type SttEngine } from './engines/engine';
 import { OpenAiSttEngine } from './engines/openai';
 import { WhisperLocalSttEngine } from './engines/whisper-local';
 
 /** RIFF header (44 bytes) plus at least ~0.2 s of 16 kHz 16-bit audio. */
 const MIN_WAV_BYTES = 44 + 6400;
+/** A stream left open longer than this (a stuck key, a crashed renderer) is dropped. */
+const STREAM_MAX_MS = 90_000;
 
 export class VoiceService {
   readonly credentials: ChorusCredentials;
   private readonly settings: JsonSettingsFile<VoiceSettings>;
   private readonly engines: Record<SttEngineId, SttEngine>;
   private registeredShortcut: string | null = null;
+  private readonly streams = new Map<
+    string,
+    { stream: DeepgramStream; startedAt: number; timer: ReturnType<typeof setTimeout> }
+  >();
 
   constructor(
     private readonly host: ChorusHostServices,
@@ -51,6 +58,7 @@ export class VoiceService {
   }
 
   dispose(): void {
+    for (const id of [...this.streams.keys()]) this.abortStream(id);
     if (this.registeredShortcut) this.host.globalShortcuts.unregister(this.registeredShortcut);
     this.registeredShortcut = null;
   }
@@ -75,6 +83,49 @@ export class VoiceService {
   async setCredential(id: ChorusCredentialId, value: string | null): Promise<VoiceStatus> {
     await this.credentials.set(id, value);
     return this.status();
+  }
+
+  /** Opens a live stream if the current engine supports one; null means upload instead. */
+  async openStream(
+    vocabulary: readonly string[],
+    onPartial: (streamId: string, text: string) => void
+  ): Promise<string | null> {
+    const settings = await this.settings.read();
+    if (settings.engine !== 'deepgram' || !settings.streaming) return null;
+    const key = await this.credentials.get('deepgram');
+    if (!key) return null;
+    const streamId = crypto.randomUUID();
+    const stream = new DeepgramStream(key, { language: settings.language, vocabulary }, (text) =>
+      onPartial(streamId, text)
+    );
+    const timer = setTimeout(() => this.abortStream(streamId), STREAM_MAX_MS);
+    this.streams.set(streamId, { stream, startedAt: performance.now(), timer });
+    return streamId;
+  }
+
+  pushAudio(streamId: string, pcm: Uint8Array<ArrayBuffer>): void {
+    this.streams.get(streamId)?.stream.push(pcm);
+  }
+
+  async closeStream(streamId: string): Promise<Transcription> {
+    const entry = this.streams.get(streamId);
+    if (!entry) throw new SttEngineError('engine-failed', 'That transcription stream expired.');
+    this.streams.delete(streamId);
+    clearTimeout(entry.timer);
+    const finishedAt = performance.now();
+    const text = (await entry.stream.finish()).trim();
+    // Latency the user feels: from releasing the key to having the final text.
+    const latencyMs = Math.round(performance.now() - finishedAt);
+    this.logger.info('voice: streamed', { latencyMs, chars: text.length });
+    return { text, engine: 'deepgram', latencyMs };
+  }
+
+  abortStream(streamId: string): void {
+    const entry = this.streams.get(streamId);
+    if (!entry) return;
+    this.streams.delete(streamId);
+    clearTimeout(entry.timer);
+    entry.stream.abort();
   }
 
   async transcribe(audio: Uint8Array, vocabulary: readonly string[]): Promise<Transcription> {

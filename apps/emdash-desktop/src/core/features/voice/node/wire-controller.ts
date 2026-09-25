@@ -5,6 +5,7 @@ import { createEventStreamHost } from '@emdash/wire/live';
 import { createController, type Controller } from '@emdash/wire/rpc';
 import type { ChorusHostServices } from '@core/primitives/chorus-host/api/host-services';
 import { voiceContract } from '../api/contract';
+import { base64ToBytes } from '../api/wav';
 import { SttEngineError } from './engines/engine';
 import { VoiceService } from './voice-service';
 
@@ -40,6 +41,29 @@ export function createVoiceWireController(options: {
       }
     },
     getStatus: () => service.status(),
+    openStream: async ({ vocabulary }) => {
+      const streamId = await service
+        .openStream(vocabulary, (id, text) =>
+          voiceEvents.emit(undefined, { type: 'partial', streamId: id, text })
+        )
+        .catch((error: unknown) => {
+          options.logger.warn('voice: could not open a stream', { error });
+          return null;
+        });
+      return { supported: streamId !== null, streamId };
+    },
+    pushAudio: ({ streamId, pcm }) => service.pushAudio(streamId, base64ToBytes(pcm)),
+    closeStream: async ({ streamId }) => {
+      try {
+        return ok(await service.closeStream(streamId));
+      } catch (error) {
+        if (error instanceof SttEngineError)
+          return err({ type: error.kind, message: error.message });
+        options.logger.error('voice: stream failed', { error });
+        return err({ type: 'engine-failed' as const, message: 'Live transcription failed.' });
+      }
+    },
+    abortStream: ({ streamId }) => service.abortStream(streamId),
     updateSettings: (patch) => service.updateSettings(patch),
     setCredential: ({ id, value }) => service.setCredential(id, value),
     openMicrophoneSettings: () => options.host.openMicrophoneSettings(),
