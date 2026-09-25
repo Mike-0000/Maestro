@@ -1,3 +1,4 @@
+import { canvasAppStoreContributions } from '@core/features/canvas/contributions/browser/app-stores';
 import { machinesAppStoreContributions } from '@core/features/machines/contributions/app-stores';
 import { createProjectsAppStoreContributions } from '@core/features/projects/contributions/app-stores';
 import { sourceControlAppStoreContributions } from '@core/features/source-control/contributions/browser/app-stores';
@@ -18,5 +19,6 @@ export const appStoreContributions: readonly AppScopedStoreContribution[] = [
   ...taskAppStoreContributions,
   ...machinesAppStoreContributions,
   ...workbenchAppStoreContributions,
+  ...canvasAppStoreContributions,
   ...updateAppStoreContributions,
 ];

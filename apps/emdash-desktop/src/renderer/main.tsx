@@ -13,6 +13,8 @@ import { monacoBootstrap } from '@core/features/editor/browser/monaco/monaco-boo
 import { getProjectManagerStore } from '@core/features/projects/api/browser/stores/project-selectors';
 import { prefetchAppSettingsKey } from '@core/features/settings/api/browser/use-app-settings-key';
 import { initSoundPlayer, soundPlayer } from '@core/features/settings/browser/sound-player';
+import { getCanvasStore } from '@core/features/canvas/contributions/browser/app-stores';
+import { canvasBoardMemento } from '@core/features/canvas/contributions/mementos';
 import { getSidebarStore } from '@core/features/workbench/contributions/browser/app-stores';
 import { workbenchSidebarMemento } from '@core/features/workbench/contributions/mementos';
 import { appStoreContributions } from '@core/manifests/browser/app-scoped-stores';
@@ -133,6 +135,7 @@ async function bootstrap() {
   const historyHandle = appSpace.handle(workbenchHistoryMemento);
   const legacyNavigationHandle = appSpace.handle(workbenchNavigationMemento);
   const sidebarHandle = appSpace.handle(workbenchSidebarMemento);
+  const canvasHandle = appSpace.handle(canvasBoardMemento);
   const projectsLoaded = getProjectManagerStore()
     .load()
     .then(() => bootMark('projects-loaded'));
@@ -144,6 +147,7 @@ async function bootstrap() {
     bootMark('memento-handles-ready');
     getNavigation().attachMemento(historyHandle, legacyNavigationHandle);
     getSidebarStore().attachMemento(sidebarHandle);
+    getCanvasStore().attachMemento(canvasHandle);
     wireNavigationTelemetry(getNavigation());
   });
   const sidebarInitialized = Promise.all([navigationRestored, projectsLoaded]).then(() => {

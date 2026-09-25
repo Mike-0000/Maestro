@@ -11,6 +11,7 @@ describe('viewCatalog', () => {
     expect(viewCatalog.defs.map(({ id }) => id)).toEqual([
       'home',
       'automations',
+      'canvas',
       'project',
       'task',
       'settings',
@@ -60,6 +61,7 @@ describe('viewCatalog', () => {
     ).toEqual({
       home: 'home_viewed',
       automations: 'automations_viewed',
+      canvas: 'canvas_viewed',
       project: 'project_viewed',
       task: 'task_viewed',
       settings: 'settings_viewed',

@@ -108,3 +108,6 @@ packages/plugins/src/agents/impl/*/fixtures/acp-transcript.json
 # Nx local cache and workspace data
 .nx/cache
 .nx/workspace-data
+
+# Chorus verification screenshots
+.chorus-shots/

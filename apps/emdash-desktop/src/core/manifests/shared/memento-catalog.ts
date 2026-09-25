@@ -1,3 +1,4 @@
+import { canvasBoardMemento } from '@core/features/canvas/contributions/mementos';
 import {
   acpDraftMemento,
   providerPreferencesMemento,
@@ -44,6 +45,7 @@ export const mementoCatalog: readonly MementoCatalogEntry[] = [
   workbenchPanelLayoutsMemento,
   workbenchSidebarMemento,
   workbenchHistoryMemento,
+  canvasBoardMemento,
 ];
 
 export const mementoSweepPolicies = mementoCatalog.flatMap((definition) =>
