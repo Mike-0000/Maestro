@@ -44,9 +44,10 @@ const TELL = /^(?:tell|ask)\s+(.+)$/i;
 function clean(utterance: string): string {
   return utterance
     .trim()
+    .replace(/[.!?]+$/, '')
     .replace(LEADING_FILLER, '')
     .replace(TRAILING_FILLER, '')
-    .replace(/[.!?]+$/, '')
+    .replace(/[.!?,]+$/, '')
     .trim();
 }
 
@@ -77,7 +78,7 @@ function resolveOrClarify(
   return null;
 }
 
-type Split = { agent: RosterAgent; text: string; refEndsWithTo: boolean };
+type Split = { agent: RosterAgent; text: string; refEndsWithTo: boolean; connector: boolean };
 
 /**
  * Splits "codex to run the tests" / "claude two to fix lint" into an agent and an instruction,
@@ -103,18 +104,28 @@ function splitAddressed(
     ) {
       continue;
     }
-    if (/^(?:to|that)$/i.test(remainder[0] ?? '')) remainder = remainder.slice(1);
+    const connector = /^(?:to|that)$/i.test(remainder[0] ?? '');
+    if (connector) remainder = remainder.slice(1);
     const text = remainder.join(' ').trim();
     if (!text) continue;
     const resolution = resolveAgent(reference, roster, focusedId);
     if (resolution.kind === 'match') {
-      splits.push({ agent: resolution.agent, text, refEndsWithTo: /^(?:to|too)$/.test(lastWord) });
+      splits.push({
+        agent: resolution.agent,
+        text,
+        refEndsWithTo: /^(?:to|too)$/.test(lastWord),
+        connector,
+      });
     } else if (resolution.kind === 'ambiguous' && !ambiguity) {
       ambiguity = { question: `Which one: ${describeCandidates(resolution.candidates)}?` };
     }
   }
   const preferred = splits.find((split) => !split.refEndsWithTo);
   if (preferred) return preferred;
+  // "Claude too to run…": a name read with a trailing to/too counts as "2" only when a connector
+  // still follows it; "tell Claude to run…" stays ambiguous instead of guessing Claude 2.
+  const numbered = splits.find((split) => split.refEndsWithTo && split.connector);
+  if (numbered) return numbered;
   if (ambiguity) return ambiguity;
   return splits[0] ?? null;
 }

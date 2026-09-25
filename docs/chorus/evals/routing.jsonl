@@ -1,0 +1,201 @@
+{"roster": [{"id": "c1", "name": "Claude 1", "providerLabel": "Claude", "taskName": "auth-refactor"}, {"id": "c2", "name": "Claude 2", "providerLabel": "Claude", "taskName": "settings-page"}, {"id": "x1", "name": "Codex 1", "providerLabel": "Codex", "taskName": "api-tests"}, {"id": "g1", "name": "Gemini 1", "providerLabel": "Gemini", "taskName": "docs"}]}
+{"utterance": "so stop talking please?", "focused": null, "expect": {"kind": "mute"}, "tag": "mute"}
+{"utterance": "can you split the auth rewrite across three agents", "focused": null, "expect": {"kind": "model"}, "tag": "model"}
+{"utterance": "um, jump to cloud 1 please.", "focused": null, "expect": {"kind": "focus", "agent": "c1"}, "tag": "focus"}
+{"utterance": "alright focus on Claude.", "focused": null, "expect": {"kind": "clarify"}, "tag": "ambiguous"}
+{"utterance": "alright check for merge conflicts between claude one and codex.", "focused": null, "expect": {"kind": "model"}, "tag": "model"}
+{"utterance": "tell Claude to to run the tests", "focused": null, "expect": {"kind": "send", "agent": "c2", "text": "run the tests"}, "tag": "homophone"}
+{"utterance": "okay who's waiting please.", "focused": null, "expect": {"kind": "next"}, "tag": "next"}
+{"utterance": "zoom out.", "focused": null, "expect": {"kind": "overview"}, "tag": "overview"}
+{"utterance": "so talk to me, thanks.", "focused": null, "expect": {"kind": "unmute"}, "tag": "unmute"}
+{"utterance": "um, set up a plan to add oauth with google and github please.", "focused": null, "expect": {"kind": "model"}, "tag": "model"}
+{"utterance": "okay zoom in on codecs one?", "focused": null, "expect": {"kind": "focus", "agent": "x1"}, "tag": "focus"}
+{"utterance": "okay spin up an agent to migrate us to the new router?", "focused": null, "expect": {"kind": "model"}, "tag": "model"}
+{"utterance": "hey chorus, halt kodex", "focused": null, "expect": {"kind": "interrupt", "agent": "x1"}, "tag": "interrupt"}
+{"utterance": "alright never mind.", "focused": null, "expect": {"kind": "reject"}, "tag": "reject"}
+{"utterance": "okay who needs me.", "focused": null, "expect": {"kind": "next"}, "tag": "next"}
+{"utterance": "go to Clod one.", "focused": null, "expect": {"kind": "focus", "agent": "c1"}, "tag": "focus"}
+{"utterance": "um, tell kodex to write docs for the auth module.", "focused": null, "expect": {"kind": "send", "agent": "x1", "text": "write docs for the auth module"}, "tag": "send"}
+{"utterance": "so go to Claude 1, thanks.", "focused": null, "expect": {"kind": "focus", "agent": "c1"}, "tag": "focus"}
+{"utterance": "so is cloud 1 done?", "focused": null, "expect": {"kind": "status", "agent": "c1"}, "tag": "status"}
+{"utterance": "switch to Claude won.", "focused": null, "expect": {"kind": "focus", "agent": "c1"}, "tag": "focus"}
+{"utterance": "hey chorus, go to Codex", "focused": null, "expect": {"kind": "focus", "agent": "x1"}, "tag": "focus"}
+{"utterance": "um, tell Claude too to explain why the build failed", "focused": null, "expect": {"kind": "send", "agent": "c2", "text": "explain why the build failed"}, "tag": "send"}
+{"utterance": "what is Claude too doing?", "focused": null, "expect": {"kind": "status", "agent": "c2"}, "tag": "status"}
+{"utterance": "okay jump to claud two.", "focused": null, "expect": {"kind": "focus", "agent": "c2"}, "tag": "focus"}
+{"utterance": "open Claude won.", "focused": null, "expect": {"kind": "focus", "agent": "c1"}, "tag": "focus"}
+{"utterance": "tell claude two to fix lint", "focused": null, "expect": {"kind": "send", "agent": "c2", "text": "fix lint"}, "tag": "homophone"}
+{"utterance": "hey chorus, ask the codex one to write docs for the auth module please", "focused": null, "expect": {"kind": "send", "agent": "x1", "text": "write docs for the auth module"}, "tag": "send"}
+{"utterance": "Claude 2, add a loading spinner to the settings page.", "focused": null, "expect": {"kind": "send", "agent": "c2", "text": "add a loading spinner to the settings page"}, "tag": "vocative"}
+{"utterance": "what's claude doing, thanks.", "focused": null, "expect": {"kind": "clarify"}, "tag": "ambiguous"}
+{"utterance": "um, ask Gemini 1 to write docs for the auth module.", "focused": null, "expect": {"kind": "send", "agent": "g1", "text": "write docs for the auth module"}, "tag": "send"}
+{"utterance": "okay jump to codecs one.", "focused": null, "expect": {"kind": "focus", "agent": "x1"}, "tag": "focus"}
+{"utterance": "uh plan the payments feature?", "focused": null, "expect": {"kind": "model"}, "tag": "model"}
+{"utterance": "alright confirm please", "focused": null, "expect": {"kind": "confirm"}, "tag": "confirm"}
+{"utterance": "hey chorus, ask Codex to fix the lint errors", "focused": null, "expect": {"kind": "send", "agent": "x1", "text": "fix the lint errors"}, "tag": "send"}
+{"utterance": "uh jump to Codex 1 please", "focused": null, "expect": {"kind": "focus", "agent": "x1"}, "tag": "focus"}
+{"utterance": "take a note: ship the voice HUD", "focused": null, "expect": {"kind": "note", "text": "ship the voice HUD"}, "tag": "note"}
+{"utterance": "uh ask Clod 2 to commit and push your branch, thanks", "focused": null, "expect": {"kind": "send", "agent": "c2", "text": "commit and push your branch"}, "tag": "send"}
+{"utterance": "okay tell Claude 1 to explain why the build failed.", "focused": null, "expect": {"kind": "send", "agent": "c1", "text": "explain why the build failed"}, "tag": "send"}
+{"utterance": "ask the gemini one to commit and push your branch, thanks", "focused": null, "expect": {"kind": "send", "agent": "g1", "text": "commit and push your branch"}, "tag": "send"}
+{"utterance": "so rename Claude 2 to Settings, thanks.", "focused": null, "expect": {"kind": "model"}, "tag": "model"}
+{"utterance": "so jump to claude one?", "focused": null, "expect": {"kind": "focus", "agent": "c1"}, "tag": "focus"}
+{"utterance": "summarize what everyone is working on please?", "focused": null, "expect": {"kind": "model"}, "tag": "model"}
+{"utterance": "uh reject", "focused": null, "expect": {"kind": "reject"}, "tag": "reject"}
+{"utterance": "um, stop Aider?", "focused": null, "expect": {"kind": "model"}, "tag": "unknown-agent"}
+{"utterance": "Gemini 1, add a loading spinner to the settings page.", "focused": null, "expect": {"kind": "send", "agent": "g1", "text": "add a loading spinner to the settings page"}, "tag": "vocative"}
+{"utterance": "so ask cloud 1 to explain why the build failed", "focused": null, "expect": {"kind": "send", "agent": "c1", "text": "explain why the build failed"}, "tag": "send"}
+{"utterance": "which agents are going to conflict", "focused": null, "expect": {"kind": "model"}, "tag": "model"}
+{"utterance": "alright how's Codex doing, thanks?", "focused": null, "expect": {"kind": "status", "agent": "x1"}, "tag": "status"}
+{"utterance": "okay show all agents?", "focused": null, "expect": {"kind": "overview"}, "tag": "overview"}
+{"utterance": "take a note: ask Sam about the API keys", "focused": null, "expect": {"kind": "note", "text": "ask Sam about the API keys"}, "tag": "note"}
+{"utterance": "alright show me Gemini please?", "focused": null, "expect": {"kind": "focus", "agent": "g1"}, "tag": "focus"}
+{"utterance": "hey chorus, fit all", "focused": null, "expect": {"kind": "overview"}, "tag": "overview"}
+{"utterance": "note ask Sam about the API keys", "focused": null, "expect": {"kind": "note", "text": "ask Sam about the API keys"}, "tag": "note"}
+{"utterance": "show all?", "focused": null, "expect": {"kind": "overview"}, "tag": "overview"}
+{"utterance": "stop claude.", "focused": null, "expect": {"kind": "clarify"}, "tag": "ambiguous"}
+{"utterance": "zoom in on Clod 2, thanks?", "focused": null, "expect": {"kind": "focus", "agent": "c2"}, "tag": "focus"}
+{"utterance": "uh how's Clod 2 doing, thanks.", "focused": null, "expect": {"kind": "status", "agent": "c2"}, "tag": "status"}
+{"utterance": "focus on Cursor 3", "focused": null, "expect": {"kind": "model"}, "tag": "unknown-agent"}
+{"utterance": "tell Codex 1 to explain why the build failed?", "focused": null, "expect": {"kind": "send", "agent": "x1", "text": "explain why the build failed"}, "tag": "send"}
+{"utterance": "stop cloud 1?", "focused": null, "expect": {"kind": "interrupt", "agent": "c1"}, "tag": "interrupt"}
+{"utterance": "uh tell the codex one to explain why the build failed.", "focused": null, "expect": {"kind": "send", "agent": "x1", "text": "explain why the build failed"}, "tag": "send"}
+{"utterance": "compare the two claude branches?", "focused": null, "expect": {"kind": "model"}, "tag": "model"}
+{"utterance": "make the canvas less cluttered please.", "focused": null, "expect": {"kind": "model"}, "tag": "model"}
+{"utterance": "ask claud two to rebase on main please", "focused": null, "expect": {"kind": "send", "agent": "c2", "text": "rebase on main"}, "tag": "send"}
+{"utterance": "how's the gemini one doing please.", "focused": null, "expect": {"kind": "status", "agent": "g1"}, "tag": "status"}
+{"utterance": "tell Gemini 1 to add a loading spinner to the settings page please", "focused": null, "expect": {"kind": "send", "agent": "g1", "text": "add a loading spinner to the settings page"}, "tag": "send"}
+{"utterance": "uh tell claude one to write docs for the auth module please", "focused": null, "expect": {"kind": "send", "agent": "c1", "text": "write docs for the auth module"}, "tag": "send"}
+{"utterance": "alright switch to the codex one please.", "focused": null, "expect": {"kind": "focus", "agent": "x1"}, "tag": "focus"}
+{"utterance": "okay yep, thanks", "focused": null, "expect": {"kind": "confirm"}, "tag": "confirm"}
+{"utterance": "allow it", "focused": null, "expect": {"kind": "confirm"}, "tag": "confirm"}
+{"utterance": "um, is this one done please.", "focused": "x1", "expect": {"kind": "status", "agent": "x1"}, "tag": "deictic"}
+{"utterance": "okay status of claude one", "focused": null, "expect": {"kind": "status", "agent": "c1"}, "tag": "status"}
+{"utterance": "alright go ahead", "focused": null, "expect": {"kind": "confirm"}, "tag": "confirm"}
+{"utterance": "so stop Clod 2?", "focused": null, "expect": {"kind": "interrupt", "agent": "c2"}, "tag": "interrupt"}
+{"utterance": "um, how's Gemini doing.", "focused": null, "expect": {"kind": "status", "agent": "g1"}, "tag": "status"}
+{"utterance": "hey chorus, is anything waiting on me for permission and if so what does it want, thanks.", "focused": null, "expect": {"kind": "model"}, "tag": "model"}
+{"utterance": "alright show me Gemini please.", "focused": null, "expect": {"kind": "focus", "agent": "g1"}, "tag": "focus"}
+{"utterance": "um, interrupt Claude won.", "focused": null, "expect": {"kind": "interrupt", "agent": "c1"}, "tag": "interrupt"}
+{"utterance": "submit it, thanks", "focused": null, "expect": {"kind": "submit"}, "tag": "submit"}
+{"utterance": "take a note: check the flaky test tomorrow", "focused": null, "expect": {"kind": "note", "text": "check the flaky test tomorrow"}, "tag": "note"}
+{"utterance": "okay build a settings page with dark mode and split it between Claude and Codex please.", "focused": null, "expect": {"kind": "model"}, "tag": "model"}
+{"utterance": "halt Gemini 1, thanks?", "focused": null, "expect": {"kind": "interrupt", "agent": "g1"}, "tag": "interrupt"}
+{"utterance": "what is codex one doing?", "focused": null, "expect": {"kind": "status", "agent": "x1"}, "tag": "status"}
+{"utterance": "okay go to Clod 2.", "focused": null, "expect": {"kind": "focus", "agent": "c2"}, "tag": "focus"}
+{"utterance": "yeah", "focused": null, "expect": {"kind": "confirm"}, "tag": "confirm"}
+{"utterance": "jump to the gemini one please.", "focused": null, "expect": {"kind": "focus", "agent": "g1"}, "tag": "focus"}
+{"utterance": "okay interrupt Claude 2?", "focused": null, "expect": {"kind": "interrupt", "agent": "c2"}, "tag": "interrupt"}
+{"utterance": "submit?", "focused": null, "expect": {"kind": "submit"}, "tag": "submit"}
+{"utterance": "um, be quiet.", "focused": null, "expect": {"kind": "mute"}, "tag": "mute"}
+{"utterance": "hey chorus, what's Copilot doing please?", "focused": null, "expect": {"kind": "model"}, "tag": "unknown-agent"}
+{"utterance": "show me everything, thanks.", "focused": null, "expect": {"kind": "overview"}, "tag": "overview"}
+{"utterance": "okay is claud two done", "focused": null, "expect": {"kind": "status", "agent": "c2"}, "tag": "status"}
+{"utterance": "alright interrupt Codex.", "focused": null, "expect": {"kind": "interrupt", "agent": "x1"}, "tag": "interrupt"}
+{"utterance": "um, ask Claude won to commit and push your branch?", "focused": null, "expect": {"kind": "send", "agent": "c1", "text": "commit and push your branch"}, "tag": "send"}
+{"utterance": "nope, thanks.", "focused": null, "expect": {"kind": "reject"}, "tag": "reject"}
+{"utterance": "alright deny", "focused": null, "expect": {"kind": "reject"}, "tag": "reject"}
+{"utterance": "alright abort", "focused": null, "expect": {"kind": "reject"}, "tag": "reject"}
+{"utterance": "focus on this one.", "focused": "x1", "expect": {"kind": "focus", "agent": "x1"}, "tag": "deictic"}
+{"utterance": "um, what did I ask claude one earlier.", "focused": null, "expect": {"kind": "model"}, "tag": "model"}
+{"utterance": "alright ask Codex 1 to add a loading spinner to the settings page, thanks", "focused": null, "expect": {"kind": "send", "agent": "x1", "text": "add a loading spinner to the settings page"}, "tag": "send"}
+{"utterance": "tell Claude 1 to deploy", "focused": null, "expect": {"kind": "send", "agent": "c1", "text": "deploy"}, "tag": "homophone"}
+{"utterance": "jump to claude two.", "focused": null, "expect": {"kind": "focus", "agent": "c2"}, "tag": "focus"}
+{"utterance": "tell claude two to commit and push your branch.", "focused": null, "expect": {"kind": "send", "agent": "c2", "text": "commit and push your branch"}, "tag": "send"}
+{"utterance": "hey chorus, halt Claude too please", "focused": null, "expect": {"kind": "interrupt", "agent": "c2"}, "tag": "interrupt"}
+{"utterance": "show me gemini one", "focused": null, "expect": {"kind": "focus", "agent": "g1"}, "tag": "focus"}
+{"utterance": "okay ask codex one to add a loading spinner to the settings page?", "focused": null, "expect": {"kind": "send", "agent": "x1", "text": "add a loading spinner to the settings page"}, "tag": "send"}
+{"utterance": "open kodex, thanks", "focused": null, "expect": {"kind": "focus", "agent": "x1"}, "tag": "focus"}
+{"utterance": "uh open Gemini 1.", "focused": null, "expect": {"kind": "focus", "agent": "g1"}, "tag": "focus"}
+{"utterance": "approve please?", "focused": null, "expect": {"kind": "confirm"}, "tag": "confirm"}
+{"utterance": "what's claude two doing?", "focused": null, "expect": {"kind": "status", "agent": "c2"}, "tag": "status"}
+{"utterance": "um, hit enter please.", "focused": null, "expect": {"kind": "submit"}, "tag": "submit"}
+{"utterance": "okay next one please?", "focused": null, "expect": {"kind": "next"}, "tag": "next"}
+{"utterance": "tell cloud 1 to run the tests", "focused": null, "expect": {"kind": "send", "agent": "c1", "text": "run the tests"}, "tag": "send"}
+{"utterance": "so tell Claude won to fix the lint errors, thanks.", "focused": null, "expect": {"kind": "send", "agent": "c1", "text": "fix the lint errors"}, "tag": "send"}
+{"utterance": "ask claude two to use the new logger instead of console.log.", "focused": null, "expect": {"kind": "send", "agent": "c2", "text": "use the new logger instead of console.log"}, "tag": "send"}
+{"utterance": "okay halt codex one, thanks.", "focused": null, "expect": {"kind": "interrupt", "agent": "x1"}, "tag": "interrupt"}
+{"utterance": "uh zoom in on Claude too please.", "focused": null, "expect": {"kind": "focus", "agent": "c2"}, "tag": "focus"}
+{"utterance": "um, cancel please.", "focused": null, "expect": {"kind": "reject"}, "tag": "reject"}
+{"utterance": "alright interrupt Clod one.", "focused": null, "expect": {"kind": "interrupt", "agent": "c1"}, "tag": "interrupt"}
+{"utterance": "hey chorus, ask claude one to rebase on main, thanks?", "focused": null, "expect": {"kind": "send", "agent": "c1", "text": "rebase on main"}, "tag": "send"}
+{"utterance": "um, what is kodex doing", "focused": null, "expect": {"kind": "status", "agent": "x1"}, "tag": "status"}
+{"utterance": "um, tell Claude 2 to add a loading spinner to the settings page please", "focused": null, "expect": {"kind": "send", "agent": "c2", "text": "add a loading spinner to the settings page"}, "tag": "send"}
+{"utterance": "focus on claude two, thanks?", "focused": null, "expect": {"kind": "focus", "agent": "c2"}, "tag": "focus"}
+{"utterance": "zoom in on Codex.", "focused": null, "expect": {"kind": "focus", "agent": "x1"}, "tag": "focus"}
+{"utterance": "hey chorus, ask codecs one to commit and push your branch", "focused": null, "expect": {"kind": "send", "agent": "x1", "text": "commit and push your branch"}, "tag": "send"}
+{"utterance": "um, tell gemini one to write docs for the auth module, thanks.", "focused": null, "expect": {"kind": "send", "agent": "g1", "text": "write docs for the auth module"}, "tag": "send"}
+{"utterance": "so interrupt Gemini.", "focused": null, "expect": {"kind": "interrupt", "agent": "g1"}, "tag": "interrupt"}
+{"utterance": "ask Claude 1 to run the tests.", "focused": null, "expect": {"kind": "send", "agent": "c1", "text": "run the tests"}, "tag": "send"}
+{"utterance": "add a note, ship the voice HUD", "focused": null, "expect": {"kind": "note", "text": "ship the voice HUD"}, "tag": "note"}
+{"utterance": "note ship the voice HUD", "focused": null, "expect": {"kind": "note", "text": "ship the voice HUD"}, "tag": "note"}
+{"utterance": "pause claude one", "focused": null, "expect": {"kind": "interrupt", "agent": "c1"}, "tag": "interrupt"}
+{"utterance": "um, send it please", "focused": null, "expect": {"kind": "submit"}, "tag": "submit"}
+{"utterance": "so ask Claude too to add a loading spinner to the settings page?", "focused": null, "expect": {"kind": "send", "agent": "c2", "text": "add a loading spinner to the settings page"}, "tag": "send"}
+{"utterance": "tell Codex to write docs for the auth module, thanks", "focused": null, "expect": {"kind": "send", "agent": "x1", "text": "write docs for the auth module"}, "tag": "send"}
+{"utterance": "pause gemini one", "focused": null, "expect": {"kind": "interrupt", "agent": "g1"}, "tag": "interrupt"}
+{"utterance": "tell codex one to commit and push your branch", "focused": null, "expect": {"kind": "send", "agent": "x1", "text": "commit and push your branch"}, "tag": "send"}
+{"utterance": "um, refactor the logging across the whole repo in parallel please", "focused": null, "expect": {"kind": "model"}, "tag": "model"}
+{"utterance": "what's next", "focused": null, "expect": {"kind": "next"}, "tag": "next"}
+{"utterance": "okay yes?", "focused": null, "expect": {"kind": "confirm"}, "tag": "confirm"}
+{"utterance": "open the gemini one.", "focused": null, "expect": {"kind": "focus", "agent": "g1"}, "tag": "focus"}
+{"utterance": "stop the gemini one", "focused": null, "expect": {"kind": "interrupt", "agent": "g1"}, "tag": "interrupt"}
+{"utterance": "hey chorus, switch to the codex one.", "focused": null, "expect": {"kind": "focus", "agent": "x1"}, "tag": "focus"}
+{"utterance": "so no.", "focused": null, "expect": {"kind": "reject"}, "tag": "reject"}
+{"utterance": "alright tell codecs one to write docs for the auth module", "focused": null, "expect": {"kind": "send", "agent": "x1", "text": "write docs for the auth module"}, "tag": "send"}
+{"utterance": "um, ask Gemini to run the tests please", "focused": null, "expect": {"kind": "send", "agent": "g1", "text": "run the tests"}, "tag": "send"}
+{"utterance": "so interrupt claud two", "focused": null, "expect": {"kind": "interrupt", "agent": "c2"}, "tag": "interrupt"}
+{"utterance": "so show me Gemini 1.", "focused": null, "expect": {"kind": "focus", "agent": "g1"}, "tag": "focus"}
+{"utterance": "um, status of Gemini 1, thanks", "focused": null, "expect": {"kind": "status", "agent": "g1"}, "tag": "status"}
+{"utterance": "halt the codex one please", "focused": null, "expect": {"kind": "interrupt", "agent": "x1"}, "tag": "interrupt"}
+{"utterance": "hey chorus, ask gemini one to write docs for the auth module please", "focused": null, "expect": {"kind": "send", "agent": "g1", "text": "write docs for the auth module"}, "tag": "send"}
+{"utterance": "focus on Clod one.", "focused": null, "expect": {"kind": "focus", "agent": "c1"}, "tag": "focus"}
+{"utterance": "ask kodex to fix the lint errors.", "focused": null, "expect": {"kind": "send", "agent": "x1", "text": "fix the lint errors"}, "tag": "send"}
+{"utterance": "ask codex to add retries", "focused": null, "expect": {"kind": "send", "agent": "x1", "text": "add retries"}, "tag": "homophone"}
+{"utterance": "is Claude won done", "focused": null, "expect": {"kind": "status", "agent": "c1"}, "tag": "status"}
+{"utterance": "ask Clod one to commit and push your branch please.", "focused": null, "expect": {"kind": "send", "agent": "c1", "text": "commit and push your branch"}, "tag": "send"}
+{"utterance": "why is the build red.", "focused": null, "expect": {"kind": "model"}, "tag": "model"}
+{"utterance": "hey chorus, mute.", "focused": null, "expect": {"kind": "mute"}, "tag": "mute"}
+{"utterance": "is Codex 1 done, thanks", "focused": null, "expect": {"kind": "status", "agent": "x1"}, "tag": "status"}
+{"utterance": "um, tell claud two to fix the lint errors.", "focused": null, "expect": {"kind": "send", "agent": "c2", "text": "fix the lint errors"}, "tag": "send"}
+{"utterance": "alright what is Claude 2 doing please.", "focused": null, "expect": {"kind": "status", "agent": "c2"}, "tag": "status"}
+{"utterance": "um, start a new agent on the docs.", "focused": null, "expect": {"kind": "model"}, "tag": "model"}
+{"utterance": "uh next please?", "focused": null, "expect": {"kind": "next"}, "tag": "next"}
+{"utterance": "uh switch to Codex 1", "focused": null, "expect": {"kind": "focus", "agent": "x1"}, "tag": "focus"}
+{"utterance": "uh jump to claud two, thanks.", "focused": null, "expect": {"kind": "focus", "agent": "c2"}, "tag": "focus"}
+{"utterance": "alright what's the codex one doing.", "focused": null, "expect": {"kind": "status", "agent": "x1"}, "tag": "status"}
+{"utterance": "archive the gemini task, it's done.", "focused": null, "expect": {"kind": "model"}, "tag": "model"}
+{"utterance": "uh tell Clod one to explain why the build failed.", "focused": null, "expect": {"kind": "send", "agent": "c1", "text": "explain why the build failed"}, "tag": "send"}
+{"utterance": "um, tell Gemini to commit and push your branch?", "focused": null, "expect": {"kind": "send", "agent": "g1", "text": "commit and push your branch"}, "tag": "send"}
+{"utterance": "alright halt Codex 1", "focused": null, "expect": {"kind": "interrupt", "agent": "x1"}, "tag": "interrupt"}
+{"utterance": "um, go to codex one.", "focused": null, "expect": {"kind": "focus", "agent": "x1"}, "tag": "focus"}
+{"utterance": "do it", "focused": null, "expect": {"kind": "confirm"}, "tag": "confirm"}
+{"utterance": "what's Claude 1 doing please.", "focused": null, "expect": {"kind": "status", "agent": "c1"}, "tag": "status"}
+{"utterance": "tell Clod 2 to rebase on main please.", "focused": null, "expect": {"kind": "send", "agent": "c2", "text": "rebase on main"}, "tag": "send"}
+{"utterance": "alright go to Claude 2.", "focused": null, "expect": {"kind": "focus", "agent": "c2"}, "tag": "focus"}
+{"utterance": "status of codecs one, thanks", "focused": null, "expect": {"kind": "status", "agent": "x1"}, "tag": "status"}
+{"utterance": "switch to Claude 1?", "focused": null, "expect": {"kind": "focus", "agent": "c1"}, "tag": "focus"}
+{"utterance": "jump to Claude 2.", "focused": null, "expect": {"kind": "focus", "agent": "c2"}, "tag": "focus"}
+{"utterance": "hey chorus, tell claude to run the tests please?", "focused": null, "expect": {"kind": "clarify"}, "tag": "ambiguous"}
+{"utterance": "hey chorus, give codex the same instructions as claude two please.", "focused": null, "expect": {"kind": "model"}, "tag": "model"}
+{"utterance": "uh show me codex one.", "focused": null, "expect": {"kind": "focus", "agent": "x1"}, "tag": "focus"}
+{"utterance": "add a note, ask Sam about the API keys", "focused": null, "expect": {"kind": "note", "text": "ask Sam about the API keys"}, "tag": "note"}
+{"utterance": "hey chorus, overview please", "focused": null, "expect": {"kind": "overview"}, "tag": "overview"}
+{"utterance": "hey chorus, switch to claude one please.", "focused": null, "expect": {"kind": "focus", "agent": "c1"}, "tag": "focus"}
+{"utterance": "uh go to cloud 1", "focused": null, "expect": {"kind": "focus", "agent": "c1"}, "tag": "focus"}
+{"utterance": "have Claude 1 review what Codex did and then fix anything it finds?", "focused": null, "expect": {"kind": "model"}, "tag": "model"}
+{"utterance": "unmute?", "focused": null, "expect": {"kind": "unmute"}, "tag": "unmute"}
+{"utterance": "so go to kodex, thanks?", "focused": null, "expect": {"kind": "focus", "agent": "x1"}, "tag": "focus"}
+{"utterance": "um, what changed in the api tests branch.", "focused": null, "expect": {"kind": "model"}, "tag": "model"}
+{"utterance": "focus on Claude too.", "focused": null, "expect": {"kind": "focus", "agent": "c2"}, "tag": "focus"}
+{"utterance": "uh what's gemini one doing", "focused": null, "expect": {"kind": "status", "agent": "g1"}, "tag": "status"}
+{"utterance": "hey chorus, interrupt Claude 1", "focused": null, "expect": {"kind": "interrupt", "agent": "c1"}, "tag": "interrupt"}
+{"utterance": "Claude 1, add a loading spinner to the settings page.", "focused": null, "expect": {"kind": "send", "agent": "c1", "text": "add a loading spinner to the settings page"}, "tag": "vocative"}
+{"utterance": "what's it doing.", "focused": "x1", "expect": {"kind": "status", "agent": "x1"}, "tag": "deictic"}
+{"utterance": "um, stop it.", "focused": "x1", "expect": {"kind": "interrupt", "agent": "x1"}, "tag": "deictic"}
+{"utterance": "alright is Clod one done please?", "focused": null, "expect": {"kind": "status", "agent": "c1"}, "tag": "status"}
+{"utterance": "um, next agent, thanks?", "focused": null, "expect": {"kind": "next"}, "tag": "next"}
+{"utterance": "add a note, check the flaky test tomorrow", "focused": null, "expect": {"kind": "note", "text": "check the flaky test tomorrow"}, "tag": "note"}
+{"utterance": "Codex 1, explain why the build failed.", "focused": null, "expect": {"kind": "send", "agent": "x1", "text": "explain why the build failed"}, "tag": "vocative"}
+{"utterance": "note check the flaky test tomorrow", "focused": null, "expect": {"kind": "note", "text": "check the flaky test tomorrow"}, "tag": "note"}
+{"utterance": "press enter please.", "focused": null, "expect": {"kind": "submit"}, "tag": "submit"}
