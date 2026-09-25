@@ -305,43 +305,52 @@ Playwright browser tests (`src/renderer/tests/browser/`) using emdash's fixture 
 ## 11. Implementation status (2026-09-24)
 
 Built on `chorus/main`. Everything below was verified in the built app by Playwright drivers in
-`apps/emdash-desktop/tooling/chorus/` (no real LLM or cloud STT calls; agents stay idle).
+`apps/emdash-desktop/tooling/chorus/` (mock whisper-server, mock Jev, fake microphone, idle agents;
+no real LLM or cloud STT calls) and by unit tests against local mocks of the Anthropic, OpenRouter,
+and TypeSafe APIs.
 
 ### Shipped
 
 | Area | What exists | Verified by |
 |------|-------------|-------------|
-| Fork/rebrand | App id `dev.chorus.app`, name, userData dir, icons (generated Chorus mark), UI strings, NOTICE, updater and signing disabled | build + launch; `smoke`, `explore` steps |
-| Canvas | `canvas` view: React Flow board of every agent across projects; live xterm at zoom 1 (interactive), throttled preview, glyph LOD, live-tile budget 6; notes; minimap; project filter; hide/show; rename spoken names; resume sleeping agents; focus/fit animations; attention cycling | `canvas` step, screenshots |
-| Voice | AudioWorklet capture → 16 kHz WAV → main; OpenAI / Deepgram (keyterm) / local whisper.cpp; vocabulary biasing from roster; Right-Ctrl hold-to-talk, Shift for dictation, global toggle shortcut, click-to-talk, silence auto-stop; TTS replies and attention announcements with barge-in | `voice`, `voice-e2e` (fake mic → mock whisper-server → grammar → note on canvas) |
-| Conductor | Grammar fast path (52-case routing eval); Claude tool loop with 11 tools executing through existing stores; 1.5 s cancel window for send/interrupt/spawn; explicit confirmation for permission answers; agent resolver never guesses; plans with owned-path overlap/cycle/provider validation, approval, `sequential_after`, conflict radar (`git merge-tree`); sending to a stopped agent starts it and delivers when ready; JSONL audit log with history panel; daily token budget + HUD readout | unit tests; `conductor`, `note-drop` steps |
-| Windows | Long-path check with one-click `core.longpaths`; quit dialog names running agents; mic-privacy deep link | `note-drop` step (card shown) |
+| Fork/rebrand | App id `dev.chorus.app`, name, userData dir, generated Chorus icons, UI strings, NOTICE, updater and signing disabled | packaged `Chorus.exe`; `smoke` step |
+| Canvas | Board of every agent across projects; live xterm at zoom 1, throttled preview, glyph LOD, live-tile budget; notes (drop on an agent to send); task frames with diff stats, "Review changes", and group drag; minimap; project filter; hide/show; spoken-name rename; resume; open-on-launch; Shift+Esc back to canvas; palette commands and `Ctrl+Shift+A` / `Ctrl+Shift+J` | `canvas`, `frames`, `note-drop`, `commands` steps |
+| Voice | AudioWorklet capture; OpenAI / Deepgram (keyterm, live streaming partials) / local whisper.cpp / OpenRouter audio model; vocabulary biasing; Right-Ctrl hold-to-talk, Shift dictation, global toggle, click-to-talk; hands-free with speech onset, pre-roll, and a wake phrase; TTS with barge-in; first-run voice setup | `voice`, `voice-e2e`, `voice-handsfree` (fake mic bursts) |
+| Conductor | Grammar fast path (**200-utterance routing eval: 200/200**); Jev routing, triage, and plan review; Claude (Anthropic API or OpenRouter) tool loop with 12 tools; cancel window / explicit confirmation; plans with overlap/cycle/provider validation, Jev sizes and cost estimate, approval, `sequential_after`, conflict radar; project context pack in plan mode; archive tool; auto-resume on send; audit log + history; token budget | unit tests (mock APIs); `conductor`, `jev-routing` steps |
+| Providers | One-switch "Use OpenRouter for everything" (conductor + STT); Jev (TypeSafe) optional | unit tests |
+| Windows | Long-path fix; short worktree folder (host setting); Defender exclusion guide (copy only); mic permission scoped to the app window, audio only; quit dialog names running agents; mic-privacy deep link | settings screenshots; `voice` step |
 
 ### Deviations from the plan (and why)
 
-- **No new Drizzle tables.** Canvas layout, notes and names are an app memento (`canvas.board`);
-  conductor settings/usage/log are JSON(L) files under `userData/chorus`. Avoids migration
-  collisions with a fast-moving upstream; boards are one global board with a project filter.
-- **Conductor tools execute in the renderer** against the existing MobX stores (the same code paths
-  the UI uses); only the Claude call, keys, STT and git live in main. This reuses validated flows
-  instead of duplicating them in main.
-- **Model defaults:** `claude-opus-5` with effort `low` for commands and `high` for plans, adaptive
-  thinking, prompt caching, and server-side fallback to `claude-opus-4-8`. Configurable in settings.
-- **Plans render in the HUD**, not as canvas nodes (avoids a canvas↔conductor dependency cycle).
-- **Audio is uploaded per utterance** (Wire `uploadFile`), not streamed; the renderer never holds keys.
+- **No new Drizzle tables.** Canvas state is an app memento (`canvas.board`, v2); conductor and
+  voice settings, usage, and the turn log are JSON(L) files under `userData/chorus`. Avoids
+  migration collisions with a fast-moving upstream.
+- **Conductor tools execute in the renderer** through the existing stores; keys, model calls, STT,
+  and git stay in main.
+- **Model defaults:** `claude-opus-5`, effort `low` for commands and `high` for plans, adaptive
+  thinking, prompt caching, server-side fallback to `claude-opus-4-8`. OpenRouter is an alternative
+  provider (default `anthropic/claude-opus-5`).
+- **Jev (TypeSafe System One)** was added for the fast typed decisions the plan assigned to
+  regexes or to Claude: routing, permission risk, attention urgency, plan review and sizing.
+- **Plans render in the HUD**, not as canvas nodes; **task frames** combine the planned GroupTile
+  and DiffTile (diff review opens the existing Changes panel).
+- **Esc stays with the agent** (it interrupts TUIs); Shift+Esc returns focus to the canvas.
+  Attention cycling is `Ctrl+Shift+J` because `Ctrl+Tab` belongs to tabs.
+- **The built-in worktree root is unchanged** (changing it touches 11 upstream tests); Windows
+  users get a one-click switch to `~\chorus\wt` instead.
 
-### Not built yet
+### Needs a decision before building
 
-- GroupTile/DiffTile; canvas as the default home view; Esc-to-canvas focus. (Attention cycling
-  ships as `Ctrl+Shift+J`, "next", and the toolbar button rather than `Ctrl+Tab`, which tabs own.)
-- Streaming STT with live partials; hands-free VAD/wake word; global hold-to-talk (`uiohook-napi`).
-- `archive_agent` tool; per-project context pack for planning; cost estimate on plans.
-- Main-window `setPermissionRequestHandler` scoping (Electron's default currently grants media).
-- Defender-exclusion guide; default short worktree root; persistent PTY host (agents still stop
-  when the app quits; they resume via the provider's resume path).
-- First-run onboarding for voice (mic test, pick engine); signed installer.
-- Measurements M1–M8 and the 200-utterance / 50-recording / 10-goal eval sets. The grammar has a
-  52-case routing eval; everything else needs real keys, a real mic, and real agent runs.
+- **Global hold-to-talk** needs a native keyboard hook (`uiohook-napi`), which adds an install
+  script and native build — the repo rules require explicit review for that.
+- **Agents that survive quitting** need a detached PTY-host process (P5 in §7): a large change in
+  the high-risk PTY area. Today agents stop on quit and resume from the canvas.
+- **Signed installer** needs a code-signing certificate (e.g. Azure Trusted Signing account).
+
+### Not measured yet
+
+M1, M2, M5–M8 need real keys, a real microphone, a 16-agent session, and real agent runs. The STT
+(50 recordings) and planning (10 goals) eval sets are not recorded yet.
 
 ---
 

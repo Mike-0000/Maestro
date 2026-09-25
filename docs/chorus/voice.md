@@ -38,7 +38,7 @@ rename it. Common mishearings ("clod two", "codecs") are corrected automatically
 Sending text or interrupting shows a 1.5-second countdown in the HUD; press **Esc** or say "no"
 to cancel. Answering an agent's permission prompt always needs an explicit "yes".
 
-## The conductor (Claude)
+## The conductor
 
 Anything the grammar does not recognise goes to Claude, which can:
 
@@ -62,6 +62,7 @@ and a daily token budget (3M by default) stops runaway spend. Every turn is logg
 | OpenAI `gpt-4o-transcribe` | OpenAI API key | Default. Agent names are passed as a prompt hint. |
 | Deepgram Nova-3 | Deepgram API key | Agent names are boosted with `keyterm`. |
 | Local whisper.cpp | Run `whisper-server` | Audio never leaves your machine. |
+| OpenRouter | OpenRouter API key | Any audio-input model; one key for everything. |
 
 API keys are encrypted with Windows DPAPI (Electron `safeStorage`) and only ever used in the main
 process; the UI never sees them. Environment variables `OPENAI_API_KEY`, `DEEPGRAM_API_KEY`, and
@@ -82,6 +83,41 @@ process; the UI never sees them. Environment variables `OPENAI_API_KEY`, `DEEPGR
    `http://127.0.0.1:8178`.
 
 Chorus posts 16 kHz mono WAV to `/inference`.
+
+## Hands-free
+
+Turn on **Hands-free** in Settings → Voice & Conductor. The mic stays open; when you start
+speaking, Chorus records (including the moment before you started) until you pause. Only
+utterances that begin with the wake phrase run: "Chorus, focus Claude 1". Everything else is
+ignored (the HUD shows what it ignored). Every utterance is transcribed, so this uses more STT.
+
+## Live transcript
+
+With Deepgram and **Live transcript** on, audio streams while you speak and the words appear in
+the HUD as they are recognized. Other engines transcribe after you stop. If streaming fails,
+Chorus uploads the recording instead.
+
+## Jev (fast decisions)
+
+With a TypeSafe API key, the conductor uses Jev, a fast decision model (~50 ms, typed answers
+with calibrated confidence), for:
+
+- **Routing:** commands the built-in grammar misses ("can you bring up the codex agent") are
+  classified; confident navigation runs without calling Claude, and Jev decides whether a goal
+  needs planning.
+- **Triage:** when an agent starts waiting, Jev rates how urgently it needs you (the "next" order)
+  and how risky its permission request is (shown on the tile and in the confirmation).
+- **Plan review:** plans whose parallel subtasks would likely edit the same code, or whose prompts
+  are vague, go back to Claude to fix; subtasks get a size and the plan a rough token estimate.
+
+Jev only acts above the confidence you set (default 0.8); below it, Claude decides.
+
+## OpenRouter
+
+One OpenRouter key can run everything: turn on **Use OpenRouter for everything** in settings. The
+conductor then uses an OpenRouter model with tool calling (default `anthropic/claude-opus-5`) and
+speech-to-text uses an audio-input model (default `google/gemini-3.5-flash-lite`). Both models are
+configurable. Jev is separate (it is not on OpenRouter) and stays optional.
 
 ## Troubleshooting
 
