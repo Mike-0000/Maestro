@@ -58,11 +58,11 @@ const config: Configuration = {
       { target: 'dmg', arch: ['arm64'] },
       { target: 'zip', arch: ['arm64'] },
     ],
-    icon: 'src/assets/images/emdash/emdash-canary.icns',
+    icon: 'src/assets/images/chorus/chorus-canary.icns',
     notarize: false,
   },
   dmg: {
-    icon: 'src/assets/images/emdash/emdash-canary.icns',
+    icon: 'src/assets/images/chorus/chorus-canary.icns',
     background: 'build/dmg-background.tiff',
     window: { width: 530, height: 319 },
     contents: [
@@ -73,7 +73,7 @@ const config: Configuration = {
   linux: {
     category: 'Development',
     executableName: APP_NAME_LOWER,
-    icon: 'src/assets/images/emdash/emdash-canary.png',
+    icon: 'src/assets/images/chorus/chorus-canary.png',
     syncDesktopName: true,
     desktop: {
       entry: { StartupWMClass: PRODUCT_NAME },
@@ -91,7 +91,7 @@ const config: Configuration = {
     packageName: APP_NAME_LOWER,
   },
   win: {
-    icon: 'src/assets/images/emdash/emdash-canary.png',
+    icon: 'src/assets/images/chorus/chorus-canary.png',
     target: [
       { target: 'nsis', arch: ['x64'] },
       { target: 'msi', arch: ['x64'] },

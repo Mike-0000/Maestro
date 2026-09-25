@@ -52,8 +52,12 @@ finally {
   Remove-Item -LiteralPath $localConfig -Force -ErrorAction SilentlyContinue
 }
 
-$exe = Join-Path $outputDir 'win-unpacked/Emdash.exe'
-if (-not (Test-Path -LiteralPath $exe)) { throw "Windows executable not found: $exe" }
+# The product name decides the executable name (Chorus.exe in this fork, Emdash.exe upstream).
+$exe = @('Chorus.exe', 'Emdash.exe') |
+  ForEach-Object { Join-Path $outputDir "win-unpacked/$_" } |
+  Where-Object { Test-Path -LiteralPath $_ } |
+  Select-Object -First 1
+if (-not $exe) { throw "Windows executable not found in $(Join-Path $outputDir 'win-unpacked')" }
 New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
 $env:EMDASH_USER_DATA_DIR = $profileDir
 $env:EMDASH_DB_FILE = Join-Path $profileDir 'emdash4.db'
@@ -64,12 +68,12 @@ Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
 $process = Start-Process -FilePath $exe -WorkingDirectory (Split-Path $exe) -PassThru
 Start-Sleep -Seconds 12
 $process.Refresh()
-if ($process.HasExited) { throw "Built Emdash exited early with code $($process.ExitCode). Log: $env:EMDASH_LOG_FILE" }
+if ($process.HasExited) { throw "The built app exited early with code $($process.ExitCode). Log: $env:EMDASH_LOG_FILE" }
 
 Write-Host "Windows build launched (PID $($process.Id))"
 Write-Host "Executable: $exe"
 Write-Host "Isolated profile: $profileDir"
 Write-Host "Window title: $($process.MainWindowTitle) (handle $($process.MainWindowHandle))"
 if ($process.MainWindowHandle -eq 0 -or -not (Test-Path -LiteralPath $env:EMDASH_DB_FILE)) {
-  throw "Emdash is running, but its window or scratch database is not ready. Inspect $env:EMDASH_LOG_FILE"
+  throw "The app is running, but its window or scratch database is not ready. Inspect $env:EMDASH_LOG_FILE"
 }

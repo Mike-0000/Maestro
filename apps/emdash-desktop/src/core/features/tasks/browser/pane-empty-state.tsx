@@ -3,7 +3,6 @@ import type { ReactNode } from 'react';
 import { useTaskViewContext } from '@core/features/tasks/contributions/browser/task-view-context';
 import { useWorkspaceId } from '@core/features/workbench/api/browser/task-composition-context';
 import { useOpenModal } from '@core/manifests/browser/modal-api';
-import { EmdashLogo } from '@core/primitives/app-identity/browser/emdash-logo';
 import { BoundShortcut } from '@core/primitives/keybindings/browser/shortcut';
 import { useArrowKeyNavigation } from '@core/primitives/react-hooks/browser/use-arrow-key-navigation';
 import { cn } from '@core/primitives/styling/browser/cn';
@@ -40,7 +39,9 @@ export function PaneEmptyState() {
 
   return (
     <div className="text-muted-foreground flex h-full flex-col items-center justify-center gap-3">
-      <EmdashLogo height={32} className="text-background-2" />
+      <span className="text-[40px] leading-none font-semibold tracking-tight text-background-2 select-none">
+        chorus
+      </span>
       <div className="mx-auto mt-10 flex w-full max-w-xs flex-col gap-0.5">
         <PaneEmptyStateAction
           isSelected={selectedIndex === 0}

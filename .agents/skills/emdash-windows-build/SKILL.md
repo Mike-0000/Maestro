@@ -6,7 +6,7 @@ compatibility: Native Windows, pnpm and Node from this repository, Git Bash or P
 
 # Verify a Windows change by launching its build
 
-After making changes, run `scripts/build-launch-windows.ps1` from this skill directory. It installs dependencies if missing, runs the root Nx build, creates an **unsigned, unpacked** Windows build, and opens `Emdash.exe` with a unique scratch user-data directory and database. It does **not** install over `C:\Program Files\Emdash`, publish, sign, or run release workflows. Do not use `package:win` for this local test: `electron-builder.config.ts` selects publisher-only Azure Trusted Signing.
+After making changes, run `scripts/build-launch-windows.ps1` from this skill directory. It installs dependencies if missing, runs the root Nx build, creates an **unsigned, unpacked** Windows build, and opens `Chorus.exe` (or `Emdash.exe` on upstream checkouts) with a unique scratch user-data directory and database. It does **not** install over `C:\Program Files\Emdash`, publish, sign, or run release workflows. Do not use `package:win` for this local test: `electron-builder.config.ts` selects publisher-only Azure Trusted Signing.
 
 From the repo root in Git Bash (or adapt to PowerShell):
 

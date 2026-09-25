@@ -56,8 +56,8 @@ export function ProjectConfigImportModal({
   );
   const description =
     migrations.length === 1 && selectedMigration
-      ? `Found configuration file from ${selectedMigration.label} that can be imported into Emdash.`
-      : 'Found configuration files that can be imported into Emdash.';
+      ? `Found configuration file from ${selectedMigration.label} that can be imported into Chorus.`
+      : 'Found configuration files that can be imported into Chorus.';
 
   const disabled = !selectedMigration || status === 'importing' || status === 'imported';
 

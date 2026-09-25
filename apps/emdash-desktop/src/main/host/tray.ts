@@ -1,10 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { app, Menu, nativeImage, Tray } from 'electron';
-import canaryIcon from '@/assets/images/emdash/emdash-canary.png?asset';
-import devIcon from '@/assets/images/emdash/emdash-dev.png?asset';
-import stableIcon from '@/assets/images/emdash/emdash.png?asset';
-import trayTemplate1x from '@/assets/images/emdash/trayTemplate.png?asset';
-import trayTemplate2x from '@/assets/images/emdash/trayTemplate@2x.png?asset';
+import canaryIcon from '@/assets/images/chorus/chorus-canary.png?asset';
+import devIcon from '@/assets/images/chorus/chorus-dev.png?asset';
+import stableIcon from '@/assets/images/chorus/chorus.png?asset';
+import trayTemplate1x from '@/assets/images/chorus/trayTemplate.png?asset';
+import trayTemplate2x from '@/assets/images/chorus/trayTemplate@2x.png?asset';
 import { IS_CANARY, PRODUCT_NAME } from '@core/primitives/app-identity/api/app-identity';
 import { showMainWindow } from './window';
 

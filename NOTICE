@@ -1,0 +1,15 @@
+Chorus
+Copyright 2026 The Chorus authors
+
+Chorus is a fork of Emdash (https://github.com/generalaction/emdash),
+Copyright General Action, Inc. and the Emdash contributors, licensed under the
+Apache License, Version 2.0 (see LICENSE.md). Chorus adds an infinite agent
+canvas, voice control, and a Claude-powered conductor on top of Emdash's
+worktree, terminal, and agent-provider foundation.
+
+"Emdash" is a name of its respective owner. Chorus is not affiliated with or
+endorsed by the Emdash project. Emdash account and GitHub sign-in features in
+this app connect to Emdash's own services and are subject to their terms.
+
+This product includes third-party software; see the licenses of the packages in
+pnpm-lock.yaml.
