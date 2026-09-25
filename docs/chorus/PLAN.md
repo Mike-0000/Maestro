@@ -332,8 +332,8 @@ Built on `chorus/main`. Everything below was verified in the built app by Playwr
 
 ### Not built yet
 
-- GroupTile/DiffTile; canvas as the default home view; `Ctrl+Tab` binding (attention cycling exists
-  via "next" and the toolbar button); Esc-to-canvas focus.
+- GroupTile/DiffTile; canvas as the default home view; Esc-to-canvas focus. (Attention cycling
+  ships as `Ctrl+Shift+J`, "next", and the toolbar button rather than `Ctrl+Tab`, which tabs own.)
 - Streaming STT with live partials; hands-free VAD/wake word; global hold-to-talk (`uiohook-napi`).
 - `archive_agent` tool; per-project context pack for planning; cost estimate on plans.
 - Main-window `setPermissionRequestHandler` scoping (Electron's default currently grants media).

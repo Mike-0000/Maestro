@@ -14,6 +14,8 @@ model that can read, message, start, and plan across your agents.
 | Click to talk | The mic button in the floating HUD |
 | Cancel while listening | **Esc** |
 | Type instead of talking | The keyboard button in the HUD |
+| Open the canvas | **Ctrl + Shift + A** |
+| Jump to the agent that has waited longest | **Ctrl + Shift + J** |
 
 Toggle mode stops by itself when you pause for about a second.
 
