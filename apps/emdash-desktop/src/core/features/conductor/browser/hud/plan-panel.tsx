@@ -64,6 +64,15 @@ export const PlanPanel = observer(function PlanPanel() {
           <>
             <span className="flex-1 text-xs text-foreground-muted">
               Each agent gets its own worktree and branch. Say “yes” to start.
+              {plans.estimatedTokens && (
+                <span
+                  className="ml-1 tabular-nums"
+                  title="Rough estimate from Jev's size rating of each subtask; agents bill to their own provider accounts."
+                >
+                  Est. {formatTokens(plans.estimatedTokens[0])}–
+                  {formatTokens(plans.estimatedTokens[1])} agent tokens.
+                </span>
+              )}
             </span>
             <button
               type="button"
@@ -137,6 +146,14 @@ const SubtaskRow = observer(function SubtaskRow({ subtask }: { subtask: PlannedS
               : subtask.owned_paths.join(', '))}
         </p>
       </div>
+      {subtask.size && (
+        <span
+          title="Jev's size estimate"
+          className="shrink-0 rounded-full bg-foreground/5 px-1.5 py-0.5 text-[10px] font-medium text-foreground-muted uppercase"
+        >
+          {subtask.size[0]}
+        </span>
+      )}
       <StateChip state={subtask.state} />
     </li>
   );
@@ -177,4 +194,9 @@ function StateChip({ state }: { state: SubtaskState }) {
       {STATE_LABELS[state]}
     </span>
   );
+}
+
+function formatTokens(count: number): string {
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(count >= 10_000_000 ? 0 : 1)}M`;
+  return `${Math.round(count / 1_000)}k`;
 }

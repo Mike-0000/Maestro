@@ -4,6 +4,7 @@ import { getTaskStore } from '@core/features/tasks/api/browser/task-state/task-s
 import { log } from '@core/primitives/logging/browser/logger';
 import { getConductorClient } from '../api/browser/client';
 import type { ConflictReport } from '../api/contract';
+import { SIZE_TOKEN_RANGE, type SubtaskSize } from '../api/jev';
 import { findPlanOverlaps, scopedPrompt, type PlanInput, type PlanSubtask } from '../api/plan';
 import { deliverPromptWhenReady } from './deferred-prompt';
 import type { InstalledProvider } from './roster';
@@ -14,6 +15,8 @@ export type SubtaskState = 'pending' | 'waiting' | 'spawning' | 'running' | 'don
 
 export type PlannedSubtask = PlanSubtask & {
   state: SubtaskState;
+  /** Jev's size estimate, when available (drives the rough cost readout). */
+  size?: SubtaskSize;
   taskId?: string;
   conversationId?: string;
   error?: string;
@@ -184,6 +187,29 @@ export class PlanStore {
       if (subtask.state === 'pending') await this.spawn(subtask);
     }
     this.startRadar();
+  }
+
+  /** Attaches Jev's per-subtask size estimates to the proposed plan. */
+  setSizes(sizes: readonly (SubtaskSize | null)[]): void {
+    const plan = this.plan;
+    if (!plan) return;
+    plan.subtasks.forEach((subtask, index) => {
+      const size = sizes[index];
+      if (size) subtask.size = size;
+    });
+  }
+
+  /** Rough total agent tokens for the plan, from Jev sizes; null when unsized. */
+  get estimatedTokens(): [number, number] | null {
+    const subtasks = this.plan?.subtasks ?? [];
+    if (subtasks.length === 0 || subtasks.some((subtask) => !subtask.size)) return null;
+    return subtasks.reduce<[number, number]>(
+      (total, subtask) => {
+        const range = SIZE_TOKEN_RANGE[subtask.size ?? 'medium'];
+        return [total[0] + range[0], total[1] + range[1]];
+      },
+      [0, 0]
+    );
   }
 
   cancel(): void {

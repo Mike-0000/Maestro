@@ -241,9 +241,38 @@ export const CLARITY_LEVELS = [
   'Clear, scoped, and actionable on its own',
 ] as const;
 
+export const SIZE_LEVELS = [
+  'Small: a focused change to a few files',
+  'Medium: a feature slice across several files with tests',
+  'Large: a broad change across many files or subsystems',
+] as const;
+
+export type SubtaskSize = 'small' | 'medium' | 'large';
+const SIZE_NAMES: SubtaskSize[] = ['small', 'medium', 'large'];
+
+/** Rough agent token use per size, for a before-approval cost readout (order of magnitude). */
+export const SIZE_TOKEN_RANGE: Record<SubtaskSize, [number, number]> = {
+  small: [200_000, 1_000_000],
+  medium: [1_000_000, 4_000_000],
+  large: [4_000_000, 12_000_000],
+};
+
+export function interpretSubtaskSizes(answers: JevAnswers, count: number): (SubtaskSize | null)[] {
+  return Array.from({ length: count }, (_unused, index) => {
+    const size = scoreOf(answers, `size_${index}`);
+    if (!size) return null;
+    return SIZE_NAMES[Math.max(0, Math.min(2, Math.round(size.score)))] ?? null;
+  });
+}
+
 export function planReviewQuestions(subtasks: readonly PlanSubtask[]): JevQuestions {
   const questions: JevQuestions = {};
   subtasks.forEach((_subtask, index) => {
+    questions[`size_${index}`] = {
+      type: 'score',
+      instructions: `How much work is \`subtasks[${index}]\` for a coding agent?`,
+      criteria: [...SIZE_LEVELS],
+    };
     questions[`clarity_${index}`] = {
       type: 'score',
       instructions: `How well can an agent work on \`subtasks[${index}]\` alone, from its prompt only?`,

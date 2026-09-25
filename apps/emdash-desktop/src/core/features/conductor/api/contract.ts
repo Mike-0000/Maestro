@@ -159,6 +159,11 @@ export const conductorContract = defineContract({
   }),
   appendLog: procedure({ input: conductorTurnRecordSchema, output: z.void() }),
   getSystemChecks: procedure({ input: z.void(), output: systemChecksSchema }),
+  /** Layout, scripts, README head, and hot spots of a local repository, for planning. */
+  projectContext: procedure({
+    input: z.object({ path: z.string() }),
+    output: z.object({ text: z.string().nullable() }),
+  }),
   /** Runs `git config --global core.longpaths true`; only called from an explicit user click. */
   enableGitLongPaths: procedure({ input: z.void(), output: systemChecksSchema }),
   readLog: procedure({

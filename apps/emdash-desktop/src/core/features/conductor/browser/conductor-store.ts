@@ -6,7 +6,11 @@ import type {
 } from '@core/features/canvas/api/browser/stores/canvas-store';
 import { assignSpokenName } from '@core/features/canvas/api/canvas-model';
 import { spokenProviderLabel } from '@core/features/canvas/api/provider-names';
-import { getTaskStore } from '@core/features/tasks/api/browser/task-state/task-selectors';
+import { getProjectManagerStore } from '@core/features/projects/api/browser/stores/project-selectors';
+import {
+  getTaskManagerStore,
+  getTaskStore,
+} from '@core/features/tasks/api/browser/task-state/task-selectors';
 import { log } from '@core/primitives/logging/browser/logger';
 import { getConductorClient } from '../api/browser/client';
 import {
@@ -23,6 +27,7 @@ import {
   interpretPermissionRisk,
   interpretPlanReview,
   interpretRouting,
+  interpretSubtaskSizes,
   interpretUrgency,
   permissionRiskQuestions,
   planReviewQuestions,
@@ -30,6 +35,7 @@ import {
   routingQuestions,
   routingState,
   urgencyQuestions,
+  type SubtaskSize,
 } from '../api/jev';
 import { resolveAgent } from '../api/resolver';
 import { conductorUserMessage } from '../api/system-prompt';
@@ -516,7 +522,14 @@ export class ConductorStore {
     const mode: ConductorMode = modeHint ?? chooseMode(text);
     const providers = await installedProviders();
     const planLine = this.plans.contextLine;
-    const context = buildContext(this.canvas, providers, planLine ? [planLine] : []);
+    const extra = planLine ? [planLine] : [];
+    if (mode === 'plan') {
+      runInAction(() => (this.activity = 'Reading the project…'));
+      const pack = await this.projectContextPack();
+      if (pack) extra.push(pack);
+      runInAction(() => (this.activity = 'Thinking…'));
+    }
+    const context = buildContext(this.canvas, providers, extra);
     const messages: Anthropic.Beta.BetaMessageParam[] = [
       ...this.history,
       { role: 'user', content: conductorUserMessage(context, text) },
@@ -724,6 +737,7 @@ export class ConductorStore {
       case 'propose_plan': {
         const settings = this.settings;
         const plan = input as ConductorToolInput<'propose_plan'>;
+        let sizes: (SubtaskSize | null)[] = [];
         if (this.status?.jevReady && plan.subtasks.length > 1) {
           runInAction(() => (this.activity = 'Reviewing the plan…'));
           const decision = await jevDecide(
@@ -732,6 +746,7 @@ export class ConductorStore {
           );
           const review = decision ? interpretPlanReview(decision.answers, plan.subtasks) : null;
           if (review && !review.ok) return { content: review.reason, isError: true };
+          if (decision) sizes = interpretSubtaskSizes(decision.answers, plan.subtasks.length);
         }
         const providers = await installedProviders();
         const proposal = this.plans.propose(plan, {
@@ -740,6 +755,7 @@ export class ConductorStore {
           preferredProjectId: this.focusedEntry()?.projectId,
         });
         if (!proposal.ok) return { content: proposal.reason, isError: true };
+        this.plans.setSizes(sizes);
         if (settings?.autoApprovePlans) {
           void this.plans.approve();
           return {
@@ -770,6 +786,19 @@ export class ConductorStore {
             .map((pair) => `${pair.a} and ${pair.b} conflict in ${pair.files.join(', ')}`)
             .join('\n'),
         };
+      }
+      case 'archive_agent': {
+        const entry = this.resolveEntry((input as ConductorToolInput<'archive_agent'>).agent);
+        if ('error' in entry) return { content: entry.error, isError: true };
+        const target = this.nameOf(entry.entry);
+        const label = `Archive ${target} (task "${truncate(entry.entry.taskName, 40)}"; the branch is kept)`;
+        if (!(await this.requestPending(label, confirmKind))) {
+          return { content: 'The user did not confirm, so nothing was archived.' };
+        }
+        const manager = getTaskManagerStore(entry.entry.projectId);
+        if (!manager) return { content: 'That project is not open.', isError: true };
+        await manager.archiveTask(entry.entry.taskId);
+        return { content: `Archived ${target}'s task. Its branch and worktree are kept.` };
       }
       case 'add_note':
         this.canvas.addNote((input as ConductorToolInput<'add_note'>).text);
@@ -899,6 +928,21 @@ export class ConductorStore {
     }
     const entry = entryForConversation(this.canvas, resolution.agent.id);
     return entry ? { entry } : { error: `${resolution.agent.name} is no longer on the canvas.` };
+  }
+
+  /** Layout, scripts, and hot spots of the project a plan would target (local projects only). */
+  private async projectContextPack(): Promise<string | null> {
+    const projectId = resolveProjectId(undefined, this.focusedEntry()?.projectId);
+    if (!projectId) return null;
+    const project = getProjectManagerStore().projects.get(projectId);
+    const data = project?.data;
+    if (!data || data.type !== 'local') return null;
+    try {
+      const { text } = await (await getConductorClient()).projectContext({ path: data.path });
+      return text ? `Project "${project.name ?? ''}" at a glance:\n${text}` : null;
+    } catch {
+      return null;
+    }
   }
 
   private isRunning(entry: AgentTileEntry): boolean {

@@ -3,6 +3,7 @@ import {
   interpretPermissionRisk,
   interpretPlanReview,
   interpretRouting,
+  interpretSubtaskSizes,
   interpretUrgency,
   parallelPairs,
   planReviewQuestions,
@@ -125,8 +126,11 @@ describe('plan review', () => {
       [1, 2],
     ]);
     expect(Object.keys(planReviewQuestions(subtasks))).toEqual([
+      'size_0',
       'clarity_0',
+      'size_1',
       'clarity_1',
+      'size_2',
       'clarity_2',
       'overlap_0_1',
       'overlap_1_2',
@@ -149,6 +153,18 @@ describe('plan review', () => {
       expect(review.reason).toContain('"API" and "UI"');
       expect(review.reason).toContain('"Docs" is too vague');
     }
+  });
+
+  it('turns size scores into sizes', () => {
+    expect(
+      interpretSubtaskSizes(
+        {
+          size_0: { type: 'score', score: 0.1, probabilities: {}, confidence: 1 },
+          size_1: { type: 'score', score: 1.9, probabilities: {}, confidence: 1 },
+        },
+        3
+      )
+    ).toEqual(['small', 'large', null]);
   });
 
   it('accepts a clean plan', () => {

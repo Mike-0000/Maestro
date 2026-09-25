@@ -49,6 +49,7 @@ export const conductorToolSchemas = {
   }),
   check_conflicts: z.object({ agents: z.array(agentRef).min(2).max(12) }),
   add_note: z.object({ text: z.string().min(1) }),
+  archive_agent: z.object({ agent: agentRef }),
 } as const;
 
 export type ConductorToolName = keyof typeof conductorToolSchemas;
@@ -75,6 +76,8 @@ const descriptions: Record<ConductorToolName, string> = {
   check_conflicts:
     "Predict whether the named agents' branches would merge cleanly with each other (read-only).",
   add_note: 'Pin a sticky note to the canvas.',
+  archive_agent:
+    "Archive an agent's task when its work is finished or abandoned. The worktree and branch are kept. Only when the user asked for it; the user confirms first.",
 };
 
 function toolDefinition(name: ConductorToolName): Anthropic.Beta.BetaTool {
@@ -99,6 +102,7 @@ export function conductorToolDefinitions(): Anthropic.Beta.BetaTool[] {
 /** Tools whose effects the user must explicitly confirm (not just get a chance to cancel). */
 export const CONFIRM_REQUIRED_TOOLS: ReadonlySet<ConductorToolName> = new Set([
   'answer_permission',
+  'archive_agent',
 ]);
 
 /** Tools with side effects that run after a short, cancellable countdown. */
