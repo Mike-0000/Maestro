@@ -3,8 +3,10 @@ import { Button, Input, Select, Switch } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
 import { useEffect, useState } from 'react';
 import { getCanvasStore } from '@core/features/canvas/contributions/browser/app-stores';
+import { getMachinesClient } from '@core/features/machines/api/browser/client';
 import { getVoiceStore } from '@core/features/voice/contributions/browser/app-stores';
 import type { ChorusCredentialId } from '@core/primitives/chorus-host/api/credentials';
+import { copyTextToClipboard } from '@core/primitives/desktop-host/browser/host-client';
 import { getConductorClient } from '../../api/browser/client';
 import type { SystemChecks } from '../../api/contract';
 import { getConductorStore } from '../../contributions/browser/app-stores';
@@ -607,43 +609,104 @@ function formatTokens(count: number): string {
   return `${count} tokens`;
 }
 
-/** Surfaces Windows settings that break agent worktrees, with a one-click fix. */
+/** The short worktree folder Chorus suggests on Windows (under the user profile). */
+const SHORT_WORKTREE_ROOT = '~\\chorus\\wt';
+
+/**
+ * Windows settings that commonly break or slow down agent worktrees: git long paths (one-click
+ * fix), a short worktree folder (one click, host setting), and a Defender exclusion (a guide and
+ * a command to copy; Chorus never changes security settings itself).
+ */
 function WindowsChecks() {
   const [checks, setChecks] = useState<SystemChecks | null>(null);
   const [fixing, setFixing] = useState(false);
+  const [worktreeRoot, setWorktreeRoot] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   useEffect(() => {
     void getConductorClient()
       .then((client) => client.getSystemChecks())
       .then(setChecks)
       .catch(() => setChecks(null));
   }, []);
-  if (!checks || checks.platform !== 'win32' || (checks.git && checks.longPaths)) return null;
+  if (!checks || checks.platform !== 'win32') return null;
+  const exclusionPath = worktreeRoot ?? '$env:USERPROFILE\\chorus\\wt';
+  const defenderCommand = `Add-MpPreference -ExclusionPath "${exclusionPath}"`;
+
   return (
     <SettingsSection title="Windows">
+      {(!checks.git || !checks.longPaths) && (
+        <SettingsRow
+          label={checks.git ? 'Git long paths are off' : 'Git was not found'}
+          description={
+            checks.git
+              ? 'Agent worktrees nest deep folders (node_modules). With long paths off, checkouts fail past 260 characters. This sets git config --global core.longpaths true.'
+              : 'Install Git for Windows and restart Chorus; agents work in git worktrees.'
+          }
+          control={
+            checks.git ? (
+              <Button
+                variant="primary"
+                size="xs"
+                disabled={fixing}
+                onClick={() => {
+                  setFixing(true);
+                  void getConductorClient()
+                    .then((client) => client.enableGitLongPaths())
+                    .then(setChecks)
+                    .finally(() => setFixing(false));
+                }}
+              >
+                Enable long paths
+              </Button>
+            ) : null
+          }
+        />
+      )}
       <SettingsRow
-        label={checks.git ? 'Git long paths are off' : 'Git was not found'}
+        label="Short worktree folder"
         description={
-          checks.git
-            ? 'Agent worktrees nest deep folders (node_modules). With long paths off, checkouts fail past 260 characters. This sets git config --global core.longpaths true.'
-            : 'Install Git for Windows and restart Chorus; agents work in git worktrees.'
+          worktreeRoot
+            ? `New agent worktrees go to ${worktreeRoot}. Change it any time under Machines.`
+            : 'Deep paths hit Windows limits. Put new agent worktrees in a short folder under your profile (existing tasks stay where they are).'
         }
         control={
-          checks.git ? (
+          worktreeRoot ? null : (
             <Button
-              variant="primary"
+              variant="secondary"
               size="xs"
-              disabled={fixing}
               onClick={() => {
-                setFixing(true);
-                void getConductorClient()
-                  .then((client) => client.enableGitLongPaths())
-                  .then(setChecks)
-                  .finally(() => setFixing(false));
+                void getMachinesClient()
+                  .then((client) =>
+                    client.updateHostSettings({
+                      machineId: undefined,
+                      patch: { worktreeRoot: SHORT_WORKTREE_ROOT },
+                    })
+                  )
+                  .then((result) => {
+                    if (result.success) {
+                      setWorktreeRoot(result.data.settings.worktreeRoot ?? SHORT_WORKTREE_ROOT);
+                    }
+                  });
               }}
             >
-              Enable long paths
+              Use {SHORT_WORKTREE_ROOT}
             </Button>
-          ) : null
+          )
+        }
+      />
+      <SettingsRow
+        label="Faster worktrees with Defender"
+        description={`Real-time scanning slows worktree creation and installs. To exclude the worktree folder, run this in an administrator PowerShell: ${defenderCommand}. Chorus never changes security settings for you.`}
+        control={
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={() => {
+              void copyTextToClipboard(defenderCommand).then(() => setCopied(true));
+            }}
+          >
+            {copied ? 'Copied' : 'Copy command'}
+          </Button>
         }
       />
     </SettingsSection>

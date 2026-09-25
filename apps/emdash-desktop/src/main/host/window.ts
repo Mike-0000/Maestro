@@ -20,6 +20,7 @@ import {
 import { registerExternalLinkHandlers } from '@main/host/externalLinks';
 import { log } from '@main/lib/logger';
 import { telemetryService } from '@main/lib/telemetry';
+import { restrictMediaPermissions } from './media-permissions';
 import { APP_ORIGIN } from './protocol';
 
 let mainWindow: BrowserWindow | null = null;
@@ -70,6 +71,8 @@ export function createMainWindow(): BrowserWindow {
     show: false,
   });
   watchWindow(mainWindow);
+  const appContents = mainWindow.webContents;
+  restrictMediaPermissions((contents) => contents === appContents);
   mainWindow.webContents.once('did-finish-load', () => {
     log.info('boot-timeline', {
       mark: 'window-did-finish-load',
