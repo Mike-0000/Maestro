@@ -16,6 +16,10 @@ export type CanvasViewport = { x: number; y: number; zoom: number };
 /** Default agent tile size in canvas units (1 unit = 1 CSS px at zoom 1). */
 export const AGENT_TILE_SIZE = { w: 720, h: 460 } as const;
 export const NOTE_TILE_SIZE = { w: 320, h: 200 } as const;
+/** App browser tiles: a laptop-ish viewport so screenshots read like the real app. */
+export const BROWSER_TILE_SIZE = { w: 960, h: 640 } as const;
+/** Height of a browser tile's header strip (the rest is the page). */
+export const BROWSER_TILE_HEADER = 32;
 export const TILE_GAP = 48;
 export const MIN_TILE_SIZE = { w: 360, h: 220 } as const;
 
@@ -56,6 +60,57 @@ export function resolveTileDetail(input: TileDetailInput): TileDetail {
   if (input.zoom < GLYPH_ZOOM_THRESHOLD) return 'glyph';
   if (!input.visible || !input.hasSession) return 'preview';
   return input.focusRank < input.liveBudget ? 'live' : 'preview';
+}
+
+// ── App browsers ─────────────────────────────────────────────────────────────
+
+/**
+ * How an app browser tile shows its page. `live`: the real webview sits over the tile and takes
+ * input. `snapshot`: the tile shows the last capture (zoomed out, partly off-screen, or the
+ * browser is suspended). `glyph`: far zoom, header only.
+ *
+ * A webview cannot be scaled or clipped by the canvas without breaking input, so it is live only
+ * at interactive zoom and fully inside the canvas viewport.
+ */
+export type BrowserTileMode = 'live' | 'snapshot' | 'glyph';
+
+export function resolveBrowserTileMode(input: {
+  zoom: number;
+  /** The tile's page area lies entirely inside the canvas viewport. */
+  fullyVisible: boolean;
+  /** The webview is alive (within the live-browser budget, or leased by a model). */
+  alive: boolean;
+}): BrowserTileMode {
+  if (input.zoom < GLYPH_ZOOM_THRESHOLD) return 'glyph';
+  if (!input.alive || !input.fullyVisible || !isInteractiveZoom(input.zoom)) return 'snapshot';
+  return 'live';
+}
+
+/** True when `inner` lies entirely inside `outer`. */
+export function rectContains(outer: TileRect, inner: TileRect, tolerance = 1): boolean {
+  return (
+    inner.x >= outer.x - tolerance &&
+    inner.y >= outer.y - tolerance &&
+    inner.x + inner.w <= outer.x + outer.w + tolerance &&
+    inner.y + inner.h <= outer.y + outer.h + tolerance
+  );
+}
+
+/**
+ * Which browsers stay alive: every leased one, then the most recently used up to `budget`.
+ * Returns the ids to suspend.
+ */
+export function browsersToSuspend(input: {
+  alive: readonly string[];
+  lastUsed: ReadonlyMap<string, number>;
+  leased: ReadonlySet<string>;
+  budget: number;
+}): string[] {
+  const idle = input.alive
+    .filter((id) => !input.leased.has(id))
+    .sort((a, b) => (input.lastUsed.get(b) ?? 0) - (input.lastUsed.get(a) ?? 0));
+  const room = Math.max(0, input.budget - (input.alive.length - idle.length));
+  return idle.slice(room);
 }
 
 export function rectsOverlap(a: TileRect, b: TileRect, gap = 0): boolean {

@@ -15,6 +15,21 @@ export const acpStartInputSchema = z.object({
   collaborationMode: z.string().nullable().optional(),
   initialQueue: z.array(promptInputSchema).optional(),
   env: z.record(z.string(), z.string()).optional(),
+  /**
+   * Host-provided HTTP MCP servers for this session only (e.g. Chorus's per-conversation browser
+   * control server). Appended to the provider's configured servers when the agent supports HTTP
+   * MCP; never part of the connection key, so they do not fork agent processes.
+   */
+  extraMcpServers: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(64),
+        url: z.string().url(),
+        headers: z.record(z.string(), z.string()).optional(),
+      })
+    )
+    .max(4)
+    .optional(),
 });
 export type AcpStartInputWire = z.infer<typeof acpStartInputSchema>;
 

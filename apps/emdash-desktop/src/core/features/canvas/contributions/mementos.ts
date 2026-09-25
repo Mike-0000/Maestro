@@ -37,6 +37,22 @@ const canvasBoardV2Schema = canvasBoardV1Schema.extend({
   showTaskFrames: z.boolean(),
 });
 
+const canvasBrowserSchema = z.object({
+  projectId: z.string(),
+  workspaceId: z.string(),
+  /** Last page shown, restored when the tile comes back. */
+  url: z.string(),
+  /** `agents` lets the conductor and the task's agents drive it; `user` keeps it manual. */
+  control: z.enum(['user', 'agents']),
+  title: z.string().optional(),
+});
+
+const canvasBoardV3Schema = canvasBoardV2Schema.extend({
+  version: z.literal('3'),
+  /** One app browser per task, keyed by task id; geometry lives in `tiles` (`browser:<taskId>`). */
+  browsers: z.record(z.string(), canvasBrowserSchema),
+});
+
 export const canvasBoardSchema = defineVersionedSchema()
   .initial('1', canvasBoardV1Schema)
   .version('2', canvasBoardV2Schema, (v1) => ({
@@ -45,7 +61,10 @@ export const canvasBoardSchema = defineVersionedSchema()
     openOnLaunch: false,
     showTaskFrames: true,
   }))
+  .version('3', canvasBoardV3Schema, (v2) => ({ ...v2, version: '3' as const, browsers: {} }))
   .build();
+
+export type CanvasBrowserState = z.infer<typeof canvasBrowserSchema>;
 
 export type CanvasBoardState = typeof canvasBoardSchema.Type;
 
@@ -54,7 +73,7 @@ export const canvasBoardMemento = defineMemento({
   subject: appSubject,
   schema: canvasBoardSchema,
   default: {
-    version: '2' as const,
+    version: '3' as const,
     viewport: { x: 80, y: 80, zoom: 0.6 },
     tiles: {},
     notes: {},
@@ -63,6 +82,7 @@ export const canvasBoardMemento = defineMemento({
     projectFilter: null,
     openOnLaunch: false,
     showTaskFrames: true,
+    browsers: {},
   },
   retention: { tier: 'persisted', maxAge: days(365), maxEntries: 4 },
 });

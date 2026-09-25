@@ -114,6 +114,19 @@ export function buildContext(
   }
   const focused = focusedConversationId(canvas);
   lines.push(`Focused agent: ${focused ? canvas.spokenName(focused) : 'none'}`);
+  const apps = canvas.visibleBrowserEntries;
+  if (apps.length > 0) {
+    lines.push('App browsers:');
+    for (const app of apps) {
+      const owners = entries
+        .filter((entry) => entry.taskId === app.taskId)
+        .map((entry) => canvas.spokenName(entry.conversationId));
+      const who = owners.length > 0 ? ` (${owners.join(', ')})` : '';
+      const control = app.control === 'agents' ? 'agents may use it' : 'user only';
+      const focus = canvas.focusedTileId === app.tileId ? ', focused' : '';
+      lines.push(`- task "${app.taskName}"${who}: ${app.url}; ${control}${focus}`);
+    }
+  }
   const projects = canvas.projectOptions.map((project) => project.name).filter(Boolean);
   lines.push(`Projects: ${projects.length > 0 ? projects.join(', ') : 'none open'}`);
   lines.push(

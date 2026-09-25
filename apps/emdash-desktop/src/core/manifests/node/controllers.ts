@@ -22,7 +22,10 @@ import {
 import { createCatalogWireController } from '@core/features/catalog/node/wire-controller';
 import { createConductorWireController } from '@core/features/conductor/node/wire-controller';
 import type { CompensationRunner } from '@core/features/conversations/node/createConversation';
-import { createConversationsWireController } from '@core/features/conversations/node/wire-controller';
+import {
+  createConversationsWireController,
+  type SessionMcpServersResolver,
+} from '@core/features/conversations/node/wire-controller';
 import {
   createDevPerfWireController,
   type DevPerfOperations,
@@ -125,6 +128,8 @@ export type DesktopControllerContext = {
   readonly automations: AutomationsService;
   readonly chorus: ChorusHostServices;
   readonly browserOperations: BrowserOperations;
+  /** Chorus browser-control MCP servers for local ACP sessions (resolved in main). */
+  readonly sessionMcpServers?: SessionMcpServersResolver;
   readonly compensation: CompensationRunner;
   readonly db: AppDb;
   readonly devPerfOperations: DevPerfOperations;
@@ -384,6 +389,7 @@ export const desktopNodeControllers = {
   },
   conversations: {
     create: ({
+      sessionMcpServers,
       compensation,
       db,
       terminalFileSources,
@@ -403,6 +409,7 @@ export const desktopNodeControllers = {
         logger,
         projects,
         getProviderEnv: async (providerId) => (await providerSettings.getItem(providerId))?.env,
+        getSessionMcpServers: sessionMcpServers,
         sessionLaunchContexts,
         runtimes,
         taskSessions,

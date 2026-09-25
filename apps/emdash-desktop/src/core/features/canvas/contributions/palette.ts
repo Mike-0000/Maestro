@@ -4,6 +4,7 @@ import {
   fitCanvasCommand,
   nextAttentionCommand,
   openCanvasCommand,
+  runCanvasAppCommand,
 } from './commands';
 
 export const CANVAS_COMMAND_PALETTE_ITEMS = [
@@ -17,4 +18,8 @@ export const CANVAS_COMMAND_PALETTE_ITEMS = [
   }),
   defineCommandPaletteItem({ command: fitCanvasCommand, aliases: ['zoom out', 'fit'] }),
   defineCommandPaletteItem({ command: addCanvasNoteCommand, aliases: ['sticky'] }),
+  defineCommandPaletteItem({
+    command: runCanvasAppCommand,
+    aliases: ['browser', 'preview', 'dev server', 'open app'],
+  }),
 ] as const;

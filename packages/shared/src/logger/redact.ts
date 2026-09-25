@@ -28,6 +28,8 @@ const SECRET_PATTERNS: Array<[RegExp, RedactionReplacement]> = [
   [/-----BEGIN[^-\n]{1,40}-----[\s\S]+?-----END[^-\n]{1,40}-----/g, '[REDACTED_PEM_BLOCK]'],
   // Known token prefixes — order matters: vendor-specific before generic
   [/\bgh[opsu]_[A-Za-z0-9]{36,255}\b/g, '[REDACTED_GITHUB_TOKEN]'],
+  // Chorus per-conversation browser-control bearer tokens
+  [/\bchorus_bt_[A-Za-z0-9]{16,}\b/g, '[REDACTED_CHORUS_TOKEN]'],
   [/\bglpat-[A-Za-z0-9_-]{20,}\b/g, '[REDACTED_GITLAB_TOKEN]'],
   [/\bnpm_[A-Za-z0-9]{36,}\b/g, '[REDACTED_NPM_TOKEN]'],
   [/\bAKIA[0-9A-Z]{16}\b/g, '[REDACTED_AWS_KEY]'],

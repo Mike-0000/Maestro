@@ -1,12 +1,14 @@
 import type { NodeProps } from '@xyflow/react';
-import { FileDiff, GitBranch, PanelsTopLeft } from 'lucide-react';
+import { AppWindow, FileDiff, GitBranch, Loader2, PanelsTopLeft, Play, Square } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
+import type { TaskFrameEntry } from '@core/features/canvas/api/browser/stores/canvas-store';
+import { useAppSettingsKey } from '@core/features/settings/api/browser/use-app-settings-key';
 import { taskViewDef } from '@core/features/tasks/contributions/views';
 import { getTaskComposition } from '@core/features/workbench/api/browser/task-composition-selectors';
 import { getNavigation } from '@core/primitives/navigation/browser/navigation-selectors';
 import { cn } from '@core/primitives/styling/browser/cn';
 import { FRAME_HEADER } from '../../api/canvas-model';
-import { getCanvasStore } from '../../contributions/browser/app-stores';
+import { getCanvasBrowserHost, getCanvasStore } from '../../contributions/browser/app-stores';
 
 export type TaskFrameData = { frameId: string };
 
@@ -53,6 +55,7 @@ export const TaskFrameNode = observer(function TaskFrameNode({ data }: NodeProps
           </span>
         )}
         <span className="flex-1" />
+        <AppControls frame={frame} />
         <button
           type="button"
           onClick={() => void openTaskDiffReview(frame.projectId, frame.taskId)}
@@ -87,5 +90,67 @@ export const TaskFrameNode = observer(function TaskFrameNode({ data }: NodeProps
         </button>
       </div>
     </div>
+  );
+});
+
+/** Run, show, and stop the task's app (its `run` script and dev server). */
+const AppControls = observer(function AppControls({ frame }: { frame: TaskFrameEntry }) {
+  const { value: settings } = useAppSettingsKey('canvasBrowser');
+  const host = getCanvasBrowserHost();
+  const canvas = getCanvasStore();
+  const workspaceId = frame.workspaceId;
+  if (!workspaceId || settings?.enabled === false) return null;
+  const target = { projectId: frame.projectId, workspaceId, taskId: frame.taskId };
+  const starting = host.starting.has(frame.taskId);
+  const running = host.appRunning(target);
+  const browser = canvas.browserForTask(frame.taskId);
+  const buttonClass =
+    'nodrag flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 hover:bg-background-secondary hover:text-foreground';
+
+  if (starting) {
+    return (
+      <span className="flex shrink-0 items-center gap-1 px-1.5">
+        <Loader2 className="size-3.5 animate-spin" />
+        Starting app…
+      </span>
+    );
+  }
+  if (!running) {
+    return (
+      <button
+        type="button"
+        className={buttonClass}
+        title="Run this task's app (its run script) and open it here"
+        onClick={() => void host.runApp(target)}
+      >
+        <Play className="size-3.5" />
+        Run app
+      </button>
+    );
+  }
+  return (
+    <>
+      <button
+        type="button"
+        className={buttonClass}
+        title={browser ? 'Show the app browser' : 'Open the running app on the canvas'}
+        onClick={() => {
+          if (browser) canvas.requestFocus(browser.tileId);
+          host.openForTask(target);
+        }}
+      >
+        <AppWindow className="size-3.5" />
+        {browser ? 'Show app' : 'Open app'}
+      </button>
+      <button
+        type="button"
+        aria-label="Stop app"
+        title="Stop the app's dev server"
+        className="nodrag flex size-5 shrink-0 items-center justify-center rounded hover:bg-background-secondary hover:text-foreground"
+        onClick={() => void host.stopApp(target)}
+      >
+        <Square className="size-3" />
+      </button>
+    </>
   );
 });

@@ -10,9 +10,14 @@ import type { AgentStatus, NotificationType } from '@core/primitives/agents/api'
 import { log } from '@core/primitives/logging/browser/logger';
 import type { MementoHandle } from '@core/primitives/mementos/browser';
 import { isProvisioned } from '@core/primitives/task-state/browser/task-state';
-import { canvasBoardMemento, type CanvasBoardState } from '../../../contributions/mementos';
+import {
+  canvasBoardMemento,
+  type CanvasBoardState,
+  type CanvasBrowserState,
+} from '../../../contributions/mementos';
 import {
   AGENT_TILE_SIZE,
+  BROWSER_TILE_SIZE,
   assignSpokenName,
   frameRect,
   isLegacySpokenName,
@@ -55,6 +60,21 @@ export type NoteTileEntry = {
   readonly color: NonNullable<CanvasBoardState['notes'][string]['color']>;
 };
 
+/** A task's app browser on the board. */
+export type BrowserTileEntry = {
+  readonly tileId: string;
+  /** Stable browser session id (`canvas-app-<taskId>`). */
+  readonly browserId: string;
+  readonly taskId: string;
+  readonly projectId: string;
+  readonly workspaceId: string;
+  readonly projectName: string;
+  readonly taskName: string;
+  readonly url: string;
+  readonly title: string | undefined;
+  readonly control: CanvasBrowserState['control'];
+};
+
 /** A note dropped onto an agent tile: its text is offered to that agent (the conductor sends it). */
 export type NoteDrop = {
   readonly id: number;
@@ -68,6 +88,8 @@ export type TaskFrameEntry = {
   readonly frameId: string;
   readonly taskId: string;
   readonly projectId: string;
+  /** The task's workspace, when provisioned (needed to run its app). */
+  readonly workspaceId: string | null;
   readonly taskName: string;
   readonly projectName: string;
   readonly rect: TileRect;
@@ -102,6 +124,14 @@ export function agentTileId(conversationId: string): string {
 
 export function noteTileId(noteId: string): string {
   return `note:${noteId}`;
+}
+
+export function browserTileId(taskId: string): string {
+  return `browser:${taskId}`;
+}
+
+export function canvasBrowserId(taskId: string): string {
+  return `canvas-app-${taskId}`;
 }
 
 const ATTENTION_STATUSES: ReadonlySet<AgentStatus> = new Set([
@@ -152,7 +182,13 @@ export class CanvasStore {
       agentEntries: computed,
       visibleAgentEntries: computed,
       noteEntries: computed,
+      browserEntries: computed,
+      visibleBrowserEntries: computed,
       taskFrames: computed,
+      openBrowser: action,
+      closeBrowser: action,
+      setBrowserUrl: action,
+      setBrowserControl: action,
       setOpenOnLaunch: action,
       setShowTaskFrames: action,
       moveTiles: action,
@@ -270,7 +306,46 @@ export class CanvasStore {
     }));
   }
 
-  /** One frame per task with visible agents (empty when frames are turned off). */
+  /** App browsers whose task is still on the board, in task order. */
+  get browserEntries(): BrowserTileEntry[] {
+    const browsers = this.state.browsers;
+    if (Object.keys(browsers).length === 0) return [];
+    const entries: BrowserTileEntry[] = [];
+    for (const project of this.projectManager.projects.values()) {
+      const context = asAvailableProject(project);
+      if (!context) continue;
+      for (const task of context.get(taskManagerStoreToken).tasks.values()) {
+        const browser = browsers[task.data.id];
+        if (!browser || !isCanvasTask(task)) continue;
+        entries.push({
+          tileId: browserTileId(task.data.id),
+          browserId: canvasBrowserId(task.data.id),
+          taskId: task.data.id,
+          projectId: project.id,
+          workspaceId: browser.workspaceId,
+          projectName: project.name ?? 'Project',
+          taskName: task.displayName,
+          url: browser.url,
+          title: browser.title,
+          control: browser.control,
+        });
+      }
+    }
+    entries.sort((a, b) => a.taskId.localeCompare(b.taskId));
+    return entries;
+  }
+
+  /** Browser entries after the project filter. */
+  get visibleBrowserEntries(): BrowserTileEntry[] {
+    const filter = this.state.projectFilter;
+    return this.browserEntries.filter((entry) => !filter || entry.projectId === filter);
+  }
+
+  browserForTask(taskId: string): BrowserTileEntry | undefined {
+    return this.browserEntries.find((entry) => entry.taskId === taskId);
+  }
+
+  /** One frame per task with visible agents or an app browser (empty when frames are off). */
   get taskFrames(): TaskFrameEntry[] {
     if (!this.state.showTaskFrames) return [];
     const byTask = new Map<string, AgentTileEntry[]>();
@@ -279,21 +354,30 @@ export class CanvasStore {
       group.push(entry);
       byTask.set(entry.taskId, group);
     }
+    const browsers = new Map(this.visibleBrowserEntries.map((entry) => [entry.taskId, entry]));
     const frames: TaskFrameEntry[] = [];
-    for (const [taskId, entries] of byTask) {
+    for (const taskId of new Set([...byTask.keys(), ...browsers.keys()])) {
+      const entries = byTask.get(taskId) ?? [];
+      const browser = browsers.get(taskId);
       const first = entries[0];
-      const rect = frameRect(entries.map((entry) => this.tileRect(entry.tileId)));
-      if (!first || !rect) continue;
+      const tileIds = [
+        ...entries.map((entry) => entry.tileId),
+        ...(browser ? [browser.tileId] : []),
+      ];
+      const rect = frameRect(tileIds.map((tileId) => this.tileRect(tileId)));
+      const named = first ?? browser;
+      if (!named || !rect) continue;
       frames.push({
         frameId: taskFrameId(taskId),
         taskId,
-        projectId: first.projectId,
-        taskName: first.taskName,
-        projectName: first.projectName,
+        projectId: named.projectId,
+        workspaceId: first?.workspaceId ?? browser?.workspaceId ?? null,
+        taskName: named.taskName,
+        projectName: named.projectName,
         rect,
-        tileIds: entries.map((entry) => entry.tileId),
-        linesAdded: first.linesAdded,
-        linesDeleted: first.linesDeleted,
+        tileIds,
+        linesAdded: first?.linesAdded ?? 0,
+        linesDeleted: first?.linesDeleted ?? 0,
         working: entries.filter((entry) => entry.status === 'working').length,
         waiting: entries.filter(needsAttention).length,
       });
@@ -374,7 +458,11 @@ export class CanvasStore {
   tileRect(tileId: string): TileRect {
     const stored = this.state.tiles[tileId];
     if (stored) return stored;
-    const size = tileId.startsWith('note:') ? NOTE_TILE_SIZE : AGENT_TILE_SIZE;
+    const size = tileId.startsWith('note:')
+      ? NOTE_TILE_SIZE
+      : tileId.startsWith('browser:')
+        ? BROWSER_TILE_SIZE
+        : AGENT_TILE_SIZE;
     return { x: 0, y: 0, ...size };
   }
 
@@ -563,6 +651,85 @@ export class CanvasStore {
       delete tiles[noteTileId(noteId)];
       return { ...current, notes, tiles };
     });
+  }
+
+  // ── App browsers ───────────────────────────────────────────────────────────
+
+  /**
+   * Adds a task's app browser (or updates its URL) and places it beside the task's agents.
+   * Returns the tile id.
+   */
+  openBrowser(input: {
+    projectId: string;
+    workspaceId: string;
+    taskId: string;
+    url?: string;
+    control?: CanvasBrowserState['control'];
+    focus?: boolean;
+  }): string {
+    const tileId = browserTileId(input.taskId);
+    const existing = this.state.browsers[input.taskId];
+    this.updateState((current) => {
+      const browsers = {
+        ...current.browsers,
+        [input.taskId]: {
+          projectId: input.projectId,
+          workspaceId: input.workspaceId,
+          url: input.url ?? existing?.url ?? 'about:blank',
+          control: input.control ?? existing?.control ?? 'user',
+          ...(existing?.title ? { title: existing.title } : {}),
+        },
+      };
+      if (current.tiles[tileId]) return { ...current, browsers };
+      const siblings = this.agentEntries
+        .filter((entry) => entry.taskId === input.taskId && current.tiles[entry.tileId])
+        .map((entry) => current.tiles[entry.tileId] as TileRect);
+      const occupied = Object.values(current.tiles);
+      const anchor = nextFreeAnchor(siblings.length > 0 ? siblings : occupied);
+      const [rect] = placeTiles(occupied, 1, BROWSER_TILE_SIZE, anchor, 1);
+      return {
+        ...current,
+        browsers,
+        tiles: { ...current.tiles, [tileId]: rect ?? { ...anchor, ...BROWSER_TILE_SIZE } },
+      };
+    });
+    if (input.focus !== false) this.requestFocus(tileId);
+    return tileId;
+  }
+
+  closeBrowser(taskId: string): void {
+    if (!this.state.browsers[taskId]) return;
+    const tileId = browserTileId(taskId);
+    this.updateState((current) => {
+      const browsers = { ...current.browsers };
+      const tiles = { ...current.tiles };
+      delete browsers[taskId];
+      delete tiles[tileId];
+      return { ...current, browsers, tiles };
+    });
+    if (this.focusedTileId === tileId) this.focusedTileId = null;
+  }
+
+  setBrowserUrl(taskId: string, url: string, title?: string): void {
+    const browser = this.state.browsers[taskId];
+    if (!browser) return;
+    if (browser.url === url && (title === undefined || browser.title === title)) return;
+    this.updateState((current) => ({
+      ...current,
+      browsers: {
+        ...current.browsers,
+        [taskId]: { ...browser, url, ...(title !== undefined ? { title } : {}) },
+      },
+    }));
+  }
+
+  setBrowserControl(taskId: string, control: CanvasBrowserState['control']): void {
+    const browser = this.state.browsers[taskId];
+    if (!browser || browser.control === control) return;
+    this.updateState((current) => ({
+      ...current,
+      browsers: { ...current.browsers, [taskId]: { ...browser, control } },
+    }));
   }
 
   // ── Agents ─────────────────────────────────────────────────────────────────

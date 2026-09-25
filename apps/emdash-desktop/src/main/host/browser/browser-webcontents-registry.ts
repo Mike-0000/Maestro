@@ -31,6 +31,16 @@ type RegisteredBrowserSession = {
   partition: string;
 };
 
+export type BrowserBindingListener = (
+  event:
+    | { type: 'bound'; browserId: string; webContents: WebContents }
+    | {
+        type: 'unbound';
+        browserId: string;
+        webContentsId: number;
+      }
+) => void;
+
 // OAuth popups become real child windows sharing the browser partition; they
 // must stay as locked down as the webview that opened them.
 const BROWSER_POPUP_WINDOW_OPTIONS: BrowserWindowConstructorOptions = {
@@ -65,6 +75,34 @@ export class BrowserWebContentsRegistry {
   private readonly pendingWebContentsIds = new Set<number>();
   private activeBrowserId: string | null = null;
   private browserShortcuts = buildBrowserClaims();
+  private readonly bindingListeners = new Set<BrowserBindingListener>();
+
+  /** Observes webContents binding changes (automation guards, console capture). */
+  onBinding(listener: BrowserBindingListener): () => void {
+    this.bindingListeners.add(listener);
+    return () => this.bindingListeners.delete(listener);
+  }
+
+  /** The live, bound webContents of a browser, or null while its webview is not attached. */
+  getBoundWebContents(browserId: string): WebContents | null {
+    const webContents = this.webContentsByBrowserId.get(browserId);
+    if (!webContents || webContents.isDestroyed()) return null;
+    return webContents;
+  }
+
+  getPartition(browserId: string): string | null {
+    return this.sessionsByBrowserId.get(browserId)?.partition ?? null;
+  }
+
+  private notifyBinding(event: Parameters<BrowserBindingListener>[0]): void {
+    for (const listener of this.bindingListeners) {
+      try {
+        listener(event);
+      } catch {
+        // A failing observer must not break webview binding.
+      }
+    }
+  }
 
   registerSession(input: RegisteredBrowserSession): void {
     this.sessionsByBrowserId.set(input.browserId, input);
@@ -74,6 +112,7 @@ export class BrowserWebContentsRegistry {
     const webContents = this.webContentsByBrowserId.get(browserId);
     if (webContents) {
       this.browserIdByWebContentsId.delete(webContents.id);
+      this.notifyBinding({ type: 'unbound', browserId, webContentsId: webContents.id });
     }
     this.sessionsByBrowserId.delete(browserId);
     this.webContentsByBrowserId.delete(browserId);
@@ -118,6 +157,7 @@ export class BrowserWebContentsRegistry {
       this.browserIdByWebContentsId.delete(webContentsId);
       if (this.webContentsByBrowserId.get(boundBrowserId) === webContents) {
         this.webContentsByBrowserId.delete(boundBrowserId);
+        this.notifyBinding({ type: 'unbound', browserId: boundBrowserId, webContentsId });
       }
       if (this.activeBrowserId === boundBrowserId) {
         this.activeBrowserId = null;
@@ -141,10 +181,12 @@ export class BrowserWebContentsRegistry {
     const previous = this.webContentsByBrowserId.get(browserId);
     if (previous && previous.id !== webContents.id) {
       this.browserIdByWebContentsId.delete(previous.id);
+      this.notifyBinding({ type: 'unbound', browserId, webContentsId: previous.id });
     }
     this.webContentsByBrowserId.set(browserId, webContents);
     this.browserIdByWebContentsId.set(webContents.id, browserId);
     this.activeBrowserId = browserId;
+    this.notifyBinding({ type: 'bound', browserId, webContents });
     return true;
   }
 

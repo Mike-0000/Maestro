@@ -1,4 +1,5 @@
 import { Toaster } from '@emdash/ui/react/primitives';
+import { BrowserSurfaceHost } from '@core/features/canvas/browser/browser-surface-host';
 import { ConductorHud } from '@core/features/conductor/browser/hud/conductor-hud';
 import { LeftSidebar } from '@core/features/workbench/browser/sidebar/left-sidebar';
 import { WindowScope } from '@core/features/workbench/browser/window-scope';
@@ -27,6 +28,7 @@ export function Workspace() {
           </WrapView>
         }
       />
+      <BrowserSurfaceHost />
       <ConductorHud />
       <Toaster />
     </WindowScope>

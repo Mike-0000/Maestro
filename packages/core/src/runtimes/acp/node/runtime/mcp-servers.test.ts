@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { registrationsToAcpMcpServers, summarizeAcpMcpServers } from './mcp-servers';
+import {
+  registrationsToAcpMcpServers,
+  summarizeAcpMcpServers,
+  withExtraMcpServers,
+} from './mcp-servers';
 
 describe('registrationsToAcpMcpServers', () => {
   it('maps enabled stdio registrations to ACP stdio servers', () => {
@@ -75,5 +79,38 @@ describe('summarizeAcpMcpServers', () => {
       { name: 'filesystem', transport: 'stdio' },
       { name: 'docs', transport: 'http' },
     ]);
+  });
+});
+
+describe('withExtraMcpServers', () => {
+  const configured = [
+    { name: 'filesystem', command: 'npx', args: [], env: [] },
+    { type: 'http' as const, name: 'chorus-browser', url: 'http://old', headers: [] },
+  ];
+  const extra = [
+    {
+      name: 'chorus-browser',
+      url: 'http://127.0.0.1:4000/mcp',
+      headers: { Authorization: 'Bearer chorus_bt_x' },
+    },
+  ];
+
+  it('appends host servers and replaces same-named configured ones', () => {
+    expect(withExtraMcpServers(configured, extra, { http: true, sse: false })).toEqual([
+      configured[0],
+      {
+        type: 'http',
+        name: 'chorus-browser',
+        url: 'http://127.0.0.1:4000/mcp',
+        headers: [{ name: 'Authorization', value: 'Bearer chorus_bt_x' }],
+      },
+    ]);
+  });
+
+  it('drops host servers when the agent lacks HTTP MCP', () => {
+    expect(withExtraMcpServers(configured, extra, { http: false, sse: false })).toEqual(configured);
+    expect(withExtraMcpServers(configured, undefined, { http: true, sse: false })).toEqual(
+      configured
+    );
   });
 });

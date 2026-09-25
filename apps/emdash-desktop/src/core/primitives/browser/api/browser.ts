@@ -1,6 +1,34 @@
+import type { BrowserAutomationActor } from './automation';
+
 export type BrowserEvent =
   | { type: 'open-in-new-tab'; sourceBrowserId: string; url: string }
-  | { type: 'link-copied'; kind: 'image' | 'link' | 'url'; url: string };
+  | { type: 'link-copied'; kind: 'image' | 'link' | 'url'; url: string }
+  /**
+   * A model (conductor or agent) observed or acted in a browser. `leaseUntil` is set while the
+   * actor holds a control lease, so the canvas keeps the browser alive and shows who drives it.
+   */
+  | {
+      type: 'automation';
+      browserId: string;
+      actor: BrowserAutomationActor;
+      action: string;
+      ok: boolean;
+      detail?: string;
+      leaseUntil?: number;
+    }
+  /**
+   * Main asks the renderer to open (or resume) the agent-controllable canvas browser of a task.
+   * Only the renderer can mount a webview; it answers with `browser.ackOpenRequest`.
+   */
+  | {
+      type: 'open-request';
+      requestId: string;
+      projectId: string;
+      workspaceId: string;
+      taskId: string;
+      url: string | null;
+      actor: BrowserAutomationActor;
+    };
 
 export const BROWSER_PARTITION_PREFIX = 'persist:emdash-browser';
 
@@ -219,6 +247,13 @@ export function makeIsolatedBrowserPartition(identity: BrowserSessionIdentity): 
     partitionComponent(identity.workspaceId),
     partitionComponent(identity.taskId),
   ].join('-');
+}
+
+const ISOLATED_PARTITION_PREFIX = `${BROWSER_PARTITION_PREFIX}-isolated-`;
+
+/** True for isolated-per-task partitions: the only partitions models may control. */
+export function isIsolatedBrowserPartition(partition: string): boolean {
+  return partition.startsWith(ISOLATED_PARTITION_PREFIX);
 }
 
 export function browserPartitionForProfile(

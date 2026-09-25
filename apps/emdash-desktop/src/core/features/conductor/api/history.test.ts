@@ -1,6 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { describe, expect, it } from 'vitest';
-import { trimHistory } from './history';
+import { pruneScreenshots, SCREENSHOT_OMITTED, trimHistory } from './history';
 
 type Message = Anthropic.Beta.BetaMessageParam;
 
@@ -41,5 +41,36 @@ describe('trimHistory', () => {
         : []
     );
     expect(toolUses).toHaveLength(toolResults.length);
+  });
+});
+
+describe('pruneScreenshots', () => {
+  const shot = (id: string): Message => ({
+    role: 'user',
+    content: [
+      {
+        type: 'tool_result',
+        tool_use_id: id,
+        content: [
+          { type: 'text', text: `page ${id}` },
+          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'AAAA' } },
+        ],
+      },
+    ],
+  });
+  const hasImage = (message: Message) => JSON.stringify(message).includes('"type":"image"');
+
+  it('keeps only the latest screenshot for the next request', () => {
+    const messages: Message[] = [{ role: 'user', content: 'look' }, shot('a'), shot('b')];
+    const pruned = pruneScreenshots(messages);
+    expect(pruned[0]).toBe(messages[0]);
+    expect(hasImage(pruned[1]!)).toBe(false);
+    expect(JSON.stringify(pruned[1])).toContain(SCREENSHOT_OMITTED);
+    expect(JSON.stringify(pruned[1])).toContain('page a');
+    expect(pruned[2]).toBe(messages[2]);
+  });
+
+  it('drops every screenshot from stored history', () => {
+    expect(pruneScreenshots([shot('a'), shot('b')], 0).some(hasImage)).toBe(false);
   });
 });

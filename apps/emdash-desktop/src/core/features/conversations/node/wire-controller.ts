@@ -1,4 +1,5 @@
 import {
+  isLocalHostRef,
   LOCAL_HOST_REF,
   parseHostRef,
   type HostRef,
@@ -72,6 +73,14 @@ type ConversationRuntimeHooks = Readonly<{
   recordTuiInput(target: ConversationRuntimeTarget): Promise<void>;
 }>;
 
+export type SessionMcpServersResolver = (context: {
+  conversationId: string;
+  projectId: string;
+  workspaceId: string;
+  taskId: string;
+  title: string;
+}) => Promise<Array<{ name: string; url: string; headers?: Record<string, string> }>>;
+
 export type CreateConversationsWireControllerOptions = Readonly<{
   db: AppDb;
   terminalFileSources: TerminalFileSources;
@@ -80,6 +89,11 @@ export type CreateConversationsWireControllerOptions = Readonly<{
   resolveTarget?: (conversationId: string) => Promise<ConversationRuntimeTarget>;
   hooks?: ConversationRuntimeHooks;
   getProviderEnv?: (providerId: string) => Promise<Record<string, string> | undefined>;
+  /**
+   * Host-provided HTTP MCP servers for a local ACP session (Chorus browser control). Resolved in
+   * main per conversation; the renderer cannot add servers.
+   */
+  getSessionMcpServers?: SessionMcpServersResolver;
   sessionLaunchContexts: Pick<TaskSessionLaunchContextResolver, 'resolve'>;
   logger: Logger;
   projects: Pick<ProjectAttachmentManager, 'requireAttached'>;
@@ -100,7 +114,8 @@ export function createConversationsWireController(
         options.workspaceIdentity,
         options.db,
         options.getProviderEnv,
-        options.sessionLaunchContexts
+        options.sessionLaunchContexts,
+        options.getSessionMcpServers
       ));
   const hooks = options.hooks ?? createDefaultRuntimeHooks(options);
   const conversationOperations = createConversationOperations({
@@ -375,7 +390,8 @@ async function resolveConversationRuntimeTarget(
   workspaceIdentity: WorkspaceIdentityResolver,
   db: AppDb,
   getProviderEnv: ((providerId: string) => Promise<Record<string, string> | undefined>) | undefined,
-  sessionLaunchContexts: Pick<TaskSessionLaunchContextResolver, 'resolve'>
+  sessionLaunchContexts: Pick<TaskSessionLaunchContextResolver, 'resolve'>,
+  getSessionMcpServers?: SessionMcpServersResolver
 ): Promise<ConversationRuntimeTarget> {
   const [row] = await db
     .select({
@@ -385,6 +401,7 @@ async function resolveConversationRuntimeTarget(
       sessionId: conversations.providerSessionId,
       config: conversations.config,
       type: conversations.type,
+      title: conversations.title,
       workspaceId: tasks.workspaceId,
     })
     .from(conversations)
@@ -430,6 +447,22 @@ async function resolveConversationRuntimeTarget(
     ...(providerEnv ?? {}),
     ...(launchContext?.success ? launchContext.data.env : {}),
   };
+  // Loopback servers only reach agents on this machine.
+  const extraMcpServers =
+    row.type === 'acp' &&
+    workspacePath &&
+    row.workspaceId &&
+    identity &&
+    isLocalHostRef(identity.host) &&
+    getSessionMcpServers
+      ? await getSessionMcpServers({
+          conversationId,
+          projectId: row.projectId,
+          workspaceId: row.workspaceId,
+          taskId: row.taskId,
+          title: row.title,
+        }).catch(() => [])
+      : [];
   const acpInput =
     row.type === 'acp' && workspacePath && row.providerId
       ? {
@@ -443,6 +476,7 @@ async function resolveConversationRuntimeTarget(
           collaborationMode: acpConfig?.collaborationMode ?? null,
           ...(initialQueue && { initialQueue }),
           ...(Object.keys(processEnv).length > 0 ? { env: processEnv } : {}),
+          ...(extraMcpServers.length > 0 ? { extraMcpServers } : {}),
         }
       : undefined;
 

@@ -1,6 +1,9 @@
 import { toast } from '@emdash/ui/react/primitives';
 import { useLayoutEffect, type ReactNode } from 'react';
-import { getCanvasStore } from '@core/features/canvas/contributions/browser/app-stores';
+import {
+  getCanvasBrowserHost,
+  getCanvasStore,
+} from '@core/features/canvas/contributions/browser/app-stores';
 import { canvasViewDef } from '@core/features/canvas/contributions/views';
 import { captureDevPerfTrace } from '@core/features/dev-perf/api/browser/capture-trace';
 import { projectViewDef } from '@core/features/projects/contributions/views';
@@ -152,6 +155,26 @@ export function WindowScope({ children }: { readonly children: ReactNode }) {
       execute: () => {
         if (currentView !== 'canvas') getNavigation().navigate(canvasViewDef({}));
         getCanvasStore().addNote();
+      },
+    }),
+    'canvas.runApp': () => ({
+      execute: () => {
+        if (currentView !== 'canvas') getNavigation().navigate(canvasViewDef({}));
+        const canvas = getCanvasStore();
+        const focused = canvas.focusedTileId;
+        const task =
+          (focused ? canvas.entryForTile(focused) : undefined) ??
+          canvas.browserEntries.find((entry) => entry.tileId === focused) ??
+          canvas.visibleAgentEntries[0];
+        if (!task?.workspaceId) {
+          toast('Focus an agent whose task has a workspace first');
+          return;
+        }
+        void getCanvasBrowserHost().runApp({
+          projectId: task.projectId,
+          workspaceId: task.workspaceId,
+          taskId: task.taskId,
+        });
       },
     }),
     'voice.toggleListening': () => ({

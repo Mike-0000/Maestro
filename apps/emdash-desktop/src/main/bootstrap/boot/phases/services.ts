@@ -139,6 +139,7 @@ import { runLocalCommand } from '@main/core/utils/exec';
 import { cleanupLegacyOperationsDatabases } from '@main/db/legacy-operations-cleanup';
 import type { DesktopRuntimes } from '@main/gateway/desktop-runtimes';
 import { createDesktopWorkspaceRuntimeAcquirer } from '@main/gateway/workspace-runtime';
+import { browserControlServer } from '@main/host/browser/browser-control-instance';
 import { setBrowserCorsRelaxationSettings } from '@main/host/browser/browser-profile-session';
 import { browserWebContentsRegistry } from '@main/host/browser/browser-webcontents-registry';
 import { HostAttachmentRegistry } from '@main/host/host-attachment-registry';
@@ -534,6 +535,7 @@ export async function bootServices(
   });
   appScope.add(() => {
     gitCredentialServer.stop();
+    browserControlServer.stop();
   });
   const gitCredentials = createGitCredentialsService({
     getAgentGitCredentialsSetting: async (projectId) => {

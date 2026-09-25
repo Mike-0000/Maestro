@@ -1,5 +1,16 @@
+import type { Result } from '@emdash/shared';
 import { createController, type Controller } from '@emdash/wire/rpc';
-import type { BrowserDataClearKind, BrowsingDataKind } from '@core/primitives/browser/api';
+import type {
+  BrowserAction,
+  BrowserActResult,
+  BrowserAutomationError,
+  BrowserConsoleEntry,
+  BrowserDataClearKind,
+  BrowserImage,
+  BrowserObservation,
+  BrowserObserveInput,
+  BrowsingDataKind,
+} from '@core/primitives/browser/api';
 import { browserContract } from '../api';
 import { browserEvents } from './event-host';
 
@@ -14,6 +25,27 @@ export type BrowserOperations = {
   clearData(browserId: string, kind: BrowserDataClearKind): Promise<BrowserActionResult>;
   clearProfileStorage(profileId: string): Promise<BrowserActionResult>;
   clearBrowsingData(kind: BrowsingDataKind): Promise<BrowserActionResult>;
+  observe(input: BrowserObserveInput): Promise<Result<BrowserObservation, BrowserAutomationError>>;
+  act(input: {
+    browserId: string;
+    action: BrowserAction;
+  }): Promise<Result<BrowserActResult, BrowserAutomationError>>;
+  consoleTail(input: {
+    browserId: string;
+    limit: number;
+  }): Promise<Result<BrowserConsoleEntry[], BrowserAutomationError>>;
+  setControl(input: {
+    browserId: string;
+    projectId: string;
+    workspaceId: string;
+    taskId: string;
+    control: 'user' | 'agents';
+    origins?: string[];
+  }): Result<void, BrowserAutomationError>;
+  stopLease(browserId: string): BrowserActionResult;
+  forgetControl(browserId: string): BrowserActionResult;
+  ackOpenRequest(input: { requestId: string; browserId: string | null }): BrowserActionResult;
+  capturePreview(input: { browserId: string; maxEdge: number }): Promise<BrowserImage | null>;
 };
 
 type BrowserActionResult = { success: boolean; error?: string };
@@ -30,6 +62,14 @@ export function createBrowserWireController(browserOperations: BrowserOperations
     clearData: ({ browserId, kind }) => browserOperations.clearData(browserId, kind),
     clearProfileStorage: ({ profileId }) => browserOperations.clearProfileStorage(profileId),
     clearBrowsingData: ({ kind }) => browserOperations.clearBrowsingData(kind),
+    observe: (input) => browserOperations.observe(input),
+    act: (input) => browserOperations.act(input),
+    consoleTail: (input) => browserOperations.consoleTail(input),
+    setControl: (input) => browserOperations.setControl(input),
+    stopLease: ({ browserId }) => browserOperations.stopLease(browserId),
+    forgetControl: ({ browserId }) => browserOperations.forgetControl(browserId),
+    ackOpenRequest: (input) => browserOperations.ackOpenRequest(input),
+    capturePreview: (input) => browserOperations.capturePreview(input),
     events: browserEvents,
   });
 }

@@ -19,10 +19,18 @@ import { MAX_ZOOM, MIN_ZOOM } from '../api/canvas-model';
 import { getCanvasStore } from '../contributions/browser/app-stores';
 import { CanvasToolbar } from './canvas-toolbar';
 import { AgentTileNode } from './tiles/agent-tile';
+import { BrowserTileNode, CANVAS_OVERLAY_ATTRIBUTE } from './tiles/browser-tile';
 import { NoteTileNode } from './tiles/note-tile';
 import { TaskFrameNode } from './tiles/task-frame';
 
-const nodeTypes: NodeTypes = { agent: AgentTileNode, note: NoteTileNode, frame: TaskFrameNode };
+const nodeTypes: NodeTypes = {
+  agent: AgentTileNode,
+  browser: BrowserTileNode,
+  note: NoteTileNode,
+  frame: TaskFrameNode,
+};
+
+const overlayProps = { [CANVAS_OVERLAY_ATTRIBUTE]: '' };
 
 const FOCUS_ANIMATION_MS = 350;
 
@@ -53,6 +61,17 @@ function buildNodes(store: CanvasStore): Node[] {
       width: rect.w,
       height: rect.h,
       data: { tileId: entry.tileId },
+    });
+  }
+  for (const browser of store.visibleBrowserEntries) {
+    const rect = store.tileRect(browser.tileId);
+    nodes.push({
+      id: browser.tileId,
+      type: 'browser',
+      position: { x: rect.x, y: rect.y },
+      width: rect.w,
+      height: rect.h,
+      data: { tileId: browser.tileId },
     });
   }
   for (const note of store.noteEntries) {
@@ -92,6 +111,7 @@ const minimapColor = (node: Node): string => {
     case 'completed':
       return '#22c55e';
     default:
+      if (node.type === 'browser') return '#8b5cf6';
       return node.type === 'note' ? '#d6b656' : '#8a8a8a';
   }
 };
@@ -223,8 +243,9 @@ const Board = observer(function Board() {
         nodeStrokeWidth={0}
         maskColor="rgb(0 0 0 / 0.08)"
         className="!rounded-lg !border !border-border !bg-background-secondary"
+        {...overlayProps}
       />
-      <Panel position="top-left">
+      <Panel position="top-left" {...overlayProps}>
         <CanvasToolbar />
       </Panel>
     </ReactFlow>

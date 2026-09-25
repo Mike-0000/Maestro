@@ -12,9 +12,13 @@ export type OpenAiToolCall = {
   function: { name: string; arguments: string };
 };
 
+export type OpenAiUserPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+
 export type OpenAiMessage =
   | { role: 'system'; content: string }
-  | { role: 'user'; content: string }
+  | { role: 'user'; content: string | OpenAiUserPart[] }
   | { role: 'assistant'; content: string | null; tool_calls?: OpenAiToolCall[] }
   | { role: 'tool'; tool_call_id: string; content: string };
 
@@ -33,6 +37,16 @@ function textOf(content: unknown): string {
       part.type === 'text' ? (part.text ?? '') : ''
     )
     .join('');
+}
+
+/** Base64 images inside a tool result, as data URLs. */
+function imagesOf(content: unknown): string[] {
+  if (!Array.isArray(content)) return [];
+  return content.flatMap((part: { type?: string; source?: Anthropic.Beta.BetaBase64ImageSource }) =>
+    part.type === 'image' && part.source?.type === 'base64'
+      ? [`data:${part.source.media_type};base64,${part.source.data}`]
+      : []
+  );
 }
 
 export function toOpenAiMessages(
@@ -67,10 +81,13 @@ export function toOpenAiMessages(
       continue;
     }
     // User turns carry text and/or tool results; tool results become role 'tool' messages.
+    // OpenAI-style tool messages are text-only, so screenshots follow as one user message.
     const texts: string[] = [];
+    const images: string[] = [];
     for (const block of blocks) {
       if (block.type === 'tool_result') {
         const body = textOf(block.content);
+        images.push(...imagesOf(block.content));
         out.push({
           role: 'tool',
           tool_call_id: block.tool_use_id,
@@ -79,6 +96,15 @@ export function toOpenAiMessages(
       } else if (block.type === 'text') {
         texts.push(block.text);
       }
+    }
+    if (images.length > 0) {
+      out.push({
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Screenshots returned by the tool calls above:' },
+          ...images.map<OpenAiUserPart>((url) => ({ type: 'image_url', image_url: { url } })),
+        ],
+      });
     }
     if (texts.length > 0) out.push({ role: 'user', content: texts.join('\n') });
   }

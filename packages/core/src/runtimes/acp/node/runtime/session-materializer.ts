@@ -20,7 +20,11 @@ import { SessionCell } from '#runtimes/acp/node/session/cell';
 import type { SessionCellCallbacks } from '#runtimes/acp/node/session/cell-deps';
 import type { ConversationHandle } from './conversation-handle';
 import type { ConnectionLeaseState, SessionRecord } from './conversation-types';
-import { registrationsToAcpMcpServers, summarizeAcpMcpServers } from './mcp-servers';
+import {
+  registrationsToAcpMcpServers,
+  summarizeAcpMcpServers,
+  withExtraMcpServers,
+} from './mcp-servers';
 import { routeOwnerId } from './session-router';
 import type { AcpRuntimeDeps, AcpStartInput } from './types';
 
@@ -89,7 +93,11 @@ export class SessionMaterializer {
     }
 
     const connection = acquired.value;
-    const mcpServers = await this.resolveSessionMcpServers(input.providerId, connection);
+    const mcpServers = withExtraMcpServers(
+      await this.resolveSessionMcpServers(input.providerId, connection),
+      input.extraMcpServers,
+      connection.mcpCapabilities
+    );
     const mcpServerSummary = summarizeAcpMcpServers(mcpServers);
     const processOwner = routeOwnerId(connection.key, connection.generation);
     let record: SessionRecord | null = null;

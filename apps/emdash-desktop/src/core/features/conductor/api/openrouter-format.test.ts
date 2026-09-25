@@ -94,3 +94,33 @@ describe('fromOpenAiChoice', () => {
     );
   });
 });
+
+describe('toOpenAiMessages screenshots', () => {
+  it('keeps tool text and hoists images into a following user message', () => {
+    const out = toOpenAiMessages('SYS', [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'call_1',
+            content: [
+              { type: 'text', text: 'Page: http://localhost:5173/' },
+              { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'AAAA' } },
+            ],
+          },
+        ],
+      },
+    ]);
+    expect(out.slice(1)).toEqual([
+      { role: 'tool', tool_call_id: 'call_1', content: 'Page: http://localhost:5173/' },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Screenshots returned by the tool calls above:' },
+          { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,AAAA' } },
+        ],
+      },
+    ]);
+  });
+});

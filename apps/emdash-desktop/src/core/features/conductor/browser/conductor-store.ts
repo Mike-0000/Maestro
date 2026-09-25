@@ -4,6 +4,7 @@ import type {
   AgentTileEntry,
   CanvasStore,
 } from '@core/features/canvas/api/browser/stores/canvas-store';
+import { getCanvasBrowserHost } from '@core/features/canvas/contributions/browser/app-stores';
 import { getProjectManagerStore } from '@core/features/projects/api/browser/stores/project-selectors';
 import {
   getTaskManagerStore,
@@ -22,7 +23,7 @@ import {
   type TraceEvent,
 } from '../api/contract';
 import { chooseMode, parseCommand, type CloseScope, type GrammarCommand } from '../api/grammar';
-import { trimHistory } from '../api/history';
+import { pruneScreenshots, trimHistory } from '../api/history';
 import {
   interpretPermissionRisk,
   interpretPlanReview,
@@ -46,6 +47,7 @@ import {
   conductorToolSchemas,
   type ConductorToolInput,
   type ConductorToolName,
+  type ToolOutcome,
 } from '../api/tools';
 import { atPermissionPrompt, closeTargets, listNames, reopenTargets } from '../api/window-targets';
 import {
@@ -57,6 +59,7 @@ import {
   stopAgentSession,
   submitAgentInput,
 } from './agent-io';
+import { ConductorAppTools, type AppTask } from './app-tools';
 import { deliverPromptWhenReady } from './deferred-prompt';
 import { focusSpawnedAgent } from './focus-spawned-agent';
 import { jevDecide } from './jev';
@@ -103,7 +106,6 @@ export type PendingAction = {
 
 export type ConductorErrorState = { message: string; kind: ConductorError['type'] | 'other' };
 
-type ToolOutcome = { content: string; isError?: boolean };
 type ActionRecord = ConductorTurnRecord['actions'][number];
 
 /** Short cancel window before side-effecting commands run. */
@@ -153,6 +155,7 @@ export class ConductorStore {
   /** The windows the conductor closed last, so a bare "reopen" or "undo" restores the batch. */
   private lastClosed: string[] = [];
   private readonly disposers: (() => void)[] = [];
+  private appToolsInstance: ConductorAppTools | null = null;
 
   constructor(
     private readonly canvas: CanvasStore,
@@ -174,6 +177,7 @@ export class ConductorStore {
       | 'announceTimer'
       | 'lastClosed'
       | 'disposers'
+      | 'appToolsInstance'
     >(this, {
       plans: false,
       canvas: false,
@@ -189,6 +193,7 @@ export class ConductorStore {
       announceTimer: false,
       lastClosed: false,
       disposers: false,
+      appToolsInstance: false,
     });
   }
 
@@ -716,7 +721,7 @@ export class ConductorStore {
           this.phase = 'thinking';
           this.activity = iteration === 0 ? 'Thinking…' : 'Thinking about the results…';
         });
-        const result = await client.runTurn({ mode, messages });
+        const result = await client.runTurn({ mode, messages: pruneScreenshots(messages) });
         if (!result.success) {
           runInAction(
             () => (this.error = { kind: result.error.type, message: result.error.message })
@@ -766,7 +771,19 @@ export class ConductorStore {
           results.push({
             type: 'tool_result',
             tool_use_id: use.id,
-            content: outcome.content,
+            content: outcome.images?.length
+              ? [
+                  { type: 'text', text: outcome.content },
+                  ...outcome.images.map((image) => ({
+                    type: 'image' as const,
+                    source: {
+                      type: 'base64' as const,
+                      media_type: image.mediaType,
+                      data: image.data,
+                    },
+                  })),
+                ]
+              : outcome.content,
             ...(outcome.isError ? { is_error: true } : {}),
           });
         }
@@ -780,7 +797,7 @@ export class ConductorStore {
     }
 
     // Keep history only for turns that ended on an assistant message (valid to resume from).
-    if (completed) this.history = trimHistory(messages);
+    if (completed) this.history = trimHistory(pruneScreenshots(messages, 0));
     this.setReply(reply, source);
     this.log({ route: 'llm', actions, reply, startedAt, tokens });
   }
@@ -1023,6 +1040,18 @@ export class ConductorStore {
         if ('error' in entry) return { content: entry.error, isError: true };
         return { content: await this.stopEntry(entry.entry, []) };
       }
+      case 'start_app':
+        return this.appTools().startApp(input as ConductorToolInput<'start_app'>);
+      case 'show_app':
+        return this.appTools().showApp(input as ConductorToolInput<'show_app'>);
+      case 'look_at_app':
+        return this.appTools().lookAtApp(input as ConductorToolInput<'look_at_app'>);
+      case 'use_app':
+        return this.appTools().useApp(input as ConductorToolInput<'use_app'>);
+      case 'stop_app':
+        return this.appTools().stopApp(input as ConductorToolInput<'stop_app'>);
+      case 'close_app':
+        return this.appTools().closeApp(input as ConductorToolInput<'close_app'>);
     }
     return { content: `Unhandled tool ${name}.`, isError: true };
   }
@@ -1298,6 +1327,63 @@ export class ConductorStore {
     return id ? entryForConversation(this.canvas, id) : undefined;
   }
 
+  private appTools(): ConductorAppTools {
+    this.appToolsInstance ??= new ConductorAppTools({
+      canvas: this.canvas,
+      host: getCanvasBrowserHost(),
+      requestPending: (label, kind) => this.requestPending(label, kind),
+      resolveTask: (agent) => this.resolveAppTask(agent),
+    });
+    return this.appToolsInstance;
+  }
+
+  /** An app tool's task: a named agent's, else the focused app browser's or agent's. */
+  private resolveAppTask(agent: string | undefined): { task: AppTask } | { error: string } {
+    if (agent) {
+      const resolved = this.resolveEntry(agent);
+      if ('error' in resolved) return resolved;
+      const { entry } = resolved;
+      if (!entry.workspaceId)
+        return { error: `${this.nameOf(entry)}'s task has no workspace yet.` };
+      return {
+        task: {
+          taskId: entry.taskId,
+          projectId: entry.projectId,
+          workspaceId: entry.workspaceId,
+          name: this.nameOf(entry),
+        },
+      };
+    }
+    const focusedTile = this.canvas.focusedTileId;
+    const browser = focusedTile
+      ? this.canvas.browserEntries.find((candidate) => candidate.tileId === focusedTile)
+      : undefined;
+    if (browser) {
+      return {
+        task: {
+          taskId: browser.taskId,
+          projectId: browser.projectId,
+          workspaceId: browser.workspaceId,
+          name: browser.taskName,
+        },
+      };
+    }
+    const entry = this.focusedEntry();
+    if (entry) return this.resolveAppTask(this.nameOf(entry));
+    const only = this.canvas.browserEntries;
+    if (only.length === 1 && only[0]) {
+      return {
+        task: {
+          taskId: only[0].taskId,
+          projectId: only[0].projectId,
+          workspaceId: only[0].workspaceId,
+          name: only[0].taskName,
+        },
+      };
+    }
+    return { error: "Which agent's app? Nothing is focused; name an agent." };
+  }
+
   private nameOf(entry: AgentTileEntry): string {
     return this.canvas.spokenName(entry.conversationId);
   }
@@ -1475,6 +1561,18 @@ function describeTool(name: string): string {
       return 'Drafting a plan…';
     case 'check_conflicts':
       return 'Checking for conflicts…';
+    case 'start_app':
+      return 'Starting the app…';
+    case 'show_app':
+      return 'Opening the app…';
+    case 'look_at_app':
+      return 'Looking at the app…';
+    case 'use_app':
+      return 'Using the app…';
+    case 'stop_app':
+      return 'Stopping the app…';
+    case 'close_app':
+      return 'Closing the app…';
     default:
       return 'Working…';
   }

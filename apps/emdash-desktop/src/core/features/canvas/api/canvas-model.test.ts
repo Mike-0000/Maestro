@@ -3,6 +3,7 @@ import {
   AGENT_TILE_SIZE,
   assignSpokenName,
   boundsOf,
+  browsersToSuspend,
   FRAME_HEADER,
   FRAME_PADDING,
   frameRect,
@@ -11,7 +12,9 @@ import {
   isLegacySpokenName,
   nextFreeAnchor,
   placeTiles,
+  rectContains,
   rectsOverlap,
+  resolveBrowserTileMode,
   resolveTileDetail,
   TILE_GAP,
   viewportRect,
@@ -140,5 +143,47 @@ describe('frameRect', () => {
     });
     expect(FRAME_PADDING * 2 + FRAME_HEADER).toBeLessThanOrEqual(TILE_GAP);
     expect(frameRect([])).toBeNull();
+  });
+});
+
+describe('app browser tiles', () => {
+  it('is live only at interactive zoom, fully visible and alive', () => {
+    expect(resolveBrowserTileMode({ zoom: 1, fullyVisible: true, alive: true })).toBe('live');
+    expect(resolveBrowserTileMode({ zoom: 1, fullyVisible: false, alive: true })).toBe('snapshot');
+    expect(resolveBrowserTileMode({ zoom: 1, fullyVisible: true, alive: false })).toBe('snapshot');
+    expect(resolveBrowserTileMode({ zoom: 0.5, fullyVisible: true, alive: true })).toBe('snapshot');
+    expect(
+      resolveBrowserTileMode({ zoom: GLYPH_ZOOM_THRESHOLD / 2, fullyVisible: true, alive: true })
+    ).toBe('glyph');
+  });
+
+  it('checks containment with a small tolerance', () => {
+    const outer = { x: 0, y: 0, w: 100, h: 100 };
+    expect(rectContains(outer, { x: 10, y: 10, w: 50, h: 50 })).toBe(true);
+    expect(rectContains(outer, { x: -0.5, y: 0, w: 100.5, h: 100 })).toBe(true);
+    expect(rectContains(outer, { x: 60, y: 0, w: 50, h: 50 })).toBe(false);
+  });
+
+  it('suspends the least recently used idle browsers over budget, never leased ones', () => {
+    const lastUsed = new Map([
+      ['a', 1],
+      ['b', 3],
+      ['c', 2],
+      ['d', 0],
+    ]);
+    expect(
+      browsersToSuspend({ alive: ['a', 'b', 'c', 'd'], lastUsed, leased: new Set(), budget: 2 })
+    ).toEqual(['a', 'd']);
+    expect(
+      browsersToSuspend({
+        alive: ['a', 'b', 'c', 'd'],
+        lastUsed,
+        leased: new Set(['d']),
+        budget: 2,
+      })
+    ).toEqual(['c', 'a']);
+    expect(
+      browsersToSuspend({ alive: ['a', 'b'], lastUsed, leased: new Set(['a', 'b']), budget: 1 })
+    ).toEqual([]);
   });
 });

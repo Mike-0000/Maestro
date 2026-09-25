@@ -62,6 +62,7 @@ export function BrowserToolbar({
   onForceReload,
   onSetZoomFactor,
   onFocusUrl,
+  profileLocked = false,
 }: {
   session: BrowserSessionSnapshot;
   adapter: BrowserWebviewAdapter | null;
@@ -73,6 +74,8 @@ export function BrowserToolbar({
   onForceReload?: () => void;
   onSetZoomFactor?: (factor: number) => void;
   onFocusUrl?: (focus: () => void) => void;
+  /** Hides the profile switcher (canvas app browsers stay on their isolated partition). */
+  profileLocked?: boolean;
 }) {
   const [urlText, setUrlText] = useState(browserUrlInputText(session.currentUrl));
   const [urlError, setUrlError] = useState<string | null>(null);
@@ -249,38 +252,40 @@ export function BrowserToolbar({
           {import.meta.env.DEV && (
             <DropdownMenu.Item onClick={openDevTools}>Open DevTools</DropdownMenu.Item>
           )}
-          <DropdownMenu.Separator />
-          <DropdownMenu.Sub>
-            <DropdownMenu.SubTrigger>Browser profile</DropdownMenu.SubTrigger>
-            <DropdownMenu.SubContent className="min-w-44">
-              <DropdownMenu.RadioGroup
-                value={session.profileId}
-                onValueChange={(value) => switchProfile(String(value))}
-              >
-                {profiles.map((profile) => (
+          {!profileLocked && <DropdownMenu.Separator />}
+          {!profileLocked && (
+            <DropdownMenu.Sub>
+              <DropdownMenu.SubTrigger>Browser profile</DropdownMenu.SubTrigger>
+              <DropdownMenu.SubContent className="min-w-44">
+                <DropdownMenu.RadioGroup
+                  value={session.profileId}
+                  onValueChange={(value) => switchProfile(String(value))}
+                >
+                  {profiles.map((profile) => (
+                    <DropdownMenu.RadioItem
+                      key={profile.id}
+                      value={profile.id}
+                      className={PROFILE_RADIO_ITEM_CLASS}
+                    >
+                      {profile.name}
+                    </DropdownMenu.RadioItem>
+                  ))}
                   <DropdownMenu.RadioItem
-                    key={profile.id}
-                    value={profile.id}
+                    value={BROWSER_ISOLATED_PROFILE_ID}
                     className={PROFILE_RADIO_ITEM_CLASS}
                   >
-                    {profile.name}
+                    Isolated per task
                   </DropdownMenu.RadioItem>
-                ))}
-                <DropdownMenu.RadioItem
-                  value={BROWSER_ISOLATED_PROFILE_ID}
-                  className={PROFILE_RADIO_ITEM_CLASS}
+                </DropdownMenu.RadioGroup>
+                <DropdownMenu.Separator />
+                <DropdownMenu.Item
+                  onClick={() => navigateToView(settingsViewDef({ tab: 'browser' }))}
                 >
-                  Isolated per task
-                </DropdownMenu.RadioItem>
-              </DropdownMenu.RadioGroup>
-              <DropdownMenu.Separator />
-              <DropdownMenu.Item
-                onClick={() => navigateToView(settingsViewDef({ tab: 'browser' }))}
-              >
-                Manage profiles…
-              </DropdownMenu.Item>
-            </DropdownMenu.SubContent>
-          </DropdownMenu.Sub>
+                  Manage profiles…
+                </DropdownMenu.Item>
+              </DropdownMenu.SubContent>
+            </DropdownMenu.Sub>
+          )}
           <DropdownMenu.Separator />
           <div className="flex items-center justify-between gap-2 px-2 py-1.5 text-sm">
             <span>Zoom</span>

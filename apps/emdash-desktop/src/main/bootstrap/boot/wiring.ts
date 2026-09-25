@@ -14,6 +14,7 @@ import { getTerminalColorEnv } from '@main/core/terminal-shell/color-env';
 import { withCompensation } from '@main/core/utils/compensation';
 import { legacyPortOperations } from '@main/db/legacy-port/controller';
 import type { DesktopRuntimes } from '@main/gateway/desktop-runtimes';
+import { resolveBrowserControlMcpServers } from '@main/host/browser/browser-control-instance';
 import { setBrowserCorsRelaxationSettings } from '@main/host/browser/browser-profile-session';
 import { browserWebContentsRegistry } from '@main/host/browser/browser-webcontents-registry';
 import { browserOperations } from '@main/host/browser/controller';
@@ -68,6 +69,7 @@ export function createDesktopWireOptions(
     automations: services.automations,
     chorus: createChorusHostServices(),
     browserOperations,
+    sessionMcpServers: resolveBrowserControlMcpServers,
     compensation: withCompensation,
     db: database.db,
     devPerfOperations: createDevPerfOperations(runtimes),

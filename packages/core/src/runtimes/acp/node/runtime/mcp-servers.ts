@@ -25,6 +25,34 @@ export function registrationsToAcpMcpServers(
   return servers;
 }
 
+export type ExtraHttpMcpServer = {
+  name: string;
+  url: string;
+  headers?: Record<string, string>;
+};
+
+/**
+ * Appends host-provided HTTP servers to a session's configured servers. A host server replaces a
+ * configured server with the same name; without HTTP support the extras are dropped.
+ */
+export function withExtraMcpServers(
+  servers: readonly AcpMcpServer[],
+  extras: readonly ExtraHttpMcpServer[] | undefined,
+  capabilities: AcpMcpCapabilities
+): AcpMcpServer[] {
+  if (!extras?.length || !capabilities.http) return [...servers];
+  const names = new Set(extras.map((extra) => extra.name));
+  return [
+    ...servers.filter((server) => !names.has(server.name)),
+    ...extras.map((extra) => ({
+      type: 'http' as const,
+      name: extra.name,
+      url: extra.url,
+      headers: recordToPairs(extra.headers),
+    })),
+  ];
+}
+
 export function summarizeAcpMcpServers(
   servers: readonly AcpMcpServer[]
 ): SessionMcpServerSummary[] {

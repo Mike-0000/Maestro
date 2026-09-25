@@ -35,9 +35,18 @@ export const addCanvasNoteCommand = defineCommand({
   icon: 'sticky-note',
 });
 
+export const runCanvasAppCommand = defineCommand({
+  id: 'canvas.runApp',
+  title: 'Run App on Canvas',
+  description: "Start the focused task's app and open it in a browser on the canvas",
+  category: 'Canvas',
+  icon: 'app-window',
+});
+
 export const CANVAS_COMMAND_DEFS = [
   openCanvasCommand,
   nextAttentionCommand,
   fitCanvasCommand,
   addCanvasNoteCommand,
+  runCanvasAppCommand,
 ] as const;
