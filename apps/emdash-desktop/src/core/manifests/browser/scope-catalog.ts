@@ -1,7 +1,9 @@
+import { CANVAS_COMMAND_DEFS } from '@core/features/canvas/contributions/commands';
 import { DEV_PERF_COMMAND_DEFS } from '@core/features/dev-perf/contributions/commands';
 import { fileTreeScope } from '@core/features/editor/contributions/scopes';
 import { settingsScope } from '@core/features/settings/contributions/scopes';
 import { taskListScope, taskViewScope } from '@core/features/tasks/contributions/scopes';
+import { VOICE_COMMAND_DEFS } from '@core/features/voice/contributions/commands';
 import {
   defineWindowScope,
   editorScope,
@@ -12,7 +14,11 @@ import {
 } from '@core/features/workbench/contributions/scopes';
 import { COMMAND_CATALOG } from '../shared/command-catalog';
 
-export const windowScope = defineWindowScope([...DEV_PERF_COMMAND_DEFS]);
+export const windowScope = defineWindowScope([
+  ...DEV_PERF_COMMAND_DEFS,
+  ...CANVAS_COMMAND_DEFS,
+  ...VOICE_COMMAND_DEFS,
+]);
 
 export const SCOPE_CATALOG = [
   windowScope,

@@ -5,6 +5,7 @@
 //     [--profile <dir>] [--out <dir>] [--keep-open] [--fake-mic]
 //
 // A steps module default-exports `async ({ app, page, shot, log, profileDir }) => {}`.
+import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -93,6 +94,49 @@ try {
   await shot('failure').catch(() => {});
 } finally {
   clearTimeout(deadline);
-  if (!values['keep-open']) await app.close().catch(() => {});
+  if (!values['keep-open']) await quitApp();
 }
 process.exit(exitCode);
+
+/**
+ * Quits through the app's own quit path, answering the "Quit Chorus?" confirmation (and
+ * discarding unsaved files if asked), then kills the process if it still has not exited.
+ */
+async function quitApp() {
+  const child = app.process();
+  const exited = new Promise((resolve) => {
+    if (child.exitCode !== null) resolve();
+    else child.once('exit', resolve);
+  });
+  // app.quit() runs the app's own before-quit guard, which asks for confirmation in the page;
+  // Playwright's app.close() would sever the page connection before we could answer it.
+  void app.evaluate(({ app: electronApp }) => electronApp.quit()).catch(() => {});
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    const done = await Promise.race([exited.then(() => true), sleep(500).then(() => false)]);
+    if (done) return;
+    // Button names include their shortcut hint ("QuitCtrl⏎"), so match the leading label.
+    for (const name of [/^Quit/, /^Don.t save/, /^Discard/]) {
+      const button = page
+        .locator('[role="dialog"], [role="alertdialog"]')
+        .getByRole('button', { name })
+        .first();
+      if (await button.isVisible().catch(() => false)) {
+        await button.click().catch(() => {});
+        log(`quit: clicked ${name}`);
+      }
+    }
+  }
+  log('quit: app did not exit in time; killing it');
+  // child.kill() only ends the launcher on Windows; take down the whole Electron tree.
+  if (process.platform === 'win32') {
+    spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+  } else {
+    child.kill('SIGKILL');
+  }
+  await Promise.race([exited, sleep(5_000)]);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}

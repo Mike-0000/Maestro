@@ -1,5 +1,7 @@
 import { toast } from '@emdash/ui/react/primitives';
 import { useLayoutEffect, type ReactNode } from 'react';
+import { getCanvasStore } from '@core/features/canvas/contributions/browser/app-stores';
+import { canvasViewDef } from '@core/features/canvas/contributions/views';
 import { captureDevPerfTrace } from '@core/features/dev-perf/api/browser/capture-trace';
 import { projectViewDef } from '@core/features/projects/contributions/views';
 import { toggleAppTheme } from '@core/features/settings/api/browser/theme-toggle';
@@ -8,6 +10,7 @@ import {
   taskHostActionAvailability,
 } from '@core/features/tasks/api/browser/task-state/task-selectors';
 import { taskViewDef } from '@core/features/tasks/contributions/views';
+import { getVoiceStore } from '@core/features/voice/contributions/browser/app-stores';
 import { applyHistoryEntry } from '@core/features/workbench/browser/nav-buttons';
 import { useWorkspaceLayoutContext } from '@core/features/workbench/contributions/browser/layout-provider';
 import { openModal } from '@core/manifests/browser/modal-api';
@@ -18,7 +21,10 @@ import {
   useViewParams,
   useWorkspaceSlots,
 } from '@core/primitives/navigation/browser/navigation-hooks';
-import { getNavigationHistory } from '@core/primitives/navigation/browser/navigation-selectors';
+import {
+  getNavigation,
+  getNavigationHistory,
+} from '@core/primitives/navigation/browser/navigation-selectors';
 import { toggleSettingsView } from '@core/primitives/navigation/browser/settings-toggle';
 import { openInCommandRegistry } from '@core/primitives/open-in-apps/browser/open-in-command-registry';
 import { disabled, enabled, hidden, type ViewScopeImpl } from '@core/primitives/view-scopes/api';
@@ -125,6 +131,36 @@ export function WindowScope({ children }: { readonly children: ReactNode }) {
             ? toast.success('Trace captured', { description: outcome.path })
             : toast.error('Trace capture failed', { description: outcome.message })
         );
+      },
+    }),
+    'canvas.open': () => ({
+      execute: () => getNavigation().navigate(canvasViewDef({})),
+    }),
+    'canvas.nextAttention': () => ({
+      execute: () => {
+        if (currentView !== 'canvas') getNavigation().navigate(canvasViewDef({}));
+        if (!getCanvasStore().focusNextAttention()) toast('No agent is waiting for you');
+      },
+    }),
+    'canvas.fitAll': () => ({
+      execute: () => {
+        if (currentView !== 'canvas') getNavigation().navigate(canvasViewDef({}));
+        getCanvasStore().requestFit();
+      },
+    }),
+    'canvas.addNote': () => ({
+      execute: () => {
+        if (currentView !== 'canvas') getNavigation().navigate(canvasViewDef({}));
+        getCanvasStore().addNote();
+      },
+    }),
+    'voice.toggleListening': () => ({
+      execute: () => void getVoiceStore().toggle(),
+    }),
+    'voice.toggleMute': () => ({
+      execute: () => {
+        const voice = getVoiceStore();
+        voice.setMuted(!voice.muted);
       },
     }),
     // Zen is workspace-chrome data; the task sidebar hides while zen is
