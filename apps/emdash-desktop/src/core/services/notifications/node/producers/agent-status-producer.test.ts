@@ -62,6 +62,37 @@ describe('agent status notification producer', () => {
     });
   });
 
+  it('says what finished when the final reply has a synopsis', () => {
+    const input = agentNotificationInputFromEvent(
+      event({
+        type: 'stop',
+        payload: {
+          lastAssistantMessage:
+            "Done! I've researched TTS models across three areas:\n- Naturalness: VITS\n" +
+            '- Latency: streaming vocoders\n- Multilingual support: XTTS',
+        },
+      }),
+      'Claude',
+      'TTS research'
+    );
+
+    expect(input).toMatchObject({
+      kind: 'agent-complete',
+      title: 'Claude - TTS research',
+      body: 'Researched TTS models across three areas: naturalness, latency, and multilingual support.',
+    });
+  });
+
+  it('keeps the generic completion body when the final reply is empty filler', () => {
+    const input = agentNotificationInputFromEvent(
+      event({ type: 'stop', payload: { lastAssistantMessage: 'All done!' } }),
+      'Claude',
+      null
+    );
+
+    expect(input.body).toBe('Your agent has finished working');
+  });
+
   it('ignores non-attention notification events', () => {
     expect(
       notificationMapping(event({ payload: { notificationType: 'auth_success' } }))

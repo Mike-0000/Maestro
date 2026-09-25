@@ -181,6 +181,36 @@ describe('AgentStatusService', () => {
     );
   });
 
+  it('publishes a completion synopsis, never the full final reply', async () => {
+    const service = new AgentStatusService();
+    mocks.updateRows.push(row(), row());
+    const reply =
+      'I fixed the flaky login test and added a retry guard.\n\n```\nTOKEN=abc123 npm test\n```';
+
+    await service.applySignal(signal('stop', { payload: { lastAssistantMessage: reply } }));
+    await service.applySignal(signal('start', { payload: { lastAssistantMessage: reply } }));
+
+    const [completed, working] = mocks.emit.mock.calls.map((call) => call[1]);
+    expect(completed).toMatchObject({
+      status: 'completed',
+      completionSummary: 'fixed the flaky login test and added a retry guard',
+    });
+    expect(JSON.stringify(completed)).not.toContain('TOKEN');
+    expect(working).not.toHaveProperty('completionSummary');
+  });
+
+  it('publishes a null synopsis when the stop signal has no final reply', async () => {
+    const service = new AgentStatusService();
+    mocks.updateRows.push(row());
+
+    await service.applySignal(signal('stop'));
+
+    expect(mocks.emit).toHaveBeenCalledWith(
+      undefined,
+      expect.objectContaining({ status: 'completed', completionSummary: null })
+    );
+  });
+
   it('waits for queued writes before disposing', async () => {
     const service = new AgentStatusService();
     mocks.blockUpdates = true;

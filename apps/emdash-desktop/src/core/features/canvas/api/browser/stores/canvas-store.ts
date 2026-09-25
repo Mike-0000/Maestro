@@ -37,6 +37,8 @@ export type AgentTileEntry = {
   readonly status: AgentStatus;
   readonly seen: boolean;
   readonly notificationType: NotificationType | null;
+  /** Few-word synopsis of what the agent finished (status 'completed' only). */
+  readonly completionSummary: string | null;
   /** True when the task workspace is provisioned (its sessions can attach). */
   readonly taskProvisioned: boolean;
   /** True when the host reports a running session for this conversation. */
@@ -701,6 +703,7 @@ function toAgentEntry(
     status: conversation.status,
     seen: conversation.seen,
     notificationType: conversation.lastNotificationType,
+    completionSummary: conversation.completionSummary,
     taskProvisioned: isProvisioned(task),
     sessionActive: runtime.sessionActive,
     workspaceId: task.workspaceId,

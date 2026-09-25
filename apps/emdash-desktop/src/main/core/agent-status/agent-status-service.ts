@@ -5,6 +5,7 @@ import {
   type AgentStatus,
   type AgentStatusSignal,
 } from '@core/primitives/agents/api';
+import { summarizeCompletionMessage } from '@core/primitives/agents/api/completion-summary';
 import type { ConversationEvent } from '@core/primitives/conversations/api';
 import { HookCore, type Hookable } from '@core/primitives/hooks/api/hookable';
 import { conversations } from '@core/services/app-db/node/schema';
@@ -115,6 +116,10 @@ export class AgentStatusService implements Hookable<AgentStatusServiceHooks> {
         projectId: row.projectId,
         status,
         seen: (row.agentStatusSeen ?? derivedSeen) === 1,
+        // Only the condensed synopsis leaves the main process, never the full reply.
+        ...(status === 'completed'
+          ? { completionSummary: summarizeCompletionMessage(signal.payload.lastAssistantMessage) }
+          : {}),
       });
     } else {
       const [row] = await getAppDb()

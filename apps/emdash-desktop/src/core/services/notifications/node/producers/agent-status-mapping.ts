@@ -1,4 +1,8 @@
 import { isAttentionNotification, type AgentEvent } from '@core/primitives/agents/api';
+import {
+  completionNotificationBody,
+  summarizeCompletionMessage,
+} from '@core/primitives/agents/api/completion-summary';
 import type { PublishNotification } from '../../api';
 
 export function agentNotificationInputFromEvent(
@@ -39,9 +43,11 @@ export function notificationMapping(event: AgentEvent): {
   sound: 'needs_attention' | 'task_complete';
 } | null {
   if (event.type === 'stop') {
+    // Say what finished when the agent's final reply allows it; otherwise the generic body.
+    const summary = summarizeCompletionMessage(event.payload.lastAssistantMessage);
     return {
       kind: 'agent-complete',
-      body: 'Your agent has finished working',
+      body: completionNotificationBody(summary) ?? 'Your agent has finished working',
       sound: 'task_complete',
     };
   }

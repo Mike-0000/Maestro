@@ -10,6 +10,7 @@ import {
   getTaskStore,
 } from '@core/features/tasks/api/browser/task-state/task-selectors';
 import { log } from '@core/primitives/logging/browser/logger';
+import { announcementText, attentionPhrase } from '../api/announcements';
 import { getConductorClient } from '../api/browser/client';
 import {
   DEFAULT_CONDUCTOR_SETTINGS,
@@ -384,7 +385,9 @@ export class ConductorStore {
           reply = 'Nobody needs you right now.';
         } else {
           const focused = this.focusedEntry() ?? next;
-          reply = `${this.nameOf(focused)} ${attentionPhrase(focused)}.`;
+          reply =
+            announcementText([{ ...focused, name: this.nameOf(focused) }]) ??
+            `${this.nameOf(focused)} ${attentionPhrase(focused)}.`;
         }
         break;
       }
@@ -1114,19 +1117,17 @@ export class ConductorStore {
       this.announceTimer = null;
       const batch = this.announceQueue.splice(0);
       const unique = [...new Map(batch.map((entry) => [entry.tileId, entry])).values()];
-      if (unique.length === 0) return;
-      const sentence =
-        unique.length <= 3
-          ? unique
-              .map((entry) => {
-                const risk = this.canvas.insight(entry.conversationId)?.riskLevel;
-                const suffix =
-                  risk === 'high' ? ' for something risky' : risk === 'low' ? ', low risk' : '';
-                return `${this.nameOf(entry)} ${attentionPhrase(entry)}${suffix}`;
-              })
-              .join(', ')
-          : `${unique.length} agents need you`;
-      this.voice.announce(`${sentence}.`);
+      const text = announcementText(
+        unique.map((entry) => ({
+          name: this.nameOf(entry),
+          status: entry.status,
+          notificationType: entry.notificationType,
+          taskName: entry.taskName,
+          completionSummary: entry.completionSummary,
+          riskLevel: this.canvas.insight(entry.conversationId)?.riskLevel,
+        }))
+      );
+      if (text) this.voice.announce(text);
     }, ANNOUNCE_BATCH_MS);
   }
 
@@ -1272,19 +1273,6 @@ export class ConductorStore {
 
 function isToolName(name: string): name is ConductorToolName {
   return (conductorToolNames as string[]).includes(name);
-}
-
-export function attentionPhrase(entry: Pick<AgentTileEntry, 'status' | 'notificationType'>) {
-  switch (entry.status) {
-    case 'awaiting-input':
-      return entry.notificationType === 'permission_prompt' ? 'needs permission' : 'needs you';
-    case 'completed':
-      return 'is done';
-    case 'error':
-      return 'hit an error';
-    default:
-      return 'is ready';
-  }
 }
 
 function spokenStatus(entry: AgentTileEntry): string {

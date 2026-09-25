@@ -202,6 +202,8 @@ export class ConversationManagerStore implements Disposable {
         if (payload.status !== 'awaiting-input') {
           conversationStore.lastNotificationType = null;
         }
+        conversationStore.completionSummary =
+          payload.status === 'completed' ? (payload.completionSummary ?? null) : null;
       });
     });
   }
@@ -643,6 +645,8 @@ export class ConversationStore {
   status: AgentStatus;
   seen: boolean;
   lastNotificationType: NotificationType | null = null;
+  /** What the agent last finished, in a few words; set only while status is 'completed'. */
+  completionSummary: string | null = null;
 
   constructor(conversation: Conversation) {
     this.data = conversation;
@@ -653,6 +657,7 @@ export class ConversationStore {
       status: observable,
       seen: observable,
       lastNotificationType: observable,
+      completionSummary: observable,
       setStatus: action,
       setAwaitingInput: action,
       setWorking: action,
@@ -682,6 +687,7 @@ export class ConversationStore {
     if (status !== 'awaiting-input') {
       this.lastNotificationType = null;
     }
+    if (status !== 'completed') this.completionSummary = null;
   }
 
   setAwaitingInput(notificationType: NotificationType) {

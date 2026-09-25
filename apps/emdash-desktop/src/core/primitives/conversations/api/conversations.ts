@@ -77,6 +77,8 @@ export type ConversationEvent =
       projectId: string;
       status: AgentStatus;
       seen: boolean;
+      /** Few-word synopsis of what a completed agent did, from its final reply; null if unknown. */
+      completionSummary?: string | null;
     };
 
 export type RenameConversationParams = {
