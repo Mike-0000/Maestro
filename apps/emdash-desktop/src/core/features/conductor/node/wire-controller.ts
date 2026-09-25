@@ -1,0 +1,28 @@
+import { err, ok } from '@emdash/shared';
+import type { Logger } from '@emdash/shared/logger';
+import { createController, type Controller } from '@emdash/wire/rpc';
+import type { ChorusHostServices } from '@core/primitives/chorus-host/api/host-services';
+import { conductorContract } from '../api/contract';
+import { ConductorService } from './conductor-service';
+import { checkWorktreeConflicts } from './conflicts';
+
+export function createConductorWireController(options: {
+  host: ChorusHostServices;
+  logger: Logger;
+}): Controller {
+  const service = new ConductorService(options.host, options.logger);
+  return createController(conductorContract, {
+    runTurn: ({ mode, messages }) => service.runTurn(mode, messages),
+    getStatus: () => service.status(),
+    updateSettings: (patch) => service.updateSettings(patch),
+    checkConflicts: async ({ worktrees }) => {
+      try {
+        return ok(await checkWorktreeConflicts(worktrees));
+      } catch (error) {
+        return err({ message: error instanceof Error ? error.message : String(error) });
+      }
+    },
+    appendLog: (record) => service.appendLog(record),
+    readLog: ({ limit }) => service.readLog(limit),
+  });
+}

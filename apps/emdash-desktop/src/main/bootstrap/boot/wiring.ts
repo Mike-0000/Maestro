@@ -15,6 +15,7 @@ import { withCompensation } from '@main/core/utils/compensation';
 import { legacyPortOperations } from '@main/db/legacy-port/controller';
 import type { DesktopRuntimes } from '@main/gateway/desktop-runtimes';
 import { setBrowserCorsRelaxationSettings } from '@main/host/browser/browser-profile-session';
+import { createChorusHostServices } from '@main/host/chorus-host';
 import { browserWebContentsRegistry } from '@main/host/browser/browser-webcontents-registry';
 import { browserOperations } from '@main/host/browser/controller';
 import { createDevPerfOperations } from '@main/host/dev-perf/controller-operations';
@@ -65,6 +66,7 @@ export function createDesktopWireOptions(
     },
     appSettings: database.appSettings,
     automations: services.automations,
+    chorus: createChorusHostServices(),
     browserOperations,
     compensation: withCompensation,
     db: database.db,

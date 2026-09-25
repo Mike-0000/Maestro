@@ -3,6 +3,7 @@ import { agentsContract, agentsDomain } from '@core/features/agents/api';
 import { automationsContract, automationsDomain } from '@core/features/automations/api';
 import { browserContract, browserDomain } from '@core/features/browser/api';
 import { catalogDomain, catalogWireContract } from '@core/features/catalog/api';
+import { conductorContract, conductorDomain } from '@core/features/conductor/api';
 import { conversationsContract, conversationsDomain } from '@core/features/conversations/api';
 import { devPerfContract, devPerfDomain } from '@core/features/dev-perf/api';
 import { editorContract, editorDomain } from '@core/features/editor/api';
@@ -23,6 +24,7 @@ import { sourceControlContract, sourceControlDomain } from '@core/features/sourc
 import { tasksDomain, tasksWireContract } from '@core/features/tasks/api';
 import { terminalsContract, terminalsDomain } from '@core/features/terminals/api';
 import { updatesContract, updatesDomain } from '@core/features/updates/api';
+import { voiceContract, voiceDomain } from '@core/features/voice/api';
 import {
   lifecycleScriptsDomain,
   lifecycleScriptsWireContract,
@@ -88,4 +90,6 @@ export const desktopDomainContracts = {
   [tasksDomain]: tasksWireContract,
   [updatesDomain]: updatesContract,
   [desktopHostDomain]: desktopHostContract,
+  [voiceDomain]: voiceContract,
+  [conductorDomain]: conductorContract,
 } as const;

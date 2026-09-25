@@ -20,6 +20,7 @@ import {
   type BrowserOperations,
 } from '@core/features/browser/node/wire-controller';
 import { createCatalogWireController } from '@core/features/catalog/node/wire-controller';
+import { createConductorWireController } from '@core/features/conductor/node/wire-controller';
 import type { CompensationRunner } from '@core/features/conversations/node/createConversation';
 import { createConversationsWireController } from '@core/features/conversations/node/wire-controller';
 import {
@@ -85,8 +86,10 @@ import {
   createWorkspacesWireController,
   type CreateWorkspacesWireControllerOptions,
 } from '@core/features/workspaces/node/wire-controller';
+import { createVoiceWireController } from '@core/features/voice/node/wire-controller';
 import { WorkspaceMutationService } from '@core/features/workspaces/node/workspace-mutation-service';
 import type { SshServiceHandle } from '@core/manifests/node/ssh-service-handle';
+import type { ChorusHostServices } from '@core/primitives/chorus-host/api/host-services';
 import { desktopDomainContracts } from '@core/manifests/shared/domain-contracts';
 import type { HostReachabilityProbe } from '@core/primitives/ssh/api';
 import type { TelemetryService } from '@core/primitives/telemetry/api/telemetry';
@@ -120,6 +123,7 @@ export type DesktopControllerContext = {
   >;
   readonly appSettings: AppSettingsService;
   readonly automations: AutomationsService;
+  readonly chorus: ChorusHostServices;
   readonly browserOperations: BrowserOperations;
   readonly compensation: CompensationRunner;
   readonly db: AppDb;
@@ -452,6 +456,13 @@ export const desktopNodeControllers = {
   },
   host: {
     create: ({ hostOperations }) => createDesktopHostWireController(hostOperations),
+  },
+  voice: {
+    create: ({ chorus, logger, scope }) =>
+      createVoiceWireController({ host: chorus, logger, scope }).controller,
+  },
+  conductor: {
+    create: ({ chorus, logger }) => createConductorWireController({ host: chorus, logger }),
   },
 } satisfies {
   readonly [Domain in DesktopDomain]: DesktopNodeControllerContribution;

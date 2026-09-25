@@ -285,12 +285,8 @@ export class CanvasStore {
           const siblingRects = this.agentEntries
             .filter((entry) => entry.taskId === group[0]?.taskId && tiles[entry.tileId])
             .map((entry) => tiles[entry.tileId] as TileRect);
-          const anchor =
-            siblingRects.length > 0
-              ? nextFreeAnchor(siblingRects)
-              : existing.length > 0
-                ? { x: 0, y: maxBottom(existing) + 96 }
-                : { x: 0, y: 0 };
+          // Siblings of an existing task extend its row; new tasks fill the first free grid slots.
+          const anchor = siblingRects.length > 0 ? nextFreeAnchor(siblingRects) : { x: 0, y: 0 };
           const rects = placeTiles(existing, group.length, AGENT_TILE_SIZE, anchor);
           group.forEach((entry, index) => {
             const rect = rects[index];
@@ -462,10 +458,6 @@ function isCanvasTask(task: TaskStore): boolean {
   if (task.state === 'unregistered') return false;
   if (task.data.type === 'automation-run') return false;
   return !('archivedAt' in task.data && task.data.archivedAt);
-}
-
-function maxBottom(rects: readonly TileRect[]): number {
-  return rects.reduce((bottom, rect) => Math.max(bottom, rect.y + rect.h), 0);
 }
 
 function toAgentEntry(

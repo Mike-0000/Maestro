@@ -50,6 +50,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.1.0",
+    "@anthropic-ai/sdk": "0.106.0",
     "@emdash/chat-ui": "workspace:*",
     "@emdash/core": "workspace:*",
     "@emdash/plugins": "workspace:*",
