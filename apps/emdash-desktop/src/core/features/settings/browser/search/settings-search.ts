@@ -46,7 +46,8 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     id: 'chorus-spoken-output',
     label: 'Spoken output',
     tab: 'chorus',
-    description: 'Speak replies with Windows, offline Kitten Mini, or Gemini Flash / Flash-Lite TTS.',
+    description:
+      'Speak replies with Windows, offline Kitten Mini, or Gemini Flash / Flash-Lite TTS.',
     keywords: ['tts', 'text to speech', 'gemini', 'kitten', 'model', 'spoken replies', 'voice'],
   },
   {

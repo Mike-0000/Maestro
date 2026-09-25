@@ -29,9 +29,15 @@ describe('Gemini TTS streaming', () => {
   it('sends verbatim text with the key only in the request header and emits PCM chunks', async () => {
     const pcm = Buffer.from([0, 0, 255, 127]).toString('base64');
     const data = audioEvent(pcm);
-    const request = vi.fn<typeof fetch>().mockResolvedValue(
-      response('data: {"event_type":"interaction.started"}\r', '\n\r\n' + data.slice(0, 18), data.slice(18))
-    );
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        response(
+          'data: {"event_type":"interaction.started"}\r',
+          '\n\r\n' + data.slice(0, 18),
+          data.slice(18)
+        )
+      );
     const events: GeminiTtsEvent[] = [];
     await streamGeminiTts(options(), (event) => events.push(event), request);
     expect(events).toEqual([{ type: 'chunk', pcm }, { type: 'done' }]);
@@ -58,7 +64,11 @@ describe('Gemini TTS streaming', () => {
       'data: {"event_type":"interaction.failed"}\n\n',
     ]) {
       await expect(
-        streamGeminiTts(options(), (event) => events.push(event), async () => response(payload))
+        streamGeminiTts(
+          options(),
+          (event) => events.push(event),
+          async () => response(payload)
+        )
       ).rejects.toThrow();
     }
     expect(events).toEqual([]);

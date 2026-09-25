@@ -27,6 +27,7 @@ describe('voice interaction capture', () => {
         anthropic: false,
         typesafe: false,
         openrouter: false,
+        gemini: false,
       },
       globalShortcutRegistered: false,
       globalHoldActive: false,

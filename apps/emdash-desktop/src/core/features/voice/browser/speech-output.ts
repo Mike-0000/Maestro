@@ -177,7 +177,7 @@ export class SpeechOutput {
       this.active?.('started');
       this.onSpeakingChange?.(true);
     };
-    const done = (status: SpeechStatus) => {
+    const done = (status: 'ended' | 'failed') => {
       if (this.generation !== generation) return;
       this.settle(status);
       this.onSpeakingChange?.(false);
