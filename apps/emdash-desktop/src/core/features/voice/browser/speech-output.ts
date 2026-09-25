@@ -1,6 +1,9 @@
 import { getVoiceClient } from '../api/browser/client';
 import type { VoiceEvent, VoiceSettings } from '../api/contract';
 
+export type SpeechStatus = 'started' | 'ended' | 'cancelled' | 'failed';
+type SpeechStatusListener = (status: SpeechStatus) => void;
+
 /** Cancellable spoken output: local or Gemini PCM, otherwise the installed system voice. */
 export class SpeechOutput {
   private preferredVoice = '';
@@ -16,6 +19,8 @@ export class SpeechOutput {
   private fallbackTimer: ReturnType<typeof setTimeout> | null = null;
   private generation = 0;
   onSpeakingChange: ((speaking: boolean) => void) | null = null;
+  /** Trace listener for the utterance in flight; notified once per terminal status. */
+  private active: SpeechStatusListener | null = null;
 
   configure(settings: VoiceSettings, geminiAvailable: boolean): void {
     this.preferredVoice = settings.ttsVoice;
@@ -27,9 +32,13 @@ export class SpeechOutput {
     return typeof speechSynthesis === 'undefined' ? [] : speechSynthesis.getVoices();
   }
 
-  speak(text: string): void {
-    if (!text.trim()) return;
+  speak(text: string, onStatus?: SpeechStatusListener): void {
+    if (!text.trim()) {
+      onStatus?.('failed');
+      return;
+    }
     this.stop();
+    this.active = onceStarted(onStatus ?? (() => {}));
     const generation = this.generation;
     if (
       this.engine === 'platform' ||
@@ -98,6 +107,7 @@ export class SpeechOutput {
     };
     source.start(startAt);
     this.receivedAudio = true;
+    this.active?.('started');
     this.clearFallbackTimer();
     this.onSpeakingChange?.(true);
     if (context.state !== 'running') {
@@ -126,6 +136,7 @@ export class SpeechOutput {
     if (!this.finished || this.sources.size) return;
     this.requestId = null;
     this.pendingText = '';
+    this.settle('ended');
     this.onSpeakingChange?.(false);
   }
 
@@ -137,14 +148,21 @@ export class SpeechOutput {
   private fallbackToPlatform(text?: string): void {
     // The text is stored only in this closure until the first chunk or timeout; no cloud retry.
     const fallbackText = text ?? this.pendingText;
-    this.stop();
+    const listener = this.active;
+    this.reset();
+    this.onSpeakingChange?.(false);
+    this.active = listener;
     if (fallbackText) this.speakPlatform(fallbackText, this.generation);
+    else this.settle('failed');
   }
 
   private pendingText = '';
 
   private speakPlatform(text: string, generation: number): void {
-    if (typeof speechSynthesis === 'undefined') return;
+    if (typeof speechSynthesis === 'undefined') {
+      this.settle('failed');
+      return;
+    }
     speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     const voice =
@@ -155,13 +173,17 @@ export class SpeechOutput {
     if (voice) utterance.voice = voice;
     utterance.rate = 1.1;
     utterance.onstart = () => {
-      if (this.generation === generation) this.onSpeakingChange?.(true);
+      if (this.generation !== generation) return;
+      this.active?.('started');
+      this.onSpeakingChange?.(true);
     };
-    const done = () => {
-      if (this.generation === generation) this.onSpeakingChange?.(false);
+    const done = (status: SpeechStatus) => {
+      if (this.generation !== generation) return;
+      this.settle(status);
+      this.onSpeakingChange?.(false);
     };
-    utterance.onend = done;
-    utterance.onerror = done;
+    utterance.onend = () => done('ended');
+    utterance.onerror = () => done('failed');
     speechSynthesis.speak(utterance);
   }
 
@@ -170,7 +192,21 @@ export class SpeechOutput {
     this.fallbackTimer = null;
   }
 
+  /** Reports a terminal status to the current trace listener, at most once. */
+  private settle(status: Exclude<SpeechStatus, 'started'>): void {
+    const listener = this.active;
+    this.active = null;
+    listener?.(status);
+  }
+
   stop(): void {
+    this.settle('cancelled');
+    this.reset();
+    this.onSpeakingChange?.(false);
+  }
+
+  /** Cancels any in-flight synthesis and playback without notifying listeners. */
+  private reset(): void {
     this.generation++;
     this.clearFallbackTimer();
     const requestId = this.requestId;
@@ -195,6 +231,17 @@ export class SpeechOutput {
     this.receivedAudio = false;
     this.finished = false;
     if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel();
-    this.onSpeakingChange?.(false);
   }
+}
+
+/** Forwards `started` at most once, so a platform fallback after playback began is not recounted. */
+function onceStarted(listener: SpeechStatusListener): SpeechStatusListener {
+  let started = false;
+  return (status) => {
+    if (status === 'started') {
+      if (started) return;
+      started = true;
+    }
+    listener(status);
+  };
 }

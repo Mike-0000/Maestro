@@ -1,4 +1,5 @@
 import { err, ok } from '@emdash/shared';
+import type { Scope } from '@emdash/shared/concurrency';
 import type { Logger } from '@emdash/shared/logger';
 import { createController, type Controller } from '@emdash/wire/rpc';
 import type { ChorusHostServices } from '@core/primitives/chorus-host/api/host-services';
@@ -11,8 +12,11 @@ import { enableGitLongPaths, readSystemChecks } from './system-checks';
 export function createConductorWireController(options: {
   host: ChorusHostServices;
   logger: Logger;
+  scope: Scope;
 }): Controller {
   const service = new ConductorService(options.host, options.logger);
+  service.start();
+  options.scope.add(() => service.dispose());
   return createController(conductorContract, {
     runTurn: ({ mode, messages }) => service.runTurn(mode, messages),
     decide: ({ state, questions }) => service.decide(state, questions),
@@ -27,6 +31,9 @@ export function createConductorWireController(options: {
     },
     appendLog: (record) => service.appendLog(record),
     readLog: ({ limit }) => service.readLog(limit),
+    appendTrace: (event) => service.appendTrace(event),
+    readTrace: (query) => service.readTrace(query),
+    deleteDiagnostics: () => service.deleteDiagnostics(),
     getSystemChecks: () => readSystemChecks(),
     projectContext: async ({ path }) => ({
       text: await readProjectContext(path).catch(() => null),

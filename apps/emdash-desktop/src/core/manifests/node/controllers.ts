@@ -462,7 +462,8 @@ export const desktopNodeControllers = {
       createVoiceWireController({ host: chorus, logger, scope }).controller,
   },
   conductor: {
-    create: ({ chorus, logger }) => createConductorWireController({ host: chorus, logger }),
+    create: ({ chorus, logger, scope }) =>
+      createConductorWireController({ host: chorus, logger, scope }),
   },
 } satisfies {
   readonly [Domain in DesktopDomain]: DesktopNodeControllerContribution;

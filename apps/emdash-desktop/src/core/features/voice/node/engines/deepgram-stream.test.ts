@@ -15,18 +15,21 @@ describe('deepgramStreamUrl', () => {
 });
 
 describe('TranscriptAccumulator', () => {
-  const result = (transcript: string, isFinal: boolean) => ({
+  const result = (transcript: string, isFinal: boolean, confidence?: number) => ({
     type: 'Results',
     is_final: isFinal,
-    channel: { alternatives: [{ transcript }] },
+    channel: { alternatives: [{ transcript, confidence }] },
   });
 
   it('shows interim text after finals and keeps only finals at the end', () => {
     const acc = new TranscriptAccumulator();
     expect(acc.apply(result('tell', false))).toBe(true);
     expect(acc.text).toBe('tell');
-    acc.apply(result('tell codex', true));
-    acc.apply(result('to run', false));
+    acc.apply(result('tell codex', true, 0.87));
+    expect(acc.confidence).toBe(0.87);
+    acc.apply(result('to run', false, 0.45));
+    expect(acc.confidence).toBe(0.45);
+    expect(acc.finalConfidence).toBe(0.87);
     expect(acc.text).toBe('tell codex to run');
     acc.apply(result('to run the tests', true));
     expect(acc.finalText).toBe('tell codex to run the tests');

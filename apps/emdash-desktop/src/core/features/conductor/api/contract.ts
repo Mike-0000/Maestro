@@ -41,6 +41,9 @@ export const conductorSettingsSchema = z.object({
   jevSource: z.enum(['auto', 'openrouter', 'typesafe']),
   /** Minimum Jev confidence before the conductor acts on a decision without Claude. */
   jevConfidence: z.number().min(0.5).max(0.99),
+  /** Local diagnostic traces are disabled until the user explicitly opts in. */
+  diagnosticHistory: z.boolean(),
+  diagnosticDays: z.number().int().min(1).max(30),
 });
 export type ConductorSettings = z.infer<typeof conductorSettingsSchema>;
 
@@ -57,6 +60,8 @@ export const DEFAULT_CONDUCTOR_SETTINGS: ConductorSettings = {
   jevEnabled: true,
   jevSource: 'auto',
   jevConfidence: 0.8,
+  diagnosticHistory: false,
+  diagnosticDays: 7,
 };
 
 export const conductorUsageSchema = z.object({
@@ -119,6 +124,30 @@ export const conductorTurnRecordSchema = z.object({
 });
 export type ConductorTurnRecord = z.infer<typeof conductorTurnRecordSchema>;
 
+export const traceEventSchema = z.object({
+  interactionId: z.string().uuid(),
+  at: z.string().datetime(),
+  kind: z.enum([
+    'capture',
+    'stt-partial',
+    'stt-final',
+    'stt-failed',
+    'ignored',
+    'dictation',
+    'route',
+    'confirmation',
+    'tool-start',
+    'tool-result',
+    'action-result',
+    'reply',
+    'speech',
+  ]),
+  /** Bounded, redacted text. Raw audio and model messages are never stored. */
+  text: z.string().max(4000).optional(),
+  detail: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+});
+export type TraceEvent = z.infer<typeof traceEventSchema>;
+
 export const systemChecksSchema = z.object({
   platform: z.string(),
   git: z.boolean(),
@@ -178,6 +207,17 @@ export const conductorContract = defineContract({
     error: z.object({ message: z.string() }),
   }),
   appendLog: procedure({ input: conductorTurnRecordSchema, output: z.void() }),
+  appendTrace: procedure({ input: traceEventSchema, output: z.void() }),
+  readTrace: procedure({
+    input: z.object({
+      interactionId: z.string().uuid().optional(),
+      since: z.string().datetime().optional(),
+      before: z.string().datetime().optional(),
+      limit: z.number().int().min(1).max(200),
+    }),
+    output: z.array(traceEventSchema),
+  }),
+  deleteDiagnostics: procedure({ input: z.void(), output: z.void() }),
   getSystemChecks: procedure({ input: z.void(), output: systemChecksSchema }),
   /** Layout, scripts, README head, and hot spots of a local repository, for planning. */
   projectContext: procedure({

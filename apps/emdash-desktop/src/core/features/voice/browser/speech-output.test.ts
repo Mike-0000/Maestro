@@ -153,4 +153,35 @@ describe('SpeechOutput', () => {
     expect(sources).toHaveLength(0);
     output.stop();
   });
+
+  it('reports platform speech starting, finishing and barge-in without claiming cancelled speech finished', () => {
+    type Utterance = { onstart?: () => void; onend?: () => void };
+    const output = new SpeechOutput();
+    const statuses: string[] = [];
+    output.speak('first', (status) => statuses.push(status));
+    const first = speak.mock.calls.at(-1)![0] as Utterance;
+    first.onstart?.();
+    output.stop();
+    first.onend?.();
+    expect(statuses).toEqual(['started', 'cancelled']);
+    output.speak('second', (status) => statuses.push(status));
+    const second = speak.mock.calls.at(-1)![0] as Utterance;
+    second.onstart?.();
+    second.onend?.();
+    expect(statuses).toEqual(['started', 'cancelled', 'started', 'ended']);
+  });
+
+  it('reports streamed model speech once and falls back to the platform voice with one listener', async () => {
+    const output = new SpeechOutput();
+    output.configure({ ...DEFAULT_VOICE_SETTINGS, ttsEngine: 'kitten' }, false);
+    const statuses: string[] = [];
+    output.speak('Ready.', (status) => statuses.push(status));
+    await vi.waitFor(() => expect(startTts).toHaveBeenCalledTimes(1));
+    const { requestId } = startTts.mock.calls[0]![0];
+    output.handleEvent({ type: 'tts-error', requestId });
+    const fallback = speak.mock.calls.at(-1)![0] as { onstart?: () => void; onend?: () => void };
+    fallback.onstart?.();
+    fallback.onend?.();
+    expect(statuses).toEqual(['started', 'ended']);
+  });
 });

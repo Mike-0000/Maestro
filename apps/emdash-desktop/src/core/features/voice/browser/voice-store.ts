@@ -1,4 +1,5 @@
 import { makeAutoObservable, runInAction } from 'mobx';
+import type { TraceEvent } from '@core/features/conductor/api/contract';
 import type { ChorusCredentialId } from '@core/primitives/chorus-host/api/credentials';
 import { log } from '@core/primitives/logging/browser/logger';
 import { getVoiceClient } from '../api/browser/client';
@@ -13,7 +14,11 @@ export type TranscriptIntent = 'command' | 'dictation';
 export type ListenMode = 'hold' | 'toggle';
 /** Who started listening: the user (key, click, shortcut) or hands-free speech detection. */
 export type ListenOrigin = 'user' | 'hands-free';
-export type TranscriptHandler = (text: string, intent: TranscriptIntent) => Promise<void> | void;
+export type TranscriptHandler = (
+  text: string,
+  intent: TranscriptIntent,
+  interactionId: string
+) => Promise<void> | void;
 
 export type VoiceErrorState = {
   message: string;
@@ -57,6 +62,8 @@ export class VoiceStore {
   private captureNext: ((text: string) => void) | null = null;
   private maxTimer: ReturnType<typeof setTimeout> | null = null;
   private handler: TranscriptHandler | null = null;
+  private traceHandler: ((event: TraceEvent) => void) | null = null;
+  private interactionId: string | null = null;
   private vocabulary: () => string[] = () => [];
   private disposers: (() => void)[] = [];
 
@@ -74,6 +81,8 @@ export class VoiceStore {
       | 'streamPending'
       | 'streamOpening'
       | 'captureNext'
+      | 'traceHandler'
+      | 'interactionId'
     >(this, {
       speech: false,
       recorder: false,
@@ -83,6 +92,8 @@ export class VoiceStore {
       streamPending: false,
       streamOpening: false,
       captureNext: false,
+      traceHandler: false,
+      interactionId: false,
       maxTimer: false,
       handler: false,
       vocabulary: false,
@@ -105,6 +116,10 @@ export class VoiceStore {
             else if (event.type === 'global-hold') this.onGlobalHold(event.action, event.intent);
             else if (event.type === 'partial' && event.streamId === this.streamId) {
               runInAction(() => (this.partial = event.text));
+              this.trace('stt-partial', event.text, {
+                engine: 'deepgram',
+                ...(event.confidence !== undefined ? { confidence: event.confidence } : {}),
+              });
             } else this.speech.handleEvent(event);
           },
         });
@@ -128,6 +143,26 @@ export class VoiceStore {
     this.handler = handler;
   }
 
+  setTraceHandler(handler: (event: TraceEvent) => void): void {
+    this.traceHandler = handler;
+  }
+
+  private trace(
+    kind: TraceEvent['kind'],
+    text?: string,
+    detail?: TraceEvent['detail'],
+    id = this.interactionId
+  ): void {
+    if (!id) return;
+    this.traceHandler?.({
+      interactionId: id,
+      at: new Date().toISOString(),
+      kind,
+      ...(text !== undefined ? { text: text.slice(0, 4000) } : {}),
+      ...(detail ? { detail } : {}),
+    });
+  }
+
   setVocabularyProvider(provider: () => string[]): void {
     this.vocabulary = provider;
   }
@@ -149,6 +184,8 @@ export class VoiceStore {
   ): Promise<void> {
     if (this.phase === 'listening' || this.phase === 'transcribing') return;
     this.speech.stop(); // barge-in
+    this.interactionId = crypto.randomUUID();
+    this.trace('capture', undefined, { mode, intent, origin });
     this.mode = mode;
     this.intent = intent;
     this.origin = origin;
@@ -165,6 +202,7 @@ export class VoiceStore {
       await this.recorder.start({ withPreRoll: origin === 'hands-free' });
     } catch (error) {
       this.abortStream();
+      this.trace('stt-failed', undefined, { reason: 'microphone' });
       runInAction(() => {
         this.phase = 'error';
         this.error = describeMicError(error);
@@ -182,6 +220,8 @@ export class VoiceStore {
     this.clearMaxTimer();
     const { wav, durationMs } = this.recorder.stop();
     if (durationMs < MIN_UTTERANCE_MS) {
+      this.abortStream();
+      this.trace('ignored', undefined, { reason: 'too-short' });
       runInAction(() => {
         this.phase = 'idle';
         this.level = 0;
@@ -196,7 +236,13 @@ export class VoiceStore {
     const origin = this.origin;
     const streamed = await this.closeStream();
     if (streamed !== null) {
-      await this.finishTranscript(streamed.text, streamed.latencyMs, intent, origin);
+      await this.finishTranscript(
+        streamed.text,
+        streamed.latencyMs,
+        intent,
+        origin,
+        streamed.confidence
+      );
       return;
     }
     try {
@@ -213,6 +259,7 @@ export class VoiceStore {
         }
       );
       if (!result.success) {
+        this.trace('stt-failed', undefined, { reason: result.error.type });
         runInAction(() => {
           this.phase = 'error';
           this.error = {
@@ -222,8 +269,15 @@ export class VoiceStore {
         });
         return;
       }
-      await this.finishTranscript(result.data.text, result.data.latencyMs, intent, origin);
+      await this.finishTranscript(
+        result.data.text,
+        result.data.latencyMs,
+        intent,
+        origin,
+        result.data.confidence
+      );
     } catch (error) {
+      this.trace('stt-failed', undefined, { reason: 'request' });
       log.error('voice: transcription request failed', { error });
       runInAction(() => {
         this.phase = 'error';
@@ -233,6 +287,7 @@ export class VoiceStore {
   }
 
   cancelListening(): void {
+    this.trace('ignored', undefined, { reason: 'cancelled' });
     this.clearMaxTimer();
     this.abortStream();
     this.partial = '';
@@ -272,7 +327,8 @@ export class VoiceStore {
     raw: string,
     latencyMs: number,
     intent: TranscriptIntent,
-    origin: ListenOrigin
+    origin: ListenOrigin,
+    confidence?: number
   ): Promise<void> {
     const text = raw.trim();
     let command: string | null = text;
@@ -286,13 +342,21 @@ export class VoiceStore {
       this.lastLatencyMs = latencyMs;
       this.ignoredUtterance = command === null && text ? text : null;
     });
+    this.trace('stt-final', text, {
+      origin,
+      intent,
+      latencyMs,
+      engine: this.settings?.engine ?? 'unknown',
+      ...(confidence !== undefined ? { confidence } : {}),
+    });
+    if (command === null) this.trace('ignored', text, { reason: 'wake-phrase' });
     const capture = this.captureNext;
     if (capture) {
       this.captureNext = null;
       capture(text);
       return;
     }
-    if (command) await this.handler?.(command, intent);
+    if (command) await this.handler?.(command, intent, this.interactionId ?? crypto.randomUUID());
   }
 
   /**
@@ -351,7 +415,11 @@ export class VoiceStore {
   }
 
   /** Final text from the live stream, or null to fall back to uploading the recording. */
-  private async closeStream(): Promise<{ text: string; latencyMs: number } | null> {
+  private async closeStream(): Promise<{
+    text: string;
+    latencyMs: number;
+    confidence?: number;
+  } | null> {
     const opening = this.streamOpening;
     this.streamOpening = null;
     if (!opening) return null;
@@ -410,9 +478,14 @@ export class VoiceStore {
   // ── Output ─────────────────────────────────────────────────────────────────
 
   /** Speaks a conductor reply (respects mute and the speak-replies setting). */
-  say(text: string): void {
-    if (this.muted || this.settings?.speakReplies === false) return;
-    this.speech.speak(text);
+  say(text: string, interactionId?: string): void {
+    const id = interactionId ?? this.interactionId;
+    if (this.muted || this.settings?.speakReplies === false) {
+      this.trace('speech', undefined, { status: 'suppressed' }, id);
+      return;
+    }
+    this.trace('speech', undefined, { status: 'requested' }, id);
+    this.speech.speak(text, (status) => this.trace('speech', undefined, { status }, id));
   }
 
   /** Speaks an attention event such as "Codex 1 needs permission". */

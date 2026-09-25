@@ -22,7 +22,7 @@ export function deepgramUrl(request: Pick<SttRequest, 'language' | 'vocabulary'>
 }
 
 type DeepgramResponse = {
-  results?: { channels?: { alternatives?: { transcript?: string }[] }[] };
+  results?: { channels?: { alternatives?: { transcript?: string; confidence?: number }[] }[] };
 };
 
 /** Deepgram prerecorded transcription. */
@@ -31,7 +31,7 @@ export class DeepgramSttEngine implements SttEngine {
 
   constructor(private readonly apiKey: () => Promise<Secret<string> | null>) {}
 
-  async transcribe(request: SttRequest): Promise<string> {
+  async transcribe(request: SttRequest): Promise<{ text: string; confidence?: number }> {
     const key = await this.apiKey();
     if (!key)
       throw new SttEngineError(
@@ -55,6 +55,11 @@ export class DeepgramSttEngine implements SttEngine {
     }
     if (!response.ok) await failFromResponse('Deepgram', response);
     const body = (await response.json()) as DeepgramResponse;
-    return body.results?.channels?.[0]?.alternatives?.[0]?.transcript?.trim() ?? '';
+    const alternative = body.results?.channels?.[0]?.alternatives?.[0];
+    const confidence = alternative?.confidence;
+    return {
+      text: alternative?.transcript?.trim() ?? '',
+      ...(confidence !== undefined && confidence >= 0 && confidence <= 1 ? { confidence } : {}),
+    };
   }
 }

@@ -12,7 +12,7 @@ export type SttRequest = {
 
 export interface SttEngine {
   readonly id: SttEngineId;
-  transcribe(request: SttRequest): Promise<string>;
+  transcribe(request: SttRequest): Promise<string | { text: string; confidence?: number }>;
 }
 
 export class SttEngineError extends Error {

@@ -6,10 +6,19 @@ import type { ConductorTurnRecord } from '../../api/contract';
 const LOG_LIMIT = 30;
 
 /** Recent conductor turns, newest first: what was heard, what ran, and what it cost. */
-export function ConductorLogPanel({ refreshKey }: { refreshKey: number }) {
+export function ConductorLogPanel({
+  refreshKey,
+  enabled,
+}: {
+  refreshKey: number;
+  enabled: boolean;
+}) {
   const [records, setRecords] = useState<ConductorTurnRecord[] | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
+    if (!enabled) return;
+    setRecords(null);
+    setFailed(false);
     let cancelled = false;
     void getConductorClient()
       .then((client) => client.readLog({ limit: LOG_LIMIT }))
@@ -22,8 +31,14 @@ export function ConductorLogPanel({ refreshKey }: { refreshKey: number }) {
     return () => {
       cancelled = true;
     };
-  }, [refreshKey]);
+  }, [refreshKey, enabled]);
 
+  if (!enabled)
+    return (
+      <p className="px-1 text-xs text-foreground-muted">
+        Enable diagnostic history in Voice & Conductor settings to record commands.
+      </p>
+    );
   if (failed) return <p className="px-1 text-xs text-foreground-muted">The log is unavailable.</p>;
   if (!records) {
     return (

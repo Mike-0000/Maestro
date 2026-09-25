@@ -183,15 +183,17 @@ export class VoiceService {
   /** Opens a live stream if the current engine supports one; null means upload instead. */
   async openStream(
     vocabulary: readonly string[],
-    onPartial: (streamId: string, text: string) => void
+    onPartial: (streamId: string, text: string, confidence?: number) => void
   ): Promise<string | null> {
     const settings = await this.settings.read();
     if (settings.engine !== 'deepgram' || !settings.streaming) return null;
     const key = await this.credentials.get('deepgram');
     if (!key) return null;
     const streamId = crypto.randomUUID();
-    const stream = new DeepgramStream(key, { language: settings.language, vocabulary }, (text) =>
-      onPartial(streamId, text)
+    const stream = new DeepgramStream(
+      key,
+      { language: settings.language, vocabulary },
+      (text, confidence) => onPartial(streamId, text, confidence)
     );
     const timer = setTimeout(() => this.abortStream(streamId), STREAM_MAX_MS);
     this.streams.set(streamId, { stream, startedAt: performance.now(), timer });
@@ -212,7 +214,12 @@ export class VoiceService {
     // Latency the user feels: from releasing the key to having the final text.
     const latencyMs = Math.round(performance.now() - finishedAt);
     this.logger.info('voice: streamed', { latencyMs, chars: text.length });
-    return { text, engine: 'deepgram', latencyMs };
+    return {
+      text,
+      engine: 'deepgram',
+      latencyMs,
+      ...(entry.stream.confidence !== undefined ? { confidence: entry.stream.confidence } : {}),
+    };
   }
 
   abortStream(streamId: string): void {
@@ -230,10 +237,18 @@ export class VoiceService {
     const settings = await this.settings.read();
     const engine = this.engines[settings.engine];
     const started = performance.now();
-    const text = await engine.transcribe({ audio, vocabulary, language: settings.language });
+    const result = await engine.transcribe({ audio, vocabulary, language: settings.language });
+    const text = typeof result === 'string' ? result : result.text;
     const latencyMs = Math.round(performance.now() - started);
     this.logger.info('voice: transcribed', { engine: engine.id, latencyMs, chars: text.length });
-    return { text, engine: engine.id, latencyMs };
+    return {
+      text,
+      engine: engine.id,
+      latencyMs,
+      ...(typeof result !== 'string' && result.confidence !== undefined
+        ? { confidence: result.confidence }
+        : {}),
+    };
   }
 
   /** Starts or stops the system-wide key hook for global hold-to-talk. */

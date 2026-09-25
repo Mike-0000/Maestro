@@ -49,8 +49,13 @@ export function createVoiceWireController(options: {
     getStatus: () => service.status(),
     openStream: async ({ vocabulary }) => {
       const streamId = await service
-        .openStream(vocabulary, (id, text) =>
-          voiceEvents.emit(undefined, { type: 'partial', streamId: id, text })
+        .openStream(vocabulary, (id, text, confidence) =>
+          voiceEvents.emit(undefined, {
+            type: 'partial',
+            streamId: id,
+            text,
+            ...(confidence !== undefined ? { confidence } : {}),
+          })
         )
         .catch((error: unknown) => {
           options.logger.warn('voice: could not open a stream', { error });

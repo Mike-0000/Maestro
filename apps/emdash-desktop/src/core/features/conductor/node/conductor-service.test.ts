@@ -333,8 +333,35 @@ describe('ConductorService.decide (Jev)', () => {
 });
 
 describe('ConductorService log', () => {
+  it('does not persist diagnostics without opt-in and deletes them when disabled', async () => {
+    const conductor = service();
+    const record = {
+      at: new Date().toISOString(),
+      utterance: 'secret',
+      route: 'grammar' as const,
+      actions: [],
+      reply: 'ok',
+      latencyMs: 1,
+    };
+    await conductor.appendLog(record);
+    await conductor.appendTrace({
+      interactionId: crypto.randomUUID(),
+      at: record.at,
+      kind: 'stt-final',
+      text: 'secret',
+    });
+    expect(await conductor.readLog(10)).toEqual([]);
+    expect(await conductor.readTrace({ limit: 10 })).toEqual([]);
+    await conductor.updateSettings({ diagnosticHistory: true });
+    await conductor.appendLog(record);
+    expect(await conductor.readLog(10)).toHaveLength(1);
+    await conductor.updateSettings({ diagnosticHistory: false });
+    await conductor.updateSettings({ diagnosticHistory: true });
+    expect(await conductor.readLog(10)).toEqual([]);
+  });
   it('appends and reads back turns, newest last, skipping torn lines', async () => {
     const conductor = service();
+    await conductor.updateSettings({ diagnosticHistory: true });
     for (const utterance of ['one', 'two', 'three']) {
       await conductor.appendLog({
         at: new Date().toISOString(),

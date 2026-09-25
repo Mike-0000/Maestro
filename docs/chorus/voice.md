@@ -83,8 +83,24 @@ Anything the grammar does not recognise goes to Claude, which can:
 
 Add an Anthropic API key in **Settings → Voice & Conductor**. The default model is
 `claude-opus-5` with low effort for commands and high effort for plans; both are configurable,
-and a daily token budget (3M by default) stops runaway spend. Every turn is logged to
-`%APPDATA%\chorus\chorus\conductor-log.jsonl` (utterance, actions, reply, latency, tokens).
+and a daily token budget (3M by default) stops runaway spend. **Diagnostic history is off by
+ default.** Enable it in Settings → Voice & Conductor to retain recent, redacted command summaries
+and interaction events under the Chorus profile's `chorus/` directory (`conductor-log.jsonl` and
+`interaction-trace.jsonl`). On a standard Windows install this is `%APPDATA%\chorus\chorus\`;
+development, canary, and overridden profiles have different locations. Traces include final STT
+text, live Deepgram partials, routing, tool activity, the HUD reply, and whether speech started,
+ended, was suppressed, or was interrupted. They do **not** contain audio or prove what the
+microphone actually captured. Deepgram confidence, when supplied, describes the latest segment
+or selected alternative, not the reliability of the whole command; other adapters do not expose it. A reported agent send
+may mean only that it was accepted or scheduled, not that the agent completed the work.
+
+Diagnostics are limited to 2 MB per file and 7 days by default (configurable up to 30 days).
+Turning the setting off deletes stored diagnostics. Use **Delete diagnostics** to erase them
+without disabling collection. **Copy recent events for agent** requires confirmation and copies
+up to 200 redacted events to the clipboard; paste into a trusted coding agent only after review.
+The app does not silently grant worktree agents access to the desktop profile. Speech and tool
+arguments may contain private data despite automatic secret redaction; do not export without
+reviewing them. Cloud STT sends audio to the chosen provider; local whisper.cpp does not.
 
 ## Spoken replies (text-to-speech)
 

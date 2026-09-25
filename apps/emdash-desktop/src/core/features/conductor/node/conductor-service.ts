@@ -1,8 +1,8 @@
-import { appendFile, mkdir, readFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rm, rename, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import Anthropic from '@anthropic-ai/sdk';
 import { err, ok, type Result, type Secret } from '@emdash/shared';
-import type { Logger } from '@emdash/shared/logger';
+import { redactAll, type Logger } from '@emdash/shared/logger';
 import type { ChorusHostServices } from '@core/primitives/chorus-host/api/host-services';
 import { ChorusCredentials } from '@core/primitives/chorus-host/node/credentials';
 import { JsonSettingsFile } from '@core/primitives/chorus-host/node/json-settings-file';
@@ -21,6 +21,7 @@ import {
   type ConductorUsage,
   type JevDecision,
   type JevError,
+  type TraceEvent,
 } from '../api/contract';
 import type { JevQuestions } from '../api/jev';
 import {
@@ -31,6 +32,7 @@ import {
 } from '../api/openrouter-format';
 import { CONDUCTOR_SYSTEM_PROMPT } from '../api/system-prompt';
 import { conductorToolDefinitions } from '../api/tools';
+import { InteractionDiagnostics } from './diagnostics';
 import { evaluateWithJev, JevRequestError, type JevVia } from './jev-client';
 
 const LOG_FILE = 'conductor-log.jsonl';
@@ -63,12 +65,16 @@ export class ConductorService {
   private readonly usage: JsonSettingsFile<ConductorUsage>;
   private readonly tools = conductorToolDefinitions();
   private client: { key: string; client: Anthropic } | null = null;
+  private readonly diagnostics: InteractionDiagnostics;
+  private logWrites: Promise<void> = Promise.resolve();
+  private pruneTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     private readonly host: ChorusHostServices,
     private readonly logger: Logger
   ) {
     this.credentials = new ChorusCredentials(host.secrets);
+    this.diagnostics = new InteractionDiagnostics(host.dataDir);
     this.settings = JsonSettingsFile.inDir(
       host.dataDir,
       'conductor-settings.json',
@@ -87,6 +93,30 @@ export class ConductorService {
     if (lastTool) lastTool.cache_control = { type: 'ephemeral' };
   }
 
+  start(): void {
+    const prune = () =>
+      void this.prune().catch((error: unknown) =>
+        this.logger.warn('conductor: diagnostic pruning failed', { error })
+      );
+    prune();
+    this.pruneTimer = setInterval(prune, 60 * 60_000);
+  }
+
+  dispose(): void {
+    if (this.pruneTimer) clearInterval(this.pruneTimer);
+    this.pruneTimer = null;
+  }
+
+  private async prune(): Promise<void> {
+    const settings = await this.settings.read();
+    if (!settings.diagnosticHistory) {
+      await this.deleteDiagnostics();
+    } else {
+      await this.readLog(1);
+      await this.diagnostics.read({ limit: 1 }, settings.diagnosticDays);
+    }
+  }
+
   async status(): Promise<ConductorStatus> {
     return {
       configured: (await this.credentials.get(await this.providerCredential())) !== null,
@@ -99,6 +129,7 @@ export class ConductorService {
 
   async updateSettings(patch: Partial<ConductorSettings>): Promise<ConductorStatus> {
     await this.settings.update(patch);
+    if (patch.diagnosticHistory === false) await this.deleteDiagnostics();
     return this.status();
   }
 
@@ -291,29 +322,106 @@ export class ConductorService {
     }
   }
 
+  private enqueueLog<T>(work: () => Promise<T>): Promise<T> {
+    const next = this.logWrites.then(work, work);
+    this.logWrites = next.then(
+      () => {},
+      () => {}
+    );
+    return next;
+  }
+
   async appendLog(record: ConductorTurnRecord): Promise<void> {
-    await mkdir(this.host.dataDir, { recursive: true });
-    await appendFile(join(this.host.dataDir, LOG_FILE), `${JSON.stringify(record)}\n`, 'utf8');
+    // Legacy HUD summaries follow the same opt-in policy as detailed traces.
+    return this.enqueueLog(async () => {
+      const settings = await this.settings.read();
+      if (!settings.diagnosticHistory) return;
+      const records = await this.loadLog(settings.diagnosticDays);
+      const bounded = {
+        ...record,
+        utterance: record.utterance.slice(0, 4000),
+        reply: record.reply.slice(0, 4000),
+        actions: record.actions.slice(0, 20).map((action) => ({
+          ...action,
+          input: JSON.stringify(action.input)?.slice(0, 2000) ?? null,
+          outcome: action.outcome.slice(0, 4000),
+        })),
+      };
+      records.push(conductorTurnRecordSchema.parse(JSON.parse(redactAll(JSON.stringify(bounded)))));
+      await this.saveLog(records);
+    });
   }
 
   async readLog(limit: number): Promise<ConductorTurnRecord[]> {
-    let raw: string;
-    try {
-      raw = await readFile(join(this.host.dataDir, LOG_FILE), 'utf8');
-    } catch {
-      return [];
-    }
-    const records: ConductorTurnRecord[] = [];
-    for (const line of raw.split('\n').slice(-limit - 1)) {
-      if (!line.trim()) continue;
+    return this.enqueueLog(async () => {
+      const settings = await this.settings.read();
+      if (!settings.diagnosticHistory) return [];
+      const records = await this.loadLog(settings.diagnosticDays);
+      await this.saveLog(records);
+      return records
+        .slice(-limit)
+        .map((record) =>
+          conductorTurnRecordSchema.parse(JSON.parse(redactAll(JSON.stringify(record))))
+        );
+    });
+  }
+
+  async appendTrace(event: TraceEvent): Promise<void> {
+    const settings = await this.settings.read();
+    if (settings.diagnosticHistory) await this.diagnostics.append(event, settings.diagnosticDays);
+  }
+
+  async readTrace(query: {
+    interactionId?: string;
+    since?: string;
+    before?: string;
+    limit: number;
+  }): Promise<TraceEvent[]> {
+    const settings = await this.settings.read();
+    if (!settings.diagnosticHistory) return [];
+    return this.diagnostics.read(query, settings.diagnosticDays);
+  }
+
+  async deleteDiagnostics(): Promise<void> {
+    await this.diagnostics.delete();
+    await this.enqueueLog(async () => {
+      await rm(join(this.host.dataDir, LOG_FILE), { force: true });
+      await rm(join(this.host.dataDir, LOG_FILE + '.tmp'), { force: true });
+    });
+  }
+
+  private async loadLog(days: number): Promise<ConductorTurnRecord[]> {
+    const path = join(this.host.dataDir, LOG_FILE);
+    if (((await stat(path).catch(() => null))?.size ?? 0) > 4 * 1024 * 1024) return [];
+    const raw = await readFile(path, 'utf8').catch(() => '');
+    const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+    return raw.split('\n').flatMap((line) => {
       try {
         const parsed = conductorTurnRecordSchema.safeParse(JSON.parse(line));
-        if (parsed.success) records.push(parsed.data);
+        return parsed.success && parsed.data.at >= cutoff ? [parsed.data] : [];
       } catch {
-        // A torn final line from a crash is skipped.
+        return [];
       }
+    });
+  }
+
+  private async saveLog(records: ConductorTurnRecord[]): Promise<void> {
+    await mkdir(this.host.dataDir, { recursive: true, mode: 0o700 });
+    const lines = records.map((record) => redactAll(JSON.stringify(record)) + '\n');
+    let size = 0;
+    const kept: string[] = [];
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i];
+      if (!line) continue;
+      const bytes = Buffer.byteLength(line);
+      if (size + bytes > 2 * 1024 * 1024) break;
+      kept.unshift(line);
+      size += bytes;
     }
-    return records.slice(-limit);
+    const path = join(this.host.dataDir, LOG_FILE);
+    await writeFile(path + '.tmp', kept.join(''), { encoding: 'utf8', mode: 0o600 });
+    await rename(path + '.tmp', path);
+    if (process.platform !== 'win32') await chmod(path, 0o600);
   }
 
   private clientFor(key: Secret<string>): Anthropic {

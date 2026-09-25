@@ -147,7 +147,12 @@ export const ConductorHud = observer(function ConductorHud() {
 
         {error && <ErrorCard />}
 
-        {showLog && <ConductorLogPanel refreshKey={conductor.logVersion} />}
+        {showLog && (
+          <ConductorLogPanel
+            refreshKey={conductor.logVersion}
+            enabled={conductor.settings?.diagnosticHistory ?? false}
+          />
+        )}
 
         {typing && <CommandInput onClose={() => setTyping(false)} />}
       </div>

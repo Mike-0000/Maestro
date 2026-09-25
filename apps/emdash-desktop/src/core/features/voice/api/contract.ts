@@ -62,6 +62,8 @@ export const transcriptionSchema = z.object({
   engine: sttEngineIdSchema,
   /** Server-side transcription latency. */
   latencyMs: z.number(),
+  /** Confidence of the chosen STT alternative, only when supplied by the provider. */
+  confidence: z.number().min(0).max(1).optional(),
 });
 export type Transcription = z.infer<typeof transcriptionSchema>;
 
@@ -90,7 +92,12 @@ export const voiceEventSchema = z.discriminatedUnion('type', [
     intent: z.enum(['command', 'dictation']).optional(),
   }),
   /** Live partial transcript of an open stream. */
-  z.object({ type: z.literal('partial'), streamId: z.string(), text: z.string() }),
+  z.object({
+    type: z.literal('partial'),
+    streamId: z.string(),
+    text: z.string(),
+    confidence: z.number().min(0).max(1).optional(),
+  }),
   /** 24 kHz mono signed 16-bit little-endian PCM from Gemini or the local Kitten model. */
   z.object({ type: z.literal('tts-chunk'), requestId: z.string(), pcm: z.string() }),
   z.object({ type: z.literal('tts-done'), requestId: z.string() }),

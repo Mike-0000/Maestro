@@ -19,6 +19,7 @@ import {
   type ConductorSettings,
   type ConductorStatus,
   type ConductorTurnRecord,
+  type TraceEvent,
 } from '../api/contract';
 import { chooseMode, parseCommand, type CloseScope, type GrammarCommand } from '../api/grammar';
 import { trimHistory } from '../api/history';
@@ -74,12 +75,17 @@ import { resolveProjectId, spawnAgentTask, startAgentSession } from './spawn';
 /** What the conductor needs from the voice slice (kept structural to avoid a slice dependency). */
 export interface ConductorVoicePort {
   readonly muted: boolean;
-  say(text: string): void;
+  say(text: string, interactionId?: string): void;
   announce(text: string): void;
   setMuted(muted: boolean): void;
   setTranscriptHandler(
-    handler: (text: string, intent: 'command' | 'dictation') => Promise<void> | void
+    handler: (
+      text: string,
+      intent: 'command' | 'dictation',
+      interactionId: string
+    ) => Promise<void> | void
   ): void;
+  setTraceHandler(handler: (event: TraceEvent) => void): void;
   setVocabularyProvider(provider: () => string[]): void;
 }
 
@@ -136,7 +142,9 @@ export class ConductorStore {
   readonly plans: PlanStore;
 
   private history: Anthropic.Beta.BetaMessageParam[] = [];
-  private queued: { text: string; source: UtteranceSource } | null = null;
+  private queued: { text: string; source: UtteranceSource; interactionId: string } | null = null;
+  private interactionId: string | null = null;
+  private traceWrites: Promise<void> = Promise.resolve();
   private pendingResolve: ((confirmed: boolean) => void) | null = null;
   private pendingTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingSeq = 0;
@@ -157,6 +165,8 @@ export class ConductorStore {
       | 'voice'
       | 'history'
       | 'queued'
+      | 'interactionId'
+      | 'traceWrites'
       | 'pendingResolve'
       | 'pendingTimer'
       | 'pendingSeq'
@@ -170,6 +180,8 @@ export class ConductorStore {
       voice: false,
       history: false,
       queued: false,
+      interactionId: false,
+      traceWrites: false,
       pendingResolve: false,
       pendingTimer: false,
       pendingSeq: false,
@@ -181,8 +193,11 @@ export class ConductorStore {
   }
 
   activate(): void {
-    this.voice.setTranscriptHandler((text, intent) =>
-      intent === 'dictation' ? this.dictate(text) : this.handleUtterance(text, 'voice')
+    this.voice.setTraceHandler((event) => this.writeTrace(event));
+    this.voice.setTranscriptHandler((text, intent, interactionId) =>
+      intent === 'dictation'
+        ? this.dictate(text, interactionId)
+        : this.handleUtterance(text, 'voice', interactionId)
     );
     this.voice.setVocabularyProvider(() => this.vocabulary());
     void this.refreshStatus();
@@ -248,49 +263,94 @@ export class ConductorStore {
   // ── Entry points ───────────────────────────────────────────────────────────
 
   /** Voice dictation: types the text into the focused agent without pressing Enter. */
-  async dictate(text: string): Promise<void> {
+  async dictate(text: string, interactionId: string = crypto.randomUUID()): Promise<void> {
+    this.trace('dictation', text, { status: 'requested' }, interactionId);
     const entry = this.focusedEntry();
     if (!entry) {
-      this.setReply('Focus an agent first, then dictate.', 'voice');
+      this.setReply('Focus an agent first, then dictate.', 'voice', interactionId);
       return;
     }
     const blocked = this.permissionBlock(entry);
     if (blocked) {
-      this.setReply(blocked, 'voice');
+      this.setReply(blocked, 'voice', interactionId);
       return;
     }
     try {
       await sendToAgent(entry, text, false);
-      this.setReply(`Typed into ${this.nameOf(entry)}. Say "send it" to submit.`, null);
+      this.trace(
+        'action-result',
+        undefined,
+        { tool: 'dictation', status: 'accepted' },
+        interactionId
+      );
+      this.setReply(
+        `Typed into ${this.nameOf(entry)}. Say "send it" to submit.`,
+        null,
+        interactionId
+      );
     } catch (error) {
-      this.setReply(errorMessage(error), 'voice');
+      this.trace(
+        'action-result',
+        undefined,
+        { tool: 'dictation', status: 'failed' },
+        interactionId
+      );
+      this.setReply(errorMessage(error), 'voice', interactionId);
     }
   }
 
-  async handleUtterance(raw: string, source: UtteranceSource): Promise<void> {
+  async handleUtterance(
+    raw: string,
+    source: UtteranceSource,
+    interactionId: string = crypto.randomUUID()
+  ): Promise<void> {
     const text = raw.trim();
     if (!text) return;
+    if (source === 'typed') this.trace('capture', text, { source: 'typed' }, interactionId);
 
     // A pending action is answered before anything else, even while a turn is running.
     const roster = buildRoster(this.canvas);
     const focusedId = focusedConversationId(this.canvas);
     const command = parseCommand(text, roster, focusedId);
     if (this.pending) {
-      if (command?.kind === 'confirm') return this.confirmPending();
+      if (command?.kind === 'confirm') {
+        this.trace(
+          'confirmation',
+          text,
+          { status: 'user-confirmed', targetInteractionId: this.interactionId ?? '' },
+          interactionId
+        );
+        return this.confirmPending();
+      }
       // "Close" with something pending closes the prompt in front of the user, not a window.
       if (command?.kind === 'reject' || (command?.kind === 'close' && !command.agent)) {
         this.cancelPending();
-        this.setReply('Cancelled.', source);
+        this.trace(
+          'confirmation',
+          text,
+          { status: 'user-cancelled', targetInteractionId: this.interactionId ?? '' },
+          interactionId
+        );
+        this.setReply('Cancelled.', source, interactionId);
         return;
       }
       this.cancelPending();
     }
 
     if (this.busy) {
-      this.queued = { text, source };
+      if (this.queued)
+        this.trace(
+          'ignored',
+          undefined,
+          { reason: 'superseded-by-new-command' },
+          this.queued.interactionId
+        );
+      this.queued = { text, source, interactionId };
+      this.trace('route', undefined, { status: 'queued' }, interactionId);
       return;
     }
 
+    this.interactionId = interactionId;
     this.lastUtterance = text;
     this.error = null;
     const startedAt = performance.now();
@@ -306,7 +366,7 @@ export class ConductorStore {
       });
       const next = this.queued;
       this.queued = null;
-      if (next) void this.handleUtterance(next.text, next.source);
+      if (next) void this.handleUtterance(next.text, next.source, next.interactionId);
     }
   }
 
@@ -346,6 +406,11 @@ export class ConductorStore {
     const actions: ActionRecord[] = [];
     let reply = '';
     this.lastRoute = route;
+    this.trace('route', undefined, {
+      route,
+      intent: command.kind,
+      input: JSON.stringify(command).slice(0, 2000),
+    });
     this.phase = 'acting';
 
     switch (command.kind) {
@@ -517,6 +582,11 @@ export class ConductorStore {
       }
     }
 
+    for (const action of actions)
+      this.trace('action-result', action.outcome, {
+        tool: action.tool,
+        input: JSON.stringify(action.input).slice(0, 2000),
+      });
     this.setReply(reply, source);
     this.log({ route, actions, reply, startedAt });
     return true;
@@ -552,7 +622,10 @@ export class ConductorStore {
       decision.answers,
       this.settings?.jevConfidence ?? DEFAULT_CONDUCTOR_SETTINGS.jevConfidence
     );
-    if (routing.kind === 'model') return { handled: false, mode: routing.mode };
+    if (routing.kind === 'model') {
+      this.trace('route', undefined, { route: 'jev-fallback', mode: routing.mode ?? 'command' });
+      return { handled: false, mode: routing.mode };
+    }
 
     const agent = routing.agent
       ? roster.find((candidate) => candidate.name === routing.agent)
@@ -601,6 +674,7 @@ export class ConductorStore {
     modeHint?: ConductorMode
   ): Promise<void> {
     this.lastRoute = 'llm';
+    this.trace('route', undefined, { route: 'llm', mode: modeHint ?? chooseMode(text) });
     if (this.status && !this.status.configured) {
       runInAction(() => {
         this.error = {
@@ -675,7 +749,15 @@ export class ConductorStore {
             this.phase = 'acting';
             this.activity = describeTool(use.name);
           });
+          this.trace('tool-start', undefined, {
+            tool: use.name,
+            input: JSON.stringify(use.input).slice(0, 2000),
+          });
           const outcome = await this.executeTool(use.name, use.input);
+          this.trace('tool-result', outcome.content, {
+            tool: use.name,
+            status: outcome.isError ? 'failed' : 'returned',
+          });
           actions.push({
             tool: use.name,
             input: use.input,
@@ -820,11 +902,47 @@ export class ConductorStore {
           throw error;
         });
         this.disposers.push(focusSpawnedAgent(this.canvas, result.conversationId));
-        void startAgentSession(projectId, result.taskId, result.conversationId).then((started) => {
-          if (started && result.promptDeferred && spawn.prompt.trim()) {
-            void deliverPromptWhenReady(this.canvas, result.conversationId, spawn.prompt);
-          }
-        });
+        const interactionId = this.interactionId;
+        this.trace('action-result', undefined, { tool: 'spawn_agent', status: 'scheduled' });
+        void startAgentSession(projectId, result.taskId, result.conversationId)
+          .then(async (started) => {
+            if (!started) {
+              this.trace(
+                'action-result',
+                undefined,
+                { tool: 'spawn_agent', status: 'failed-to-start' },
+                interactionId
+              );
+              return;
+            }
+            this.trace(
+              'action-result',
+              undefined,
+              { tool: 'spawn_agent', status: 'session-started' },
+              interactionId
+            );
+            if (result.promptDeferred && spawn.prompt.trim()) {
+              const delivered = await deliverPromptWhenReady(
+                this.canvas,
+                result.conversationId,
+                spawn.prompt
+              );
+              this.trace(
+                'action-result',
+                undefined,
+                { tool: 'spawn_agent', status: delivered ? 'prompt-accepted' : 'prompt-failed' },
+                interactionId
+              );
+            }
+          })
+          .catch(() =>
+            this.trace(
+              'action-result',
+              undefined,
+              { tool: 'spawn_agent', status: 'failed-to-start' },
+              interactionId
+            )
+          );
         return {
           content: `Created task "${spawn.task_name}" in a new worktree; the agent is starting. It will appear on the canvas as ${name}.`,
         };
@@ -1085,6 +1203,7 @@ export class ConductorStore {
     this.settlePending(false);
     const durationMs = kind === 'countdown' ? CANCEL_WINDOW_MS : CONFIRM_TIMEOUT_MS;
     this.pending = { id: ++this.pendingSeq, label, kind, startedAt: Date.now(), durationMs };
+    this.trace('confirmation', undefined, { status: 'waiting', kind });
     return new Promise<boolean>((resolve) => {
       this.pendingResolve = resolve;
       this.pendingTimer = setTimeout(() => this.settlePending(kind === 'countdown'), durationMs);
@@ -1105,6 +1224,8 @@ export class ConductorStore {
     const resolve = this.pendingResolve;
     this.pendingResolve = null;
     this.pending = null;
+    if (resolve)
+      this.trace('confirmation', undefined, { status: confirmed ? 'confirmed' : 'cancelled' });
     resolve?.(confirmed);
   }
 
@@ -1153,6 +1274,11 @@ export class ConductorStore {
   async updateSettings(patch: Partial<ConductorSettings>): Promise<void> {
     const status = await (await getConductorClient()).updateSettings(patch);
     runInAction(() => (this.status = status));
+  }
+
+  async recentTrace(limit = 200): Promise<TraceEvent[]> {
+    await this.traceWrites;
+    return (await getConductorClient()).readTrace({ limit });
   }
 
   clearHistory(): void {
@@ -1223,11 +1349,30 @@ export class ConductorStore {
   private async deliver(entry: AgentTileEntry, text: string, submit: boolean): Promise<void> {
     if (this.isRunning(entry)) {
       await sendToAgent(entry, text, submit);
+      this.trace('action-result', undefined, { tool: 'send_to_agent', status: 'accepted' });
       return;
     }
     const started = await startAgentSession(entry.projectId, entry.taskId, entry.conversationId);
     if (!started) throw new Error(`${this.nameOf(entry)} could not be started.`);
-    void deliverPromptWhenReady(this.canvas, entry.conversationId, text, submit);
+    const interactionId = this.interactionId;
+    this.trace('action-result', undefined, { tool: 'send_to_agent', status: 'scheduled' });
+    void deliverPromptWhenReady(this.canvas, entry.conversationId, text, submit)
+      .then((delivered) =>
+        this.trace(
+          'action-result',
+          undefined,
+          { tool: 'send_to_agent', status: delivered ? 'accepted' : 'failed' },
+          interactionId
+        )
+      )
+      .catch(() =>
+        this.trace(
+          'action-result',
+          undefined,
+          { tool: 'send_to_agent', status: 'failed' },
+          interactionId
+        )
+      );
   }
 
   private async attempt(run: () => Promise<void>, success: string): Promise<string> {
@@ -1239,12 +1384,37 @@ export class ConductorStore {
     }
   }
 
-  private setReply(text: string, source: UtteranceSource | null): void {
+  private setReply(text: string, source: UtteranceSource | null, id = this.interactionId): void {
     runInAction(() => {
       this.reply = text;
       this.replyAt = Date.now();
     });
-    if (text && source === 'voice') this.voice.say(text);
+    if (text) this.trace('reply', text, { surface: 'hud', source: source ?? 'silent' }, id);
+    if (text && source === 'voice') this.voice.say(text, id ?? undefined);
+  }
+
+  private writeTrace(event: TraceEvent): void {
+    this.traceWrites = this.traceWrites
+      .then(async () => {
+        await (await getConductorClient()).appendTrace(event);
+      })
+      .catch((error: unknown) => log.warn('conductor: trace write failed', { error }));
+  }
+
+  private trace(
+    kind: TraceEvent['kind'],
+    text?: string,
+    detail?: TraceEvent['detail'],
+    id = this.interactionId
+  ): void {
+    if (!id) return;
+    this.writeTrace({
+      interactionId: id,
+      at: new Date().toISOString(),
+      kind,
+      ...(text !== undefined ? { text: text.slice(0, 4000) } : {}),
+      ...(detail ? { detail } : {}),
+    });
   }
 
   private log(entry: {

@@ -27,7 +27,7 @@ export function deepgramStreamUrl(options: { language: string; vocabulary: reado
 type DeepgramMessage = {
   type?: string;
   is_final?: boolean;
-  channel?: { alternatives?: { transcript?: string }[] };
+  channel?: { alternatives?: { transcript?: string; confidence?: number }[] };
 };
 
 /**
@@ -37,14 +37,22 @@ type DeepgramMessage = {
 export class TranscriptAccumulator {
   private finals: string[] = [];
   private interim = '';
+  /** Confidence of the most recent segment, not a whole-utterance confidence estimate. */
+  private latestConfidence: number | undefined;
+  private lastFinalConfidence: number | undefined;
 
   /** Applies one message; returns true when the visible text changed. */
   apply(message: DeepgramMessage): boolean {
     if (message.type !== 'Results') return false;
-    const transcript = message.channel?.alternatives?.[0]?.transcript?.trim() ?? '';
+    const alternative = message.channel?.alternatives?.[0];
+    const transcript = alternative?.transcript?.trim() ?? '';
+    this.latestConfidence = alternative?.confidence;
     const before = this.text;
     if (message.is_final) {
-      if (transcript) this.finals.push(transcript);
+      if (transcript) {
+        this.finals.push(transcript);
+        this.lastFinalConfidence = alternative?.confidence;
+      }
       this.interim = '';
     } else {
       this.interim = transcript;
@@ -60,6 +68,16 @@ export class TranscriptAccumulator {
   /** Only finalized speech (the interim tail is dropped if Deepgram never finalized it). */
   get finalText(): string {
     return this.finals.length > 0 ? this.finals.join(' ') : this.interim;
+  }
+
+  get confidence(): number | undefined {
+    const value = this.latestConfidence;
+    return value !== undefined && value >= 0 && value <= 1 ? value : undefined;
+  }
+
+  get finalConfidence(): number | undefined {
+    const value = this.finals.length > 0 ? this.lastFinalConfidence : this.latestConfidence;
+    return value !== undefined && value >= 0 && value <= 1 ? value : undefined;
   }
 }
 
@@ -78,7 +96,7 @@ export class DeepgramStream {
   constructor(
     key: Secret<string>,
     options: { language: string; vocabulary: readonly string[] },
-    private readonly onPartial: (text: string) => void
+    private readonly onPartial: (text: string, confidence?: number) => void
   ) {
     // Browsers and Node's WebSocket cannot set headers; Deepgram accepts the key as a subprotocol.
     this.socket = new WebSocket(deepgramStreamUrl(options), ['token', key.expose()]);
@@ -106,7 +124,7 @@ export class DeepgramStream {
       if (typeof event.data !== 'string') return;
       try {
         if (this.accumulator.apply(JSON.parse(event.data) as DeepgramMessage)) {
-          this.onPartial(this.accumulator.text);
+          this.onPartial(this.accumulator.text, this.accumulator.confidence);
         }
       } catch {
         // Ignore non-JSON keepalives.
@@ -132,6 +150,10 @@ export class DeepgramStream {
     if (this.socket.readyState !== WebSocket.CLOSED) this.socket.close();
     if (this.failure) throw this.failure;
     return this.accumulator.finalText;
+  }
+
+  get confidence(): number | undefined {
+    return this.accumulator.finalConfidence;
   }
 
   abort(): void {

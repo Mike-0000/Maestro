@@ -11,6 +11,64 @@ import { getConductorClient } from '../../api/browser/client';
 import type { SystemChecks } from '../../api/contract';
 import { getConductorStore } from '../../contributions/browser/app-stores';
 
+function DiagnosticControls({ enabled }: { enabled: boolean }) {
+  const conductor = getConductorStore();
+  const [message, setMessage] = useState('');
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <Button
+        variant="secondary"
+        size="xs"
+        disabled={!enabled}
+        onClick={() => {
+          if (
+            !window.confirm(
+              'Copy up to 200 recent redacted diagnostic events to the clipboard? Only share them with an agent you trust.'
+            )
+          )
+            return;
+          void (async () => {
+            try {
+              const events = await conductor.recentTrace();
+              await copyTextToClipboard(events.map((event) => JSON.stringify(event)).join('\n'));
+              setMessage(
+                `Copied ${events.length} events. Paste into a trusted coding agent to inspect them.`
+              );
+            } catch {
+              setMessage('Could not copy diagnostic events.');
+            }
+          })();
+        }}
+      >
+        Copy recent events for agent
+      </Button>
+      <Button
+        variant="secondary"
+        size="xs"
+        onClick={() => {
+          if (
+            !window.confirm(
+              'Permanently delete all local Chorus command logs and diagnostic traces?'
+            )
+          )
+            return;
+          void (async () => {
+            try {
+              await (await getConductorClient()).deleteDiagnostics();
+              setMessage('Diagnostics deleted.');
+            } catch {
+              setMessage('Could not delete diagnostics.');
+            }
+          })();
+        }}
+      >
+        Delete diagnostics
+      </Button>
+      <span role="status">{message}</span>
+    </div>
+  );
+}
+
 const ENGINE_LABELS = {
   openai: 'OpenAI (gpt-4o-transcribe)',
   deepgram: 'Deepgram (Nova-3)',
@@ -62,6 +120,39 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
       />
 
       <WindowsChecks />
+
+      <SettingsSection title="Diagnostic history">
+        <SettingsRow
+          label="Record voice interaction traces"
+          description="Off by default. Stores redacted transcripts, commands, tool arguments and replies locally. May still contain private information. Turning off deletes stored diagnostics."
+          control={
+            <Switch
+              checked={conductorSettings?.diagnosticHistory ?? false}
+              disabled={!conductorSettings}
+              onCheckedChange={(diagnosticHistory) =>
+                void conductor.updateSettings({ diagnosticHistory })
+              }
+            />
+          }
+        />
+        <SettingsRow
+          label="Retain for days"
+          description="At most 30 days and 2 MB per diagnostic file."
+          control={
+            <CommitInput
+              value={String(conductorSettings?.diagnosticDays ?? 7)}
+              ariaLabel="Diagnostic retention days"
+              className="w-24"
+              onCommit={(value) => {
+                const days = Number(value);
+                if (Number.isInteger(days) && days >= 1 && days <= 30)
+                  void conductor.updateSettings({ diagnosticDays: days });
+              }}
+            />
+          }
+        />
+        <DiagnosticControls enabled={conductorSettings?.diagnosticHistory ?? false} />
+      </SettingsSection>
 
       <SettingsSection title="Provider">
         <SettingsRow
