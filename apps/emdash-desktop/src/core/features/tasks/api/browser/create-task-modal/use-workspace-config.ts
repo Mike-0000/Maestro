@@ -150,6 +150,8 @@ export function useWorkspaceConfig(opts: {
   taskName: string;
   linkedIssue: LinkedIssue | null;
   createBranchAndWorktreeDefault?: boolean;
+  /** Fork new task branches from the project checkout's current branch by default. */
+  branchFromCurrentBranch?: boolean;
   resetKey?: unknown;
   initial?: WorkspaceConfigInitial;
 }): WorkspaceConfigState {
@@ -164,6 +166,7 @@ export function useWorkspaceConfig(opts: {
     taskName,
     linkedIssue,
     createBranchAndWorktreeDefault = true,
+    branchFromCurrentBranch = false,
     resetKey,
     initial,
   } = opts;
@@ -243,7 +246,8 @@ export function useWorkspaceConfig(opts: {
     currentBranch,
     isUnborn,
     initial?.branchSelection,
-    createBranchAndWorktreeDefault
+    createBranchAndWorktreeDefault,
+    branchFromCurrentBranch
   );
 
   const branchNameState = useBranchName({

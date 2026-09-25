@@ -119,6 +119,7 @@ export function useCreateTaskState(
     taskName: taskName.effectiveTaskName,
     linkedIssue: linkedType === 'issue' ? linkedIssue : null,
     createBranchAndWorktreeDefault: createBranchAndWorktree,
+    branchFromCurrentBranch: true,
     resetKey: projectId,
     initial: initialWorkspaceId
       ? {

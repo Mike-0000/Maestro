@@ -100,23 +100,28 @@ function Probe({
   isUnborn = false,
   hasRepository = true,
   pr = null,
+  currentBranch = 'current-branch',
+  branchFromCurrentBranch,
 }: {
   initial: Parameters<typeof useWorkspaceConfig>[0]['initial'];
   isUnborn?: boolean;
   hasRepository?: boolean;
   pr?: Parameters<typeof useWorkspaceConfig>[0]['pr'];
+  currentBranch?: string | null;
+  branchFromCurrentBranch?: boolean;
 }) {
   latestState = useWorkspaceConfig({
     projectId: 'project-1',
     defaultBranch: { type: 'local', branch: 'main' },
     isUnborn,
     hasRepository,
-    currentBranch: 'current-branch',
+    currentBranch,
     repositoryWorkspaceId: 'repo-workspace-1',
     pr,
     taskName: 'Generated task branch',
     linkedIssue: null,
     createBranchAndWorktreeDefault: true,
+    branchFromCurrentBranch,
     resetKey: 'project-1',
     initial,
   });
@@ -158,6 +163,8 @@ describe('useWorkspaceConfig branch selection', () => {
       isUnborn?: boolean;
       hasRepository?: boolean;
       pr?: Parameters<typeof useWorkspaceConfig>[0]['pr'];
+      currentBranch?: string | null;
+      branchFromCurrentBranch?: boolean;
     } = {}
   ) {
     await act(async () => {
@@ -201,6 +208,54 @@ describe('useWorkspaceConfig branch selection', () => {
       kind: 'use-branch',
       branchName: 'main',
     });
+  });
+
+  it('forks new task branches from the project checkout branch when enabled', async () => {
+    await renderProbe(undefined, { branchFromCurrentBranch: true });
+
+    expect(latestState?.branchSelection.createBranchAndWorktree).toBe(true);
+    expect(latestState?.resolvedConfig.git).toEqual({
+      kind: 'create-branch',
+      branchName: 'generated-task-branch',
+      fromBranch: { type: 'local', branch: 'current-branch' },
+      pushBranch: true,
+    });
+    // Still an isolated worktree, never the project root itself.
+    expect(latestState?.resolvedConfig.workspace).toEqual({ kind: 'new-worktree' });
+    expect(latestState?.setupSteps[0]?.description).toBe(
+      'Create a worktree on new branch generated-task-branch based on current-branch'
+    );
+  });
+
+  it('keeps the default branch ref when the project checkout is on the default branch', async () => {
+    await renderProbe(undefined, { branchFromCurrentBranch: true, currentBranch: 'main' });
+
+    expect(latestState?.branchSelection.selectedBranch).toEqual({ type: 'local', branch: 'main' });
+  });
+
+  it('falls back to the default branch when the checkout branch is unknown', async () => {
+    await renderProbe(undefined, { branchFromCurrentBranch: true, currentBranch: null });
+
+    expect(latestState?.branchSelection.selectedBranch).toEqual({ type: 'local', branch: 'main' });
+  });
+
+  it('prefers an explicit source branch over the project checkout branch', async () => {
+    await renderProbe(undefined, { branchFromCurrentBranch: true });
+
+    act(() => {
+      latestState?.branchSelection.setSelectedBranch({ type: 'local', branch: 'release/v2' });
+    });
+
+    expect(latestState?.branchSelection.selectedBranch).toEqual({
+      type: 'local',
+      branch: 'release/v2',
+    });
+  });
+
+  it('forks new task branches from the default branch unless enabled', async () => {
+    await renderProbe(undefined);
+
+    expect(latestState?.branchSelection.selectedBranch).toEqual({ type: 'local', branch: 'main' });
   });
 
   it('restores checkout-branch automations as use-branch configs', async () => {
