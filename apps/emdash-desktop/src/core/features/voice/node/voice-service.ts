@@ -15,6 +15,7 @@ import { DeepgramSttEngine } from './engines/deepgram';
 import { DeepgramStream } from './engines/deepgram-stream';
 import { SttEngineError, type SttEngine } from './engines/engine';
 import { OpenAiSttEngine } from './engines/openai';
+import { OpenRouterSttEngine } from './engines/openrouter';
 import { WhisperLocalSttEngine } from './engines/whisper-local';
 
 /** RIFF header (44 bytes) plus at least ~0.2 s of 16 kHz 16-bit audio. */
@@ -49,6 +50,10 @@ export class VoiceService {
       deepgram: new DeepgramSttEngine(() => this.credentials.get('deepgram')),
       'whisper-local': new WhisperLocalSttEngine(
         async () => (await this.settings.read()).whisperUrl
+      ),
+      openrouter: new OpenRouterSttEngine(
+        () => this.credentials.get('openrouter'),
+        async () => (await this.settings.read()).openrouterSttModel
       ),
     };
   }

@@ -6,6 +6,7 @@ import type { Logger } from '@emdash/shared/logger';
 import type { ChorusHostServices } from '@core/primitives/chorus-host/api/host-services';
 import { ChorusCredentials } from '@core/primitives/chorus-host/node/credentials';
 import { JsonSettingsFile } from '@core/primitives/chorus-host/node/json-settings-file';
+import { openRouterChat, OpenRouterError } from '@core/primitives/chorus-host/node/openrouter';
 import {
   conductorSettingsSchema,
   conductorTurnRecordSchema,
@@ -22,6 +23,12 @@ import {
   type JevError,
 } from '../api/contract';
 import type { JevQuestions } from '../api/jev';
+import {
+  fromOpenAiChoice,
+  openRouterEffort,
+  toOpenAiMessages,
+  toOpenAiTools,
+} from '../api/openrouter-format';
 import { CONDUCTOR_SYSTEM_PROMPT } from '../api/system-prompt';
 import { conductorToolDefinitions } from '../api/tools';
 import { evaluateWithJev, JevRequestError } from './jev-client';
@@ -82,7 +89,7 @@ export class ConductorService {
 
   async status(): Promise<ConductorStatus> {
     return {
-      configured: (await this.credentials.get('anthropic')) !== null,
+      configured: (await this.credentials.get(await this.providerCredential())) !== null,
       jevReady:
         (await this.settings.read()).jevEnabled &&
         (await this.credentials.get('typesafe')) !== null,
@@ -100,14 +107,19 @@ export class ConductorService {
     mode: ConductorMode,
     messages: Anthropic.Beta.BetaMessageParam[]
   ): Promise<Result<ConductorTurnResult, ConductorError>> {
-    const key = await this.credentials.get('anthropic');
+    const settings = await this.settings.read();
+    const key = await this.credentials.get(
+      settings.provider === 'openrouter' ? 'openrouter' : 'anthropic'
+    );
     if (!key) {
       return err({
         type: 'not-configured',
-        message: 'Add an Anthropic API key in Settings → Voice & Conductor to use the conductor.',
+        message:
+          settings.provider === 'openrouter'
+            ? 'Add an OpenRouter API key in Settings → Voice & Conductor to use the conductor.'
+            : 'Add an Anthropic API key in Settings → Voice & Conductor to use the conductor.',
       });
     }
-    const settings = await this.settings.read();
     const usage = await this.usageToday();
     if (
       settings.dailyTokenBudget > 0 &&
@@ -119,6 +131,9 @@ export class ConductorService {
           "Today's conductor token budget is used up. Raise it in Settings → Voice & Conductor.",
       });
     }
+
+    if (settings.provider === 'openrouter')
+      return this.runOpenRouterTurn(key, settings, mode, messages);
 
     const adaptive = startsWithAny(settings.model, ADAPTIVE_MODEL_PREFIXES);
     const withFallback = startsWithAny(settings.model, FALLBACK_MODEL_PREFIXES);
@@ -161,6 +176,60 @@ export class ConductorService {
       });
     } catch (error) {
       return err(this.describeError(error));
+    }
+  }
+
+  private async providerCredential(): Promise<'anthropic' | 'openrouter'> {
+    return (await this.settings.read()).provider === 'openrouter' ? 'openrouter' : 'anthropic';
+  }
+
+  /** The same turn through OpenRouter: translated to chat completions and back to content blocks. */
+  private async runOpenRouterTurn(
+    key: Secret<string>,
+    settings: ConductorSettings,
+    mode: ConductorMode,
+    messages: Anthropic.Beta.BetaMessageParam[]
+  ): Promise<Result<ConductorTurnResult, ConductorError>> {
+    try {
+      const response = await openRouterChat(key, {
+        model: settings.openrouterModel,
+        max_tokens: mode === 'plan' ? 16000 : 4096,
+        messages: toOpenAiMessages(CONDUCTOR_SYSTEM_PROMPT, messages),
+        tools: toOpenAiTools(this.tools),
+        reasoning: {
+          effort: openRouterEffort(mode === 'plan' ? settings.planEffort : settings.commandEffort),
+        },
+      });
+      const choice = response.choices?.[0];
+      if (!choice) return err({ type: 'api-error', message: 'OpenRouter returned no answer.' });
+      const usage = response.usage ?? {};
+      const cached = usage.prompt_tokens_details?.cached_tokens ?? 0;
+      const turnUsage = {
+        inputTokens: usage.prompt_tokens ?? 0,
+        outputTokens: usage.completion_tokens ?? 0,
+        cacheReadTokens: cached,
+      };
+      await this.recordUsage(turnUsage);
+      const { content, stopReason } = fromOpenAiChoice(choice);
+      if (stopReason === 'refusal') {
+        return err({ type: 'refused', message: 'The model declined that request.' });
+      }
+      return ok({
+        content,
+        stopReason,
+        model: response.model ?? settings.openrouterModel,
+        usage: turnUsage,
+      });
+    } catch (error) {
+      if (error instanceof OpenRouterError) {
+        if (error.kind === 'rejected-key')
+          return err({ type: 'not-configured', message: error.message });
+        if (error.kind === 'rate-limited')
+          return err({ type: 'rate-limited', message: error.message });
+        return err({ type: 'api-error', message: error.message });
+      }
+      this.logger.error('conductor: OpenRouter failure', { error });
+      return err({ type: 'api-error', message: 'The OpenRouter request failed.' });
     }
   }
 

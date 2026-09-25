@@ -510,7 +510,8 @@ export class ConductorStore {
       runInAction(() => {
         this.error = {
           kind: 'not-configured',
-          message: 'Add an Anthropic API key in Settings → Voice & Conductor to use the conductor.',
+          message:
+            'Add an Anthropic or OpenRouter API key in Settings → Voice & Conductor to use the conductor.',
         };
       });
       this.setReply("I didn't catch a command I know, and the conductor has no API key.", source);
@@ -1063,7 +1064,7 @@ function describeTool(name: string): string {
 function spokenError(error: ConductorError): string {
   switch (error.type) {
     case 'not-configured':
-      return 'The conductor needs an Anthropic API key.';
+      return 'The conductor needs an Anthropic or OpenRouter API key.';
     case 'budget-exceeded':
       return "Today's conductor token budget is used up.";
     case 'rate-limited':

@@ -4,7 +4,7 @@ import { chorusCredentialIdSchema } from '@core/primitives/chorus-host/api/crede
 
 export const voiceDomain = 'voice' as const;
 
-export const sttEngineIds = ['openai', 'deepgram', 'whisper-local'] as const;
+export const sttEngineIds = ['openai', 'deepgram', 'whisper-local', 'openrouter'] as const;
 export const sttEngineIdSchema = z.enum(sttEngineIds);
 export type SttEngineId = z.infer<typeof sttEngineIdSchema>;
 
@@ -12,6 +12,8 @@ export const voiceSettingsSchema = z.object({
   engine: sttEngineIdSchema,
   /** whisper.cpp `whisper-server` base URL for the local engine. */
   whisperUrl: z.string(),
+  /** Audio-input model used for speech-to-text when the engine is openrouter. */
+  openrouterSttModel: z.string(),
   language: z.string(),
   /** Electron accelerator for the global toggle-to-talk shortcut; empty disables it. */
   globalShortcut: z.string(),
@@ -32,6 +34,7 @@ export type VoiceSettings = z.infer<typeof voiceSettingsSchema>;
 export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   engine: 'openai',
   whisperUrl: 'http://127.0.0.1:8178',
+  openrouterSttModel: 'google/gemini-3.5-flash-lite',
   language: 'en',
   globalShortcut: 'Control+Alt+Space',
   speakReplies: true,

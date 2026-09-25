@@ -10,9 +10,16 @@ export type ConductorMode = z.infer<typeof conductorModeSchema>;
 
 export const conductorEffortSchema = z.enum(['low', 'medium', 'high', 'xhigh', 'max']);
 
+export const conductorProviderSchema = z.enum(['anthropic', 'openrouter']);
+export type ConductorProvider = z.infer<typeof conductorProviderSchema>;
+
 export const conductorSettingsSchema = z.object({
+  /** Where the conductor's model runs: the Anthropic API directly, or OpenRouter. */
+  provider: conductorProviderSchema,
   /** Claude model for the conductor. */
   model: z.string(),
+  /** OpenRouter model id used when provider is openrouter. */
+  openrouterModel: z.string(),
   /** Model the API retries on when the primary declines (server-side fallback). */
   fallbackModel: z.string(),
   /** Effort for quick voice commands (latency-sensitive). */
@@ -33,7 +40,9 @@ export const conductorSettingsSchema = z.object({
 export type ConductorSettings = z.infer<typeof conductorSettingsSchema>;
 
 export const DEFAULT_CONDUCTOR_SETTINGS: ConductorSettings = {
+  provider: 'anthropic',
   model: 'claude-opus-5',
+  openrouterModel: 'anthropic/claude-opus-5',
   fallbackModel: 'claude-opus-4-8',
   commandEffort: 'low',
   planEffort: 'high',

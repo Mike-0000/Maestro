@@ -13,6 +13,7 @@ const ENGINE_LABELS = {
   openai: 'OpenAI (gpt-4o-transcribe)',
   deepgram: 'Deepgram (Nova-3)',
   'whisper-local': 'Local whisper.cpp server',
+  openrouter: 'OpenRouter (audio model)',
 } as const;
 
 const EFFORT_LABELS = {
@@ -48,12 +49,41 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
 
       <WindowsChecks />
 
+      <SettingsSection title="Provider">
+        <SettingsRow
+          label="Use OpenRouter for everything"
+          description="One OpenRouter key runs the conductor and speech-to-text. Jev stays optional (it is not on OpenRouter)."
+          control={
+            <Switch
+              checked={
+                conductorSettings?.provider === 'openrouter' &&
+                voiceSettings?.engine === 'openrouter'
+              }
+              disabled={!conductorSettings || !voiceSettings}
+              onCheckedChange={(useOpenRouter) => {
+                void conductor.updateSettings({
+                  provider: useOpenRouter ? 'openrouter' : 'anthropic',
+                });
+                void voice.updateSettings({ engine: useOpenRouter ? 'openrouter' : 'openai' });
+              }}
+            />
+          }
+        />
+      </SettingsSection>
+
       <SettingsSection title="API keys">
         <KeyRow
           id="anthropic"
           label="Anthropic"
           description="Powers the conductor. Built-in commands work without it."
           present={credentials?.anthropic}
+          onSaved={() => void conductor.refreshStatus()}
+        />
+        <KeyRow
+          id="openrouter"
+          label="OpenRouter"
+          description="Runs the conductor and/or speech-to-text through OpenRouter models instead of the direct APIs."
+          present={credentials?.openrouter}
           onSaved={() => void conductor.refreshStatus()}
         />
         <KeyRow
@@ -115,6 +145,19 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
                 value={voiceSettings.whisperUrl}
                 ariaLabel="whisper-server URL"
                 onCommit={(whisperUrl) => void voice.updateSettings({ whisperUrl })}
+              />
+            }
+          />
+        )}
+        {voiceSettings?.engine === 'openrouter' && (
+          <SettingsRow
+            label="OpenRouter speech model"
+            description="Any OpenRouter model that accepts audio input, e.g. google/gemini-3.5-flash-lite or openai/gpt-audio-mini."
+            control={
+              <CommitInput
+                value={voiceSettings.openrouterSttModel}
+                ariaLabel="OpenRouter speech model"
+                onCommit={(openrouterSttModel) => void voice.updateSettings({ openrouterSttModel })}
               />
             }
           />
@@ -215,16 +258,53 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
 
       <SettingsSection title="Conductor">
         <SettingsRow
-          label="Model"
-          description="Claude model that plans and routes your commands."
+          label="Conductor provider"
+          description="Call Claude directly with an Anthropic key, or any tool-capable model through OpenRouter."
           control={
-            <CommitInput
-              value={conductorSettings?.model ?? ''}
-              ariaLabel="Conductor model"
-              onCommit={(model) => void conductor.updateSettings({ model })}
-            />
+            <Select.Root
+              value={conductorSettings?.provider ?? 'anthropic'}
+              disabled={!conductorSettings}
+              onValueChange={(provider) => {
+                if (provider) void conductor.updateSettings({ provider });
+              }}
+            >
+              <Select.Trigger className="w-[180px]">
+                <Select.Value>
+                  {conductorSettings?.provider === 'openrouter' ? 'OpenRouter' : 'Anthropic API'}
+                </Select.Value>
+              </Select.Trigger>
+              <Select.Content align="end">
+                <Select.Item value="anthropic">Anthropic API</Select.Item>
+                <Select.Item value="openrouter">OpenRouter</Select.Item>
+              </Select.Content>
+            </Select.Root>
           }
         />
+        {conductorSettings?.provider === 'openrouter' ? (
+          <SettingsRow
+            label="OpenRouter model"
+            description="Model id on OpenRouter; it must support tool calling."
+            control={
+              <CommitInput
+                value={conductorSettings.openrouterModel}
+                ariaLabel="OpenRouter conductor model"
+                onCommit={(openrouterModel) => void conductor.updateSettings({ openrouterModel })}
+              />
+            }
+          />
+        ) : (
+          <SettingsRow
+            label="Model"
+            description="Claude model that plans and routes your commands."
+            control={
+              <CommitInput
+                value={conductorSettings?.model ?? ''}
+                ariaLabel="Conductor model"
+                onCommit={(model) => void conductor.updateSettings({ model })}
+              />
+            }
+          />
+        )}
         <SettingsRow
           label="Command effort"
           description="Reasoning effort for quick commands. Lower is faster."

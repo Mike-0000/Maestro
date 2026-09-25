@@ -221,6 +221,77 @@ describe('ConductorService.runTurn', () => {
   });
 });
 
+describe('ConductorService.runTurn via OpenRouter', () => {
+  async function useOpenRouter(conductor: ConductorService) {
+    await secrets.setSecret('chorus.credential.openrouter', secret('sk-or-test', 'openrouter'));
+    process.env.OPENROUTER_BASE_URL = baseUrl;
+    await conductor.updateSettings({ provider: 'openrouter' });
+  }
+
+  it('sends chat completions with tools and maps tool calls back to content blocks', async () => {
+    const conductor = service();
+    await useOpenRouter(conductor);
+    respond = json(200, {
+      model: 'anthropic/claude-opus-5',
+      choices: [
+        {
+          finish_reason: 'tool_calls',
+          message: {
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_1',
+                type: 'function',
+                function: { name: 'focus_agent', arguments: '{"agent":"Claude 1"}' },
+              },
+            ],
+          },
+        },
+      ],
+      usage: {
+        prompt_tokens: 120,
+        completion_tokens: 15,
+        prompt_tokens_details: { cached_tokens: 40 },
+      },
+    });
+    const result = await conductor.runTurn('plan', userTurn);
+    const [request] = captured;
+    expect(request?.headers.authorization).toBe('Bearer sk-or-test');
+    expect(request?.body.model).toBe('anthropic/claude-opus-5');
+    expect(request?.body.max_tokens).toBe(16000);
+    expect(request?.body.reasoning).toEqual({ effort: 'high' });
+    const messages = request?.body.messages as { role: string }[];
+    expect(messages[0]?.role).toBe('system');
+    expect(messages[1]).toEqual(userTurn[0]);
+    const tools = request?.body.tools as { type: string; function: { name: string } }[];
+    expect(tools.map((tool) => tool.function.name)).toContain('propose_plan');
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.stopReason).toBe('tool_use');
+      expect(result.data.content).toEqual([
+        { type: 'tool_use', id: 'call_1', name: 'focus_agent', input: { agent: 'Claude 1' } },
+      ]);
+      expect(result.data.usage).toEqual({
+        inputTokens: 120,
+        outputTokens: 15,
+        cacheReadTokens: 40,
+      });
+    }
+    expect((await conductor.status()).configured).toBe(true);
+  });
+
+  it('reports a missing OpenRouter key and a rejected one', async () => {
+    const conductor = service();
+    await conductor.updateSettings({ provider: 'openrouter' });
+    const missing = await conductor.runTurn('command', userTurn);
+    expect(!missing.success && missing.error.message).toContain('OpenRouter');
+    await useOpenRouter(conductor);
+    respond = json(401, { error: { message: 'bad key', code: 401 } });
+    const rejected = await conductor.runTurn('command', userTurn);
+    expect(!rejected.success && rejected.error.type).toBe('not-configured');
+  });
+});
+
 describe('ConductorService log', () => {
   it('appends and reads back turns, newest last, skipping torn lines', async () => {
     const conductor = service();

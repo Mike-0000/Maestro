@@ -10,6 +10,7 @@ const ENGINE_NAMES = {
   openai: 'OpenAI',
   deepgram: 'Deepgram',
   'whisper-local': 'local whisper.cpp',
+  openrouter: 'OpenRouter',
 } as const;
 
 type TestState =
@@ -32,9 +33,7 @@ export const VoiceSetupPanel = observer(function VoiceSetupPanel({
   const settings = voice.settings;
   if (!settings) return null;
   const engine = settings.engine;
-  const keyReady =
-    engine === 'whisper-local' ||
-    (engine === 'openai' ? voice.status?.credentials.openai : voice.status?.credentials.deepgram);
+  const keyReady = engine === 'whisper-local' || Boolean(voice.status?.credentials[engine]);
   const finish = () => {
     void voice.updateSettings({ onboarded: true });
     onClose();

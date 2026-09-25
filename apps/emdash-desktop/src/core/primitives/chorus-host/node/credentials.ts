@@ -10,6 +10,7 @@ const ENV_FALLBACKS: Record<ChorusCredentialId, string> = {
   deepgram: 'DEEPGRAM_API_KEY',
   anthropic: 'ANTHROPIC_API_KEY',
   typesafe: 'TYPESAFE_API_KEY',
+  openrouter: 'OPENROUTER_API_KEY',
 };
 
 /**
