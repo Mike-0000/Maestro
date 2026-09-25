@@ -29,8 +29,11 @@ const HOLD_KEYCODES: Record<VoiceSettings['globalHoldKey'], number | null> = {
 };
 const SHIFT_KEYCODES = new Set([42, 54]);
 
-/** A stream left open longer than this (a stuck key, a crashed renderer) is dropped. */
-const STREAM_MAX_MS = 90_000;
+/**
+ * A stream left open longer than this (a stuck key, a crashed renderer) is dropped. Click-to-talk
+ * records until Send for up to 5 minutes, so this leaves headroom above that.
+ */
+const STREAM_MAX_MS = 6 * 60_000;
 
 export class VoiceService {
   readonly credentials: ChorusCredentials;

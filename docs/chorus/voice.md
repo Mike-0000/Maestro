@@ -11,14 +11,15 @@ model that can read, message, start, and plan across your agents.
 | Hold to talk (command) | Hold **Right Ctrl**, speak, release |
 | Hold to dictate into the focused agent | Hold **Shift + Right Ctrl** |
 | Hold to talk from anywhere in Windows | **Right Ctrl** or **Right Alt**, if enabled in settings (off by default) |
-| Toggle listening from anywhere in Windows | **Ctrl + Alt + Space** (configurable) |
-| Click to talk | The mic button in the floating HUD |
-| Cancel while listening | **Esc** |
+| Toggle listening from anywhere in Windows | **Ctrl + Alt + Space** (configurable); press again to send |
+| Click to talk | The mic button in the floating HUD, then **Send** (or click the mic again) |
+| Cancel while listening | **Esc**, or the × next to **Send** |
 | Type instead of talking | The keyboard button in the HUD |
 | Open the canvas | **Ctrl + Shift + A** |
 | Jump to the agent that has waited longest | **Ctrl + Shift + J** |
 
-Toggle mode stops by itself when you pause for about a second.
+Pausing never ends a recording: it runs until you release the hold key, press the toggle shortcut
+again, or click **Send** (up to 5 minutes). Only hands-free listening stops on a pause.
 
 ## Built-in commands (instant, no API key needed)
 

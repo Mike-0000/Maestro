@@ -22,8 +22,13 @@ export type VoiceErrorState = {
 
 /** Utterances shorter than this are treated as accidental taps. */
 const MIN_UTTERANCE_MS = 300;
-/** A toggle-mode utterance never records longer than this. */
-const MAX_UTTERANCE_MS = 60_000;
+/** A hands-free utterance (which ends on a pause) never records longer than this. */
+const MAX_HANDS_FREE_MS = 60_000;
+/**
+ * A click-to-talk utterance waits for Send, so cap it just under the upload limit
+ * (MAX_UTTERANCE_BYTES, ~5.4 minutes of 16 kHz PCM16) in case it is left open.
+ */
+const MAX_MANUAL_MS = 5 * 60_000;
 
 export class VoiceStore {
   phase: VoicePhase = 'idle';
@@ -151,7 +156,9 @@ export class VoiceStore {
     this.ignoredUtterance = null;
     this.level = 0;
     this.partial = '';
-    this.silence = mode === 'toggle' ? new SilenceDetector() : null;
+    // Only hands-free listening ends on a pause; otherwise the user ends it by releasing the hold
+    // key, pressing the toggle shortcut again, or clicking Send.
+    this.silence = origin === 'hands-free' ? new SilenceDetector() : null;
     this.phase = 'listening';
     this.openStream();
     try {
@@ -165,7 +172,8 @@ export class VoiceStore {
       return;
     }
     if (mode === 'toggle') {
-      this.maxTimer = setTimeout(() => void this.stopListening(), MAX_UTTERANCE_MS);
+      const maxMs = origin === 'hands-free' ? MAX_HANDS_FREE_MS : MAX_MANUAL_MS;
+      this.maxTimer = setTimeout(() => void this.stopListening(), maxMs);
     }
   }
 

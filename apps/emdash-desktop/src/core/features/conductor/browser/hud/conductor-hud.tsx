@@ -5,6 +5,7 @@ import {
   Loader2,
   Mic,
   MicOff,
+  SendHorizontal,
   Settings2,
   Volume2,
   VolumeX,
@@ -84,6 +85,7 @@ export const ConductorHud = observer(function ConductorHud() {
           <div className="min-w-0 flex-1 text-sm">
             <StatusLine />
           </div>
+          <ManualListenControls />
           {needsSetup && !setupOpen && (
             <button
               type="button"
@@ -156,9 +158,9 @@ const MicButton = observer(function MicButton() {
   return (
     <button
       type="button"
-      aria-label={listening ? 'Stop listening' : 'Start listening'}
+      aria-label={listening ? 'Stop listening and send' : 'Start listening'}
       aria-pressed={listening}
-      title="Click to talk, or hold Right Ctrl. Hold Shift + Right Ctrl to dictate into the focused agent."
+      title="Click to talk, then click Send. Or hold Right Ctrl and release to send. Hold Shift + Right Ctrl to dictate into the focused agent."
       onClick={() => void voice.toggle()}
       className={cn(
         'relative flex size-9 shrink-0 items-center justify-center rounded-full transition-colors',
@@ -185,6 +187,29 @@ const MicButton = observer(function MicButton() {
   );
 });
 
+/** Click-to-talk records until the user sends or cancels (it does not stop on a pause). */
+const ManualListenControls = observer(function ManualListenControls() {
+  const voice = getVoiceStore();
+  if (voice.phase !== 'listening' || voice.mode !== 'toggle' || voice.origin !== 'user') {
+    return null;
+  }
+  return (
+    <>
+      <HudIconButton label="Cancel (Esc)" onClick={() => voice.cancelListening()}>
+        <X className="size-4" />
+      </HudIconButton>
+      <button
+        type="button"
+        onClick={() => void voice.stopListening()}
+        className="flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-foreground px-3 text-xs font-medium text-background hover:opacity-90"
+      >
+        <SendHorizontal className="size-3.5" />
+        Send
+      </button>
+    </>
+  );
+});
+
 const StatusLine = observer(function StatusLine() {
   const voice = getVoiceStore();
   const conductor = getConductorStore();
@@ -201,7 +226,7 @@ const StatusLine = observer(function StatusLine() {
         ) : voice.mode === 'hold' ? (
           'Listening… release to send'
         ) : (
-          'Listening… pause when you are done'
+          'Listening… click Send when you are done'
         )}
       </span>
     );
