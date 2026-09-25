@@ -31,7 +31,7 @@ import {
 } from '../api/openrouter-format';
 import { CONDUCTOR_SYSTEM_PROMPT } from '../api/system-prompt';
 import { conductorToolDefinitions } from '../api/tools';
-import { evaluateWithJev, JevRequestError } from './jev-client';
+import { evaluateWithJev, JevRequestError, type JevVia } from './jev-client';
 
 const LOG_FILE = 'conductor-log.jsonl';
 const FALLBACK_BETA = 'server-side-fallback-2026-06-01';
@@ -90,9 +90,8 @@ export class ConductorService {
   async status(): Promise<ConductorStatus> {
     return {
       configured: (await this.credentials.get(await this.providerCredential())) !== null,
-      jevReady:
-        (await this.settings.read()).jevEnabled &&
-        (await this.credentials.get('typesafe')) !== null,
+      jevReady: (await this.jevRoute()) !== null,
+      jevVia: (await this.jevRoute())?.via ?? null,
       settings: await this.settings.read(),
       usageToday: await this.usageToday(),
     };
@@ -179,6 +178,31 @@ export class ConductorService {
     }
   }
 
+  /**
+   * Which System One endpoint Jev uses and with which key, or null when Jev is off or unkeyed.
+   * Auto prefers OpenRouter when the conductor runs on OpenRouter (one key for everything), then
+   * whichever key exists.
+   */
+  private async jevRoute(): Promise<{ via: JevVia; key: Secret<string> } | null> {
+    const settings = await this.settings.read();
+    if (!settings.jevEnabled) return null;
+    const openrouter = await this.credentials.get('openrouter');
+    const typesafe = await this.credentials.get('typesafe');
+    const order: JevVia[] =
+      settings.jevSource === 'openrouter'
+        ? ['openrouter']
+        : settings.jevSource === 'typesafe'
+          ? ['typesafe']
+          : settings.provider === 'openrouter'
+            ? ['openrouter', 'typesafe']
+            : ['typesafe', 'openrouter'];
+    for (const via of order) {
+      const key = via === 'openrouter' ? openrouter : typesafe;
+      if (key) return { via, key };
+    }
+    return null;
+  }
+
   private async providerCredential(): Promise<'anthropic' | 'openrouter'> {
     return (await this.settings.read()).provider === 'openrouter' ? 'openrouter' : 'anthropic';
   }
@@ -237,21 +261,29 @@ export class ConductorService {
   async decide(state: unknown, questions: JevQuestions): Promise<Result<JevDecision, JevError>> {
     const settings = await this.settings.read();
     if (!settings.jevEnabled) return err({ type: 'disabled', message: 'Jev is turned off.' });
-    const key = await this.credentials.get('typesafe');
-    if (!key) {
+    const route = await this.jevRoute();
+    if (!route) {
       return err({
         type: 'not-configured',
-        message: 'Add a TypeSafe API key in Settings → Voice & Conductor to use Jev.',
+        message:
+          'Add an OpenRouter or TypeSafe API key in Settings → Voice & Conductor to use Jev.',
       });
     }
     const startedAt = performance.now();
     try {
-      const { answers, model } = await evaluateWithJev(key, state, questions);
-      return ok({ answers, model, latencyMs: Math.round(performance.now() - startedAt) });
+      const result = await evaluateWithJev(route.key, state, questions, { via: route.via });
+      return ok({
+        answers: result.answers,
+        model: result.model,
+        latencyMs: Math.round(performance.now() - startedAt),
+        via: route.via,
+        ...(result.costUsd !== undefined ? { costUsd: result.costUsd } : {}),
+      });
     } catch (error) {
       if (error instanceof JevRequestError) {
         if (error.kind === 'rejected-key')
           return err({ type: 'not-configured', message: error.message });
+        if (error.kind === 'no-credits') return err({ type: 'api-error', message: error.message });
         return err({ type: error.kind, message: error.message });
       }
       this.logger.warn('conductor: Jev request failed', { error });

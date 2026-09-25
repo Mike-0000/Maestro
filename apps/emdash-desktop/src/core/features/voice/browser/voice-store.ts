@@ -97,6 +97,7 @@ export class VoiceStore {
         const next = await client.events.subscribe(undefined, {
           onEvent: (event) => {
             if (event.type === 'global-toggle') void this.toggle();
+            else if (event.type === 'global-hold') this.onGlobalHold(event.action, event.intent);
             else if (event.type === 'partial' && event.streamId === this.streamId) {
               runInAction(() => (this.partial = event.text));
             }
@@ -366,6 +367,16 @@ export class VoiceStore {
     this.streamOpening = null;
     this.streamPending = [];
     if (streamId) void getVoiceClient().then((client) => client.abortStream({ streamId }));
+  }
+
+  /** Global hold-to-talk from the system-wide key hook (works while other apps are focused). */
+  private onGlobalHold(
+    action: 'start' | 'stop' | 'cancel',
+    intent: TranscriptIntent = 'command'
+  ): void {
+    if (action === 'start') void this.startListening('hold', intent);
+    else if (action === 'stop') void this.stopListening();
+    else this.cancelListening();
   }
 
   // ── Hands-free ─────────────────────────────────────────────────────────────

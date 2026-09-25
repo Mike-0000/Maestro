@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { app, globalShortcut, shell } from 'electron';
+import { uIOhook } from 'uiohook-napi';
 import type { ChorusHostServices } from '@core/primitives/chorus-host/api/host-services';
 import { encryptedAppSecretsStore } from '@main/host/secrets/encrypted-app-secrets-store';
 
@@ -11,6 +12,29 @@ export function createChorusHostServices(): ChorusHostServices {
     globalShortcuts: {
       register: (accelerator, onPress) => globalShortcut.register(accelerator, onPress),
       unregister: (accelerator) => globalShortcut.unregister(accelerator),
+    },
+    keyboardHook: {
+      start: (onKey) => {
+        try {
+          uIOhook.removeAllListeners('keydown');
+          uIOhook.removeAllListeners('keyup');
+          uIOhook.on('keydown', (event) => onKey({ type: 'down', keycode: event.keycode }));
+          uIOhook.on('keyup', (event) => onKey({ type: 'up', keycode: event.keycode }));
+          uIOhook.start();
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      stop: () => {
+        try {
+          uIOhook.stop();
+        } catch {
+          // Already stopped.
+        }
+        uIOhook.removeAllListeners('keydown');
+        uIOhook.removeAllListeners('keyup');
+      },
     },
     openMicrophoneSettings: async () => {
       const url =

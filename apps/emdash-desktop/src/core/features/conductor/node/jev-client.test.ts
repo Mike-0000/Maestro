@@ -71,6 +71,28 @@ describe('evaluateWithJev', () => {
     expect(result.answers.intent).toMatchObject({ type: 'choice', choice: 'focus' });
   });
 
+  it('calls the OpenRouter System One endpoint with the Jev alias and reports cost', async () => {
+    reply = {
+      ...(reply as object),
+      usage: { input_tokens: 300, output_tokens: 20, cost: 0.00002 },
+    };
+    const result = await evaluateWithJev(key, 'state', routingQuestions(roster), {
+      via: 'openrouter',
+      baseUrl,
+    });
+    expect(last?.url).toBe('/systemone');
+    expect(last?.body.model).toBe('~typesafe/jev-latest');
+    expect(last?.headers['x-openrouter-title']).toBe('Chorus');
+    expect(result.costUsd).toBe(0.00002);
+  });
+
+  it('reports missing OpenRouter credits', async () => {
+    status = 402;
+    await expect(
+      evaluateWithJev(key, 's', {}, { via: 'openrouter', baseUrl })
+    ).rejects.toMatchObject({ kind: 'no-credits' });
+  });
+
   it('maps a rejected key and rate limits', async () => {
     status = 401;
     await expect(evaluateWithJev(key, 's', {}, { baseUrl })).rejects.toMatchObject({

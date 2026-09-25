@@ -19,7 +19,13 @@ export function createVoiceWireController(options: {
   const service = new VoiceService(
     options.host,
     () => voiceEvents.emit(undefined, { type: 'global-toggle' }),
-    options.logger
+    options.logger,
+    (output) =>
+      voiceEvents.emit(undefined, {
+        type: 'global-hold',
+        action: output.type,
+        ...(output.type === 'start' ? { intent: output.intent } : {}),
+      })
   );
   void service.start().catch((error: unknown) => {
     options.logger.warn('voice: failed to start', { error });

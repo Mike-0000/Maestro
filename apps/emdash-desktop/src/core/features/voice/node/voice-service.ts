@@ -11,6 +11,7 @@ import {
   type VoiceSettings,
   type VoiceStatus,
 } from '../api/contract';
+import { HoldToTalkMachine, type HoldOutput } from '../api/hold-to-talk';
 import { DeepgramSttEngine } from './engines/deepgram';
 import { DeepgramStream } from './engines/deepgram-stream';
 import { SttEngineError, type SttEngine } from './engines/engine';
@@ -20,6 +21,14 @@ import { WhisperLocalSttEngine } from './engines/whisper-local';
 
 /** RIFF header (44 bytes) plus at least ~0.2 s of 16 kHz 16-bit audio. */
 const MIN_WAV_BYTES = 44 + 6400;
+/** uiohook key codes for the supported hold keys (libuiohook VC_* values). */
+const HOLD_KEYCODES: Record<VoiceSettings['globalHoldKey'], number | null> = {
+  off: null,
+  'right-ctrl': 3613,
+  'right-alt': 3640,
+};
+const SHIFT_KEYCODES = new Set([42, 54]);
+
 /** A stream left open longer than this (a stuck key, a crashed renderer) is dropped. */
 const STREAM_MAX_MS = 90_000;
 
@@ -28,6 +37,8 @@ export class VoiceService {
   private readonly settings: JsonSettingsFile<VoiceSettings>;
   private readonly engines: Record<SttEngineId, SttEngine>;
   private registeredShortcut: string | null = null;
+  private holdKey: number | null = null;
+  private readonly hold: HoldToTalkMachine;
   private readonly streams = new Map<
     string,
     { stream: DeepgramStream; startedAt: number; timer: ReturnType<typeof setTimeout> }
@@ -36,8 +47,10 @@ export class VoiceService {
   constructor(
     private readonly host: ChorusHostServices,
     private readonly onGlobalToggle: () => void,
-    private readonly logger: Logger
+    private readonly logger: Logger,
+    onGlobalHold: (output: HoldOutput) => void = () => {}
   ) {
+    this.hold = new HoldToTalkMachine(onGlobalHold);
     this.credentials = new ChorusCredentials(host.secrets);
     this.settings = JsonSettingsFile.inDir(
       host.dataDir,
@@ -59,11 +72,14 @@ export class VoiceService {
   }
 
   async start(): Promise<void> {
-    await this.applyGlobalShortcut((await this.settings.read()).globalShortcut);
+    const settings = await this.settings.read();
+    await this.applyGlobalShortcut(settings.globalShortcut);
+    this.applyGlobalHold(settings.globalHoldKey);
   }
 
   dispose(): void {
     for (const id of [...this.streams.keys()]) this.abortStream(id);
+    this.applyGlobalHold('off');
     if (this.registeredShortcut) this.host.globalShortcuts.unregister(this.registeredShortcut);
     this.registeredShortcut = null;
   }
@@ -73,6 +89,7 @@ export class VoiceService {
       settings: await this.settings.read(),
       credentials: await this.credentials.presence(),
       globalShortcutRegistered: this.registeredShortcut !== null,
+      globalHoldActive: this.holdKey !== null,
     };
   }
 
@@ -82,6 +99,7 @@ export class VoiceService {
     if (next.globalShortcut !== previous.globalShortcut) {
       await this.applyGlobalShortcut(next.globalShortcut);
     }
+    if (next.globalHoldKey !== previous.globalHoldKey) this.applyGlobalHold(next.globalHoldKey);
     return this.status();
   }
 
@@ -144,6 +162,27 @@ export class VoiceService {
     const latencyMs = Math.round(performance.now() - started);
     this.logger.info('voice: transcribed', { engine: engine.id, latencyMs, chars: text.length });
     return { text, engine: engine.id, latencyMs };
+  }
+
+  /** Starts or stops the system-wide key hook for global hold-to-talk. */
+  private applyGlobalHold(key: VoiceSettings['globalHoldKey']): void {
+    if (this.holdKey !== null) {
+      this.host.keyboardHook.stop();
+      this.hold.reset();
+      this.holdKey = null;
+    }
+    const keycode = HOLD_KEYCODES[key];
+    if (keycode === null) return;
+    const started = this.host.keyboardHook.start(({ type, keycode: pressed }) => {
+      if (pressed === keycode) {
+        if (type === 'down') this.hold.talkDown(false);
+        else this.hold.talkUp();
+      } else if (type === 'down') {
+        this.hold.otherDown(SHIFT_KEYCODES.has(pressed));
+      }
+    });
+    if (started) this.holdKey = keycode;
+    else this.logger.warn('voice: global hold-to-talk could not start');
   }
 
   private async applyGlobalShortcut(accelerator: string): Promise<void> {

@@ -17,6 +17,8 @@ export const voiceSettingsSchema = z.object({
   language: z.string(),
   /** Electron accelerator for the global toggle-to-talk shortcut; empty disables it. */
   globalShortcut: z.string(),
+  /** Key to hold for push-to-talk anywhere in Windows (not just when Chorus is focused). */
+  globalHoldKey: z.enum(['off', 'right-ctrl', 'right-alt']),
   speakReplies: z.boolean(),
   speakAttention: z.boolean(),
   ttsVoice: z.string(),
@@ -37,6 +39,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   openrouterSttModel: 'google/gemini-3.5-flash-lite',
   language: 'en',
   globalShortcut: 'Control+Alt+Space',
+  globalHoldKey: 'off',
   speakReplies: true,
   speakAttention: true,
   ttsVoice: '',
@@ -64,12 +67,20 @@ export const voiceStatusSchema = z.object({
   settings: voiceSettingsSchema,
   credentials: z.record(chorusCredentialIdSchema, z.boolean()),
   globalShortcutRegistered: z.boolean(),
+  /** The system-wide hold-to-talk hook is running. */
+  globalHoldActive: z.boolean(),
 });
 export type VoiceStatus = z.infer<typeof voiceStatusSchema>;
 
 export const voiceEventSchema = z.discriminatedUnion('type', [
   /** The global toggle-to-talk shortcut fired (the app may be unfocused). */
   z.object({ type: z.literal('global-toggle') }),
+  /** Global hold-to-talk (the key was held or released while any app was focused). */
+  z.object({
+    type: z.literal('global-hold'),
+    action: z.enum(['start', 'stop', 'cancel']),
+    intent: z.enum(['command', 'dictation']).optional(),
+  }),
   /** Live partial transcript of an open stream. */
   z.object({ type: z.literal('partial'), streamId: z.string(), text: z.string() }),
 ]);

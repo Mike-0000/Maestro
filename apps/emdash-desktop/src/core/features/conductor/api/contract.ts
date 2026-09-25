@@ -34,6 +34,11 @@ export const conductorSettingsSchema = z.object({
   dailyTokenBudget: z.number().int().min(0),
   /** Use Jev (TypeSafe AI) for fast routing, risk, urgency, and plan-review decisions. */
   jevEnabled: z.boolean(),
+  /**
+   * Where Jev runs: OpenRouter's System One API (OpenRouter key), TypeSafe's API (TypeSafe key), or
+   * auto (whichever key is set; OpenRouter first when the conductor uses OpenRouter).
+   */
+  jevSource: z.enum(['auto', 'openrouter', 'typesafe']),
   /** Minimum Jev confidence before the conductor acts on a decision without Claude. */
   jevConfidence: z.number().min(0.5).max(0.99),
 });
@@ -50,6 +55,7 @@ export const DEFAULT_CONDUCTOR_SETTINGS: ConductorSettings = {
   maxAgentsPerPlan: 4,
   dailyTokenBudget: 3_000_000,
   jevEnabled: true,
+  jevSource: 'auto',
   jevConfidence: 0.8,
 };
 
@@ -63,8 +69,10 @@ export type ConductorUsage = z.infer<typeof conductorUsageSchema>;
 
 export const conductorStatusSchema = z.object({
   configured: z.boolean(),
-  /** A TypeSafe API key is available and Jev is enabled. */
+  /** Jev is enabled and a key for its source is available. */
   jevReady: z.boolean(),
+  /** Where Jev requests go right now (null when Jev is off or has no key). */
+  jevVia: z.enum(['openrouter', 'typesafe']).nullable(),
   settings: conductorSettingsSchema,
   usageToday: conductorUsageSchema,
 });
@@ -123,6 +131,9 @@ export const jevDecisionSchema = z.object({
   answers: z.record(z.string(), jevAnswerSchema),
   model: z.string(),
   latencyMs: z.number(),
+  via: z.enum(['openrouter', 'typesafe']),
+  /** USD cost when the source reports it (OpenRouter does). */
+  costUsd: z.number().optional(),
 });
 export type JevDecision = z.infer<typeof jevDecisionSchema>;
 

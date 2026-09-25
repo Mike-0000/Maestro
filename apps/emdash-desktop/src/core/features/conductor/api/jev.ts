@@ -13,6 +13,8 @@ import type { RosterAgent } from './resolver';
  */
 
 export const JEV_MODEL = 'jev-latest';
+/** The same model through OpenRouter (alias that tracks the newest Jev release). */
+export const JEV_OPENROUTER_MODEL = '~typesafe/jev-latest';
 
 type Rubric = string | Record<string, unknown> | unknown[];
 
@@ -44,7 +46,10 @@ export type JevAnswers = Record<string, JevAnswer>;
 export const jevResponseSchema = z.object({
   model: z.string(),
   answers: z.record(z.string(), jevAnswerSchema),
-  usage: z.object({ input_tokens: z.number(), output_tokens: z.number() }).partial().optional(),
+  usage: z
+    .object({ input_tokens: z.number(), output_tokens: z.number(), cost: z.number() })
+    .partial()
+    .optional(),
 });
 
 /** Choice/Score limits from the API reference. */

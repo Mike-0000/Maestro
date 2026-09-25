@@ -77,6 +77,7 @@ function service(): ConductorService {
     secrets,
     dataDir,
     globalShortcuts: { register: () => true, unregister: () => {} },
+    keyboardHook: { start: () => true, stop: () => {} },
     openMicrophoneSettings: async () => {},
   };
   return new ConductorService(host, logger);
@@ -289,6 +290,45 @@ describe('ConductorService.runTurn via OpenRouter', () => {
     respond = json(401, { error: { message: 'bad key', code: 401 } });
     const rejected = await conductor.runTurn('command', userTurn);
     expect(!rejected.success && rejected.error.type).toBe('not-configured');
+  });
+});
+
+describe('ConductorService.decide (Jev)', () => {
+  const jevReply = {
+    model: 'typesafe/jev-1.13-20260917',
+    answers: { is_urgent: { type: 'noul', noul: 0.9 } },
+    usage: { input_tokens: 100, output_tokens: 10, cost: 0.000004 },
+  };
+  const questions = { is_urgent: { type: 'noul' as const, instructions: 'Urgent?' } };
+
+  it('runs purely through OpenRouter when only an OpenRouter key is set', async () => {
+    await secrets.setSecret('chorus.credential.openrouter', secret('sk-or-test', 'openrouter'));
+    process.env.OPENROUTER_BASE_URL = baseUrl;
+    respond = json(200, jevReply);
+    const conductor = service();
+    const status = await conductor.status();
+    expect(status.jevReady).toBe(true);
+    expect(status.jevVia).toBe('openrouter');
+    const result = await conductor.decide({ text: 'prod is down' }, questions);
+    expect(result.success && result.data.via).toBe('openrouter');
+    expect(result.success && result.data.costUsd).toBe(0.000004);
+    expect(captured[0]?.headers.authorization).toBe('Bearer sk-or-test');
+    expect(captured[0]?.body.model).toBe('~typesafe/jev-latest');
+  });
+
+  it('honours an explicit source and reports when Jev has no key', async () => {
+    const conductor = service();
+    expect((await conductor.status()).jevVia).toBeNull();
+    const missing = await conductor.decide('s', questions);
+    expect(!missing.success && missing.error.type).toBe('not-configured');
+
+    await secrets.setSecret('chorus.credential.openrouter', secret('sk-or-test', 'openrouter'));
+    await secrets.setSecret('chorus.credential.typesafe', secret('ts-test', 'typesafe'));
+    expect((await conductor.status()).jevVia).toBe('typesafe');
+    await conductor.updateSettings({ provider: 'openrouter' });
+    expect((await conductor.status()).jevVia).toBe('openrouter');
+    await conductor.updateSettings({ jevSource: 'typesafe' });
+    expect((await conductor.status()).jevVia).toBe('typesafe');
   });
 });
 

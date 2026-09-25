@@ -83,6 +83,7 @@
     "ssh2": "^1.17.0",
     "tinykeys": "^4.0.0",
     "ts-pattern": "^5.9.0",
+    "uiohook-napi": "1.5.5",
     "zod": "^4.3.6"
   },
   "devDependencies": {

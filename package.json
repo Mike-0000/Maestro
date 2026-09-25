@@ -45,7 +45,8 @@
     ],
     "ignoredBuiltDependencies": [
       "cpu-features",
-      "ssh2"
+      "ssh2",
+      "uiohook-napi"
     ],
     "ignoredOptionalDependencies": [
       "@anthropic-ai/claude-agent-sdk-darwin-arm64",

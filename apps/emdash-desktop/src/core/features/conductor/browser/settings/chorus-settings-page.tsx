@@ -18,6 +18,18 @@ const ENGINE_LABELS = {
   openrouter: 'OpenRouter (audio model)',
 } as const;
 
+const JEV_SOURCE_LABELS = {
+  auto: 'Auto',
+  openrouter: 'OpenRouter',
+  typesafe: 'TypeSafe',
+} as const;
+
+const HOLD_KEY_LABELS = {
+  off: 'Only in Chorus',
+  'right-ctrl': 'Right Ctrl',
+  'right-alt': 'Right Alt',
+} as const;
+
 const EFFORT_LABELS = {
   low: 'Low',
   medium: 'Medium',
@@ -54,12 +66,13 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
       <SettingsSection title="Provider">
         <SettingsRow
           label="Use OpenRouter for everything"
-          description="One OpenRouter key runs the conductor and speech-to-text. Jev stays optional (it is not on OpenRouter)."
+          description="One OpenRouter key runs the conductor, speech-to-text, and Jev."
           control={
             <Switch
               checked={
                 conductorSettings?.provider === 'openrouter' &&
-                voiceSettings?.engine === 'openrouter'
+                voiceSettings?.engine === 'openrouter' &&
+                conductorSettings.jevSource !== 'typesafe'
               }
               disabled={!conductorSettings || !voiceSettings}
               onCheckedChange={(useOpenRouter) => {
@@ -67,6 +80,7 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
                   provider: useOpenRouter ? 'openrouter' : 'anthropic',
                 });
                 void voice.updateSettings({ engine: useOpenRouter ? 'openrouter' : 'openai' });
+                void conductor.updateSettings({ jevSource: useOpenRouter ? 'openrouter' : 'auto' });
               }}
             />
           }
@@ -84,14 +98,14 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
         <KeyRow
           id="openrouter"
           label="OpenRouter"
-          description="Runs the conductor and/or speech-to-text through OpenRouter models instead of the direct APIs."
+          description="Runs the conductor, speech-to-text, and Jev through OpenRouter instead of the direct APIs."
           present={credentials?.openrouter}
           onSaved={() => void conductor.refreshStatus()}
         />
         <KeyRow
           id="typesafe"
           label="TypeSafe (Jev)"
-          description="Fast typed decisions: routes commands without Claude, rates permission risk, ranks who needs you, and reviews plans."
+          description="Optional: call Jev directly on TypeSafe. Not needed if you use OpenRouter."
           present={credentials?.typesafe}
           onSaved={() => void conductor.refreshStatus()}
         />
@@ -174,6 +188,36 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
               className="w-20"
               onCommit={(language) => void voice.updateSettings({ language })}
             />
+          }
+        />
+        <SettingsRow
+          label="Hold to talk anywhere"
+          description={
+            voiceSettings?.globalHoldKey !== 'off' && voice.status && !voice.status.globalHoldActive
+              ? 'The system keyboard hook could not start; hold-to-talk works only inside Chorus.'
+              : 'Hold this key in any app to talk to Chorus. Chorus only watches for this key; it never records what you type.'
+          }
+          control={
+            <Select.Root
+              value={voiceSettings?.globalHoldKey ?? 'off'}
+              disabled={!voiceSettings}
+              onValueChange={(globalHoldKey) => {
+                if (globalHoldKey) void voice.updateSettings({ globalHoldKey });
+              }}
+            >
+              <Select.Trigger className="w-[160px]">
+                <Select.Value>
+                  {HOLD_KEY_LABELS[voiceSettings?.globalHoldKey ?? 'off']}
+                </Select.Value>
+              </Select.Trigger>
+              <Select.Content align="end">
+                {Object.entries(HOLD_KEY_LABELS).map(([id, label]) => (
+                  <Select.Item key={id} value={id}>
+                    {label}
+                  </Select.Item>
+                ))}
+              </Select.Content>
+            </Select.Root>
           }
         />
         <SettingsRow
@@ -347,10 +391,10 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
           label="Use Jev for fast decisions"
           description={
             conductor.status?.jevReady
-              ? 'On: routing, permission risk, attention order, and plan review use Jev.'
-              : credentials?.typesafe
+              ? `On, via ${conductor.status.jevVia === 'openrouter' ? 'OpenRouter' : 'TypeSafe'}: routing, permission risk, attention order, and plan review use Jev.`
+              : conductorSettings?.jevEnabled === false
                 ? 'Off.'
-                : 'Add a TypeSafe API key above to enable.'
+                : 'Add an OpenRouter (or TypeSafe) API key above to enable.'
           }
           control={
             <Switch
@@ -358,6 +402,32 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
               disabled={!conductorSettings}
               onCheckedChange={(jevEnabled) => void conductor.updateSettings({ jevEnabled })}
             />
+          }
+        />
+        <SettingsRow
+          label="Jev source"
+          description="Where Jev runs. Auto uses whichever key is set, preferring OpenRouter when the conductor uses it."
+          control={
+            <Select.Root
+              value={conductorSettings?.jevSource ?? 'auto'}
+              disabled={!conductorSettings}
+              onValueChange={(jevSource) => {
+                if (jevSource) void conductor.updateSettings({ jevSource });
+              }}
+            >
+              <Select.Trigger className="w-[160px]">
+                <Select.Value>
+                  {JEV_SOURCE_LABELS[conductorSettings?.jevSource ?? 'auto']}
+                </Select.Value>
+              </Select.Trigger>
+              <Select.Content align="end">
+                {Object.entries(JEV_SOURCE_LABELS).map(([id, label]) => (
+                  <Select.Item key={id} value={id}>
+                    {label}
+                  </Select.Item>
+                ))}
+              </Select.Content>
+            </Select.Root>
           }
         />
         <SettingsRow

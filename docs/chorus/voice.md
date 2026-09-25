@@ -10,6 +10,7 @@ model that can read, message, start, and plan across your agents.
 | --- | --- |
 | Hold to talk (command) | Hold **Right Ctrl**, speak, release |
 | Hold to dictate into the focused agent | Hold **Shift + Right Ctrl** |
+| Hold to talk from anywhere in Windows | **Right Ctrl** or **Right Alt**, if enabled in settings (off by default) |
 | Toggle listening from anywhere in Windows | **Ctrl + Alt + Space** (configurable) |
 | Click to talk | The mic button in the floating HUD |
 | Cancel while listening | **Esc** |
@@ -99,7 +100,7 @@ Chorus uploads the recording instead.
 
 ## Jev (fast decisions)
 
-With a TypeSafe API key, the conductor uses Jev, a fast decision model (~50 ms, typed answers
+With an OpenRouter or TypeSafe API key, the conductor uses Jev, a fast decision model (~50 ms, typed answers
 with calibrated confidence), for:
 
 - **Routing:** commands the built-in grammar misses ("can you bring up the codex agent") are
@@ -115,9 +116,10 @@ Jev only acts above the confidence you set (default 0.8); below it, Claude decid
 ## OpenRouter
 
 One OpenRouter key can run everything: turn on **Use OpenRouter for everything** in settings. The
-conductor then uses an OpenRouter model with tool calling (default `anthropic/claude-opus-5`) and
-speech-to-text uses an audio-input model (default `google/gemini-3.5-flash-lite`). Both models are
-configurable. Jev is separate (it is not on OpenRouter) and stays optional.
+conductor then uses an OpenRouter model with tool calling (default `anthropic/claude-opus-5`),
+speech-to-text uses an audio-input model (default `google/gemini-3.5-flash-lite`), and Jev runs
+through OpenRouter's System One API (`~typesafe/jev-latest`). No TypeSafe key is needed; Jev's
+source can also be set to Auto or TypeSafe.
 
 ## Troubleshooting
 

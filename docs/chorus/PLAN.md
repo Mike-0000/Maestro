@@ -317,7 +317,8 @@ and TypeSafe APIs.
 | Canvas | Board of every agent across projects; live xterm at zoom 1, throttled preview, glyph LOD, live-tile budget; notes (drop on an agent to send); task frames with diff stats, "Review changes", and group drag; minimap; project filter; hide/show; spoken-name rename; resume; open-on-launch; Shift+Esc back to canvas; palette commands and `Ctrl+Shift+A` / `Ctrl+Shift+J` | `canvas`, `frames`, `note-drop`, `commands` steps |
 | Voice | AudioWorklet capture; OpenAI / Deepgram (keyterm, live streaming partials) / local whisper.cpp / OpenRouter audio model; vocabulary biasing; Right-Ctrl hold-to-talk, Shift dictation, global toggle, click-to-talk; hands-free with speech onset, pre-roll, and a wake phrase; TTS with barge-in; first-run voice setup | `voice`, `voice-e2e`, `voice-handsfree` (fake mic bursts) |
 | Conductor | Grammar fast path (**200-utterance routing eval: 200/200**); Jev routing, triage, and plan review; Claude (Anthropic API or OpenRouter) tool loop with 12 tools; cancel window / explicit confirmation; plans with overlap/cycle/provider validation, Jev sizes and cost estimate, approval, `sequential_after`, conflict radar; project context pack in plan mode; archive tool; auto-resume on send; audit log + history; token budget | unit tests (mock APIs); `conductor`, `jev-routing` steps |
-| Providers | One-switch "Use OpenRouter for everything" (conductor + STT); Jev (TypeSafe) optional | unit tests |
+| Providers | One-switch "Use OpenRouter for everything" (conductor, STT, and Jev via OpenRouter's System One API); TypeSafe direct optional | unit tests; `jev-routing` step with only an OpenRouter key |
+| Global hold-to-talk | `uiohook-napi` (MIT, N-API prebuilds, no compile) behind the host-services seam; chord-safe hold machine; Right Ctrl / Right Alt, off by default; only the chosen key code is compared | unit tests; `global-hold` step (hook starts in Electron) |
 | Windows | Long-path fix; short worktree folder (host setting); Defender exclusion guide (copy only); mic permission scoped to the app window, audio only; quit dialog names running agents; mic-privacy deep link | settings screenshots; `voice` step |
 
 ### Deviations from the plan (and why)
@@ -341,8 +342,6 @@ and TypeSafe APIs.
 
 ### Needs a decision before building
 
-- **Global hold-to-talk** needs a native keyboard hook (`uiohook-napi`), which adds an install
-  script and native build — the repo rules require explicit review for that.
 - **Agents that survive quitting** need a detached PTY-host process (P5 in §7): a large change in
   the high-risk PTY area. Today agents stop on quit and resume from the canvas.
 - **Signed installer** needs a code-signing certificate (e.g. Azure Trusted Signing account).

@@ -14,6 +14,14 @@ export type ChorusHostServices = {
     register(accelerator: string, onPress: () => void): boolean;
     unregister(accelerator: string): void;
   };
+  /**
+   * System-wide key hook for global hold-to-talk. Reports only key codes (never text) and is
+   * started only when the user turns global hold-to-talk on. Returns false if it cannot start.
+   */
+  readonly keyboardHook: {
+    start(onKey: (event: { type: 'down' | 'up'; keycode: number }) => void): boolean;
+    stop(): void;
+  };
   /** Opens the OS microphone privacy settings (a fixed system URL, never caller-supplied). */
   openMicrophoneSettings(): Promise<void>;
 };

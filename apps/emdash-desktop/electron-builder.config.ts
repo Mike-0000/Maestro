@@ -28,6 +28,8 @@ const config: Configuration = {
     'out/main/adapters/**',
     'node_modules/better-sqlite3/**',
     'node_modules/node-pty/**',
+    // Global hold-to-talk keyboard hook: N-API prebuilds are resolved from its folder at runtime.
+    'node_modules/uiohook-napi/**',
     'node_modules/@parcel/watcher/**',
     '**/*.node',
   ],
