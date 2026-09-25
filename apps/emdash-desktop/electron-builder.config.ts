@@ -17,12 +17,6 @@ const config: Configuration = {
   artifactName: `${ARTIFACT_PREFIX}-\${arch}.\${ext}`,
   publish: [
     {
-      provider: 'github',
-      owner: 'generalaction',
-      repo: 'emdash',
-      releaseType: 'draft',
-    },
-    {
       provider: 'generic',
       url: R2_BASE_URL,
       channel: UPDATE_CHANNEL,
@@ -44,9 +38,9 @@ const config: Configuration = {
     entitlementsInherit: 'build/entitlements.mac.plist',
     extendInfo: {
       NSMicrophoneUsageDescription:
-        'Emdash needs microphone access for voice dictation and voice mode features.',
+        'Chorus needs microphone access for voice commands and dictation.',
       NSLocalNetworkUsageDescription:
-        'Emdash needs local network access to connect to SSH hosts on your network.',
+        'Chorus needs local network access to connect to SSH hosts on your network.',
     },
     target: [
       { target: 'dmg', arch: ['arm64'] },
@@ -83,12 +77,7 @@ const config: Configuration = {
       { target: 'nsis', arch: ['x64'] },
       { target: 'msi', arch: ['x64'] },
     ],
-    azureSignOptions: {
-      publisherName: 'General Action, Inc.',
-      endpoint: 'https://eus.codesigning.azure.net/',
-      certificateProfileName: 'emdash-public',
-      codeSigningAccountName: 'emdash',
-    },
+    // Chorus has no signing identity yet (see docs/chorus/PLAN.md §5.4); builds are unsigned.
   },
   msi: {
     oneClick: false,
