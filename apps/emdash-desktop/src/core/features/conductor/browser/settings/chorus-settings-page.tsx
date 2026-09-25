@@ -57,6 +57,13 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
           onSaved={() => void conductor.refreshStatus()}
         />
         <KeyRow
+          id="typesafe"
+          label="TypeSafe (Jev)"
+          description="Fast typed decisions: routes commands without Claude, rates permission risk, ranks who needs you, and reviews plans."
+          present={credentials?.typesafe}
+          onSaved={() => void conductor.refreshStatus()}
+        />
+        <KeyRow
           id="openai"
           label="OpenAI"
           description="Speech-to-text with gpt-4o-transcribe."
@@ -212,6 +219,40 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
                 const maxAgentsPerPlan = Number.parseInt(value, 10);
                 if (maxAgentsPerPlan >= 1 && maxAgentsPerPlan <= 12) {
                   void conductor.updateSettings({ maxAgentsPerPlan });
+                }
+              }}
+            />
+          }
+        />
+        <SettingsRow
+          label="Use Jev for fast decisions"
+          description={
+            conductor.status?.jevReady
+              ? 'On: routing, permission risk, attention order, and plan review use Jev.'
+              : credentials?.typesafe
+                ? 'Off.'
+                : 'Add a TypeSafe API key above to enable.'
+          }
+          control={
+            <Switch
+              checked={conductorSettings?.jevEnabled ?? true}
+              disabled={!conductorSettings}
+              onCheckedChange={(jevEnabled) => void conductor.updateSettings({ jevEnabled })}
+            />
+          }
+        />
+        <SettingsRow
+          label="Jev confidence to act"
+          description="Jev acts on its own only above this confidence; below it, Claude decides."
+          control={
+            <CommitInput
+              value={String(conductorSettings?.jevConfidence ?? 0.8)}
+              ariaLabel="Jev confidence to act"
+              className="w-20"
+              onCommit={(value) => {
+                const jevConfidence = Number.parseFloat(value);
+                if (jevConfidence >= 0.5 && jevConfidence <= 0.99) {
+                  void conductor.updateSettings({ jevConfidence });
                 }
               }}
             />

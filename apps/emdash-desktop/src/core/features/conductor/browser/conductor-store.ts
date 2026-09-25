@@ -9,15 +9,28 @@ import { spokenProviderLabel } from '@core/features/canvas/api/provider-names';
 import { getTaskStore } from '@core/features/tasks/api/browser/task-state/task-selectors';
 import { log } from '@core/primitives/logging/browser/logger';
 import { getConductorClient } from '../api/browser/client';
-import type {
-  ConductorError,
-  ConductorMode,
-  ConductorSettings,
-  ConductorStatus,
-  ConductorTurnRecord,
+import {
+  DEFAULT_CONDUCTOR_SETTINGS,
+  type ConductorError,
+  type ConductorMode,
+  type ConductorSettings,
+  type ConductorStatus,
+  type ConductorTurnRecord,
 } from '../api/contract';
 import { chooseMode, parseCommand, type GrammarCommand } from '../api/grammar';
 import { trimHistory } from '../api/history';
+import {
+  interpretPermissionRisk,
+  interpretPlanReview,
+  interpretRouting,
+  interpretUrgency,
+  permissionRiskQuestions,
+  planReviewQuestions,
+  planReviewState,
+  routingQuestions,
+  routingState,
+  urgencyQuestions,
+} from '../api/jev';
 import { resolveAgent } from '../api/resolver';
 import { conductorUserMessage } from '../api/system-prompt';
 import {
@@ -37,6 +50,7 @@ import {
   submitAgentInput,
 } from './agent-io';
 import { deliverPromptWhenReady } from './deferred-prompt';
+import { jevDecide } from './jev';
 import { PlanStore } from './plan-store';
 import {
   buildContext,
@@ -97,7 +111,7 @@ export class ConductorStore {
   phase: ConductorPhase = 'idle';
   activity = '';
   lastUtterance = '';
-  lastRoute: 'grammar' | 'llm' | null = null;
+  lastRoute: ConductorTurnRecord['route'] | null = null;
   reply = '';
   replyAt = 0;
   error: ConductorErrorState | null = null;
@@ -172,7 +186,18 @@ export class ConductorStore {
         (entries) => {
           const fresh = entries.filter((entry) => !known.has(entry.tileId));
           known = new Set(entries.map((entry) => entry.tileId));
-          if (fresh.length > 0) this.queueAnnouncements(fresh);
+          for (const entry of fresh) {
+            // Triage first (Jev answers in well under a second) so the announcement can say how
+            // risky the request is; announce regardless if triage fails.
+            void this.triage(entry)
+              .catch(() => {})
+              .then(() => this.queueAnnouncements([entry]));
+          }
+          // Drop insights for agents that stopped waiting.
+          const waiting = new Set(entries.map((entry) => entry.conversationId));
+          for (const id of [...this.canvas.insights.keys()]) {
+            if (!waiting.has(id)) this.canvas.clearInsight(id);
+          }
         }
       )
     );
@@ -247,7 +272,9 @@ export class ConductorStore {
     const startedAt = performance.now();
     try {
       if (command && (await this.runGrammar(command, source, startedAt))) return;
-      await this.runModel(text, source, startedAt);
+      const routed = await this.routeWithJev(text, source, startedAt);
+      if (routed.handled) return;
+      await this.runModel(text, source, startedAt, routed.mode);
     } finally {
       runInAction(() => {
         this.phase = 'idle';
@@ -284,11 +311,12 @@ export class ConductorStore {
   private async runGrammar(
     command: GrammarCommand,
     source: UtteranceSource,
-    startedAt: number
+    startedAt: number,
+    route: 'grammar' | 'jev' = 'grammar'
   ): Promise<boolean> {
     const actions: ActionRecord[] = [];
     let reply = '';
-    this.lastRoute = 'grammar';
+    this.lastRoute = route;
     this.phase = 'acting';
 
     switch (command.kind) {
@@ -394,13 +422,83 @@ export class ConductorStore {
     }
 
     this.setReply(reply, source);
-    this.log({ route: 'grammar', actions, reply, startedAt });
+    this.log({ route, actions, reply, startedAt });
     return true;
+  }
+
+  // ── Jev routing ────────────────────────────────────────────────────────────
+
+  /**
+   * Asks Jev what an utterance the grammar missed wants. Navigation-style intents it is confident
+   * about run immediately (no Claude call); everything else goes to Claude, in plan mode when Jev
+   * judges the goal needs splitting across agents.
+   */
+  private async routeWithJev(
+    text: string,
+    source: UtteranceSource,
+    startedAt: number
+  ): Promise<{ handled: boolean; mode?: ConductorMode }> {
+    if (!this.status?.jevReady) return { handled: false };
+    runInAction(() => {
+      this.phase = 'thinking';
+      this.activity = 'Routing…';
+    });
+    const roster = buildRoster(this.canvas);
+    const focusedId = focusedConversationId(this.canvas);
+    const focusedName = focusedId ? this.canvas.spokenName(focusedId) : null;
+    const decision = await jevDecide(routingState(text, focusedName), routingQuestions(roster));
+    if (!decision) return { handled: false };
+    const routing = interpretRouting(
+      decision.answers,
+      this.settings?.jevConfidence ?? DEFAULT_CONDUCTOR_SETTINGS.jevConfidence
+    );
+    if (routing.kind === 'model') return { handled: false, mode: routing.mode };
+
+    const agent = routing.agent
+      ? roster.find((candidate) => candidate.name === routing.agent)
+      : undefined;
+    let command: GrammarCommand | null = null;
+    if (routing.intent === 'overview') command = { kind: 'overview' };
+    else if (routing.intent === 'next') command = { kind: 'next' };
+    else if (agent) command = { kind: routing.intent, agent };
+    if (!command) return { handled: false };
+    const handled = await this.runGrammar(command, source, startedAt, 'jev');
+    return { handled };
+  }
+
+  // ── Jev triage ─────────────────────────────────────────────────────────────
+
+  /**
+   * Rates what an agent that just started waiting needs: how risky its permission request is and
+   * how urgently it needs the user. Results feed the tile pill, attention order, and announcements.
+   */
+  private async triage(entry: AgentTileEntry): Promise<void> {
+    if (!this.status?.jevReady) return;
+    const terminal = await readAgentOutput(entry, 30).catch(() => '');
+    if (!terminal.trim()) return;
+    const permission =
+      entry.status === 'awaiting-input' && entry.notificationType === 'permission_prompt';
+    const decision = await jevDecide(
+      { agent: this.nameOf(entry), task: entry.taskName, terminal: terminal.slice(-6_000) },
+      { ...urgencyQuestions(), ...(permission ? permissionRiskQuestions() : {}) }
+    );
+    if (!decision) return;
+    const urgency = interpretUrgency(decision.answers);
+    const risk = permission ? interpretPermissionRisk(decision.answers) : null;
+    this.canvas.setInsight(entry.conversationId, {
+      ...(urgency !== null ? { urgency } : {}),
+      ...(risk ? { riskLevel: risk.level } : {}),
+    });
   }
 
   // ── Model path ─────────────────────────────────────────────────────────────
 
-  private async runModel(text: string, source: UtteranceSource, startedAt: number): Promise<void> {
+  private async runModel(
+    text: string,
+    source: UtteranceSource,
+    startedAt: number,
+    modeHint?: ConductorMode
+  ): Promise<void> {
     this.lastRoute = 'llm';
     if (this.status && !this.status.configured) {
       runInAction(() => {
@@ -415,7 +513,7 @@ export class ConductorStore {
 
     this.phase = 'thinking';
     this.activity = 'Thinking…';
-    const mode: ConductorMode = chooseMode(text);
+    const mode: ConductorMode = modeHint ?? chooseMode(text);
     const providers = await installedProviders();
     const planLine = this.plans.contextLine;
     const context = buildContext(this.canvas, providers, planLine ? [planLine] : []);
@@ -580,7 +678,12 @@ export class ConductorStore {
         if (entry.entry.status !== 'awaiting-input') {
           return { content: `${target} is not waiting on a prompt.`, isError: true };
         }
-        const label = `${decision === 'allow' ? 'Allow' : 'Deny'} ${target}'s permission request`;
+        const riskLevel = this.canvas.insight(entry.entry.conversationId)?.riskLevel;
+        const riskNote =
+          decision === 'allow' && (riskLevel === 'high' || riskLevel === 'elevated')
+            ? ` (${riskLevel === 'high' ? 'high risk' : 'has side effects'})`
+            : '';
+        const label = `${decision === 'allow' ? 'Allow' : 'Deny'} ${target}'s permission request${riskNote}`;
         if (!(await this.requestPending(label, confirmKind))) {
           return { content: 'The user did not confirm, so nothing was sent.' };
         }
@@ -620,8 +723,18 @@ export class ConductorStore {
       }
       case 'propose_plan': {
         const settings = this.settings;
+        const plan = input as ConductorToolInput<'propose_plan'>;
+        if (this.status?.jevReady && plan.subtasks.length > 1) {
+          runInAction(() => (this.activity = 'Reviewing the plan…'));
+          const decision = await jevDecide(
+            planReviewState(plan.goal, plan.subtasks),
+            planReviewQuestions(plan.subtasks)
+          );
+          const review = decision ? interpretPlanReview(decision.answers, plan.subtasks) : null;
+          if (review && !review.ok) return { content: review.reason, isError: true };
+        }
         const providers = await installedProviders();
-        const proposal = this.plans.propose(input as ConductorToolInput<'propose_plan'>, {
+        const proposal = this.plans.propose(plan, {
           providers,
           maxAgents: settings?.maxAgentsPerPlan ?? 4,
           preferredProjectId: this.focusedEntry()?.projectId,
@@ -708,7 +821,14 @@ export class ConductorStore {
       if (unique.length === 0) return;
       const sentence =
         unique.length <= 3
-          ? unique.map((entry) => `${this.nameOf(entry)} ${attentionPhrase(entry)}`).join(', ')
+          ? unique
+              .map((entry) => {
+                const risk = this.canvas.insight(entry.conversationId)?.riskLevel;
+                const suffix =
+                  risk === 'high' ? ' for something risky' : risk === 'low' ? ', low risk' : '';
+                return `${this.nameOf(entry)} ${attentionPhrase(entry)}${suffix}`;
+              })
+              .join(', ')
           : `${unique.length} agents need you`;
       this.voice.announce(`${sentence}.`);
     }, ANNOUNCE_BATCH_MS);
@@ -821,7 +941,7 @@ export class ConductorStore {
   }
 
   private log(entry: {
-    route: 'grammar' | 'llm';
+    route: ConductorTurnRecord['route'];
     actions: ActionRecord[];
     reply: string;
     startedAt: number;

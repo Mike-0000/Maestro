@@ -18,9 +18,13 @@ import {
   type ConductorTurnRecord,
   type ConductorTurnResult,
   type ConductorUsage,
+  type JevDecision,
+  type JevError,
 } from '../api/contract';
+import type { JevQuestions } from '../api/jev';
 import { CONDUCTOR_SYSTEM_PROMPT } from '../api/system-prompt';
 import { conductorToolDefinitions } from '../api/tools';
+import { evaluateWithJev, JevRequestError } from './jev-client';
 
 const LOG_FILE = 'conductor-log.jsonl';
 const FALLBACK_BETA = 'server-side-fallback-2026-06-01';
@@ -79,6 +83,9 @@ export class ConductorService {
   async status(): Promise<ConductorStatus> {
     return {
       configured: (await this.credentials.get('anthropic')) !== null,
+      jevReady:
+        (await this.settings.read()).jevEnabled &&
+        (await this.credentials.get('typesafe')) !== null,
       settings: await this.settings.read(),
       usageToday: await this.usageToday(),
     };
@@ -154,6 +161,32 @@ export class ConductorService {
       });
     } catch (error) {
       return err(this.describeError(error));
+    }
+  }
+
+  /** One Jev evaluation. Never throws: routing callers fall back to Claude on any error. */
+  async decide(state: unknown, questions: JevQuestions): Promise<Result<JevDecision, JevError>> {
+    const settings = await this.settings.read();
+    if (!settings.jevEnabled) return err({ type: 'disabled', message: 'Jev is turned off.' });
+    const key = await this.credentials.get('typesafe');
+    if (!key) {
+      return err({
+        type: 'not-configured',
+        message: 'Add a TypeSafe API key in Settings → Voice & Conductor to use Jev.',
+      });
+    }
+    const startedAt = performance.now();
+    try {
+      const { answers, model } = await evaluateWithJev(key, state, questions);
+      return ok({ answers, model, latencyMs: Math.round(performance.now() - startedAt) });
+    } catch (error) {
+      if (error instanceof JevRequestError) {
+        if (error.kind === 'rejected-key')
+          return err({ type: 'not-configured', message: error.message });
+        return err({ type: error.kind, message: error.message });
+      }
+      this.logger.warn('conductor: Jev request failed', { error });
+      return err({ type: 'api-error', message: 'The Jev request failed.' });
     }
   }
 

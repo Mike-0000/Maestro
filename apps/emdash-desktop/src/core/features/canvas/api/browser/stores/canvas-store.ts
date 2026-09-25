@@ -79,6 +79,16 @@ export function taskFrameId(taskId: string): string {
   return `frame:${taskId}`;
 }
 
+/**
+ * Decisions other slices attach to an agent (the conductor's Jev triage): how risky its pending
+ * permission request is and how urgently it needs the user. Ephemeral, never persisted.
+ */
+export type AgentInsight = {
+  readonly riskLevel?: 'low' | 'moderate' | 'elevated' | 'high';
+  /** 0 (can wait) to 1 (needs the user now). */
+  readonly urgency?: number;
+};
+
 export type ViewportCommand =
   | { readonly id: number; readonly kind: 'focus'; readonly tileId: string }
   | { readonly id: number; readonly kind: 'fit'; readonly tileIds?: readonly string[] };
@@ -117,6 +127,8 @@ export class CanvasStore {
   noteDrop: NoteDrop | null = null;
   /** Conversations the user explicitly asked to start or resume from the canvas. */
   readonly startRequested = observable.set<string>();
+  /** Jev triage per conversation id (risk, urgency). */
+  readonly insights = observable.map<string, AgentInsight>();
   /** First time each tile was observed needing attention, for oldest-first cycling. */
   private readonly attentionSince = observable.map<string, number>();
   private commandSeq = 0;
@@ -141,6 +153,8 @@ export class CanvasStore {
       setOpenOnLaunch: action,
       setShowTaskFrames: action,
       moveTiles: action,
+      setInsight: action,
+      clearInsight: action,
       attentionEntries: computed,
       projectOptions: computed,
       updateState: action,
@@ -310,14 +324,29 @@ export class CanvasStore {
     });
   }
 
-  /** Visible agents needing the user, oldest attention first. */
+  /** Visible agents needing the user: most urgent first (Jev triage), then oldest first. */
   get attentionEntries(): AgentTileEntry[] {
+    const urgency = (entry: AgentTileEntry) =>
+      this.insights.get(entry.conversationId)?.urgency ?? 0;
     return this.visibleAgentEntries
       .filter(needsAttention)
       .sort(
         (a, b) =>
+          urgency(b) - urgency(a) ||
           (this.attentionSince.get(a.tileId) ?? 0) - (this.attentionSince.get(b.tileId) ?? 0)
       );
+  }
+
+  insight(conversationId: string): AgentInsight | undefined {
+    return this.insights.get(conversationId);
+  }
+
+  setInsight(conversationId: string, insight: AgentInsight): void {
+    this.insights.set(conversationId, { ...this.insights.get(conversationId), ...insight });
+  }
+
+  clearInsight(conversationId: string): void {
+    this.insights.delete(conversationId);
   }
 
   get projectOptions(): { id: string; name: string }[] {

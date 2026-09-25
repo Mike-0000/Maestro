@@ -9,6 +9,7 @@ const ENV_FALLBACKS: Record<ChorusCredentialId, string> = {
   openai: 'OPENAI_API_KEY',
   deepgram: 'DEEPGRAM_API_KEY',
   anthropic: 'ANTHROPIC_API_KEY',
+  typesafe: 'TYPESAFE_API_KEY',
 };
 
 /**

@@ -14,6 +14,7 @@ export function createConductorWireController(options: {
   const service = new ConductorService(options.host, options.logger);
   return createController(conductorContract, {
     runTurn: ({ mode, messages }) => service.runTurn(mode, messages),
+    decide: ({ state, questions }) => service.decide(state, questions),
     getStatus: () => service.status(),
     updateSettings: (patch) => service.updateSettings(patch),
     checkConflicts: async ({ worktrees }) => {

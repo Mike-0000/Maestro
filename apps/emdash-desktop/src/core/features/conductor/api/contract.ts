@@ -1,6 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { defineContract, fallible, procedure } from '@emdash/wire/rpc';
 import { z } from 'zod';
+import { jevAnswerSchema, type JevQuestions } from './jev';
 
 export const conductorDomain = 'conductor' as const;
 
@@ -24,6 +25,10 @@ export const conductorSettingsSchema = z.object({
   maxAgentsPerPlan: z.number().int().min(1).max(12),
   /** Daily conductor token budget (input + output); 0 disables the guard. */
   dailyTokenBudget: z.number().int().min(0),
+  /** Use Jev (TypeSafe AI) for fast routing, risk, urgency, and plan-review decisions. */
+  jevEnabled: z.boolean(),
+  /** Minimum Jev confidence before the conductor acts on a decision without Claude. */
+  jevConfidence: z.number().min(0.5).max(0.99),
 });
 export type ConductorSettings = z.infer<typeof conductorSettingsSchema>;
 
@@ -35,6 +40,8 @@ export const DEFAULT_CONDUCTOR_SETTINGS: ConductorSettings = {
   autoApprovePlans: false,
   maxAgentsPerPlan: 4,
   dailyTokenBudget: 3_000_000,
+  jevEnabled: true,
+  jevConfidence: 0.8,
 };
 
 export const conductorUsageSchema = z.object({
@@ -47,6 +54,8 @@ export type ConductorUsage = z.infer<typeof conductorUsageSchema>;
 
 export const conductorStatusSchema = z.object({
   configured: z.boolean(),
+  /** A TypeSafe API key is available and Jev is enabled. */
+  jevReady: z.boolean(),
   settings: conductorSettingsSchema,
   usageToday: conductorUsageSchema,
 });
@@ -85,7 +94,7 @@ export type ConflictReport = z.infer<typeof conflictReportSchema>;
 export const conductorTurnRecordSchema = z.object({
   at: z.string(),
   utterance: z.string(),
-  route: z.enum(['grammar', 'llm']),
+  route: z.enum(['grammar', 'jev', 'llm']),
   actions: z.array(z.object({ tool: z.string(), input: z.unknown(), outcome: z.string() })),
   reply: z.string(),
   latencyMs: z.number(),
@@ -101,7 +110,29 @@ export const systemChecksSchema = z.object({
 });
 export type SystemChecks = z.infer<typeof systemChecksSchema>;
 
+export const jevDecisionSchema = z.object({
+  answers: z.record(z.string(), jevAnswerSchema),
+  model: z.string(),
+  latencyMs: z.number(),
+});
+export type JevDecision = z.infer<typeof jevDecisionSchema>;
+
+export const jevErrorSchema = z.object({
+  type: z.enum(['not-configured', 'disabled', 'rate-limited', 'api-error']),
+  message: z.string(),
+});
+export type JevError = z.infer<typeof jevErrorSchema>;
+
 export const conductorContract = defineContract({
+  /** One Jev (System One) evaluation: typed questions about a state, answered in parallel. */
+  decide: fallible({
+    input: z.object({
+      state: z.unknown(),
+      questions: z.custom<JevQuestions>(),
+    }),
+    data: jevDecisionSchema,
+    error: jevErrorSchema,
+  }),
   runTurn: fallible({
     input: z.object({
       mode: conductorModeSchema,

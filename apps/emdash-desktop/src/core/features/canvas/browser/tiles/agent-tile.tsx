@@ -153,6 +153,7 @@ const AgentTileHeader = observer(function AgentTileHeader({
           <span className="text-red-600 dark:text-red-400">−{entry.linesDeleted}</span>
         </span>
       )}
+      {!glyph && <InsightPill conversationId={entry.conversationId} status={entry.status} />}
       <span
         className={cn(
           'flex shrink-0 items-center gap-1.5 rounded-full px-2 py-0.5 font-medium',
@@ -243,5 +244,39 @@ const ResumePrompt = observer(function ResumePrompt({ entry }: { entry: AgentTil
         Resume agent
       </button>
     </div>
+  );
+});
+
+const RISK_PRESENTATION = {
+  low: { label: 'Low risk', className: 'bg-green-500/15 text-green-700 dark:text-green-300' },
+  moderate: { label: 'Edits files', className: 'bg-foreground/5 text-foreground-muted' },
+  elevated: {
+    label: 'Side effects',
+    className: 'bg-amber-500/20 text-amber-800 dark:text-amber-300',
+  },
+  high: { label: 'High risk', className: 'bg-red-500/15 text-red-700 dark:text-red-300' },
+} as const;
+
+/** Jev's read on a pending permission request, shown next to the status pill. */
+const InsightPill = observer(function InsightPill({
+  conversationId,
+  status,
+}: {
+  conversationId: string;
+  status: AgentTileEntry['status'];
+}) {
+  const insight = getCanvasStore().insight(conversationId);
+  if (!insight?.riskLevel || status !== 'awaiting-input') return null;
+  const presentation = RISK_PRESENTATION[insight.riskLevel];
+  return (
+    <span
+      title="Jev's estimate of how risky it is to approve this agent's pending request"
+      className={cn(
+        'shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium',
+        presentation.className
+      )}
+    >
+      {presentation.label}
+    </span>
   );
 });
