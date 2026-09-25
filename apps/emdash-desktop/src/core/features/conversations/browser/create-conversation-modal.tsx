@@ -88,15 +88,9 @@ export const CreateConversationModal = observer(function CreateConversationModal
   );
   const skipPermissions =
     showAutoApproveToggle && (autoApproveOverride ?? taskSettings.autoApproveByDefault);
-  const title = providerId
-    ? nextDefaultConversationTitle(
-        providerId,
-        Array.from(
-          conversationMgr?.conversations.values() ?? [],
-          (conversation) => conversation.data
-        )
-      )
-    : 'Conversation';
+  const title = nextDefaultConversationTitle(
+    Array.from(conversationMgr?.conversations.values() ?? [], (conversation) => conversation.data)
+  );
 
   const handleProviderChange = useCallback(
     (next: typeof providerId) => {

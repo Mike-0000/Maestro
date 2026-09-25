@@ -41,7 +41,7 @@ export function buildInitialConversation(
   return {
     id: crypto.randomUUID(),
     provider,
-    title: nextDefaultConversationTitle(provider, []),
+    title: nextDefaultConversationTitle([]),
     ...(type === 'acp'
       ? { initialQueue: buildInitialQueue(state) }
       : state.initialPromptSupported
