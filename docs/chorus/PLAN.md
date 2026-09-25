@@ -3,6 +3,8 @@
 Working name: **Chorus** (placeholder; don't ship with "CNVS" or "emdash" branding).
 Base: fork of `generalaction/emdash` @ `95838289` (2026-09-24), Apache-2.0.
 Plan version: v4 (revision log and self-scores at the end). Implementation status: §11.
+Next: voice-controlled canvas organization (regions, full-screen stages, layout undo) is planned
+in [canvas-organization.md](canvas-organization.md).
 
 ---
 
