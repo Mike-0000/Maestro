@@ -1,4 +1,5 @@
 import { getAgentsClient } from '@core/features/agents/api/browser/client';
+import { nextDefaultConversationTitle } from '@core/features/conversations/api/browser/conversation-title-utils';
 import { conversationRegistry } from '@core/features/conversations/api/browser/stores/conversation-registry';
 import {
   asAvailableProject,
@@ -24,6 +25,10 @@ export type SpawnRequest = {
   providerId: string;
   taskName: string;
   prompt: string;
+  /** Pre-generated id, so a spoken name can be claimed for the agent before it exists. */
+  conversationId?: string;
+  /** Agent window title; defaults to the first roster name. */
+  title?: string;
 };
 
 export type SpawnResult = { taskId: string; conversationId: string; promptDeferred: boolean };
@@ -99,7 +104,7 @@ export async function spawnAgentTask(request: SpawnRequest): Promise<SpawnResult
   });
 
   const taskId = crypto.randomUUID();
-  const conversationId = crypto.randomUUID();
+  const conversationId = request.conversationId ?? crypto.randomUUID();
   const prompt = request.prompt.trim();
   const params: CreateTaskParams = {
     id: taskId,
@@ -110,7 +115,7 @@ export async function spawnAgentTask(request: SpawnRequest): Promise<SpawnResult
       initialConversation: {
         id: conversationId,
         provider: request.providerId,
-        title: `${agent.name} (1)`,
+        title: request.title ?? nextDefaultConversationTitle([]),
         autoApprove: false,
         type: 'pty',
         ...(prompt && canDeliverPrompt ? { initialPrompt: prompt } : {}),

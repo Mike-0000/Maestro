@@ -4,8 +4,6 @@ import type {
   AgentTileEntry,
   CanvasStore,
 } from '@core/features/canvas/api/browser/stores/canvas-store';
-import { assignSpokenName } from '@core/features/canvas/api/canvas-model';
-import { spokenProviderLabel } from '@core/features/canvas/api/provider-names';
 import { getProjectManagerStore } from '@core/features/projects/api/browser/stores/project-selectors';
 import {
   getTaskManagerStore,
@@ -720,11 +718,18 @@ export class ConductorStore {
           return { content: 'The user cancelled the new agent.' };
         }
         runInAction(() => (this.activity = 'Creating a worktree…'));
+        const conversationId = crypto.randomUUID();
+        const name = this.canvas.claimSpokenName(conversationId);
         const result = await spawnAgentTask({
           projectId,
           providerId: spawn.provider,
           taskName: spawn.task_name,
           prompt: spawn.prompt,
+          conversationId,
+          title: name,
+        }).catch((error: unknown) => {
+          this.canvas.releaseSpokenName(conversationId);
+          throw error;
         });
         void startAgentSession(projectId, result.taskId, result.conversationId).then((started) => {
           if (started && result.promptDeferred && spawn.prompt.trim()) {
@@ -732,7 +737,7 @@ export class ConductorStore {
           }
         });
         return {
-          content: `Created task "${spawn.task_name}" in a new worktree; the agent is starting. It will appear on the canvas as ${this.predictedName(spawn.provider)}.`,
+          content: `Created task "${spawn.task_name}" in a new worktree; the agent is starting. It will appear on the canvas as ${name}.`,
         };
       }
       case 'propose_plan': {
@@ -907,11 +912,6 @@ export class ConductorStore {
 
   private nameOf(entry: AgentTileEntry): string {
     return this.canvas.spokenName(entry.conversationId);
-  }
-
-  private predictedName(providerId: string): string {
-    const taken = this.canvas.agentEntries.map((entry) => this.nameOf(entry));
-    return assignSpokenName(spokenProviderLabel(providerId), taken);
   }
 
   private resolveEntry(reference: string): { entry: AgentTileEntry } | { error: string } {

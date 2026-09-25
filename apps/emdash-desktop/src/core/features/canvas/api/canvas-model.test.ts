@@ -8,6 +8,7 @@ import {
   frameRect,
   GLYPH_ZOOM_THRESHOLD,
   isInteractiveZoom,
+  isLegacySpokenName,
   nextFreeAnchor,
   placeTiles,
   rectsOverlap,
@@ -90,11 +91,32 @@ describe('geometry helpers', () => {
 });
 
 describe('spoken names', () => {
-  it('assigns the lowest free number per provider', () => {
-    expect(assignSpokenName('Claude', [])).toBe('Claude 1');
-    expect(assignSpokenName('Claude', ['Claude 1', 'Codex 1'])).toBe('Claude 2');
-    expect(assignSpokenName('Claude', ['Claude 2'])).toBe('Claude 1');
-    expect(assignSpokenName('Codex', ['codex 1', 'Auth'])).toBe('Codex 2');
+  it('assigns the first free roster name across the canvas', () => {
+    expect(assignSpokenName(undefined, [])).toBe('Atlas');
+    expect(assignSpokenName(undefined, ['Atlas', 'Auth'])).toBe('Bravo');
+    expect(assignSpokenName(undefined, ['Bravo'])).toBe('Atlas');
+    expect(assignSpokenName(undefined, ['atlas', 'Claude 1'])).toBe('Bravo');
+  });
+
+  it('keeps the conversation title when it is a free roster name', () => {
+    expect(assignSpokenName('Cedar', ['Atlas'])).toBe('Cedar');
+    expect(assignSpokenName('cedar', [])).toBe('Cedar');
+  });
+
+  it('falls back to a free roster name when the title is taken or not a roster name', () => {
+    // Every task's first window is titled "Atlas"; the canvas still needs distinct names.
+    expect(assignSpokenName('Atlas', ['Atlas'])).toBe('Bravo');
+    expect(assignSpokenName('Claude (1)', [])).toBe('Atlas');
+    expect(assignSpokenName('Fix login flow', ['Atlas'])).toBe('Bravo');
+  });
+
+  it('recognises names generated before roster names', () => {
+    expect(isLegacySpokenName('Claude 1', 'Claude')).toBe(true);
+    expect(isLegacySpokenName('codex 12', 'Codex')).toBe(true);
+    expect(isLegacySpokenName('Claude 1', 'Codex')).toBe(false);
+    expect(isLegacySpokenName('Claude', 'Claude')).toBe(false);
+    expect(isLegacySpokenName('Reviewer', 'Claude')).toBe(false);
+    expect(isLegacySpokenName('Kilo 2', 'Kilo')).toBe(false);
   });
 
   it('uses short provider labels', () => {

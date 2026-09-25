@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   AGENT_WINDOW_NAMES,
   agentWindowName,
+  parseAgentWindowNameSlot,
+} from '@core/features/conversations/api/agent-window-names';
+import {
   formatConversationTitleForDisplay,
   nextDefaultConversationTitle,
-  parseAgentWindowNameSlot,
 } from '@core/features/conversations/api/browser/conversation-title-utils';
 
 describe('nextDefaultConversationTitle', () => {

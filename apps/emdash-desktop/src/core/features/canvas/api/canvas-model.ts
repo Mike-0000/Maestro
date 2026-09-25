@@ -4,6 +4,11 @@
  * Everything here is pure so the placement and detail rules can be tested without React Flow.
  */
 
+import {
+  agentWindowName,
+  parseAgentWindowNameSlot,
+} from '@core/features/conversations/api/agent-window-names';
+
 export type TileRect = { x: number; y: number; w: number; h: number };
 
 export type CanvasViewport = { x: number; y: number; zoom: number };
@@ -167,20 +172,32 @@ export function numberWord(n: number): string {
 }
 
 /**
- * Assigns a short, speakable, unique name such as "Claude 2" for a new agent of `providerLabel`,
- * reusing the lowest free number.
+ * Assigns a short, speakable name that is unique across the canvas, from the fixed agent window
+ * roster ("Atlas", "Bravo", ...). `preferred` (usually the conversation title) wins when it is a
+ * roster name nobody else holds, so the canvas and the task view agree; otherwise the first free
+ * roster slot is used.
  */
-export function assignSpokenName(providerLabel: string, taken: Iterable<string>): string {
-  const base = providerLabel.trim() || 'Agent';
+export function assignSpokenName(preferred: string | undefined, taken: Iterable<string>): string {
   const used = new Set<number>();
-  const prefix = `${base.toLowerCase()} `;
   for (const name of taken) {
-    const lower = name.toLowerCase();
-    if (!lower.startsWith(prefix)) continue;
-    const n = Number(lower.slice(prefix.length));
-    if (Number.isInteger(n) && n > 0) used.add(n);
+    const slot = parseAgentWindowNameSlot(name);
+    if (slot !== null) used.add(slot);
   }
-  let n = 1;
-  while (used.has(n)) n++;
-  return `${base} ${n}`;
+  const preferredSlot = preferred ? parseAgentWindowNameSlot(preferred) : null;
+  if (preferredSlot !== null && !used.has(preferredSlot)) return agentWindowName(preferredSlot);
+  let slot = 0;
+  while (used.has(slot)) slot++;
+  return agentWindowName(slot);
+}
+
+/**
+ * True for names the canvas generated before roster names ("Claude 2" for a Claude agent). These
+ * are replaced with roster names; names the user typed are kept.
+ */
+export function isLegacySpokenName(name: string, providerLabel: string): boolean {
+  // "Kilo 2" is both a roster name and Kilo Code's legacy name; the roster reading wins.
+  if (parseAgentWindowNameSlot(name) !== null) return false;
+  const prefix = `${providerLabel.trim().toLowerCase()} `;
+  const lower = name.trim().toLowerCase();
+  return lower.startsWith(prefix) && /^[1-9]\d*$/.test(lower.slice(prefix.length));
 }

@@ -15,6 +15,7 @@ import {
   AGENT_TILE_SIZE,
   assignSpokenName,
   frameRect,
+  isLegacySpokenName,
   NOTE_TILE_SIZE,
   nextFreeAnchor,
   placeTiles,
@@ -391,7 +392,10 @@ export class CanvasStore {
   ensureLayout(): void {
     const state = this.state;
     const missing = this.agentEntries.filter((entry) => !state.tiles[entry.tileId]);
-    const unnamed = this.agentEntries.filter((entry) => !state.spokenNames[entry.conversationId]);
+    const unnamed = this.agentEntries.filter((entry) => {
+      const name = state.spokenNames[entry.conversationId];
+      return !name || isLegacySpokenName(name, spokenProviderLabel(entry.providerId));
+    });
     if (missing.length === 0 && unnamed.length === 0) return;
 
     this.updateState((current) => {
@@ -419,9 +423,10 @@ export class CanvasStore {
           });
         }
       }
+      for (const entry of unnamed) delete spokenNames[entry.conversationId];
       for (const entry of unnamed) {
         spokenNames[entry.conversationId] = assignSpokenName(
-          spokenProviderLabel(entry.providerId),
+          entry.conversationTitle,
           Object.values(spokenNames)
         );
       }
@@ -588,6 +593,31 @@ export class CanvasStore {
 
   shouldAttach(entry: AgentTileEntry): boolean {
     return entry.sessionActive || this.startRequested.has(entry.conversationId);
+  }
+
+  /**
+   * Reserves a spoken name for an agent that is about to be created, so agents spawned together get
+   * distinct names before their tiles exist. Use the result as the conversation title.
+   */
+  claimSpokenName(conversationId: string): string {
+    const existing = this.state.spokenNames[conversationId];
+    if (existing) return existing;
+    const name = assignSpokenName(undefined, Object.values(this.state.spokenNames));
+    this.updateState((current) => ({
+      ...current,
+      spokenNames: { ...current.spokenNames, [conversationId]: name },
+    }));
+    return name;
+  }
+
+  /** Frees a name claimed for an agent that was never created. */
+  releaseSpokenName(conversationId: string): void {
+    if (!this.state.spokenNames[conversationId]) return;
+    this.updateState((current) => {
+      const spokenNames = { ...current.spokenNames };
+      delete spokenNames[conversationId];
+      return { ...current, spokenNames };
+    });
   }
 
   setSpokenName(conversationId: string, name: string): void {

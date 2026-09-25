@@ -7,7 +7,7 @@ import { z } from 'zod';
  * Order is fixed so the tool prefix stays byte-identical for prompt caching.
  */
 
-const agentRef = z.string().min(1).describe('An agent name from the roster, e.g. "Claude 2".');
+const agentRef = z.string().min(1).describe('An agent name from the roster, e.g. "Atlas".');
 
 export const conductorToolSchemas = {
   list_agents: z.object({}),

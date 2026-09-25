@@ -120,8 +120,8 @@ export const VoiceSetupPanel = observer(function VoiceSetupPanel({
         </Step>
 
         <Step done={false} title="Try a command">
-          &ldquo;Show all&rdquo;, &ldquo;next&rdquo;, &ldquo;focus Claude 1&rdquo;, or &ldquo;tell
-          Codex 1 to run the tests&rdquo;. Hold Shift too to dictate into the focused agent.
+          &ldquo;Show all&rdquo;, &ldquo;next&rdquo;, &ldquo;focus Atlas&rdquo;, or &ldquo;tell
+          Bravo to run the tests&rdquo;. Hold Shift too to dictate into the focused agent.
         </Step>
       </ol>
 

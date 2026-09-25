@@ -236,11 +236,17 @@ export class PlanStore {
     subtask.state = 'spawning';
     try {
       const prompt = scopedPrompt(subtask, plan.goal);
+      const conversationId = crypto.randomUUID();
       const result = await spawnAgentTask({
         projectId: plan.projectId,
         providerId: subtask.provider,
         taskName: subtask.title,
         prompt,
+        conversationId,
+        title: this.canvas.claimSpokenName(conversationId),
+      }).catch((error: unknown) => {
+        this.canvas.releaseSpokenName(conversationId);
+        throw error;
       });
       runInAction(() => {
         subtask.taskId = result.taskId;

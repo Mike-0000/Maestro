@@ -347,7 +347,7 @@ function CommandInput({ onClose }: { onClose: () => void }) {
       <input
         ref={inputRef}
         aria-label="Command"
-        placeholder='Try "tell Claude 1 to run the tests" or "what is Codex 1 doing"'
+        placeholder='Try "tell Atlas to run the tests" or "what is Bravo doing"'
         className="h-8 min-w-0 flex-1 rounded-md border border-border bg-background px-2.5 text-sm text-foreground outline-none placeholder:text-foreground-muted focus:border-blue-500"
         onKeyDown={(event) => {
           if (event.key === 'Escape') onClose();
