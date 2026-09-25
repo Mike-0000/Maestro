@@ -32,6 +32,8 @@ export type Plan = {
   subtasks: PlannedSubtask[];
   status: PlanStatus;
   createdAt: number;
+  /** Region the plan's agents gather in on the canvas (when grouping plan agents is on). */
+  regionName?: string;
 };
 
 export type ProposeResult = { ok: true; plan: Plan } | { ok: false; reason: string };
@@ -183,6 +185,9 @@ export class PlanStore {
     const plan = this.plan;
     if (!plan || plan.status !== 'proposed') return;
     plan.status = 'running';
+    if (this.canvas.layoutSettings.groupPlanAgents && plan.subtasks.length > 1) {
+      plan.regionName = this.canvas.reserveRegion([], planRegionName(plan.goal));
+    }
     for (const subtask of plan.subtasks) {
       if (subtask.state === 'pending') await this.spawn(subtask);
     }
@@ -248,6 +253,7 @@ export class PlanStore {
         this.canvas.releaseSpokenName(conversationId);
         throw error;
       });
+      if (plan.regionName) this.canvas.joinRegionOnArrival(result.conversationId, plan.regionName);
       runInAction(() => {
         subtask.taskId = result.taskId;
         subtask.conversationId = result.conversationId;
@@ -366,4 +372,15 @@ function hasCycle(subtasks: readonly PlanSubtask[]): boolean {
     }
   }
   return false;
+}
+
+/** A short region name from a plan goal: its first few words ("Checkout redesign"). */
+export function planRegionName(goal: string): string {
+  const words = goal
+    .replace(/[^\p{L}\p{N}\s'-]/gu, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 4);
+  const name = words.join(' ').slice(0, 32).trim();
+  return name ? name.charAt(0).toUpperCase() + name.slice(1) : 'Plan';
 }

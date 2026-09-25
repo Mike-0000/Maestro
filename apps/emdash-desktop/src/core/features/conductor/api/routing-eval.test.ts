@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import type { CanvasRefContext } from './canvas-refs';
 import { parseCommand, type GrammarCommand } from './grammar';
 import type { RosterAgent } from './resolver';
 
@@ -85,5 +86,51 @@ describe('routing eval (grammar fast path)', () => {
 
   it('never executes an utterance that belongs to the model', () => {
     expect(grabbedModelRows).toBe(0);
+  });
+});
+
+describe('routing eval with a canvas (layout grammar enabled)', () => {
+  // The same roster as canvas windows, plus two regions and an app browser.
+  const canvas: CanvasRefContext = {
+    entities: [
+      ...roster.map((agent) => ({
+        id: agent.id,
+        kind: 'agent' as const,
+        name: agent.name,
+        providerLabel: agent.providerLabel,
+        taskName: agent.taskName,
+        ...(agent.hidden ? { hidden: true } : {}),
+      })),
+      { id: 'region:review', kind: 'region', name: 'Review' },
+      { id: 'region:backend', kind: 'region', name: 'Backend' },
+      { id: 'browser:1', kind: 'browser', name: 'checkout app', taskName: 'checkout' },
+    ],
+    selection: [],
+    focusedId: null,
+    recent: [],
+    currentRegion: null,
+    onStage: false,
+  };
+  const grabbed: string[] = [];
+  let correct = 0;
+  for (const row of rows) {
+    const command = parseCommand(row.utterance, roster, row.focused, {
+      ...canvas,
+      focusedId: row.focused,
+    });
+    // Layout undo stands in for "reopen last" when a canvas is present (it falls back to reopen).
+    const undo = command?.kind === 'canvas' && command.action.type === 'undo';
+    if (matches(command, row.expect) || (undo && row.expect.kind === 'reopen')) correct++;
+    else if (row.expect.kind === 'model' && command) {
+      grabbed.push(`"${row.utterance}" -> ${JSON.stringify(command)}`);
+    }
+  }
+
+  it('keeps the M3 bar', () => {
+    expect(correct / rows.length).toBeGreaterThanOrEqual(0.95);
+  });
+
+  it('never grabs an utterance that belongs to the model', () => {
+    expect(grabbed).toEqual([]);
   });
 });

@@ -7,12 +7,14 @@ import {
   MicOff,
   SendHorizontal,
   Settings2,
+  Undo2,
   Volume2,
   VolumeX,
   X,
 } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useEffect, useRef, useState } from 'react';
+import { getCanvasStore } from '@core/features/canvas/contributions/browser/app-stores';
 import { settingsViewDef } from '@core/features/settings/contributions/views';
 import { getVoiceStore } from '@core/features/voice/contributions/browser/app-stores';
 import { getNavigation } from '@core/primitives/navigation/browser/navigation-selectors';
@@ -60,6 +62,11 @@ export const ConductorHud = observer(function ConductorHud() {
   const listening = voice.phase === 'listening';
   const transcribing = voice.phase === 'transcribing';
   const error = voice.error ?? conductor.error;
+
+  // Spoken-name badges on canvas windows while the mic is open.
+  useEffect(() => {
+    getCanvasStore().setListening(listening);
+  }, [listening]);
   const showUtterance =
     (conductor.busy || replyVisible) && conductor.lastUtterance && !listening && !transcribing;
   const expanded =
@@ -144,6 +151,8 @@ export const ConductorHud = observer(function ConductorHud() {
         {replyVisible && conductor.reply && !conductor.busy && (
           <p className="px-1 text-sm text-foreground">{conductor.reply}</p>
         )}
+
+        <LayoutUndoChip />
 
         {error && <ErrorCard />}
 
@@ -408,6 +417,28 @@ function Key({ children }: { children: React.ReactNode }) {
 }
 
 /** True for `durationMs` after `changedAt` (a timestamp) changes. */
+/** How long a voice layout change offers a one-click undo. */
+const LAYOUT_UNDO_VISIBLE_MS = 12_000;
+
+/** "Undo: Grouped Atlas and Bravo into Review" after a spoken layout change. */
+const LayoutUndoChip = observer(function LayoutUndoChip() {
+  const canvas = getCanvasStore();
+  const change = canvas.lastChange;
+  const spoken = change !== null && (change.source === 'voice' || change.source === 'typed');
+  const visible = useRecentlyChanged(spoken ? change.at : 0, LAYOUT_UNDO_VISIBLE_MS);
+  if (!visible || !canvas.canUndo || canvas.undoLabel !== change?.label) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => canvas.undo()}
+      className="flex items-center gap-1.5 self-start rounded-md px-1 text-xs text-foreground-muted hover:text-foreground"
+    >
+      <Undo2 className="size-3.5 shrink-0" />
+      <span className="truncate">Undo: {change.label}</span>
+    </button>
+  );
+});
+
 function useRecentlyChanged(changedAt: number, durationMs: number): boolean {
   const [visible, setVisible] = useState(false);
   useEffect(() => {

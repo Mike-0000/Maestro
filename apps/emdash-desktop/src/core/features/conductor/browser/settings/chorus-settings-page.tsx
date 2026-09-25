@@ -1024,6 +1024,48 @@ const CanvasSettings = observer(function CanvasSettings() {
           />
         }
       />
+      <SettingsRow
+        label="Show names while listening"
+        description="Show each window's spoken name in large type while the microphone is open."
+        control={
+          <Switch
+            checked={canvas.layoutSettings.showNamesWhileListening}
+            onCheckedChange={(next) => canvas.setLayoutSettings({ showNamesWhileListening: next })}
+          />
+        }
+      />
+      <SettingsRow
+        label="Speak layout confirmations"
+        description='Say "Grouped Atlas and Bravo into Review" out loud after spoken layout changes. Off: changes are shown, and only failures and questions are spoken.'
+        control={
+          <Switch
+            checked={canvas.layoutSettings.speakLayoutConfirmations}
+            onCheckedChange={(next) => canvas.setLayoutSettings({ speakLayoutConfirmations: next })}
+          />
+        }
+      />
+      <SettingsRow
+        label="Group plan agents"
+        description="Put the agents a plan starts into one region named after the plan."
+        control={
+          <Switch
+            checked={canvas.layoutSettings.groupPlanAgents}
+            onCheckedChange={(next) => canvas.setLayoutSettings({ groupPlanAgents: next })}
+          />
+        }
+      />
+      <SettingsRow
+        label="New agents join the region in view"
+        description="When you are zoomed into a region or have it on the stage, new agents are placed in it."
+        control={
+          <Switch
+            checked={canvas.layoutSettings.placeNewAgentsInCurrentRegion}
+            onCheckedChange={(next) =>
+              canvas.setLayoutSettings({ placeNewAgentsInCurrentRegion: next })
+            }
+          />
+        }
+      />
     </>
   );
 });

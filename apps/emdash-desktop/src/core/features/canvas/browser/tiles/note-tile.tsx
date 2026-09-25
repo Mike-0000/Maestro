@@ -38,7 +38,7 @@ export const NoteTileNode = observer(function NoteTileNode({ data, selected }: N
         lineClassName="!border-blue-500/60"
         handleClassName="!size-2.5 !rounded-sm !border-blue-500 !bg-background"
         onResizeEnd={(_event, params) =>
-          store.setTileRect(tileId, { x: params.x, y: params.y, w: params.width, h: params.height })
+          store.resizeTile(tileId, { x: params.x, y: params.y, w: params.width, h: params.height })
         }
       />
       <div className="flex h-7 shrink-0 items-center gap-1 px-2">

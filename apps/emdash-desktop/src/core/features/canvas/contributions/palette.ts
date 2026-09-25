@@ -5,6 +5,19 @@ import {
   nextAttentionCommand,
   openCanvasCommand,
   runCanvasAppCommand,
+  undoLayoutCommand,
+  redoLayoutCommand,
+  groupSelectionCommand,
+  newRegionCommand,
+  tidyCanvasCommand,
+  organizeByTaskCommand,
+  organizeByProjectCommand,
+  organizeByStatusCommand,
+  organizeByProviderCommand,
+  enterStageCommand,
+  leaveStageCommand,
+  canvasBackCommand,
+  canvasHomeCommand,
 } from './commands';
 
 export const CANVAS_COMMAND_PALETTE_ITEMS = [
@@ -21,5 +34,51 @@ export const CANVAS_COMMAND_PALETTE_ITEMS = [
   defineCommandPaletteItem({
     command: runCanvasAppCommand,
     aliases: ['browser', 'preview', 'dev server', 'open app'],
+  }),
+  defineCommandPaletteItem({
+    command: undoLayoutCommand,
+    aliases: ['undo', 'put it back', 'revert layout'],
+  }),
+  defineCommandPaletteItem({ command: redoLayoutCommand, aliases: ['redo'] }),
+  defineCommandPaletteItem({
+    command: groupSelectionCommand,
+    aliases: ['group', 'region', 'sub-canvas', 'subcanvas', 'cluster'],
+  }),
+  defineCommandPaletteItem({
+    command: newRegionCommand,
+    aliases: ['region', 'sub-canvas', 'subcanvas', 'area', 'group'],
+  }),
+  defineCommandPaletteItem({
+    command: tidyCanvasCommand,
+    aliases: ['tidy', 'arrange', 'clean up', 'align', 'grid'],
+  }),
+  defineCommandPaletteItem({
+    command: organizeByTaskCommand,
+    aliases: ['organize', 'group by task', 'sort'],
+  }),
+  defineCommandPaletteItem({
+    command: organizeByProjectCommand,
+    aliases: ['organize', 'group by project', 'sort'],
+  }),
+  defineCommandPaletteItem({
+    command: organizeByStatusCommand,
+    aliases: ['organize', 'group by status', 'waiting', 'triage'],
+  }),
+  defineCommandPaletteItem({
+    command: organizeByProviderCommand,
+    aliases: ['organize', 'group by provider', 'claude', 'codex'],
+  }),
+  defineCommandPaletteItem({
+    command: enterStageCommand,
+    aliases: ['stage', 'full screen', 'focus mode', 'maximize', 'tile'],
+  }),
+  defineCommandPaletteItem({
+    command: leaveStageCommand,
+    aliases: ['exit stage', 'back to canvas'],
+  }),
+  defineCommandPaletteItem({ command: canvasBackCommand, aliases: ['back', 'previous'] }),
+  defineCommandPaletteItem({
+    command: canvasHomeCommand,
+    aliases: ['home', 'whole board', 'overview'],
   }),
 ] as const;

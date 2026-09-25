@@ -43,10 +43,127 @@ export const runCanvasAppCommand = defineCommand({
   icon: 'app-window',
 });
 
+export const undoLayoutCommand = defineCommand({
+  id: 'canvas.undoLayout',
+  title: 'Undo Canvas Layout Change',
+  description: 'Revert the last move, resize, grouping, or stage change on the canvas',
+  category: 'Canvas',
+  icon: 'undo-2',
+});
+
+export const redoLayoutCommand = defineCommand({
+  id: 'canvas.redoLayout',
+  title: 'Redo Canvas Layout Change',
+  description: 'Re-apply the canvas layout change you just undid',
+  category: 'Canvas',
+  icon: 'redo-2',
+});
+
+export const groupSelectionCommand = defineCommand({
+  id: 'canvas.groupSelection',
+  title: 'Group Selected Windows into a Region',
+  description: 'Put the selected windows and regions into a new named region',
+  category: 'Canvas',
+  icon: 'boxes',
+});
+
+export const newRegionCommand = defineCommand({
+  id: 'canvas.newRegion',
+  title: 'New Canvas Region',
+  description: 'Add an empty named region to the canvas',
+  category: 'Canvas',
+  icon: 'square-dashed',
+});
+
+export const tidyCanvasCommand = defineCommand({
+  id: 'canvas.tidy',
+  title: 'Tidy Up Canvas',
+  description: 'Line up the windows in the region in view (or the whole board) without overlaps',
+  category: 'Canvas',
+  icon: 'wand-sparkles',
+});
+
+export const organizeByTaskCommand = defineCommand({
+  id: 'canvas.organizeByTask',
+  title: 'Organize Canvas by Task',
+  description: 'Group windows into one region per task',
+  category: 'Canvas',
+  icon: 'layout-grid',
+});
+
+export const organizeByProjectCommand = defineCommand({
+  id: 'canvas.organizeByProject',
+  title: 'Organize Canvas by Project',
+  description: 'Group windows into one region per project',
+  category: 'Canvas',
+  icon: 'layout-grid',
+});
+
+export const organizeByStatusCommand = defineCommand({
+  id: 'canvas.organizeByStatus',
+  title: 'Organize Canvas by Status',
+  description: 'Group agents by needs you, working, idle, and done',
+  category: 'Canvas',
+  icon: 'layout-grid',
+});
+
+export const organizeByProviderCommand = defineCommand({
+  id: 'canvas.organizeByProvider',
+  title: 'Organize Canvas by Agent Type',
+  description: 'Group agents by provider (Claude, Codex, and so on)',
+  category: 'Canvas',
+  icon: 'layout-grid',
+});
+
+export const enterStageCommand = defineCommand({
+  id: 'canvas.stage.enter',
+  title: 'Open on Stage',
+  description: 'Tile the selection, or the region in view, full screen and live',
+  category: 'Canvas',
+  icon: 'layout-panel-top',
+});
+
+export const leaveStageCommand = defineCommand({
+  id: 'canvas.stage.leave',
+  title: 'Leave Stage',
+  description: 'Return from the stage to the canvas board',
+  category: 'Canvas',
+  icon: 'x',
+});
+
+export const canvasBackCommand = defineCommand({
+  id: 'canvas.back',
+  title: 'Canvas: Go Back',
+  description: 'Return to where you were on the canvas before',
+  category: 'Canvas',
+  icon: 'arrow-left',
+});
+
+export const canvasHomeCommand = defineCommand({
+  id: 'canvas.home',
+  title: 'Canvas: Whole Board',
+  description: 'Leave regions and the stage and show the whole board',
+  category: 'Canvas',
+  icon: 'house',
+});
+
 export const CANVAS_COMMAND_DEFS = [
   openCanvasCommand,
   nextAttentionCommand,
   fitCanvasCommand,
   addCanvasNoteCommand,
   runCanvasAppCommand,
+  undoLayoutCommand,
+  redoLayoutCommand,
+  groupSelectionCommand,
+  newRegionCommand,
+  tidyCanvasCommand,
+  organizeByTaskCommand,
+  organizeByProjectCommand,
+  organizeByStatusCommand,
+  organizeByProviderCommand,
+  enterStageCommand,
+  leaveStageCommand,
+  canvasBackCommand,
+  canvasHomeCommand,
 ] as const;

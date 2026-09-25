@@ -51,6 +51,9 @@ export const AgentTileNode = observer(function AgentTileNode({ data, selected }:
   });
   const focused = store.focusedTileId === tileId;
   const attention = needsAttention(entry);
+  // A staged agent is mounted on the stage; mounting its terminal here too would fight over it.
+  const staged = store.isStaged(tileId);
+  const badge = store.listening && store.layoutSettings.showNamesWhileListening;
 
   return (
     <div
@@ -68,12 +71,21 @@ export const AgentTileNode = observer(function AgentTileNode({ data, selected }:
         lineClassName="!border-blue-500/60"
         handleClassName="!size-2.5 !rounded-sm !border-blue-500 !bg-background"
         onResizeEnd={(_event, params) =>
-          store.setTileRect(tileId, { x: params.x, y: params.y, w: params.width, h: params.height })
+          store.resizeTile(tileId, { x: params.x, y: params.y, w: params.width, h: params.height })
         }
       />
       <AgentTileHeader entry={entry} glyph={band === 'glyph'} />
-      <div className="min-h-0 flex-1">
-        {detail === 'glyph' ? (
+      <div className="relative min-h-0 flex-1">
+        {badge && (
+          <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+            <span className="rounded-2xl bg-background/90 px-6 py-2 text-5xl font-bold tracking-tight text-foreground shadow-lg">
+              {store.spokenName(conversationId)}
+            </span>
+          </div>
+        )}
+        {staged ? (
+          <TerminalPlaceholder label="On the stage" />
+        ) : detail === 'glyph' ? (
           <AgentGlyph entry={entry} />
         ) : !store.shouldAttach(entry) ? (
           <ResumePrompt entry={entry} />

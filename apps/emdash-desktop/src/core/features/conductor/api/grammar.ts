@@ -1,3 +1,5 @@
+import type { CanvasRefContext } from './canvas-refs';
+import { parseCanvasCommand, type CanvasAction } from './grammar-canvas';
 import { isDeictic, normalizeSpoken, resolveAgent, type RosterAgent } from './resolver';
 
 /**
@@ -30,6 +32,8 @@ export type GrammarCommand =
   /** Answer an agent's permission prompt (needs confirmation). */
   | { kind: 'permission'; agent: RosterAgent; decision: 'allow' | 'deny' }
   | { kind: 'help' }
+  /** Canvas layout: regions, moves, sizes, the stage, and layout undo. */
+  | { kind: 'canvas'; action: CanvasAction }
   | { kind: 'clarify'; question: string };
 
 /** "close all", "close the others", "close the finished ones". */
@@ -266,7 +270,8 @@ function splitAddressed(
 export function parseCommand(
   utterance: string,
   roster: readonly RosterAgent[],
-  focusedId: string | null
+  focusedId: string | null,
+  canvas?: CanvasRefContext
 ): GrammarCommand | null {
   const text = clean(utterance);
   if (!text) return null;
@@ -282,6 +287,11 @@ export function parseCommand(
 
   const note = NOTE.exec(text);
   if (note?.[1]) return { kind: 'note', text: note[1].trim() };
+
+  if (canvas) {
+    const layout = parseCanvasCommand(text.replace(POLITE, ''), canvas);
+    if (layout) return layout;
+  }
 
   const windowCommand = parseWindowCommand(text.replace(POLITE, ''), roster, focusedId);
   if (windowCommand) return windowCommand;

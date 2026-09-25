@@ -1,6 +1,10 @@
 # Voice-controlled canvas organization
 
-Status: **plan, not built**. Written 2026-09-25 against `chorus/main` @ `b1fcd607a`.
+Status: **built** (2026-09-25). Regions, the Stage, the canvas trail, layout undo/redo, the
+layout grammar, and the `arrange_canvas` / `canvas_view` / `describe_canvas` conductor tools
+ship; saved layouts (§7.3) are still future work. The plan below was written against
+`chorus/main` @ `b1fcd607a`; see "As built" at the end for where the code lives and where it
+differs from the plan.
 Owner slices: `canvas` (model, layout, presentation), `conductor` (language → operations),
 `browser` (a canvas presenter for browser sessions). Companion to [PLAN.md](PLAN.md) and
 [voice.md](voice.md).
@@ -989,3 +993,43 @@ A developer has Atlas and Bravo (Claude) working on auth, Cedar (Codex) on tests
 | "Undo" | history, top is not layout | "I can't unsend a message. The last layout change was resizing the browser; undo that?" |
 | "No. Go back" | reject, then `back` | Stage closes; board viewport exactly as before "Open Auth". |
 | "Collapse Auth and tidy up everything" | model → `arrange_canvas{[collapse Auth, arrange root tidy]}` | Touches > 4 windows → Preview: ghost outlines, 1.5 s countdown, then applied as one undo step. |
+
+---
+
+## As built
+
+| Piece | Code |
+| --- | --- |
+| Region model, names, footprints, status summaries | `canvas/api/canvas-regions.ts` |
+| Pure planner (every op, preview tier, collisions) | `canvas/api/canvas-layout.ts` |
+| Conflict-aware undo/redo patches | `canvas/api/canvas-history.ts` |
+| Stage split-tree layout, paging, solo | `canvas/api/stage-layout.ts` |
+| Store: history, ghost previews, selection, trail, stage | `canvas/api/browser/stores/canvas-store.ts` |
+| Board regions, ghosts, drag into/out of regions | `canvas/browser/canvas-board.tsx`, `tiles/region-node.tsx` |
+| Stage presenter (live terminals, chats, browsers, notes) | `canvas/browser/stage/` |
+| Keyboard | `canvas/browser/canvas-keys.ts` |
+| Persistence (memento v4) | `canvas/contributions/mementos.ts` |
+| Spoken references | `conductor/api/canvas-refs.ts` |
+| Layout grammar | `conductor/api/grammar-canvas.ts` |
+| Model tool steps → ops | `conductor/api/canvas-tool-ops.ts` |
+
+Differences from the plan:
+
+- The model gets three tools rather than one op-per-tool surface: `arrange_canvas` (up to 12
+  named steps, one undoable change), `canvas_view` (stage, navigation, undo), and
+  `describe_canvas`. Steps use spoken names; the renderer resolves them, so the model still never
+  sees ids or coordinates.
+- Preview-tier changes (organize, dissolve, many windows moving) show dashed outlines and run
+  after the usual 1.5 s countdown; Esc, "no", or the board's Cancel drops them.
+- Closing and reopening windows go through the planner (`hide` / `show`), so "undo" also
+  reopens a window you just closed. When there is no layout change to undo, "undo" falls back to
+  reopening the last closed window, as before.
+- Plan agents gather in a region named after the plan goal (setting: group plan agents), and new
+  agents join the region you are looking at (setting: place new agents in the current region).
+- Layout changes are silent by default; failures, questions, and descriptions are spoken. The
+  HUD offers a one-click undo for 12 seconds after a spoken change.
+
+Keyboard: Ctrl+Z / Ctrl+Shift+Z undo and redo, Ctrl+G groups the selection, Ctrl+Shift+G
+ungroups, Ctrl+Enter stages the selection (or the region in view), Esc leaves the stage,
+Alt+Arrow nudges, Alt+Shift+Arrow resizes, Ctrl+Alt+Left/Right/Up/Home walk the trail.
+On the stage: Ctrl+Shift+Arrow moves between panes, Ctrl+Alt+Enter solos, PageUp/PageDown page.

@@ -40,8 +40,15 @@ export const BrowserTileNode = observer(function BrowserTileNode({ data, selecte
 
   // Report where the page area is on screen so the host can place (or hide) the webview. Runs
   // after every render: drags, resizes, and viewport moves all re-render this node.
+  const stageActive = store.stageActive;
+  const staged = browserId ? store.isStaged(tileId) : false;
   useLayoutEffect(() => {
     if (!browserId) return;
+    // The stage owns a staged browser's surface; other board browsers hide behind the stage.
+    if (stageActive) {
+      if (!staged) host.placeSurface(browserId, null);
+      return;
+    }
     const page = pageRef.current;
     if (!page || !domNode) {
       host.placeSurface(browserId, null);
@@ -76,8 +83,10 @@ export const BrowserTileNode = observer(function BrowserTileNode({ data, selecte
 
   useEffect(() => {
     if (!browserId) return;
-    return () => host.placeSurface(browserId, null);
-  }, [browserId, host]);
+    return () => {
+      if (!getCanvasStore().isStaged(tileId)) host.placeSurface(browserId, null);
+    };
+  }, [browserId, host, tileId]);
 
   if (!entry || !browserId) return null;
   const layout = host.layouts.get(browserId);
@@ -106,7 +115,7 @@ export const BrowserTileNode = observer(function BrowserTileNode({ data, selecte
         lineClassName="!border-blue-500/60"
         handleClassName="!size-2.5 !rounded-sm !border-blue-500 !bg-background"
         onResizeEnd={(_event, params) =>
-          store.setTileRect(tileId, { x: params.x, y: params.y, w: params.width, h: params.height })
+          store.resizeTile(tileId, { x: params.x, y: params.y, w: params.width, h: params.height })
         }
       />
       <BrowserTileHeader entry={entry} glyph={glyph} leased={leased} onActivate={activate} />

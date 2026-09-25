@@ -1,5 +1,7 @@
 import { toast } from '@emdash/ui/react/primitives';
 import { useLayoutEffect, type ReactNode } from 'react';
+import type { CanvasStore } from '@core/features/canvas/api/browser/stores/canvas-store';
+import type { LayoutOp, OrganizeBy } from '@core/features/canvas/api/canvas-layout';
 import {
   getCanvasBrowserHost,
   getCanvasStore,
@@ -33,6 +35,17 @@ import { openInCommandRegistry } from '@core/primitives/open-in-apps/browser/ope
 import { disabled, enabled, hidden, type ViewScopeImpl } from '@core/primitives/view-scopes/api';
 import { scopes } from '@core/primitives/view-scopes/browser';
 import { useViewScope, ViewScopeInstanceProvider } from '@core/primitives/view-scopes/react';
+
+/** Runs a canvas layout op from a command; large changes preview first (Apply or Cancel). */
+function runCanvasLayout(canvas: CanvasStore, op: LayoutOp): void {
+  const result = canvas.runLayout([op], { source: 'command', allowPreview: true });
+  if (!result.ok) toast(result.reason);
+}
+
+function organizeCanvas(by: OrganizeBy): void {
+  const canvas = getCanvasStore();
+  runCanvasLayout(canvas, { op: 'organize', scope: canvas.currentRegion(), by });
+}
 
 export function WindowScope({ children }: { readonly children: ReactNode }) {
   const { currentView } = useWorkspaceSlots();
@@ -175,6 +188,92 @@ export function WindowScope({ children }: { readonly children: ReactNode }) {
           workspaceId: task.workspaceId,
           taskId: task.taskId,
         });
+      },
+    }),
+    'canvas.undoLayout': () => ({
+      execute: () => {
+        const result = getCanvasStore().undo();
+        toast(result ? `Undid: ${result.label}` : 'Nothing to undo on the canvas');
+      },
+    }),
+    'canvas.redoLayout': () => ({
+      execute: () => {
+        const result = getCanvasStore().redo();
+        toast(result ? `Redid: ${result.label}` : 'Nothing to redo on the canvas');
+      },
+    }),
+    'canvas.groupSelection': () => ({
+      execute: () => {
+        if (currentView !== 'canvas') getNavigation().navigate(canvasViewDef({}));
+        if (!getCanvasStore().groupSelection()) toast('Select windows on the canvas first');
+      },
+    }),
+    'canvas.newRegion': () => ({
+      execute: () => {
+        if (currentView !== 'canvas') getNavigation().navigate(canvasViewDef({}));
+        const canvas = getCanvasStore();
+        const result = canvas.runLayout([{ op: 'createRegion', members: [] }], {
+          source: 'command',
+        });
+        const created = result.ok ? result.plan.created[0] : undefined;
+        if (created) canvas.setRenamingRegion(created);
+      },
+    }),
+    'canvas.tidy': () => ({
+      execute: () => {
+        if (currentView !== 'canvas') getNavigation().navigate(canvasViewDef({}));
+        const canvas = getCanvasStore();
+        const scope = canvas.currentRegion();
+        runCanvasLayout(canvas, { op: 'arrange', targets: null, scope, layout: 'tidy' });
+      },
+    }),
+    'canvas.organizeByTask': () => ({
+      execute: () => {
+        if (currentView !== 'canvas') getNavigation().navigate(canvasViewDef({}));
+        organizeCanvas('task');
+      },
+    }),
+    'canvas.organizeByProject': () => ({
+      execute: () => {
+        if (currentView !== 'canvas') getNavigation().navigate(canvasViewDef({}));
+        organizeCanvas('project');
+      },
+    }),
+    'canvas.organizeByStatus': () => ({
+      execute: () => {
+        if (currentView !== 'canvas') getNavigation().navigate(canvasViewDef({}));
+        organizeCanvas('status');
+      },
+    }),
+    'canvas.organizeByProvider': () => ({
+      execute: () => {
+        if (currentView !== 'canvas') getNavigation().navigate(canvasViewDef({}));
+        organizeCanvas('provider');
+      },
+    }),
+    'canvas.stage.enter': () => ({
+      execute: () => {
+        if (currentView !== 'canvas') getNavigation().navigate(canvasViewDef({}));
+        if (!getCanvasStore().stageSelection()) {
+          toast('Select windows or a region on the canvas first');
+        }
+      },
+    }),
+    'canvas.stage.leave': () => ({
+      execute: () => {
+        getCanvasStore().leaveStage();
+      },
+    }),
+    'canvas.back': () => ({
+      execute: () => {
+        if (currentView !== 'canvas') getNavigation().navigate(canvasViewDef({}));
+        getCanvasStore().back();
+      },
+    }),
+    'canvas.home': () => ({
+      execute: () => {
+        if (currentView !== 'canvas') getNavigation().navigate(canvasViewDef({}));
+        getCanvasStore().home();
       },
     }),
     'voice.toggleListening': () => ({

@@ -3,7 +3,7 @@ import { CANCEL_WINDOW_TOOLS, conductorToolNames, conductorToolSchemas } from '.
 
 describe('conductor tools', () => {
   it('appends the app tools after the agent tools (prompt-cache order)', () => {
-    expect(conductorToolNames.slice(-6)).toEqual([
+    expect(conductorToolNames.slice(-9, -3)).toEqual([
       'start_app',
       'show_app',
       'look_at_app',
@@ -11,7 +11,22 @@ describe('conductor tools', () => {
       'stop_app',
       'close_app',
     ]);
-    expect(conductorToolNames.indexOf('stop_agent')).toBe(conductorToolNames.length - 7);
+    expect(conductorToolNames.indexOf('stop_agent')).toBe(conductorToolNames.length - 10);
+  });
+
+  it('appends the canvas layout tools last', () => {
+    expect(conductorToolNames.slice(-3)).toEqual([
+      'describe_canvas',
+      'arrange_canvas',
+      'canvas_view',
+    ]);
+    expect(
+      conductorToolSchemas.arrange_canvas.safeParse({
+        steps: [{ op: 'group', windows: ['Atlas', 'Bravo'], name: 'Review' }],
+      }).success
+    ).toBe(true);
+    expect(conductorToolSchemas.arrange_canvas.safeParse({ steps: [] }).success).toBe(false);
+    expect(conductorToolSchemas.canvas_view.safeParse({ action: 'zoom' }).success).toBe(false);
   });
 
   it('gives app starts and stops a cancel window', () => {

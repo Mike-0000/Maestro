@@ -72,6 +72,14 @@ describe('one voice command', () => {
       attentionEntries: [],
       insights: new Map(),
       addNote,
+      layoutWindows: [],
+      regionEntries: [],
+      selection: [],
+      lastChange: null,
+      stageActive: false,
+      visibleTileIds: () => new Set<string>(),
+      regionOf: () => null,
+      currentRegion: () => null,
     } as unknown as CanvasStore;
     const store = new ConductorStore(canvas, voice);
     store.activate();

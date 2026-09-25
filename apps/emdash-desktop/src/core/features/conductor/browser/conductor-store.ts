@@ -4,6 +4,8 @@ import type {
   AgentTileEntry,
   CanvasStore,
 } from '@core/features/canvas/api/browser/stores/canvas-store';
+import type { LayoutOp } from '@core/features/canvas/api/canvas-layout';
+import { isWithin } from '@core/features/canvas/api/canvas-regions';
 import { getCanvasBrowserHost } from '@core/features/canvas/contributions/browser/app-stores';
 import { getProjectManagerStore } from '@core/features/projects/api/browser/stores/project-selectors';
 import {
@@ -13,6 +15,8 @@ import {
 import { log } from '@core/primitives/logging/browser/logger';
 import { announcementText, attentionPhrase } from '../api/announcements';
 import { getConductorClient } from '../api/browser/client';
+import { resolveCanvasRef } from '../api/canvas-refs';
+import { stepsToOps } from '../api/canvas-tool-ops';
 import {
   DEFAULT_CONDUCTOR_SETTINGS,
   type ConductorError,
@@ -23,6 +27,7 @@ import {
   type TraceEvent,
 } from '../api/contract';
 import { chooseMode, parseCommand, type CloseScope, type GrammarCommand } from '../api/grammar';
+import { LAYOUT_CUES, type CanvasAction } from '../api/grammar-canvas';
 import { pruneScreenshots, trimHistory } from '../api/history';
 import {
   interpretPermissionRisk,
@@ -65,6 +70,7 @@ import { focusSpawnedAgent } from './focus-spawned-agent';
 import { jevDecide } from './jev';
 import { PlanStore } from './plan-store';
 import {
+  buildCanvasRefContext,
   buildContext,
   buildRoster,
   entryForConversation,
@@ -115,7 +121,9 @@ const CONFIRM_TIMEOUT_MS = 30_000;
 /** Spoken (and shown) for "help" and "what can I say". */
 export const HELP_REPLY =
   'Try "focus Atlas", "tell Bravo to run the tests", "what is Cedar doing", "next", ' +
-  '"show all", "close", "reopen", "interrupt Atlas", "allow Bravo", or "shut down Cedar".';
+  '"show all", "close", "reopen", "interrupt Atlas", "allow Bravo", or "shut down Cedar". ' +
+  'For the canvas: "group Atlas and Bravo as Review", "put Cedar next to Atlas", ' +
+  '"organize by status", "full screen Review", "make the browser bigger", or "undo".';
 
 /** Upper bound on model round trips for one utterance. */
 const MAX_TOOL_ITERATIONS = 8;
@@ -316,7 +324,7 @@ export class ConductorStore {
     // A pending action is answered before anything else, even while a turn is running.
     const roster = buildRoster(this.canvas);
     const focusedId = focusedConversationId(this.canvas);
-    const command = parseCommand(text, roster, focusedId);
+    const command = parseCommand(text, roster, focusedId, buildCanvasRefContext(this.canvas));
     if (this.pending) {
       if (command?.kind === 'confirm') {
         this.trace(
@@ -410,6 +418,8 @@ export class ConductorStore {
   ): Promise<boolean> {
     const actions: ActionRecord[] = [];
     let reply = '';
+    // Layout changes are visible; they are spoken only on failure or when the user asked for it.
+    let speak = true;
     this.lastRoute = route;
     this.trace('route', undefined, {
       route,
@@ -462,8 +472,15 @@ export class ConductorStore {
         break;
       }
       case 'overview':
-        this.canvas.requestFit();
+        if (!this.canvas.leaveStage()) this.canvas.home();
         break;
+      case 'canvas': {
+        const result = await this.canvasAction(command.action, source, actions);
+        if (!result) return false;
+        reply = result.reply;
+        speak = result.speak || this.canvas.layoutSettings.speakLayoutConfirmations;
+        break;
+      }
       case 'submit': {
         const entry = this.focusedEntry();
         if (!entry) {
@@ -592,9 +609,298 @@ export class ConductorStore {
         tool: action.tool,
         input: JSON.stringify(action.input).slice(0, 2000),
       });
-    this.setReply(reply, source);
+    this.setReply(reply, speak ? source : null);
     this.log({ route, actions, reply, startedAt });
     return true;
+  }
+
+  // ── Canvas layout ──────────────────────────────────────────────────────────
+
+  /**
+   * Runs a spoken canvas command. Returns the reply and whether it is worth saying out loud
+   * (failures and answers are; a change the user can see happen is not), or null to hand the
+   * utterance to the model.
+   */
+  private async canvasAction(
+    action: CanvasAction,
+    source: UtteranceSource,
+    actions: ActionRecord[]
+  ): Promise<{ reply: string; speak: boolean } | null> {
+    const canvas = this.canvas;
+    const quiet = (reply: string) => ({ reply, speak: false });
+    const said = (reply: string) => ({ reply, speak: true });
+    switch (action.type) {
+      case 'layout': {
+        const reply = await this.applyLayout(action.ops, source);
+        actions.push({ tool: 'arrange_canvas', input: { ops: action.ops }, outcome: reply.reply });
+        return reply;
+      }
+      case 'undo': {
+        const result = canvas.undo();
+        if (result) {
+          const kept = result.conflicts > 0 ? ' Kept your later changes.' : '';
+          return quiet(`Undid: ${result.label}.${kept}`);
+        }
+        // No layout change to undo: "undo" after closing a window still reopens it.
+        const reopened = this.reopen('last', actions);
+        return reopened === 'Nothing is closed.' ? said('Nothing to undo.') : quiet(reopened);
+      }
+      case 'redo': {
+        const result = canvas.redo();
+        return result ? quiet(`Redid: ${result.label}.`) : said('Nothing to redo.');
+      }
+      case 'back':
+        return canvas.back() ? quiet('Back.') : said('Nowhere to go back to.');
+      case 'forward':
+        return canvas.forward() ? quiet('Forward.') : said('Nowhere to go forward to.');
+      case 'up':
+        return canvas.up() ? quiet('Up a level.') : said('Already showing the whole board.');
+      case 'home':
+        canvas.home();
+        return quiet('Whole board.');
+      case 'leaveStage':
+        return canvas.leaveStage() ? quiet('Back to the canvas.') : said('The stage is not open.');
+      case 'page': {
+        const location = canvas.location;
+        if (location.kind !== 'stage') return said('The stage is not open.');
+        canvas.setStagePage(location.page + action.delta);
+        return quiet(action.delta > 0 ? 'Next page.' : 'Previous page.');
+      }
+      case 'solo': {
+        const name = canvas.windowName(action.id);
+        canvas.updateStage('Solo', (saved) => ({ ...saved, soloTileId: action.id }));
+        return quiet(`Just ${name}.`);
+      }
+      case 'stage':
+        return this.stageAction(action.ids, action.immersive === true);
+      case 'goToRegion':
+        return canvas.goToRegion(action.regionId)
+          ? quiet(`Showing ${canvas.windowName(action.regionId)}.`)
+          : said('That region is gone.');
+      case 'renameAgent': {
+        const entry = canvas.entryForTile(action.id);
+        if (!entry) return said('That agent is gone.');
+        const before = this.nameOf(entry);
+        canvas.setSpokenName(entry.conversationId, action.name);
+        return quiet(`${before} is now ${canvas.spokenName(entry.conversationId)}.`);
+      }
+      case 'describe':
+        return said(
+          action.regionId ? this.describeRegion(action.regionId) : this.describeRegions()
+        );
+      case 'where':
+        return said(
+          action.ids
+            .map((id) => {
+              const region = canvas.regionOf(id);
+              const name = canvas.windowName(id);
+              const place = region ? `in ${canvas.windowName(region)}` : 'on the main board';
+              return canvas.visibleTileIds().has(id) || id.startsWith('region:')
+                ? `${name} is ${place}.`
+                : `${name} is closed.`;
+            })
+            .join(' ')
+        );
+    }
+  }
+
+  /** Applies layout ops; a large change is previewed as outlines behind a short cancel window. */
+  private async applyLayout(
+    ops: readonly LayoutOp[],
+    source: UtteranceSource
+  ): Promise<{ reply: string; speak: boolean }> {
+    const canvas = this.canvas;
+    const result = canvas.runLayout(ops, { source, allowPreview: true });
+    if (!result.ok) return { reply: result.reason, speak: true };
+    const failures = result.plan.failures.length > 0 ? ` ${result.plan.failures.join(' ')}` : '';
+    if (result.applied) {
+      return { reply: `${result.plan.summary}${failures}`, speak: failures !== '' };
+    }
+    const startedAt = Date.now();
+    // Escape (or the board's Cancel) clears the preview: stop the countdown with it.
+    const stop = reaction(
+      () => canvas.ghost,
+      (ghost) => {
+        if (!ghost) this.cancelPending();
+      }
+    );
+    const confirmed = await this.requestPending(result.plan.summary, 'countdown');
+    stop();
+    if (!confirmed) {
+      // The board's Apply button applies the preview itself.
+      const appliedByHand = !canvas.ghost && (canvas.lastChange?.at ?? 0) >= startedAt;
+      canvas.clearGhost();
+      return { reply: appliedByHand ? result.plan.summary : 'Cancelled.', speak: false };
+    }
+    const applied = canvas.applyGhost();
+    if (!applied) return { reply: 'Cancelled.', speak: false };
+    if (!applied.ok) return { reply: applied.reason, speak: true };
+    return { reply: `${applied.plan.summary}${failures}`, speak: failures !== '' };
+  }
+
+  private stageAction(
+    ids: readonly string[] | null,
+    immersive: boolean
+  ): { reply: string; speak: boolean } {
+    const canvas = this.canvas;
+    if (!ids) {
+      if (canvas.stageActive) {
+        if (immersive) canvas.setStageImmersive(true);
+        return { reply: immersive ? 'Immersive.' : 'Already on the stage.', speak: false };
+      }
+      if (!canvas.stageSelection()) {
+        return { reply: 'Select windows or say which ones to put on the stage.', speak: true };
+      }
+      if (immersive) canvas.setStageImmersive(true);
+      return { reply: `On the stage: ${canvas.stageTitle}.`, speak: false };
+    }
+    const [first] = ids;
+    const regions = ids.filter((id) => id.startsWith('region:'));
+    const windows = ids.filter((id) => !id.startsWith('region:'));
+    let entered = false;
+    if (ids.length === 1 && first && regions.length === 1) {
+      entered = canvas.enterStage({ kind: 'region', regionId: first }, { immersive });
+    } else if (ids.length === 1 && first) {
+      entered = canvas.enterStage({ kind: 'solo', tileId: first }, { immersive });
+    } else {
+      // Regions in a list stand for their windows.
+      const layout = canvas.layoutState;
+      const tiles = [
+        ...new Set([
+          ...windows,
+          ...regions.flatMap((region) =>
+            canvas.layoutWindows
+              .map((window) => window.tileId)
+              .filter((id) => isWithin(layout, id, region))
+          ),
+        ]),
+      ];
+      const label = ids.map((id) => canvas.windowName(id)).join(', ');
+      entered = canvas.enterStage({ kind: 'selection', tileIds: tiles, label }, { immersive });
+    }
+    return entered
+      ? { reply: `On the stage: ${canvas.stageTitle}.`, speak: false }
+      : { reply: 'Nothing open there to put on the stage.', speak: true };
+  }
+
+  private describeRegion(regionId: string): string {
+    const canvas = this.canvas;
+    const region = canvas.regionEntry(regionId);
+    if (!region) return 'That region is gone.';
+    const visible = canvas.visibleTileIds();
+    const members = canvas.layoutWindows
+      .filter((window) => visible.has(window.tileId) && canvas.regionOf(window.tileId) === regionId)
+      .map((window) => window.name);
+    const nested = canvas.regionEntries
+      .filter((entry) => entry.parentId === regionId)
+      .map((entry) => `the ${entry.name} region`);
+    const all = [...members, ...nested];
+    if (all.length === 0) return `${region.name} is empty.`;
+    const summary = region.summary ? ` ${region.summary}.` : '';
+    return `${region.name} has ${listNames(all, 6)}.${summary}`;
+  }
+
+  /** The canvas layout for the model: where the user is, regions, and their windows. */
+  private describeCanvas(): string {
+    const canvas = this.canvas;
+    const lines: string[] = [];
+    const location = canvas.location;
+    lines.push(
+      location.kind === 'stage'
+        ? `On the stage: ${canvas.stageTitle}.`
+        : location.regionScope
+          ? `Looking at region ${canvas.windowName(location.regionScope)}.`
+          : 'Looking at the whole board.'
+    );
+    const visible = canvas.visibleTileIds();
+    const windows = canvas.layoutWindows.filter((window) => visible.has(window.tileId));
+    const loose = windows.filter((window) => !canvas.regionOf(window.tileId));
+    for (const region of canvas.regionEntries) {
+      const members = windows
+        .filter((window) => canvas.regionOf(window.tileId) === region.regionId)
+        .map((window) => window.name);
+      const parent = region.parentId ? ` (inside ${canvas.windowName(region.parentId)})` : '';
+      const state = region.collapsed ? ' [collapsed]' : '';
+      lines.push(`Region ${region.name}${parent}${state}: ${members.join(', ') || 'no windows'}.`);
+    }
+    if (loose.length > 0) {
+      lines.push(`On the main board: ${loose.map((window) => window.name).join(', ')}.`);
+    }
+    if (canvas.selection.length > 0) {
+      lines.push(`Selected: ${canvas.selection.map((id) => canvas.windowName(id)).join(', ')}.`);
+    }
+    return lines.join('\n');
+  }
+
+  private canvasView(input: ConductorToolInput<'canvas_view'>): ToolOutcome {
+    const canvas = this.canvas;
+    const context = buildCanvasRefContext(canvas);
+    const resolveIds = (): string[] | { error: string } => {
+      const ids: string[] = [];
+      for (const reference of input.windows ?? []) {
+        const result = resolveCanvasRef(reference, context, 'any');
+        if (result.kind === 'clarify') return { error: result.question };
+        if (result.kind === 'none')
+          return { error: `Nothing on the canvas called "${reference}".` };
+        ids.push(...result.ids);
+      }
+      return ids;
+    };
+    const outcome = ({ reply, speak }: { reply: string; speak: boolean }): ToolOutcome => ({
+      content: reply,
+      isError: speak,
+    });
+    switch (input.action) {
+      case 'stage': {
+        const ids = resolveIds();
+        if ('error' in ids) return { content: ids.error, isError: true };
+        return outcome(this.stageAction(ids.length > 0 ? ids : null, input.immersive === true));
+      }
+      case 'leave_stage':
+        canvas.leaveStage();
+        return { content: 'Back on the canvas.' };
+      case 'go_to_region': {
+        const ids = resolveIds();
+        if ('error' in ids) return { content: ids.error, isError: true };
+        const [region] = ids;
+        if (!region || !region.startsWith('region:')) {
+          return { content: 'Name a region to go to.', isError: true };
+        }
+        canvas.goToRegion(region);
+        return { content: `Showing ${canvas.windowName(region)}.` };
+      }
+      case 'home':
+        canvas.home();
+        return { content: 'Showing the whole board.' };
+      case 'back':
+        return canvas.back()
+          ? { content: 'Went back.' }
+          : { content: 'Nowhere to go back to.', isError: true };
+      case 'undo': {
+        const result = canvas.undo();
+        return result
+          ? { content: `Undid: ${result.label}.` }
+          : { content: 'Nothing to undo.', isError: true };
+      }
+      case 'redo': {
+        const result = canvas.redo();
+        return result
+          ? { content: `Redid: ${result.label}.` }
+          : { content: 'Nothing to redo.', isError: true };
+      }
+    }
+  }
+
+  private describeRegions(): string {
+    const regions = this.canvas.regionEntries.filter((entry) => !entry.parentId);
+    if (regions.length === 0) {
+      return 'No regions yet. Say "group Atlas and Bravo as Review" or "organize by task".';
+    }
+    const parts = regions.map((entry) => {
+      const count = `${entry.windowCount} window${entry.windowCount === 1 ? '' : 's'}`;
+      return `${entry.name} (${count}${entry.summary ? `, ${entry.summary}` : ''})`;
+    });
+    return `Regions: ${parts.join('; ')}.`;
   }
 
   // ── Jev routing ────────────────────────────────────────────────────────────
@@ -610,6 +916,8 @@ export class ConductorStore {
     startedAt: number
   ): Promise<{ handled: boolean; mode?: ConductorMode }> {
     if (!this.status?.jevReady) return { handled: false };
+    // Layout talk the grammar missed needs the model's canvas tools, not Jev's agent intents.
+    if (LAYOUT_CUES.test(text)) return { handled: false };
     runInAction(() => {
       this.phase = 'thinking';
       this.activity = 'Routing…';
@@ -1052,6 +1360,19 @@ export class ConductorStore {
         return this.appTools().stopApp(input as ConductorToolInput<'stop_app'>);
       case 'close_app':
         return this.appTools().closeApp(input as ConductorToolInput<'close_app'>);
+      case 'describe_canvas':
+        return { content: this.describeCanvas() };
+      case 'arrange_canvas': {
+        const { steps } = input as ConductorToolInput<'arrange_canvas'>;
+        const converted = stepsToOps(steps, buildCanvasRefContext(this.canvas));
+        if ('error' in converted) return { content: converted.error, isError: true };
+        const result = await this.applyLayout(converted.ops, 'voice');
+        return result.reply === 'Cancelled.'
+          ? { content: 'The user cancelled the layout change.' }
+          : { content: result.reply, isError: result.speak };
+      }
+      case 'canvas_view':
+        return this.canvasView(input as ConductorToolInput<'canvas_view'>);
     }
     return { content: `Unhandled tool ${name}.`, isError: true };
   }
@@ -1573,6 +1894,12 @@ function describeTool(name: string): string {
       return 'Stopping the app…';
     case 'close_app':
       return 'Closing the app…';
+    case 'describe_canvas':
+      return 'Looking at the canvas…';
+    case 'arrange_canvas':
+      return 'Arranging the canvas…';
+    case 'canvas_view':
+      return 'Changing the view…';
     default:
       return 'Working…';
   }

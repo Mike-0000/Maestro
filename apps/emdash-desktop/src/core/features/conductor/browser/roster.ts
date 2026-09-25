@@ -6,6 +6,7 @@ import type {
 } from '@core/features/canvas/api/browser/stores/canvas-store';
 import { spokenProviderLabel } from '@core/features/canvas/api/provider-names';
 import { log } from '@core/primitives/logging/browser/logger';
+import type { CanvasEntity, CanvasRefContext } from '../api/canvas-refs';
 import type { RosterAgent } from '../api/resolver';
 import { agentMetadata } from './spawn';
 
@@ -54,6 +55,81 @@ export function toRosterAgent(canvas: CanvasStore, entry: AgentTileEntry): Roste
  */
 export function buildRoster(canvas: CanvasStore): RosterAgent[] {
   return canvas.agentEntries.map((entry) => toRosterAgent(canvas, entry));
+}
+
+/** How long "them" and "those" keep meaning what the last layout change touched. */
+const RECENT_CHANGE_MS = 60_000;
+
+/** Windows and regions the canvas grammar can address, with selection and recency. */
+export function buildCanvasRefContext(canvas: CanvasStore, now = Date.now()): CanvasRefContext {
+  const visible = canvas.visibleTileIds();
+  const entities: CanvasEntity[] = canvas.layoutWindows.map((window) => ({
+    id: window.tileId,
+    kind: window.kind,
+    name: window.name,
+    ...(window.providerLabel ? { providerLabel: window.providerLabel } : {}),
+    ...(window.taskName ? { taskName: window.taskName } : {}),
+    ...(window.status ? { status: window.status } : {}),
+    parentId: canvas.regionOf(window.tileId),
+    ...(visible.has(window.tileId) ? {} : { hidden: true }),
+  }));
+  for (const region of canvas.regionEntries) {
+    entities.push({
+      id: region.regionId,
+      kind: 'region',
+      name: region.name,
+      parentId: region.parentId,
+    });
+  }
+  const change = canvas.lastChange;
+  const recent =
+    change && now - change.at < RECENT_CHANGE_MS
+      ? change.targets.filter((id) => entities.some((entity) => entity.id === id))
+      : [];
+  return {
+    entities,
+    selection: [...canvas.selection],
+    focusedId: canvas.focusedTileId,
+    recent,
+    currentRegion: canvas.currentRegion(),
+    onStage: canvas.stageActive,
+  };
+}
+
+/** Where the user is on the canvas and how it is organized, for the conductor's context. */
+function canvasLines(canvas: CanvasStore): string[] {
+  const lines: string[] = [];
+  const location = canvas.location;
+  if (location.kind === 'stage') {
+    lines.push(`Canvas view: the stage, showing ${canvas.stageTitle} full screen.`);
+  } else if (location.regionScope) {
+    lines.push(`Canvas view: zoomed into region ${canvas.windowName(location.regionScope)}.`);
+  } else {
+    lines.push('Canvas view: the whole board.');
+  }
+  const regions = canvas.regionEntries;
+  if (regions.length > 0) {
+    lines.push('Regions (named areas grouping windows):');
+    for (const region of regions) {
+      const parent = region.parentId ? ` inside ${canvas.windowName(region.parentId)}` : '';
+      const members = canvas.layoutWindows
+        .filter((window) => canvas.regionOf(window.tileId) === region.regionId)
+        .map((window) => window.name);
+      const folded = region.collapsed ? ', collapsed' : '';
+      const summary = region.summary ? `; ${region.summary}` : '';
+      lines.push(
+        `- ${region.name}${parent}${folded}: ${members.length > 0 ? members.join(', ') : 'empty'}${summary}`
+      );
+    }
+  }
+  if (canvas.selection.length > 0) {
+    lines.push(`Selected: ${canvas.selection.map((id) => canvas.windowName(id)).join(', ')}`);
+  }
+  const change = canvas.lastChange;
+  if (change && Date.now() - change.at < RECENT_CHANGE_MS) {
+    lines.push(`Last layout change: ${change.label} (undo_layout reverts it).`);
+  }
+  return lines;
 }
 
 /** Agents that are off the board: closed by the user or outside the project filter. */
@@ -136,6 +212,7 @@ export function buildContext(
         : 'unknown'
     }`
   );
+  lines.push(...canvasLines(canvas));
   lines.push(...extra);
   return lines.join('\n');
 }
@@ -149,5 +226,6 @@ export function vocabulary(canvas: CanvasStore): string[] {
     words.add(entry.taskName);
   }
   for (const project of canvas.projectOptions) if (project.name) words.add(project.name);
+  for (const region of canvas.regionEntries) words.add(region.name);
   return [...words].filter((word) => word.length <= 60);
 }

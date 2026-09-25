@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canvasBoardSchema } from './mementos';
+import { canvasBoardSchema, DEFAULT_LAYOUT_SETTINGS } from './mementos';
 
 const v2 = {
   version: '2',
@@ -13,12 +13,65 @@ const v2 = {
   showTaskFrames: false,
 };
 
+const v4Defaults = {
+  regions: {},
+  membership: {},
+  hiddenTiles: [],
+  stageLayouts: {},
+  location: { kind: 'board', regionScope: null },
+  layoutSettings: DEFAULT_LAYOUT_SETTINGS,
+};
+
 describe('canvasBoardSchema', () => {
-  it('upgrades v2 boards with no app browsers', () => {
+  it('upgrades v2 boards with no app browsers and no regions', () => {
     expect(canvasBoardSchema.safeParse(v2)).toEqual({
       status: 'ok',
-      data: { ...v2, version: '3', browsers: {} },
+      data: { ...v2, ...v4Defaults, version: '4', browsers: {} },
     });
+  });
+
+  it('keeps v4 regions, membership, stage layouts, and location', () => {
+    const v4 = {
+      ...v2,
+      ...v4Defaults,
+      version: '4',
+      browsers: {},
+      regions: {
+        'region:r1': {
+          name: 'Review',
+          parentId: null,
+          rect: { x: 0, y: 0, w: 800, h: 600 },
+          collapsed: false,
+          color: 'blue',
+          createdAt: 1,
+        },
+      },
+      membership: { 'agent:c1': 'region:r1' },
+      stageLayouts: {
+        'region:r1': {
+          order: ['agent:c1'],
+          trees: {
+            'agent:c1|agent:c2': {
+              type: 'split',
+              axis: 'row',
+              ratios: [0.7, 0.3],
+              children: [
+                { type: 'leaf', tileId: 'agent:c1' },
+                { type: 'leaf', tileId: 'agent:c2' },
+              ],
+            },
+          },
+          soloTileId: null,
+        },
+      },
+      location: {
+        kind: 'stage',
+        target: { kind: 'region', regionId: 'region:r1' },
+        page: 0,
+        immersive: false,
+      },
+    };
+    expect(canvasBoardSchema.safeParse(v4)).toEqual({ status: 'ok', data: v4 });
   });
 
   it('keeps v3 browsers', () => {
@@ -34,7 +87,10 @@ describe('canvasBoardSchema', () => {
         },
       },
     };
-    expect(canvasBoardSchema.safeParse(v3)).toEqual({ status: 'ok', data: v3 });
+    expect(canvasBoardSchema.safeParse(v3)).toEqual({
+      status: 'ok',
+      data: { ...v3, ...v4Defaults, version: '4' },
+    });
   });
 
   it('rejects an unknown control value', () => {

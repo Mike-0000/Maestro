@@ -13,14 +13,26 @@ import {
 import '@xyflow/react/dist/base.css';
 import { comparer, reaction } from 'mobx';
 import { observer } from 'mobx-react-lite';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CanvasStore } from '@core/features/canvas/api/browser/stores/canvas-store';
-import { MAX_ZOOM, MIN_ZOOM } from '../api/canvas-model';
+import { cn } from '@core/primitives/styling/browser/cn';
+import { regionAt } from '../api/canvas-layout';
+import { MAX_ZOOM, MIN_ZOOM, type TileRect } from '../api/canvas-model';
+import {
+  descendantRegions,
+  descendantTiles,
+  isRegionId,
+  isWithin,
+  regionFootprint,
+} from '../api/canvas-regions';
 import { getCanvasStore } from '../contributions/browser/app-stores';
+import { handleCanvasKey } from './canvas-keys';
 import { CanvasToolbar } from './canvas-toolbar';
+import { CanvasStage } from './stage/canvas-stage';
 import { AgentTileNode } from './tiles/agent-tile';
 import { BrowserTileNode, CANVAS_OVERLAY_ATTRIBUTE } from './tiles/browser-tile';
 import { NoteTileNode } from './tiles/note-tile';
+import { GhostNode, RegionNode, regionStyle } from './tiles/region-node';
 import { TaskFrameNode } from './tiles/task-frame';
 
 const nodeTypes: NodeTypes = {
@@ -28,16 +40,47 @@ const nodeTypes: NodeTypes = {
   browser: BrowserTileNode,
   note: NoteTileNode,
   frame: TaskFrameNode,
+  region: RegionNode,
+  ghost: GhostNode,
 };
 
 const overlayProps = { [CANVAS_OVERLAY_ATTRIBUTE]: '' };
 
 const FOCUS_ANIMATION_MS = 350;
+/** How long layout changes animate and their targets glow. */
+const LAYOUT_ANIMATION_MS = 450;
+const FLASH_MS = 1600;
+const FLASH_CLASS = 'chorus-flash';
+
+function tileNode(type: string, rect: TileRect, id: string, data: Record<string, unknown>): Node {
+  return {
+    id,
+    type,
+    position: { x: rect.x, y: rect.y },
+    width: rect.w,
+    height: rect.h,
+    data,
+  };
+}
 
 /** Desired node geometry from the store; React Flow keeps selection and drag state. */
 function buildNodes(store: CanvasStore): Node[] {
   const nodes: Node[] = [];
-  // Frames first and below everything: only their header strip takes pointer input.
+  // Regions first and lowest (nested ones above their parents), then task frames, then windows.
+  // Only their header strips take pointer input.
+  for (const region of store.regionEntries) {
+    nodes.push({
+      id: region.regionId,
+      type: 'region',
+      position: { x: region.rect.x, y: region.rect.y },
+      width: region.rect.w,
+      height: region.rect.h,
+      zIndex: -20 + region.depth,
+      dragHandle: '.chorus-region-handle',
+      style: { pointerEvents: 'none' },
+      data: { regionId: region.regionId },
+    });
+  }
   for (const frame of store.taskFrames) {
     nodes.push({
       id: frame.frameId,
@@ -53,41 +96,66 @@ function buildNodes(store: CanvasStore): Node[] {
     });
   }
   for (const entry of store.visibleAgentEntries) {
-    const rect = store.tileRect(entry.tileId);
-    nodes.push({
-      id: entry.tileId,
-      type: 'agent',
-      position: { x: rect.x, y: rect.y },
-      width: rect.w,
-      height: rect.h,
-      data: {
+    if (store.isFolded(entry.tileId)) continue;
+    nodes.push(
+      tileNode('agent', store.tileRect(entry.tileId), entry.tileId, {
         tileId: entry.tileId,
         projectId: entry.projectId,
         taskId: entry.taskId,
         conversationId: entry.conversationId,
-      },
-    });
+      })
+    );
   }
   for (const browser of store.visibleBrowserEntries) {
-    const rect = store.tileRect(browser.tileId);
-    nodes.push({
-      id: browser.tileId,
-      type: 'browser',
-      position: { x: rect.x, y: rect.y },
-      width: rect.w,
-      height: rect.h,
-      data: { tileId: browser.tileId },
-    });
+    if (store.isFolded(browser.tileId)) continue;
+    nodes.push(
+      tileNode('browser', store.tileRect(browser.tileId), browser.tileId, {
+        tileId: browser.tileId,
+      })
+    );
   }
   for (const note of store.noteEntries) {
-    const rect = store.tileRect(note.tileId);
+    if (store.isFolded(note.tileId)) continue;
+    nodes.push(
+      tileNode('note', store.tileRect(note.tileId), note.tileId, {
+        tileId: note.tileId,
+        noteId: note.noteId,
+      })
+    );
+  }
+  nodes.push(...ghostNodes(store));
+  return nodes;
+}
+
+/** Outlines of a previewed layout: every window and region that would move, where it would go. */
+function ghostNodes(store: CanvasStore): Node[] {
+  const ghost = store.ghost;
+  if (!ghost) return [];
+  const current = store.layoutState;
+  const visible = store.visibleTileIds();
+  const nodes: Node[] = [];
+  const same = (a: TileRect | undefined, b: TileRect) =>
+    a !== undefined && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
+  for (const [id, region] of Object.entries(ghost.state.regions)) {
+    const rect = regionFootprint(region);
+    const before = current.regions[id];
+    if (before && same(regionFootprint(before), rect)) continue;
     nodes.push({
-      id: note.tileId,
-      type: 'note',
-      position: { x: rect.x, y: rect.y },
-      width: rect.w,
-      height: rect.h,
-      data: { tileId: note.tileId, noteId: note.noteId },
+      ...tileNode('ghost', rect, `ghost:${id}`, { label: region.name, region: true }),
+      zIndex: 2000,
+      selectable: false,
+      draggable: false,
+      style: { pointerEvents: 'none' },
+    });
+  }
+  for (const [id, rect] of Object.entries(ghost.state.tiles)) {
+    if (!visible.has(id) || same(current.tiles[id], rect)) continue;
+    nodes.push({
+      ...tileNode('ghost', rect, `ghost:${id}`, { label: store.windowName(id), region: false }),
+      zIndex: 2001,
+      selectable: false,
+      draggable: false,
+      style: { pointerEvents: 'none' },
     });
   }
   return nodes;
@@ -99,13 +167,23 @@ function mergeNodes(previous: Node[], next: Node[]): Node[] {
     const existing = byId.get(node.id);
     if (!existing) return node;
     if (existing.dragging || existing.resizing) return existing;
-    return { ...existing, position: node.position, width: node.width, height: node.height };
+    return {
+      ...existing,
+      position: node.position,
+      width: node.width,
+      height: node.height,
+      zIndex: node.zIndex,
+    };
   });
 }
 
 const minimapColor = (node: Node): string => {
-  if (node.type === 'frame') return 'transparent';
-  const entry = node.type === 'agent' ? getCanvasStore().entryForTile(node.id) : undefined;
+  if (node.type === 'frame' || node.type === 'ghost') return 'transparent';
+  const store = getCanvasStore();
+  if (node.type === 'region') {
+    return regionStyle(store.regionEntry(node.id)?.color).fill;
+  }
+  const entry = node.type === 'agent' ? store.entryForTile(node.id) : undefined;
   switch (entry?.status) {
     case 'working':
       return '#3b82f6';
@@ -121,10 +199,17 @@ const minimapColor = (node: Node): string => {
   }
 };
 
-const Board = observer(function Board() {
+type GroupDrag = {
+  nodeId: string;
+  start: { x: number; y: number };
+  followers: Map<string, { x: number; y: number }>;
+};
+
+const Board = observer(function Board({ container }: { container: HTMLDivElement | null }) {
   const store = getCanvasStore();
   const flow = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [animating, setAnimating] = useState(false);
 
   useEffect(
     () =>
@@ -145,7 +230,10 @@ const Board = observer(function Board() {
           if (!command) return;
           store.consumeViewportCommand(command.id);
           if (command.kind === 'focus') {
-            const rect = store.tileRect(command.tileId);
+            const rect = isRegionId(command.tileId)
+              ? store.regionEntry(command.tileId)?.rect
+              : store.tileRect(command.tileId);
+            if (!rect) return;
             void flow.setCenter(rect.x + rect.w / 2, rect.y + rect.h / 2, {
               zoom: 1,
               duration: FOCUS_ANIMATION_MS,
@@ -164,15 +252,103 @@ const Board = observer(function Board() {
     [store, flow]
   );
 
+  // Layout changes that did not come from the pointer glide into place, and their targets glow.
+  useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const dispose = reaction(
+      () => store.lastChange,
+      (change) => {
+        if (!change || change.source === 'pointer') return;
+        setAnimating(true);
+        timers.push(setTimeout(() => setAnimating(false), LAYOUT_ANIMATION_MS));
+        const targets = new Set([...change.targets, ...change.displaced]);
+        if (targets.size === 0) return;
+        setNodes((current) =>
+          current.map((node) => (targets.has(node.id) ? { ...node, className: FLASH_CLASS } : node))
+        );
+        timers.push(
+          setTimeout(
+            () =>
+              setNodes((current) =>
+                current.map((node) =>
+                  node.className === FLASH_CLASS ? { ...node, className: undefined } : node
+                )
+              ),
+            FLASH_MS
+          )
+        );
+      }
+    );
+    return () => {
+      dispose();
+      for (const timer of timers) clearTimeout(timer);
+    };
+  }, [store, setNodes]);
+
+  // The board's size feeds screen-relative sizes ("half the screen") and slot placement.
+  useEffect(() => {
+    if (!container) return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) store.setBoardSize(entry.contentRect.width, entry.contentRect.height);
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [container, store]);
+
+  // Board keyboard: undo/redo, group, nudge, stage, and navigation (never while typing).
+  useEffect(() => {
+    if (!container) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (container.offsetParent === null) return;
+      if (handleCanvasKey(store, event)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [container, store]);
+
   const defaultViewport = useMemo(() => store.viewport, [store]);
-  // While a task frame is dragged, its agent tiles follow it.
-  const frameDrag = useRef<{
-    frameId: string;
-    start: { x: number; y: number };
-    tiles: Map<string, { x: number; y: number }>;
-  } | null>(null);
+  // While a task frame or a region is dragged, what is inside it follows.
+  const groupDrag = useRef<GroupDrag | null>(null);
   const frameTiles = (frameId: string) =>
     store.taskFrames.find((frame) => frame.frameId === frameId)?.tileIds ?? [];
+
+  const followersOf = (node: Node): Map<string, { x: number; y: number }> | null => {
+    const followers = new Map<string, { x: number; y: number }>();
+    if (node.type === 'frame') {
+      for (const tileId of frameTiles(node.id)) {
+        const rect = store.tileRect(tileId);
+        followers.set(tileId, { x: rect.x, y: rect.y });
+      }
+      return followers;
+    }
+    if (node.type === 'region') {
+      const layout = store.layoutState;
+      for (const tileId of descendantTiles(layout, node.id)) {
+        const rect = store.tileRect(tileId);
+        followers.set(tileId, { x: rect.x, y: rect.y });
+      }
+      for (const regionId of descendantRegions(layout, node.id)) {
+        const region = layout.regions[regionId];
+        if (region) followers.set(regionId, { x: region.rect.x, y: region.rect.y });
+      }
+      for (const frame of store.taskFrames) {
+        if (frame.tileIds.some((id) => followers.has(id))) {
+          followers.set(frame.frameId, { x: frame.rect.x, y: frame.rect.y });
+        }
+      }
+      return followers;
+    }
+    return null;
+  };
+
+  const dropProbe = (node: Node) => {
+    const width = node.measured?.width ?? node.width ?? 0;
+    const height = node.measured?.height ?? node.height ?? 0;
+    return { x: node.position.x + width / 2, y: node.position.y + Math.min(height / 2, 60) };
+  };
 
   return (
     <ReactFlow
@@ -180,43 +356,62 @@ const Board = observer(function Board() {
       edges={[]}
       nodeTypes={nodeTypes}
       onNodesChange={onNodesChange}
+      elevateNodesOnSelect={false}
+      onSelectionChange={({ nodes: selected }) =>
+        store.setSelection(
+          selected
+            .filter((node) => node.type !== 'frame' && node.type !== 'ghost')
+            .map((node) => node.id)
+        )
+      }
       onNodeDragStart={(_event, node) => {
-        if (node.type !== 'frame') return;
-        const tiles = new Map<string, { x: number; y: number }>();
-        for (const tileId of frameTiles(node.id)) {
-          const rect = store.tileRect(tileId);
-          tiles.set(tileId, { x: rect.x, y: rect.y });
-        }
-        frameDrag.current = { frameId: node.id, start: { ...node.position }, tiles };
+        const followers = followersOf(node);
+        groupDrag.current = followers
+          ? { nodeId: node.id, start: { ...node.position }, followers }
+          : null;
       }}
       onNodeDrag={(_event, node) => {
-        const drag = frameDrag.current;
-        if (!drag || drag.frameId !== node.id) return;
-        const dx = node.position.x - drag.start.x;
-        const dy = node.position.y - drag.start.y;
-        setNodes((current) =>
-          current.map((candidate) => {
-            const origin = drag.tiles.get(candidate.id);
-            return origin
-              ? { ...candidate, position: { x: origin.x + dx, y: origin.y + dy } }
-              : candidate;
-          })
-        );
+        const drag = groupDrag.current;
+        if (drag && drag.nodeId === node.id) {
+          const dx = node.position.x - drag.start.x;
+          const dy = node.position.y - drag.start.y;
+          setNodes((current) =>
+            current.map((candidate) => {
+              const origin = drag.followers.get(candidate.id);
+              return origin
+                ? { ...candidate, position: { x: origin.x + dx, y: origin.y + dy } }
+                : candidate;
+            })
+          );
+        }
+        if (node.type === 'frame') return;
+        const layout = store.layoutState;
+        const hint = regionAt(layout, dropProbe(node), isRegionId(node.id) ? node.id : undefined);
+        store.setDropHint(hint && hint !== store.regionOf(node.id) ? hint : null);
       }}
       onNodeDragStop={(_event, node, dragged) => {
-        const drag = frameDrag.current;
-        if (drag && drag.frameId === node.id) {
-          frameDrag.current = null;
+        store.setDropHint(null);
+        const drag = groupDrag.current;
+        groupDrag.current = null;
+        if (drag && drag.nodeId === node.id && node.type === 'frame') {
           store.moveTiles(
-            [...drag.tiles.keys()],
+            frameTiles(node.id),
             node.position.x - drag.start.x,
             node.position.y - drag.start.y
           );
           return;
         }
-        for (const node of dragged) {
-          if (node.type !== 'frame') store.setTileRect(node.id, node.position);
-        }
+        const layout = store.layoutState;
+        const moved = dragged.filter((item) => item.type !== 'frame' && item.type !== 'ghost');
+        const regions = moved.filter((item) => isRegionId(item.id)).map((item) => item.id);
+        // Windows inside a dragged region move with it.
+        const drops = moved
+          .filter(
+            (item) =>
+              !regions.some((region) => region !== item.id && isWithin(layout, item.id, region))
+          )
+          .map((item) => ({ id: item.id, x: item.position.x, y: item.position.y }));
+        store.dropNodes(drops);
         // A single note dropped onto an agent tile offers to send its text to that agent.
         const [only] = dragged;
         if (dragged.length === 1 && only?.id.startsWith('note:')) store.noteDropped(only.id);
@@ -227,10 +422,30 @@ const Board = observer(function Board() {
         // Double-clicking empty canvas drops a note there.
         const target = event.target as HTMLElement;
         const node = target.closest('.react-flow__node');
-        if (node && !node.classList.contains('react-flow__node-frame')) return;
-        if (target.closest('.chorus-frame-handle')) return;
+        if (
+          node &&
+          !node.classList.contains('react-flow__node-frame') &&
+          !node.classList.contains('react-flow__node-region')
+        ) {
+          return;
+        }
+        if (target.closest('.chorus-frame-handle, .chorus-region-handle')) return;
         const position = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
-        store.addNote('', position);
+        const noteId = store.addNote('', position);
+        // Notes dropped inside a region belong to it.
+        const region = regionAt(store.layoutState, position);
+        if (region) {
+          store.runLayout(
+            [
+              {
+                op: 'move',
+                targets: [`note:${noteId}`],
+                to: { kind: 'exact', x: position.x, y: position.y, region },
+              },
+            ],
+            { source: 'pointer' }
+          );
+        }
       }}
       defaultViewport={defaultViewport}
       minZoom={MIN_ZOOM}
@@ -238,7 +453,12 @@ const Board = observer(function Board() {
       zoomOnDoubleClick={false}
       onlyRenderVisibleElements
       proOptions={{ hideAttribution: true }}
-      className="chorus-canvas bg-background"
+      className={cn(
+        'chorus-canvas bg-background',
+        '[&_.chorus-flash]:rounded-2xl [&_.chorus-flash]:shadow-[0_0_0_4px_rgb(59_130_246/0.55),0_0_32px_rgb(59_130_246/0.35)]',
+        animating &&
+          'motion-safe:[&_.react-flow__node]:transition-[transform,width,height] motion-safe:[&_.react-flow__node]:duration-300 motion-safe:[&_.react-flow__node]:ease-out'
+      )}
     >
       <Background variant={BackgroundVariant.Dots} gap={24} size={1.2} className="opacity-40" />
       <MiniMap
@@ -253,16 +473,60 @@ const Board = observer(function Board() {
       <Panel position="top-left" {...overlayProps}>
         <CanvasToolbar />
       </Panel>
+      <GhostBanner />
     </ReactFlow>
+  );
+});
+
+/** While a large change is previewed: what it does, with apply and cancel. */
+const GhostBanner = observer(function GhostBanner() {
+  const store = getCanvasStore();
+  const ghost = store.ghost;
+  if (!ghost) return null;
+  return (
+    <Panel position="bottom-center" {...overlayProps}>
+      <div className="flex max-w-[720px] items-center gap-3 rounded-xl border border-blue-500/40 bg-background/95 px-4 py-2 text-sm shadow-lg backdrop-blur">
+        <span className="size-2 shrink-0 animate-pulse rounded-full bg-blue-500" />
+        <span className="min-w-0 flex-1 text-foreground">{ghost.label}</span>
+        <button
+          type="button"
+          className="rounded-md bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-500"
+          onClick={() => store.applyGhost()}
+        >
+          Apply
+        </button>
+        <button
+          type="button"
+          className="rounded-md px-2 py-1 text-xs text-foreground-muted hover:bg-background-secondary hover:text-foreground"
+          onClick={() => store.clearGhost()}
+        >
+          Cancel
+        </button>
+      </div>
+    </Panel>
+  );
+});
+
+const CanvasSurface = observer(function CanvasSurface() {
+  const store = getCanvasStore();
+  const [container, setContainer] = useState<HTMLDivElement | null>(null);
+  return (
+    <div ref={setContainer} className="relative h-full w-full overflow-hidden">
+      <div
+        className={cn('h-full w-full', store.stageActive && 'invisible')}
+        aria-hidden={store.stageActive}
+      >
+        <Board container={container} />
+      </div>
+      {store.stageActive && <CanvasStage />}
+    </div>
   );
 });
 
 export function CanvasBoard() {
   return (
     <ReactFlowProvider>
-      <div className="relative h-full w-full">
-        <Board />
-      </div>
+      <CanvasSurface />
     </ReactFlowProvider>
   );
 }

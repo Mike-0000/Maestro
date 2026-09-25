@@ -43,7 +43,7 @@ again, or click **Send** (up to 5 minutes). Only hands-free listening stops on a
 | "Close" / "close this" / "hide it" | Closes the focused window (or cancels a pending action) |
 | "Close Atlas" / "dismiss the Bravo window" / "get rid of Bravo" | Closes that agent's window |
 | "Close all" / "close the others" / "close the finished ones" | Closes several windows (countdown first) |
-| "Reopen" / "bring it back" / "undo" | Reopens what you closed last |
+| "Reopen" / "bring it back" | Reopens what you closed last ("undo" does too; see below) |
 | "Reopen Atlas" / "bring Atlas back" / "go to Atlas" | Reopens that agent's window and focuses it |
 | "Reopen all" / "show hidden windows" | Reopens every closed window |
 | "Allow Atlas" / "deny Bravo" | Answers that agent's permission prompt (confirm first) |
@@ -68,6 +68,33 @@ always need an explicit "yes" (or **Enter**). Enter only confirms when it is pre
 terminal or text field, and not in the instant the action appears, so typing into an agent never
 approves something by accident. For the same reason, Chorus refuses to type a message into a
 terminal agent that is showing a permission prompt; say "allow" or "deny" instead.
+
+### Organizing the canvas
+
+Windows can be grouped into named **regions** (sub-canvases) that nest, and any region or set of
+windows can go on the **stage**: tiled full screen, live, without moving anything on the board.
+
+| Say | What happens |
+| --- | --- |
+| "Group Atlas and Bravo as Review" / "make a region called Docs with Cedar" | New region around those windows |
+| "Put these in a new group called Sprint" | Groups the selected windows |
+| "Move Cedar into Backend" / "take Atlas out of the region" | Moves windows between regions |
+| "Put Cedar next to Atlas" / "move the browser to the top right" / "move Atlas a bit left" | Places windows |
+| "Make Atlas bigger" / "make the browser half the screen" / "make Cedar the same size as Atlas" | Resizes |
+| "Put Atlas and Bravo side by side" / "tidy up" / "swap Atlas and Cedar" | Lines windows up |
+| "Organize by status" (task, project, provider) / "organize the Review region by task" | One region per group (previewed first) |
+| "Rename Review to QA" / "make Backend green" / "collapse Review" / "ungroup Backend" | Edits a region |
+| "Full screen Review" / "put Atlas and Bravo on the stage" / "just Atlas" / "exit full screen" | The stage |
+| "Go to Backend" / "go back" / "up a level" / "go home" | Moves around the canvas |
+| "What's in Review" / "list regions" / "where is Cedar" | Answers out loud |
+| "Undo" / "redo" | Reverts or re-applies the last layout change |
+
+"These" means the selection, "them" what the last change touched, and "here" the region you are
+in. Layout changes are shown, not spoken (turn on spoken confirmations in the canvas layout
+settings), and the HUD shows **Undo** for a few seconds after each one. Anything the grammar
+cannot place ("arrange my review agents so the failing one is biggest") goes to the conductor,
+which has the same abilities through its `arrange_canvas` tool. Rearranging never closes, stops,
+or types into an agent.
 
 ## The conductor
 
