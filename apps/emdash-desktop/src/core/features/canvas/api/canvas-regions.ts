@@ -30,7 +30,23 @@ export type RegionState = {
   readonly createdAt: number;
   /** Created by "organize"; a later organize may regroup its windows. */
   readonly auto?: boolean;
+  /**
+   * `tiled`: members fill the region as a weighted split and re-tile when members come or go.
+   * `free`: members keep the places they were given. Absent means free (regions made before
+   * tiling keep their layout).
+   */
+  readonly arrangement?: RegionArrangement;
+  /** Size adjustments in a tiled region ("make the browser larger"), by member id; absent = 1. */
+  readonly weights?: Readonly<Record<string, number>>;
+  /** A top-level tiled region sized to the canvas viewport; false once the user sizes it. */
+  readonly screenSized?: boolean;
 };
+
+export type RegionArrangement = 'tiled' | 'free';
+
+export function isTiled(region: RegionState | undefined): boolean {
+  return region?.arrangement === 'tiled';
+}
 
 export type LayoutState = {
   /** Geometry by tile id. */

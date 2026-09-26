@@ -1,8 +1,9 @@
 /**
  * Spoken canvas layout commands: regions ("make a region called Review with Atlas and Bravo"),
  * moves ("put Cedar next to Atlas", "move these into Review"), sizes ("make the browser half the
- * screen"), arrangement ("organize by status", "tidy up"), the stage ("full screen Review"), and
- * navigation ("back", "undo"). Pure: it returns what to do, the conductor does it.
+ * screen"), arrangement ("organize by status", "tidy up", "put these four agents in quadrants"),
+ * the stage ("full screen Review"), and navigation ("open Review", "switch to the new one",
+ * "switch back", "next sub-canvas", "main canvas", "back", "undo"). Pure: it returns what to do, the conductor does it.
  *
  * It claims an utterance only when every reference resolves (or needs a clarifying question), so
  * anything it does not understand still reaches the model.
@@ -39,6 +40,8 @@ export type CanvasAction =
   | { readonly type: 'page'; readonly delta: 1 | -1 }
   | { readonly type: 'solo'; readonly id: string }
   | { readonly type: 'goToRegion'; readonly regionId: string }
+  /** The next or previous sub-canvas beside the current one. */
+  | { readonly type: 'adjacentRegion'; readonly step: 1 | -1 }
   | { readonly type: 'renameAgent'; readonly id: string; readonly name: string }
   /** Say what is in a region (or list the regions when null). */
   | { readonly type: 'describe'; readonly regionId: string | null }
@@ -56,7 +59,18 @@ const FORWARD = /^(?:go forward|forward|navigate forward)$/;
 const UP =
   /^(?:go up|up a level|go up a level|up one level|out a level|zoom out a level|one level up)$/;
 const HOME =
-  /^(?:go home|home|back to (?:the )?(?:whole )?(?:board|canvas|top)|take me home|(?:show me )?the whole (?:board|canvas)|main canvas|top level)$/;
+  /^(?:go home|home|back to (?:the )?(?:whole |main )?(?:board|canvas|top)|take me home|(?:show me )?the whole (?:board|canvas)|(?:go (?:back )?to |take me (?:back )?to |switch (?:back )?to |return to )?(?:the )?main (?:board|canvas)|top level|leave (?:all )?(?:the )?(?:sub ?canvas(?:es)?|regions|workspaces))$/;
+const SUB = '(?:region|group|area|sub ?canvas|workspace|space)';
+/** Out of the sub-canvas the user is in (to its parent, or the main canvas). */
+const LEAVE_REGION = new RegExp(
+  `^(?:(?:leave|exit|close|get out of|step out of|zoom out of|back out of) (?:this|the|my) ${SUB}|leave|exit|get out|step out|back out)$`
+);
+const ADJACENT_REGION = new RegExp(
+  `^(?:(?:go to|switch to|take me to|show(?: me)?|jump to|open) )?(?:the )?(next|previous|prev) ${SUB}$`
+);
+const SWITCH_BACK = new RegExp(
+  `^(?:switch back|flip back|swap back|go back to (?:the )?(?:other|previous|last) (?:one|${SUB})|back to (?:the )?(?:other|previous|last) (?:one|${SUB}))$`
+);
 const LEAVE_STAGE =
   /^(?:(?:exit|leave|close|quit|end|stop) (?:the )?(?:stage|full ?screen|focus mode|stage mode)|exit|leave|un ?full ?screen|back to (?:the )?canvas|restore(?: (?:the )?(?:layout|view|windows))?)$/;
 const PAGE_NEXT = /^(?:next|following) page$/;
@@ -75,6 +89,14 @@ const TIDY =
 const ARRANGE =
   /^(?:put|arrange|lay out|line up|place|set|show|stack|organi[sz]e) (.+?) (side by side|in a row|next to each other|in a line|in a grid|as a grid|in a column|stacked|on top of each other|in a stack|vertically|horizontally)$/;
 const LINE_UP = /^(?:line up|stack) (.+)$/;
+const QUADRANTS =
+  /^(?:put|arrange|lay out|place|set|organi[sz]e|split|make|tile|turn|show) (.+?) (?:in|into|as) (?:(?:four )?quadrants|quarters|tiles|a tiled layout|tiled|(?:a )?(?:2|two) by (?:2|two)(?: grid)?)$/;
+const TILE =
+  /^(?:tile|re ?tile|auto ?tile|tile up)(?: (.+?))?(?: evenly| again| back)?$|^(?:make|let) (.+?) (?:fill|share|use) (?:the )?(?:whole |entire |all the )?(?:space|room|screen|region|sub ?canvas|workspace)$/;
+const TILE_HERE =
+  /^(?:it|this|here|everything|all|everything here|all of it|the windows|the space|this (?:region|group|area|sub ?canvas|workspace|space))$/;
+const GIVE_ROOM =
+  /^give (.+?) (more|less|a (?:bit|little) more|a (?:bit|little) less|much more|a lot more) (?:room|space)$/;
 
 const REGION_NOUN = '(?:region|group|area|sub ?canvas|space|zone|section|workspace)';
 const CREATE = new RegExp(
@@ -349,6 +371,18 @@ export function parseCanvasCommand(
   if (UP.test(text)) return act({ type: 'up' });
   if (HOME.test(text)) return act({ type: 'home' });
   if (context.onStage && LEAVE_STAGE.test(text)) return act({ type: 'leaveStage' });
+  if (!context.onStage && LEAVE_REGION.test(text)) {
+    return context.currentRegion ? act({ type: 'up' }) : ask("You're on the main canvas already.");
+  }
+  const adjacent = ADJACENT_REGION.exec(text);
+  if (adjacent?.[1]) return act({ type: 'adjacentRegion', step: adjacent[1] === 'next' ? 1 : -1 });
+  if (SWITCH_BACK.test(text)) {
+    const previous = context.previousRegion;
+    if (previous && context.entities.some((entity) => entity.id === previous)) {
+      return act({ type: 'goToRegion', regionId: previous });
+    }
+    return act({ type: 'back' });
+  }
   if (context.onStage && PAGE_NEXT.test(text)) return act({ type: 'page', delta: 1 });
   if (context.onStage && PAGE_PREVIOUS.test(text)) return act({ type: 'page', delta: -1 });
   if (IMMERSIVE.test(text)) return act({ type: 'stage', ids: null, immersive: true });
@@ -507,9 +541,13 @@ export function parseCanvasCommand(
   if (STAGE_BARE.test(text)) return act({ type: 'stage', ids: null });
   const stage = STAGE_TAIL.exec(text) ?? STAGE_HEAD.exec(text);
   if (stage?.[1]) {
+    // "Open Review" / "enter the new one" goes into the sub-canvas (it fills the screen); the
+    // stage is for "full screen", "stage", "maximize".
     const verbIsOpen = /^(?:open|enter)\s/.test(text) && !STAGE_TAIL.test(text);
     const target = verbIsOpen ? regionOnly(stage[1], context) : refs(stage[1], context, 'region');
     if (target && 'question' in target) return ask(target.question);
+    const [first] = target?.ids ?? [];
+    if (verbIsOpen && first) return act({ type: 'goToRegion', regionId: first });
     if (target && target.ids.length > 0) return act({ type: 'stage', ids: target.ids });
     if (!verbIsOpen) return null;
   }
@@ -523,6 +561,49 @@ export function parseCanvasCommand(
     }
     if (target && target.ids.length > 1) return act({ type: 'stage', ids: target.ids });
     return null;
+  }
+
+  // ── Tiling: windows share a sub-canvas as a weighted split (four make quadrants) ──
+  const quadrants = QUADRANTS.exec(text);
+  const tile = quadrants ? null : TILE.exec(text);
+  if (quadrants || tile) {
+    const target = (quadrants?.[1] ?? tile?.[1] ?? tile?.[2])?.trim();
+    if (!target || TILE_HERE.test(target)) {
+      return layout({ op: 'arrange', targets: null, scope: context.currentRegion, layout: 'tile' });
+    }
+    const found = refs(target, context);
+    if (found && 'question' in found) return ask(found.question);
+    const [only] = found?.ids ?? [];
+    if (found?.ids.length === 1 && only && isRegion(only)) {
+      return layout({ op: 'arrange', targets: null, scope: only, layout: 'tile' });
+    }
+    if (found && windowsOnly(found.ids).length > 0) {
+      return layout({
+        op: 'arrange',
+        targets: windowsOnly(found.ids),
+        scope: null,
+        layout: 'tile',
+      });
+    }
+    if (quadrants) return null;
+  }
+  const room = GIVE_ROOM.exec(text);
+  if (room?.[1] && room[2]) {
+    const targets = refs(room[1], context, 'window');
+    if (targets && 'question' in targets) return ask(targets.question);
+    if (targets && windowsOnly(targets.ids).length > 0) {
+      const amount = room[2];
+      return layout({
+        op: 'resize',
+        targets: windowsOnly(targets.ids),
+        size: {
+          kind: 'relative',
+          axis: 'both',
+          factor: /bit|little/.test(amount) ? 'bit' : /much|lot/.test(amount) ? 'much' : 'more',
+          direction: /less/.test(amount) ? 'shrink' : 'grow',
+        },
+      });
+    }
   }
 
   // ── Arrangement ──
@@ -695,6 +776,10 @@ export function parseCanvasCommand(
     if (region && 'ids' in region && region.ids[0]) {
       return act({ type: 'goToRegion', regionId: region.ids[0] });
     }
+    // "Switch to the new one" with none made yet: say so rather than guess.
+    if (region && 'question' in region && /\b(?:new|newest|other|previous|last)\b/.test(goTo[1])) {
+      return ask(region.question);
+    }
   }
   const describe = DESCRIBE_REGION.exec(text);
   if (describe?.[1]) {
@@ -714,4 +799,4 @@ export function parseCanvasCommand(
 
 /** Utterances that look like layout talk: skip Jev routing and go straight to the model. */
 export const LAYOUT_CUES =
-  /\b(?:region|regions|group|groups|sub ?canvas|stage|full ?screen|side by side|tidy|organi[sz]e|arrange|layout|lay out|move|put|drag|resize|bigger|smaller|wider|narrower|taller|shorter|swap|collapse|expand|ungroup|dissolve|corner|next to|beside|above|below|left of|right of)\b/i;
+  /\b(?:region|regions|group|groups|sub ?canvas|sub ?canvases|workspace|quadrants?|tile|tiled|stage|full ?screen|side by side|tidy|organi[sz]e|arrange|layout|lay out|move|put|drag|resize|bigger|smaller|wider|narrower|taller|shorter|swap|collapse|expand|ungroup|dissolve|corner|next to|beside|above|below|left of|right of)\b/i;

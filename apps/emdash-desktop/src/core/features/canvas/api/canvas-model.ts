@@ -74,11 +74,17 @@ export type TileDetailInput = {
   liveBudget: number;
   /** Whether a terminal session exists to render live. */
   hasSession: boolean;
+  /**
+   * The tile belongs to the sub-canvas the user is in: it renders live at any readable zoom (with
+   * pointer input only at zoom 1) instead of competing for the live budget.
+   */
+  promoted?: boolean;
 };
 
 export function resolveTileDetail(input: TileDetailInput): TileDetail {
   if (input.zoom < GLYPH_ZOOM_THRESHOLD) return 'glyph';
   if (!input.visible || !input.hasSession) return 'preview';
+  if (input.promoted) return 'live';
   if (!isInteractiveZoom(input.zoom)) return 'preview';
   return input.focusRank < input.liveBudget ? 'live' : 'preview';
 }
@@ -118,17 +124,19 @@ export function rectContains(outer: TileRect, inner: TileRect, tolerance = 1): b
 }
 
 /**
- * Which browsers stay alive: every leased one, then the most recently used up to `budget`.
- * Returns the ids to suspend.
+ * Which browsers stay alive: every leased or pinned one (a model is driving it, or it is in the
+ * sub-canvas the user is in), then the most recently used up to `budget`. Returns the ids to
+ * suspend.
  */
 export function browsersToSuspend(input: {
   alive: readonly string[];
   lastUsed: ReadonlyMap<string, number>;
   leased: ReadonlySet<string>;
+  pinned?: ReadonlySet<string>;
   budget: number;
 }): string[] {
   const idle = input.alive
-    .filter((id) => !input.leased.has(id))
+    .filter((id) => !input.leased.has(id) && !input.pinned?.has(id))
     .sort((a, b) => (input.lastUsed.get(b) ?? 0) - (input.lastUsed.get(a) ?? 0));
   const room = Math.max(0, input.budget - (input.alive.length - idle.length));
   return idle.slice(room);

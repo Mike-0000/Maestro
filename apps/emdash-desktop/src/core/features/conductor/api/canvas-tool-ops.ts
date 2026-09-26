@@ -63,7 +63,7 @@ export type ArrangeStep = {
   readonly slot?: (typeof ARRANGE_SLOTS)[number];
   readonly size?: (typeof ARRANGE_SIZES)[number];
   readonly like?: string;
-  readonly layout?: 'grid' | 'row' | 'column' | 'tidy';
+  readonly layout?: 'grid' | 'row' | 'column' | 'tidy' | 'tile';
   readonly by?: 'task' | 'project' | 'status' | 'provider';
 };
 

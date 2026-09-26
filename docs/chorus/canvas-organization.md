@@ -984,14 +984,14 @@ A developer has Atlas and Bravo (Claude) working on auth, Cedar (Codex) on tests
 | --- | --- | --- |
 | "Make a region called Auth with Atlas, Bravo and the localhost browser" | grammar → `createRegion{name:'Auth', members:[Atlas,Bravo,Browser]}` | 3 windows, 0 displaced → Immediate. Region appears around them (placed as a grid inside), HUD "Board: grouped 3 into Auth · Undo", tick. |
 | "Put Cedar next to Auth" | grammar → `move{Cedar, relative: Auth, next}` | Cedar placed right of Auth, aligned to its top. |
-| "Open Auth" | grammar → `enterStage{Auth}` | Stage: main-plus-two template (browser weighted to 60 %), all three live at zoom 1; breadcrumb `Canvas › Auth`. |
+| "Full screen Auth" | grammar → `enterStage{Auth}` | Stage: main-plus-two template (browser weighted to 60 %), all three live at zoom 1; breadcrumb `Canvas › Auth`. |
 | "Make the browser bigger" | grammar → `resize{Browser, relative grow}` (Stage scope) | Split ratio 60 → 69 %; PTYs of Atlas and Bravo resize once at the end of the animation. |
 | "Move Claude to the left" | resolver: Atlas and Bravo both Claude → clarification | HUD "Which one: 1 · Atlas, 2 · Bravo?", badges 1/2 on panes. |
 | "Bravo" | fills slot | Bravo's pane swaps into the left position. |
 | "Undo" | history | Bravo back where it was; "Undid moving Bravo." shown, not spoken. |
 | "Tell Bravo to run the auth tests" | existing grammar `send` | Unchanged behaviour: 1.5 s countdown, then sent. |
 | "Undo" | history, top is not layout | "I can't unsend a message. The last layout change was resizing the browser; undo that?" |
-| "No. Go back" | reject, then `back` | Stage closes; board viewport exactly as before "Open Auth". |
+| "No. Go back" | reject, then `back` | Stage closes; board viewport exactly as before "Full screen Auth". |
 | "Collapse Auth and tidy up everything" | model → `arrange_canvas{[collapse Auth, arrange root tidy]}` | Touches > 4 windows → Preview: ghost outlines, 1.5 s countdown, then applied as one undo step. |
 
 ---
@@ -1012,6 +1012,7 @@ A developer has Atlas and Bravo (Claude) working on auth, Cedar (Codex) on tests
 | Spoken references | `conductor/api/canvas-refs.ts` |
 | Layout grammar | `conductor/api/grammar-canvas.ts` |
 | Model tool steps → ops | `conductor/api/canvas-tool-ops.ts` |
+| Sub-canvas tiling, workspace framing, render promotion, region stepping | `canvas/api/region-tiling.ts` |
 
 Differences from the plan:
 
@@ -1029,7 +1030,74 @@ Differences from the plan:
 - Layout changes are silent by default; failures, questions, and descriptions are spoken. The
   HUD offers a one-click undo for 12 seconds after a spoken change.
 
+### Sub-canvas workspaces
+
+A sub-canvas works as a full-screen workspace rather than only a frame on the board.
+
+- **Tiling.** A region with `arrangement: 'tiled'` lays its members out with `planTiling`: a
+  weighted split tree (`tilingTree`), with no gaps or overlap.
+  - Two windows sit side by side, or stack when the region is taller than it is wide. Three give
+    the heaviest window the main pane. Four make quadrants. More make balanced rows.
+  - Weights start from the window's role (`baseTileWeight`: a browser is 1.5, an agent is 1, a note
+    is 0.5). "Make X larger" multiplies the weight within `MIN_TILE_WEIGHT`–`MAX_TILE_WEIGHT`.
+  - `settleTiling` runs after every op, so windows arriving, leaving, closing or reopening re-tile
+    their region.
+  - Moving or resizing a tiled region's member by hand makes that region `free`. Explicit
+    placement is never overwritten.
+- **Workspace size.** A top-level tiled region is created at `workspaceSize(screen)`: the board
+  size minus `WORKSPACE_INSETS`, which leave room for the toolbar.
+  - `frameViewport` therefore frames it at exactly zoom 1, where terminals take input.
+  - When the board resizes, `refitScope` (debounced by 250 ms) re-fits the focused region. It only
+    does this while `screenSized` holds. Resizing the region by hand clears the flag.
+  - The `fitRegion` op re-fits it without an undo step.
+- **Navigation.**
+  - Going into a region records the main-canvas viewport and frames the region
+    (`requestFrame`, animated). Leaving to the main canvas restores that viewport.
+  - `focusedRegionId` is the region the board is scoped to. Windows outside it dim to 30 %
+    opacity and ignore the pointer, and the minimap hides.
+  - The toolbar shows "← Main canvas" (or the parent's name), previous and next chevrons, and the
+    region's name and window count.
+  - Ways out:
+    - Esc.
+    - Clicking the dimmed board outside the region.
+    - Panning most of the region out of view, or zooming well out of it (`cameraLeftRegion`,
+      user-initiated moves only).
+    - Voice: "leave", "main canvas", "switch back".
+  - Ctrl+Alt+PageDown/PageUp and "next/previous sub-canvas" step between regions at the same
+    level, in reading order (`adjacentRegion`).
+  - Creating a region from the toolbar, with Ctrl+G, or by voice (exactly one new region) opens it.
+  - An empty region says so and suggests "move Atlas to …".
+- **Render promotion.** While a region is focused, every drawn window inside it, including nested
+  regions, is promoted (`promotedTiles`, capped at `PROMOTED_LIVE_CAP` = 12 for WebGL context
+  limits).
+  - Promoted agent tiles render live at any readable zoom, not only at zoom 1 ± 0.02 inside the
+    live budget.
+  - Promoted browsers are pinned awake: `browsersToSuspend` skips them, and suspended ones wake.
+  - Windows outside keep the old rules. Their live budget shrinks by the promoted count
+    (`outsideLiveBudget`), so the total number of live tiles stays bounded.
+  - On leaving or switching, the promoted set changes (structurally compared, so no churn). Tiles
+    fall back to the budgeted rule and browsers become suspendable by LRU again.
+  - Collapsed or closed windows are never promoted.
+- **Voice.**
+  - Grammar forms: "put these four agents in quadrants", "tile this", "give the browser more
+    room", "open Review" (goes in; "full screen Review" is still the stage), "switch to the new
+    one", "this one", "switch back", "next sub-canvas", "leave", "main canvas".
+  - `canvas-refs` resolves "the new one" (`newestRegion`), "the other one" (`previousRegion`),
+    and counted references ("these four agents"). It asks when a count, the recency or the
+    target does not match; it never guesses.
+  - The model gets `layout: 'tile'` on `arrange_canvas` and `leave_region`, `next_region` and
+    `previous_region` on `canvas_view`.
+
+Known limits:
+
+- The board still unmounts tiles outside the viewport (`onlyRenderVisibleElements`). This only
+  matters for a region that has grown larger than the screen.
+- Promotion does not start agents that have no session.
+- Live webview overlays are not dimmed.
+- xterm pointer input is still exact only at zoom 1.
+
 Keyboard: Ctrl+Z / Ctrl+Shift+Z undo and redo, Ctrl+G groups the selection, Ctrl+Shift+G
-ungroups, Ctrl+Enter stages the selection (or the region in view), Esc leaves the stage,
+ungroups, Ctrl+Enter stages the selection (or the region in view), Esc leaves the stage (then the
+sub-canvas, one level at a time), Ctrl+Alt+PageDown/PageUp step between sub-canvases,
 Alt+Arrow nudges, Alt+Shift+Arrow resizes, Ctrl+Alt+Left/Right/Up/Home walk the trail.
 On the stage: Ctrl+Shift+Arrow moves between panes, Ctrl+Alt+Enter solos, PageUp/PageDown page.

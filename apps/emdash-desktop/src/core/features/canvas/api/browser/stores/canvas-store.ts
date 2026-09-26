@@ -1,4 +1,12 @@
-import { action, computed, makeObservable, observable, reaction, runInAction } from 'mobx';
+import {
+  action,
+  comparer,
+  computed,
+  makeObservable,
+  observable,
+  reaction,
+  runInAction,
+} from 'mobx';
 import type { ConversationStore } from '@core/features/conversations/api/browser/conversation-manager';
 import { conversationRegistry } from '@core/features/conversations/api/browser/stores/conversation-registry';
 import type { ProjectManagerStore } from '@core/features/projects/api/browser/stores/project-manager';
@@ -56,6 +64,7 @@ import {
   frameAllowanceFor,
   isFoldedAway,
   isRegionId,
+  isTiled,
   newRegionId,
   nodeRect,
   parentOf,
@@ -71,6 +80,12 @@ import {
   type WindowStatus,
 } from '../../canvas-regions';
 import { spokenProviderLabel } from '../../provider-names';
+import {
+  adjacentRegion,
+  cameraLeftRegion,
+  promotedTiles,
+  PROMOTED_LIVE_CAP,
+} from '../../region-tiling';
 import { EMPTY_STAGE, stageOrder, type StageSaved } from '../../stage-layout';
 
 export type AgentTileEntry = {
@@ -177,6 +192,8 @@ export type RegionEntry = {
   /** "2 need you, 1 working". */
   readonly summary: string;
   readonly auto: boolean;
+  /** Members fill it as a weighted split (quadrants for four) and re-tile as they change. */
+  readonly tiled: boolean;
 };
 
 export type CanvasLocation = CanvasLocationState;
@@ -224,7 +241,14 @@ const BOARD_ROOT: CanvasLocation = { kind: 'board', regionScope: null };
 
 export type ViewportCommand =
   | { readonly id: number; readonly kind: 'focus'; readonly tileId: string }
-  | { readonly id: number; readonly kind: 'fit'; readonly tileIds?: readonly string[] };
+  | { readonly id: number; readonly kind: 'fit'; readonly tileIds?: readonly string[] }
+  /** Frame a region as the workspace: filling the screen, at zoom 1 when it is screen-sized. */
+  | { readonly id: number; readonly kind: 'frame'; readonly regionId: string }
+  /** Put the camera back where it was (the main canvas the user left for a region). */
+  | { readonly id: number; readonly kind: 'restore'; readonly viewport: CanvasViewport };
+
+/** How long a board resize settles before a screen-sized workspace re-tiles to it. */
+const REFIT_DELAY_MS = 250;
 
 export function agentTileId(conversationId: string): string {
   return `agent:${conversationId}`;
@@ -291,6 +315,15 @@ export class CanvasStore {
   renamingRegionId: string | null = null;
   backTrail: CanvasLocation[] = [];
   forwardTrail: CanvasLocation[] = [];
+  /** Region the user was in before the current one ("switch back", "the other one"). */
+  previousRegionId: string | null = null;
+  /** Region created most recently this session ("the new sub-canvas"). */
+  newestRegionId: string | null = null;
+  /** Zoom the board framed the current region at (leaving it is measured from there). */
+  scopeFramedZoom: number | null = null;
+  /** Main-canvas camera from before the user entered a region, restored on the way out. */
+  private rootViewport: CanvasViewport | null = null;
+  private refitTimer: ReturnType<typeof setTimeout> | null = null;
   /** Stage arrangement for selection and solo stages (region stages persist theirs). */
   private transientStage: StageSaved = EMPTY_STAGE;
   /** Region names reserved for agents about to be created (a plan's agents arrive together). */
@@ -328,6 +361,20 @@ export class CanvasStore {
       groupSelection: action,
       backTrail: observable.ref,
       forwardTrail: observable.ref,
+      previousRegionId: observable,
+      newestRegionId: observable,
+      scopeFramedZoom: observable,
+      focusedRegionId: computed,
+      promotedTileIds: computed({ equals: comparer.structural }),
+      promotedSet: computed,
+      outsideFocusOrder: computed,
+      setScopeFramedZoom: action,
+      requestFrame: action,
+      reframe: action,
+      leaveScope: action,
+      cameraMoved: action,
+      goToAdjacentRegion: action,
+      refitScope: action,
       transientStage: observable.ref,
       layoutState: computed,
       layoutWindows: computed,
@@ -444,6 +491,7 @@ export class CanvasStore {
 
   dispose(): void {
     this.disposed = true;
+    if (this.refitTimer) clearTimeout(this.refitTimer);
     for (const dispose of this.disposers.splice(0)) dispose();
   }
 
@@ -726,6 +774,52 @@ export class CanvasStore {
     return index === -1 ? Number.MAX_SAFE_INTEGER : index;
   }
 
+  // ── Render promotion ───────────────────────────────────────────────────────
+
+  /** The region the board is scoped to (the workspace the user is in); null on the main canvas. */
+  get focusedRegionId(): string | null {
+    const location = this.location;
+    if (location.kind !== 'board' || !location.regionScope) return null;
+    const region = this.state.regions[location.regionScope];
+    return region && !region.collapsed ? location.regionScope : null;
+  }
+
+  /**
+   * Windows of the focused region that render fully (live terminal or chat, mounted browser) for
+   * as long as the region is focused, most recently focused first up to the live cap.
+   */
+  get promotedTileIds(): string[] {
+    return promotedTiles(
+      this.layoutState,
+      this.focusedRegionId,
+      this.visibleTileIds(),
+      (id) => this.focusRank(id),
+      PROMOTED_LIVE_CAP
+    );
+  }
+
+  get promotedSet(): ReadonlySet<string> {
+    return new Set(this.promotedTileIds);
+  }
+
+  isPromoted(tileId: string): boolean {
+    return this.promotedSet.has(tileId);
+  }
+
+  /** Focus order of windows outside the focused region; they share what is left of the budget. */
+  get outsideFocusOrder(): string[] {
+    const promoted = this.promotedSet;
+    return promoted.size === 0
+      ? this.focusOrder
+      : this.focusOrder.filter((id) => !promoted.has(id));
+  }
+
+  /** Focus rank among windows outside the focused region. */
+  outsideFocusRank(tileId: string): number {
+    const index = this.outsideFocusOrder.indexOf(tileId);
+    return index === -1 ? Number.MAX_SAFE_INTEGER : index;
+  }
+
   // ── Layout ─────────────────────────────────────────────────────────────────
 
   /** Gives every agent a tile rect and a spoken name the first time it is seen. */
@@ -809,6 +903,8 @@ export class CanvasStore {
     const result = this.planOps(ops);
     if (!result.ok) return;
     this.writeLayout(result.plan.state);
+    const created = result.plan.created.filter(isRegionId).at(-1);
+    if (created) this.newestRegionId = created;
     this.markChanged(result.plan.summary, result.plan.targets, 'command', []);
   }
 
@@ -863,6 +959,22 @@ export class CanvasStore {
 
   requestFit(tileIds?: readonly string[]): void {
     this.viewportCommand = { id: ++this.commandSeq, kind: 'fit', tileIds };
+  }
+
+  /** Asks the board to frame a region as the workspace (see `frameViewport`). */
+  requestFrame(regionId: string): void {
+    this.viewportCommand = { id: ++this.commandSeq, kind: 'frame', regionId };
+  }
+
+  /** Frames the sub-canvas the user is in, else fits the board. */
+  reframe(): void {
+    const regionId = this.focusedRegionId;
+    if (regionId) this.requestFrame(regionId);
+    else this.requestFit();
+  }
+
+  setScopeFramedZoom(zoom: number | null): void {
+    this.scopeFramedZoom = zoom;
   }
 
   consumeViewportCommand(id: number): void {
@@ -1119,6 +1231,7 @@ export class CanvasStore {
         working: tileStatuses.filter((status) => status === 'working').length,
         summary: statusSummary(tileStatuses),
         auto: region.auto === true,
+        tiled: isTiled(region),
       });
     }
     // Parents first so the board stacks nested regions above their parents.
@@ -1187,6 +1300,8 @@ export class CanvasStore {
 
   applyPlan(plan: LayoutPlan, options: { source: LayoutSource; label?: string }): void {
     this.ghost = null;
+    const created = plan.created.filter(isRegionId).at(-1);
+    if (created) this.newestRegionId = created;
     this.commitLayout(plan.state, options.label ?? plan.summary, options.source, plan.targets, {
       displaced: plan.displaced,
     });
@@ -1377,6 +1492,30 @@ export class CanvasStore {
     if (width <= 0 || height <= 0) return;
     if (this.boardSize.width === width && this.boardSize.height === height) return;
     this.boardSize = { width, height };
+    // A screen-sized workspace follows the window once the resize settles.
+    if (this.refitTimer) clearTimeout(this.refitTimer);
+    if (!this.focusedRegionId) return;
+    this.refitTimer = setTimeout(() => {
+      this.refitTimer = null;
+      if (!this.disposed) this.refitScope();
+    }, REFIT_DELAY_MS);
+  }
+
+  /**
+   * Re-tiles the focused region's top-level workspace to the board size (when it is screen-sized
+   * and tiled) and frames the region again. Not undoable: it follows the window, not the user.
+   */
+  refitScope(): void {
+    const regionId = this.focusedRegionId;
+    if (!regionId) return;
+    const layout = this.layoutState;
+    const [root] = regionPath(layout, regionId);
+    const top = root ? layout.regions[root] : undefined;
+    if (root && top && isTiled(top) && top.screenSized !== false) {
+      const result = this.planOps([{ op: 'fitRegion', region: root }]);
+      if (result.ok && diffLayout(layout, result.plan.state)) this.writeLayout(result.plan.state);
+    }
+    this.requestFrame(regionId);
   }
 
   setListening(listening: boolean): void {
@@ -1403,6 +1542,7 @@ export class CanvasStore {
     });
     if (!result.ok) return null;
     const regionId = result.plan.created[0] ?? null;
+    if (regionId) this.goToRegion(regionId);
     if (regionId && !name) this.renamingRegionId = regionId;
     if (regionId) this.selection = [regionId];
     return regionId;
@@ -1596,10 +1736,11 @@ export class CanvasStore {
   }
 
   /** Goes to a location, recording where the user was for "back". */
-  navigate(location: CanvasLocation, options: { record?: boolean } = {}): void {
+  navigate(location: CanvasLocation, options: { record?: boolean; reveal?: boolean } = {}): void {
     const current = this.location;
+    const reveal = options.reveal !== false;
     if (sameLocation(current, location)) {
-      this.revealLocation(location);
+      if (reveal) this.revealLocation(location);
       return;
     }
     if (options.record !== false) {
@@ -1609,15 +1750,33 @@ export class CanvasStore {
     if (current.kind === 'stage' && !sameStageTarget(current, location)) {
       this.transientStage = EMPTY_STAGE;
     }
+    const from = regionOfLocation(current);
+    const to = regionOfLocation(location);
+    if (from && from !== to) this.previousRegionId = from;
+    // Leaving the main canvas for a region: remember its camera for the way back.
+    if (current.kind === 'board' && !current.regionScope && to) {
+      this.rootViewport = { ...this.state.viewport };
+    }
+    if (to !== from) this.scopeFramedZoom = null;
     this.updateState((state) => ({ ...state, location }));
-    this.revealLocation(location);
+    if (!reveal) return;
+    if (location.kind === 'board' && !to && from) this.revealRoot();
+    else this.revealLocation(location);
   }
 
   private revealLocation(location: CanvasLocation): void {
     if (location.kind !== 'board') return;
     if (location.regionScope && this.state.regions[location.regionScope]) {
-      this.requestFit([location.regionScope]);
+      this.requestFrame(location.regionScope);
     }
+  }
+
+  /** Back on the main canvas: the camera the user left it with, else everything. */
+  private revealRoot(): void {
+    const viewport = this.rootViewport;
+    this.rootViewport = null;
+    if (viewport) this.viewportCommand = { id: ++this.commandSeq, kind: 'restore', viewport };
+    else this.requestFit();
   }
 
   back(): boolean {
@@ -1652,13 +1811,57 @@ export class CanvasStore {
     if (!location.regionScope) return false;
     const parent = this.regionOf(location.regionScope);
     this.navigate({ kind: 'board', regionScope: parent });
-    if (!parent) this.requestFit();
     return true;
   }
 
+  /** The main canvas, with the camera where the user left it. */
   home(): void {
+    const from = regionOfLocation(this.location);
     this.navigate(BOARD_ROOT);
-    this.requestFit();
+    if (!from) this.requestFit();
+  }
+
+  /**
+   * Leaves the focused region for its parent (or the main canvas) without moving the camera: the
+   * user already moved it (panned or zoomed away, clicked outside).
+   */
+  leaveScope(): boolean {
+    const location = this.location;
+    if (location.kind !== 'board' || !location.regionScope) return false;
+    const parent = this.regionOf(location.regionScope);
+    this.navigate({ kind: 'board', regionScope: parent }, { reveal: false });
+    if (!parent) this.rootViewport = null;
+    return true;
+  }
+
+  /**
+   * The user moved the camera to `view` (flow coordinates) at `zoom`. Having left the focused
+   * region, the board scope becomes the innermost region still in view, else the main canvas.
+   */
+  cameraMoved(view: TileRect, zoom: number): void {
+    const regionId = this.focusedRegionId;
+    if (!regionId) return;
+    const layout = this.layoutState;
+    const framed = this.scopeFramedZoom ?? zoom;
+    const left = (id: string) => {
+      const region = layout.regions[id];
+      return (
+        !region ||
+        cameraLeftRegion(view, regionFootprint(region), { current: zoom, framed: framed })
+      );
+    };
+    if (!left(regionId)) return;
+    let target = this.regionOf(regionId);
+    while (target && left(target)) target = this.regionOf(target);
+    this.navigate({ kind: 'board', regionScope: target }, { reveal: false });
+    if (!target) this.rootViewport = null;
+  }
+
+  /** Switches to the next or previous region beside the current one. Returns the region id. */
+  goToAdjacentRegion(step: 1 | -1): string | null {
+    const next = adjacentRegion(this.layoutState, this.currentRegion(), step);
+    if (!next || !this.goToRegion(next)) return null;
+    return next;
   }
 
   /** Shows a region on the board (expanding it when collapsed). */
@@ -1977,4 +2180,9 @@ function toAgentEntry(
     linesAdded: workspaceGit?.linesAdded ?? 0,
     linesDeleted: workspaceGit?.linesDeleted ?? 0,
   };
+}
+
+function regionOfLocation(location: CanvasLocation): string | null {
+  if (location.kind === 'board') return location.regionScope;
+  return location.target.kind === 'region' ? location.target.regionId : null;
 }

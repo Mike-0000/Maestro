@@ -20,12 +20,15 @@ import {
 } from './canvas-model';
 import {
   childRegions,
+  childTiles,
+  COLLAPSED_REGION_HEIGHT,
   contentBox,
   defaultSizeOf,
   descendantRegions,
   descendantTiles,
   GRID,
   isRegionId,
+  isTiled,
   MAX_REGION_DEPTH,
   minSizeOf,
   MIN_REGION_SIZE,
@@ -36,6 +39,7 @@ import {
   parentOf,
   REGION_COLORS,
   regionDepth,
+  regionInsets,
   STATUS_GROUPS,
   subtreeHeight,
   tileRectOf,
@@ -47,6 +51,15 @@ import {
   type RegionState,
   type WindowStatus,
 } from './canvas-regions';
+import {
+  baseTileWeight,
+  clampWeight,
+  placePanes,
+  planTiling,
+  WEIGHT_STEP,
+  workspaceSize,
+  type TilingItem,
+} from './region-tiling';
 
 export type Slot =
   | 'top-left'
@@ -96,7 +109,8 @@ export type SizeSpec =
   /** Pointer resizes only. */
   | { readonly kind: 'exact'; readonly rect: TileRect };
 
-export type ArrangeLayout = 'grid' | 'row' | 'column' | 'tidy';
+/** `tile`: fill the space as a weighted split (four windows become quadrants). */
+export type ArrangeLayout = 'grid' | 'row' | 'column' | 'tidy' | 'tile';
 export type OrganizeBy = 'task' | 'project' | 'status' | 'provider';
 
 export type LayoutOp =
@@ -195,6 +209,8 @@ class Draft {
   readonly created: string[] = [];
   readonly failures: string[] = [];
   readonly summaries: string[] = [];
+  /** Tiled regions whose members must be re-tiled after the current op. */
+  readonly retile = new Set<string>();
   forcePreview = false;
 
   constructor(
@@ -424,7 +440,10 @@ function growToFit(draft: Draft, regionId: string | null, depth = 0): void {
   if (!regionId || depth > MAX_REGION_DEPTH + 1) return;
   const region = draft.regions[regionId];
   if (!region) return;
-  if (!region.collapsed) {
+  if (isTiled(region)) {
+    // A tiled region is re-laid out after the op instead of growing around a transient state.
+    draft.retile.add(regionId);
+  } else if (!region.collapsed) {
     const needed = wrapRect(
       draft.children(regionId).map((child) => draft.rect(child)),
       draft.env.frameAllowance
@@ -454,6 +473,10 @@ function growToFit(draft: Draft, regionId: string | null, depth = 0): void {
 function wrapRegion(draft: Draft, regionId: string): void {
   const region = draft.regions[regionId];
   if (!region) return;
+  if (isTiled(region)) {
+    draft.retile.add(regionId);
+    return;
+  }
   const needed = wrapRect(
     draft.children(regionId).map((child) => draft.rect(child)),
     draft.env.frameAllowance
@@ -578,6 +601,13 @@ function canReparent(draft: Draft, id: string, parentId: string | null): string 
 /** Places `id` inside `parentId` at the first free spot (the region grows to fit). */
 function placeInside(draft: Draft, id: string, parentId: string | null, near?: TileRect): void {
   draft.setParent(id, parentId);
+  if (parentId && isTiled(draft.regions[parentId])) {
+    // Joins the tiling: it takes the last place in reading order and the region re-tiles.
+    const box = contentBox(draft.regions[parentId] as RegionState, draft.env.frameAllowance);
+    draft.moveTo(id, box.x + box.w, box.y + box.h);
+    draft.retile.add(parentId);
+    return;
+  }
   const size = draft.rect(id);
   const occupied = draft
     .children(parentId)
@@ -682,6 +712,256 @@ export function nearestFreeSpot(
   return { x: rect.x, y: rect.y };
 }
 
+// ── Tiling ───────────────────────────────────────────────────────────────────
+
+/** Space between panes of a tiled region: room for a task frame's header above each pane. */
+function tilingGap(draft: Draft): number {
+  return GRID + draft.env.frameAllowance;
+}
+
+function tilingWeight(draft: Draft, regionId: string, id: string): number {
+  const base = isRegionId(id)
+    ? Math.min(3, Math.max(1, draft.children(id).length * 0.75))
+    : baseTileWeight(id);
+  return clampWeight(base * (draft.regions[regionId]?.weights?.[id] ?? 1));
+}
+
+/** Size a nested tiled region starts from when working out its smallest pane. */
+const NESTED_TILED_BASE = { w: 640, h: 400 } as const;
+
+/** Smallest pane a tiled region's member accepts. */
+function paneMinimum(draft: Draft, id: string, depth: number): { w: number; h: number } {
+  if (!isRegionId(id)) return minSizeOf(id);
+  const region = draft.regions[id];
+  if (!region) return { ...MIN_REGION_SIZE };
+  if (isTiled(region) && depth <= MAX_REGION_DEPTH) {
+    return tiledLayout(draft, id, NESTED_TILED_BASE, depth + 1).size;
+  }
+  const needed = wrapRect(
+    draft.children(id).map((child) => draft.rect(child)),
+    draft.env.frameAllowance
+  );
+  return needed ? { w: needed.w, h: needed.h } : { ...MIN_REGION_SIZE };
+}
+
+type TiledLayout = {
+  readonly size: { w: number; h: number };
+  /** Collapsed child regions, in a strip along the top. */
+  readonly strip: readonly string[];
+  /** Pane rects relative to the region's top-left. */
+  readonly panes: ReadonlyMap<string, TileRect>;
+};
+
+/** How a tiled region of (at least) `outer` size lays out its current members. */
+function tiledLayout(
+  draft: Draft,
+  regionId: string,
+  outer: { w: number; h: number },
+  depth: number
+): TiledLayout {
+  const insets = regionInsets(draft.env.frameAllowance);
+  const gap = tilingGap(draft);
+  const children = draft.children(regionId);
+  const strip = children.filter((id) => isRegionId(id) && draft.regions[id]?.collapsed);
+  const members = readingOrder(
+    children.filter((id) => !strip.includes(id)),
+    (id) => draft.rect(id)
+  );
+  const stripWidth =
+    strip.reduce((total, id) => total + draft.rect(id).w, 0) + gap * Math.max(0, strip.length - 1);
+  const stripHeight = strip.length > 0 ? COLLAPSED_REGION_HEIGHT + gap : 0;
+  const items: TilingItem[] = members.map((id) => ({
+    id,
+    weight: tilingWeight(draft, regionId, id),
+    min: paneMinimum(draft, id, depth),
+  }));
+  const content = {
+    w: Math.max(stripWidth, outer.w - insets.side * 2),
+    h: Math.max(1, outer.h - insets.top - insets.bottom - stripHeight),
+  };
+  const tiling = planTiling(items, content, gap);
+  return {
+    size: {
+      w: tiling.area.w + insets.side * 2,
+      h: tiling.area.h + insets.top + insets.bottom + stripHeight,
+    },
+    strip,
+    panes: placePanes(tiling.panes, { x: insets.side, y: insets.top + stripHeight }),
+  };
+}
+
+/**
+ * Lays a tiled region out: a top-level region takes the workspace size (unless the user sized
+ * it), a nested one takes the pane its parent gives it (`fixed`), and members fill it as a
+ * weighted split. Nested tiled regions tile recursively; free ones keep their arrangement and
+ * fill their pane.
+ */
+function tileRegion(draft: Draft, regionId: string, fixed: TileRect | null, depth = 0): void {
+  const region = draft.regions[regionId];
+  if (!region || region.collapsed || depth > MAX_REGION_DEPTH + 1) return;
+  if (fixed) draft.moveTo(regionId, fixed.x, fixed.y);
+  const outer = fixed
+    ? { w: fixed.w, h: fixed.h }
+    : !region.parentId && region.screenSized !== false
+      ? workspaceSize(draft.env.screen)
+      : { w: region.rect.w, h: region.rect.h };
+  const origin = (draft.regions[regionId] as RegionState).rect;
+  const layout = tiledLayout(draft, regionId, outer, depth);
+  const members = new Set(layout.panes.keys());
+  const weights = Object.fromEntries(
+    Object.entries(region.weights ?? {}).filter(([id]) => members.has(id))
+  );
+  const rect = roundRect({ x: origin.x, y: origin.y, ...layout.size });
+  draft.regions[regionId] = withWeights(
+    { ...(draft.regions[regionId] as RegionState), rect },
+    weights
+  );
+  const insets = regionInsets(draft.env.frameAllowance);
+  let x = origin.x + insets.side;
+  for (const id of layout.strip) {
+    draft.moveTo(id, x, origin.y + insets.top);
+    x += draft.rect(id).w + tilingGap(draft);
+  }
+  for (const [id, pane] of layout.panes) {
+    const at = { x: origin.x + pane.x, y: origin.y + pane.y, w: pane.w, h: pane.h };
+    if (!isRegionId(id)) draft.setTile(id, at);
+    else if (isTiled(draft.regions[id])) tileRegion(draft, id, at, depth + 1);
+    else fillPane(draft, id, at);
+  }
+  draft.retile.delete(regionId);
+}
+
+/** A free region in a tiled parent keeps its members' arrangement and fills its pane. */
+function fillPane(draft: Draft, regionId: string, pane: TileRect): void {
+  const region = draft.regions[regionId];
+  if (!region) return;
+  const needed = wrapRect(
+    draft.children(regionId).map((child) => draft.rect(child)),
+    draft.env.frameAllowance
+  );
+  const anchor = needed ?? region.rect;
+  draft.translate(regionId, pane.x - anchor.x, pane.y - anchor.y);
+  draft.setRegion(regionId, { rect: pane });
+}
+
+function withWeights(region: RegionState, weights: Record<string, number>): RegionState {
+  const next: Mutable<RegionState> = { ...region };
+  if (Object.keys(weights).length > 0) next.weights = weights;
+  else delete next.weights;
+  return next;
+}
+
+/** What a region's tiling depends on: its visible direct children and which are folded. */
+function childSignature(
+  state: LayoutState,
+  present: ReadonlySet<string>,
+  regionId: string
+): string {
+  const tiles = childTiles(state, regionId, present);
+  const regions = childRegions(state, regionId).map((id) =>
+    state.regions[id]?.collapsed ? `${id}:folded` : id
+  );
+  return [...tiles, ...regions].join('|');
+}
+
+/**
+ * After an op: re-tiles every tiled region whose members changed (windows added, removed,
+ * hidden, shown, folded) or that the op asked to re-tile, from the outermost tiled ancestor down,
+ * then keeps its siblings clear of its new size.
+ */
+function settleTiling(draft: Draft, before: LayoutState): void {
+  for (const [id, region] of Object.entries(draft.regions)) {
+    if (!isTiled(region) || region.collapsed) continue;
+    if (
+      !before.regions[id] ||
+      childSignature(before, draft.present, id) !== childSignature(draft.state, draft.present, id)
+    ) {
+      draft.retile.add(id);
+    }
+  }
+  for (let pass = 0; pass <= MAX_REGION_DEPTH && draft.retile.size > 0; pass++) {
+    const roots = new Set<string>();
+    for (const id of draft.retile) {
+      if (!isTiled(draft.regions[id]) || draft.regions[id]?.collapsed) continue;
+      let root = id;
+      let parent = draft.parent(root);
+      while (parent && isTiled(draft.regions[parent]) && !draft.regions[parent]?.collapsed) {
+        root = parent;
+        parent = draft.parent(root);
+      }
+      roots.add(root);
+    }
+    draft.retile.clear();
+    for (const root of roots) {
+      if (!draft.regions[root]) continue;
+      tileRegion(draft, root, null);
+      pushSiblings(draft, root);
+      growToFit(draft, draft.parent(root));
+    }
+  }
+  draft.retile.clear();
+}
+
+/** Switches a tiled region to free: the user placed or sized something in it by hand. */
+function freeRegion(draft: Draft, regionId: string | null): void {
+  if (regionId && isTiled(draft.regions[regionId])) {
+    draft.setRegion(regionId, { arrangement: 'free' });
+  }
+}
+
+/** A window's size adjustment in a tiled region for a resize request (null: not a weight). */
+function weightFor(draft: Draft, regionId: string, id: string, size: SizeSpec): number | null {
+  const weights = draft.regions[regionId]?.weights ?? {};
+  const current = weights[id] ?? 1;
+  switch (size.kind) {
+    case 'relative': {
+      if (size.factor === 'half') return current * (size.direction === 'grow' ? 1.5 : 0.5);
+      const step =
+        size.factor === 'bit'
+          ? 1.25
+          : size.factor === 'much'
+            ? WEIGHT_STEP * WEIGHT_STEP
+            : size.factor === 'double'
+              ? 2
+              : WEIGHT_STEP;
+      return current * (size.direction === 'grow' ? step : 1 / step);
+    }
+    case 'preset':
+      return { small: 0.6, medium: 1, default: 1, large: 2, wide: 2, tall: 2 }[size.preset];
+    case 'match':
+      // Same share as the other window, whatever the two kinds' defaults.
+      return draft.parent(size.like) === regionId
+        ? ((weights[size.like] ?? 1) * baseTileWeight(size.like)) / baseTileWeight(id)
+        : null;
+    default:
+      return null;
+  }
+}
+
+/** Tiles windows at the board root into a workspace-sized block where they already are. */
+function tileAtRoot(draft: Draft, ids: readonly string[]): void {
+  const ordered = readingOrder(ids, (id) => draft.rect(id));
+  const bounds = boundsOf(ordered.map((id) => draft.rect(id))) as TileRect;
+  const items: TilingItem[] = ordered.map((id) => ({
+    id,
+    weight: isRegionId(id) ? 1.5 : baseTileWeight(id),
+    min: paneMinimum(draft, id, 0),
+  }));
+  const tiling = planTiling(items, workspaceSize(draft.env.screen), tilingGap(draft));
+  for (const [id, rect] of placePanes(tiling.panes, { x: bounds.x, y: bounds.y })) {
+    if (!isRegionId(id)) {
+      draft.setTile(id, rect);
+    } else if (isTiled(draft.regions[id])) {
+      draft.setRegion(id, { screenSized: false });
+      tileRegion(draft, id, rect);
+    } else {
+      fillPane(draft, id, rect);
+    }
+  }
+  const pinned = new Set(ordered);
+  for (const id of ordered) pushSiblings(draft, id, pinned);
+}
+
 // ── Ops ──────────────────────────────────────────────────────────────────────
 
 type OpResult = string | { error: string };
@@ -740,13 +1020,16 @@ function opMove(draft: Draft, targets: readonly string[], to: Destination): OpRe
       }
       let anchorRect = draft.rect(to.anchor);
       let relocated = false;
+      const tiled = parentId !== null && isTiled(draft.regions[parentId]);
       for (const id of ids) {
         const before = draft.snapshot();
         draft.setParent(id, parentId);
         const rect = draft.rect(id);
         const pos = relativePosition(anchorRect, rect, to.side);
         draft.moveTo(id, pos.x, pos.y);
-        if (settle(draft, id, before) === 'relocated') relocated = true;
+        // In a tiled region the position only sets the order; the region re-tiles.
+        if (tiled && parentId) draft.retile.add(parentId);
+        else if (settle(draft, id, before) === 'relocated') relocated = true;
         // Several windows line up one after another on that side.
         anchorRect = draft.rect(id);
       }
@@ -763,6 +1046,14 @@ function opMove(draft: Draft, targets: readonly string[], to: Destination): OpRe
           : viewportRect(draft.env.viewport, draft.env.screen);
         const rect = draft.rect(id);
         const pos = slotPosition(scope, rect, to.slot);
+        if (parentId && isTiled(draft.regions[parentId])) {
+          // Just ahead of whoever holds that corner, so reading order gives it the slot.
+          const dx = to.slot.includes('left') ? -1 : to.slot.includes('right') ? 1 : 0;
+          const dy = to.slot.startsWith('top') ? -1 : to.slot.startsWith('bottom') ? 1 : 0;
+          draft.moveTo(id, pos.x + dx, pos.y + dy);
+          draft.retile.add(parentId);
+          continue;
+        }
         const before = draft.snapshot();
         draft.moveTo(id, pos.x, pos.y);
         settle(draft, id, before);
@@ -774,6 +1065,7 @@ function opMove(draft: Draft, targets: readonly string[], to: Destination): OpRe
       const dx = to.direction === 'left' ? -step : to.direction === 'right' ? step : 0;
       const dy = to.direction === 'up' ? -step : to.direction === 'down' ? step : 0;
       const pinned = new Set(ids);
+      for (const id of ids) freeRegion(draft, draft.parent(id));
       for (const id of ids) draft.translate(id, dx, dy);
       for (const id of ids) {
         pushSiblings(draft, id, pinned);
@@ -787,6 +1079,8 @@ function opMove(draft: Draft, targets: readonly string[], to: Destination): OpRe
       const problem = canReparent(draft, id, to.region);
       const region = problem ? draft.parent(id) : to.region;
       const from = draft.parent(id);
+      // Dragging within a tiled region is a hand placement: the region stops tiling.
+      if (region === from) freeRegion(draft, region);
       draft.setParent(id, region);
       draft.moveTo(id, to.x, to.y);
       growToFit(draft, region);
@@ -850,9 +1144,35 @@ function opResize(draft: Draft, targets: readonly string[], size: SizeSpec): OpR
     return { error: 'The window to match is gone.' };
   }
   for (const id of ids) {
+    const parentId = draft.parent(id);
+    if (parentId && isTiled(draft.regions[parentId])) {
+      const weight = weightFor(draft, parentId, id, size);
+      if (weight !== null) {
+        const region = draft.regions[parentId] as RegionState;
+        draft.regions[parentId] = withWeights(region, {
+          ...region.weights,
+          [id]: clampWeight(weight),
+        });
+        draft.retile.add(parentId);
+        continue;
+      }
+      freeRegion(draft, parentId);
+    }
     const rect = draft.rect(id);
     const next = resizedRect(draft, id, rect, size, like);
-    if (isRegionId(id)) {
+    if (isRegionId(id) && isTiled(draft.regions[id])) {
+      // A tiled region re-tiles into its new size; "default" hands its size back to the screen.
+      const region = draft.regions[id] as RegionState;
+      draft.setRegion(id, {
+        rect: {
+          ...region.rect,
+          w: Math.max(MIN_REGION_SIZE.w, next.w),
+          h: Math.max(MIN_REGION_SIZE.h, next.h),
+        },
+        screenSized: size.kind === 'preset' && size.preset === 'default',
+      });
+      draft.retile.add(id);
+    } else if (isRegionId(id)) {
       const region = draft.regions[id] as RegionState;
       const needed = wrapRect(
         draft.children(id).map((child) => draft.rect(child)),
@@ -969,6 +1289,26 @@ function opArrange(
     draft.targets.add(id);
     draft.setParent(id, parentId);
   }
+  const names0 = whole ? describeWhere(draft, scope) : listNames(ids.map((id) => draft.name(id)));
+  const tiledParent = parentId !== null && isTiled(draft.regions[parentId]);
+  if (layout === 'tile' || (tiledParent && (layout === 'grid' || layout === 'tidy'))) {
+    if (parentId) {
+      const region = draft.regions[parentId] as RegionState;
+      // "Tile" starts over: every window at its default share.
+      const next: RegionState = { ...region, arrangement: 'tiled' };
+      draft.regions[parentId] = layout === 'tile' ? withWeights(next, {}) : next;
+      draft.retile.add(parentId);
+      draft.targets.add(parentId);
+    } else {
+      if (whole) draft.forcePreview = true;
+      tileAtRoot(draft, ids);
+    }
+    if (layout !== 'tile')
+      return layout === 'grid' ? `Put ${names0} in a grid.` : `Tidied ${names0}.`;
+    const count = parentId ? draft.children(parentId).length : ids.length;
+    return count === 4 ? `Put ${names0} in quadrants.` : `Tiled ${names0}.`;
+  }
+  if (tiledParent) freeRegion(draft, parentId);
   ids = readingOrder(ids, (id) => draft.rect(id));
   const sizes = ids.map((id) => {
     const rect = draft.rect(id);
@@ -1217,6 +1557,11 @@ function opSwap(draft: Draft, a: string, b: string): OpResult {
   draft.setParent(b, parentA);
   draft.moveTo(a, rectB.x, rectB.y);
   draft.moveTo(b, rectA.x, rectA.y);
+  if (parentA === parentB && parentA && isTiled(draft.regions[parentA])) {
+    // Swapped places in the reading order; the region re-tiles them into each other's panes.
+    draft.retile.add(parentA);
+    return `Swapped ${draft.name(a)} and ${draft.name(b)}.`;
+  }
   // Different sizes can make the pair overlap: `a` holds its new place, `b` yields.
   pushSiblings(draft, a);
   pushSiblings(draft, b, new Set([a]));
@@ -1279,12 +1624,15 @@ function opCreateRegion(draft: Draft, op: Extract<LayoutOp, { op: 'createRegion'
     rect: { x: 0, y: 0, ...MIN_REGION_SIZE },
     collapsed: false,
     createdAt: draft.env.now,
+    // New regions are workspaces: members fill them and re-tile as they come and go.
+    arrangement: 'tiled',
     ...(color ? { color } : {}),
   };
 
   if (members.length === 0) {
-    // An empty region: a free spot in the parent near what the user sees.
-    const size = { w: 1200, h: 720 };
+    // An empty region: a free spot in the parent near what the user sees. A top-level one is
+    // screen sized, ready to be entered as a workspace.
+    const size = parentId ? { w: 1200, h: 720 } : workspaceSize(draft.env.screen);
     draft.setRegion(id, { rect: { x: 0, y: 0, ...size } });
     const occupied = draft
       .children(parentId)
@@ -1398,6 +1746,7 @@ function opCollapse(draft: Draft, regionId: string, collapsed: boolean): OpResul
   }
   draft.setRegion(regionId, { collapsed });
   if (!collapsed) {
+    if (isTiled(draft.regions[regionId])) draft.retile.add(regionId);
     growToFit(draft, regionId);
     pushSiblings(draft, regionId);
   }
@@ -1424,6 +1773,8 @@ function opHideShow(draft: Draft, targets: readonly string[], hide: boolean): Op
     for (const id of ids) {
       const region = draft.membership[id];
       if (region && !draft.regions[region]) delete draft.membership[id];
+      // Back in a tiled region it simply rejoins the tiling.
+      if (isTiled(draft.regions[draft.membership[id] ?? ''])) continue;
       const before = draft.snapshot();
       settle(draft, id, before);
     }
@@ -1465,6 +1816,12 @@ function applyOp(draft: Draft, op: LayoutOp): OpResult {
     case 'fitRegion':
       if (!draft.regions[op.region]) return { error: 'That region no longer exists.' };
       draft.targets.add(op.region);
+      if (isTiled(draft.regions[op.region])) {
+        // A tiled region fits the screen (top level) or its pane, re-tiling its windows.
+        if (!draft.parent(op.region)) draft.setRegion(op.region, { screenSized: true });
+        draft.retile.add(op.region);
+        return `Fitted ${draft.name(op.region)} to the screen.`;
+      }
       wrapRegion(draft, op.region);
       return `Fitted ${draft.name(op.region)} to its windows.`;
     case 'hide':
@@ -1495,8 +1852,10 @@ export function planLayout(
     const before = draft.snapshot();
     const result = applyOp(draft, op);
     if (typeof result === 'string') {
+      settleTiling(draft, before);
       draft.summaries.push(result);
     } else {
+      draft.retile.clear();
       draft.restore(before);
       draft.failures.push(result.error);
     }

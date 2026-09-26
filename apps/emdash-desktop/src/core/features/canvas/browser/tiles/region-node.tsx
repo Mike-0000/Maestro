@@ -2,7 +2,9 @@ import type { NodeProps } from '@xyflow/react';
 import {
   ChevronDown,
   ChevronRight,
+  LayoutGrid,
   LayoutPanelTop,
+  Maximize,
   Minimize2,
   Palette,
   Shrink,
@@ -94,6 +96,14 @@ export const RegionNode = observer(function RegionNode({ data, selected }: NodeP
       )}
     >
       <RegionHeader region={region} />
+      {region.windowCount === 0 && !region.collapsed && (
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 px-6 text-center text-foreground-muted">
+          <span className="text-base font-medium text-foreground">{region.name} is empty</span>
+          <span className="text-sm">
+            Drag windows in, or say &ldquo;move Atlas to {region.name}&rdquo;.
+          </span>
+        </div>
+      )}
       {badges && !region.collapsed && (
         <div className="pointer-events-none absolute inset-x-0 top-14 flex justify-center">
           <span
@@ -121,10 +131,10 @@ const RegionHeader = observer(function RegionHeader({ region }: { region: Region
     <div
       className="chorus-region-handle pointer-events-auto flex cursor-grab items-center gap-2 px-3 text-xs text-foreground-muted active:cursor-grabbing"
       style={{ height: REGION_HEADER }}
-      title="Drag to move this region and everything in it"
+      title="Drag to move this sub-canvas and everything in it. Double-click to open it."
       onDoubleClick={(event) => {
         event.stopPropagation();
-        store.enterStage({ kind: 'region', regionId: region.regionId });
+        store.goToRegion(region.regionId);
       }}
     >
       <button
@@ -194,6 +204,15 @@ const RegionHeader = observer(function RegionHeader({ region }: { region: Region
         <span className="size-2 shrink-0 animate-pulse rounded-full bg-amber-500" />
       )}
       <span className="flex-1" />
+      {store.focusedRegionId !== region.regionId && !region.collapsed && (
+        <HeaderButton
+          label="Open this sub-canvas (fills the screen)"
+          onClick={() => store.goToRegion(region.regionId)}
+        >
+          <Maximize className="size-3.5" />
+          Open
+        </HeaderButton>
+      )}
       <HeaderButton
         label="Open on the stage (full screen, tiled)"
         onClick={() => store.enterStage({ kind: 'region', regionId: region.regionId })}
@@ -202,7 +221,22 @@ const RegionHeader = observer(function RegionHeader({ region }: { region: Region
         <LayoutPanelTop className="size-3.5" />
         Stage
       </HeaderButton>
-      {!region.collapsed && (
+      {!region.collapsed && !region.tiled && (
+        <HeaderButton
+          label="Tile: windows share the whole sub-canvas (four make quadrants)"
+          onClick={() =>
+            run(`Tiled ${region.name}`, {
+              op: 'arrange',
+              targets: null,
+              scope: region.regionId,
+              layout: 'tile',
+            })
+          }
+        >
+          <LayoutGrid className="size-3.5" />
+        </HeaderButton>
+      )}
+      {!region.collapsed && !region.tiled && (
         <HeaderButton
           label="Tidy the windows inside"
           onClick={() =>
@@ -219,8 +253,13 @@ const RegionHeader = observer(function RegionHeader({ region }: { region: Region
       )}
       {!region.collapsed && (
         <HeaderButton
-          label="Shrink to fit its windows"
-          onClick={() => run(`Fitted ${region.name}`, { op: 'fitRegion', region: region.regionId })}
+          label={
+            region.tiled && !region.parentId ? 'Fit to the screen' : 'Shrink to fit its windows'
+          }
+          onClick={() => {
+            run(`Fitted ${region.name}`, { op: 'fitRegion', region: region.regionId });
+            if (store.focusedRegionId === region.regionId) store.requestFrame(region.regionId);
+          }}
         >
           <Shrink className="size-3.5" />
         </HeaderButton>

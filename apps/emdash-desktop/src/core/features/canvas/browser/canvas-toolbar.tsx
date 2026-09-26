@@ -1,6 +1,9 @@
 import {
+  ArrowLeft,
   BellRing,
   Boxes,
+  ChevronLeft,
+  ChevronRight,
   Eye,
   Group,
   LayoutPanelTop,
@@ -13,6 +16,7 @@ import {
 import { observer } from 'mobx-react-lite';
 import { cn } from '@core/primitives/styling/browser/cn';
 import type { OrganizeBy } from '../api/canvas-layout';
+import { adjacentRegion } from '../api/region-tiling';
 import { getCanvasStore } from '../contributions/browser/app-stores';
 
 const ORGANIZE_OPTIONS: { value: OrganizeBy | 'tidy'; label: string }[] = [
@@ -30,9 +34,11 @@ export const CanvasToolbar = observer(function CanvasToolbar() {
   const working = store.visibleAgentEntries.filter((entry) => entry.status === 'working').length;
   const selected = store.selection.length;
   const scope = store.currentRegion();
+  const inside = store.focusedRegionId;
 
   return (
     <div className="flex items-center gap-1 rounded-lg border border-border bg-background/95 p-1 text-xs shadow-md backdrop-blur">
+      {inside && <ScopeSegment regionId={inside} />}
       <select
         aria-label="Project filter"
         value={store.projectFilter ?? ''}
@@ -46,7 +52,10 @@ export const CanvasToolbar = observer(function CanvasToolbar() {
           </option>
         ))}
       </select>
-      <ToolbarButton label="Fit all agents" onClick={() => store.requestFit()}>
+      <ToolbarButton
+        label={inside ? 'Fit this sub-canvas to the screen' : 'Fit all agents'}
+        onClick={() => (inside ? store.refitScope() : store.requestFit())}
+      >
         <Maximize className="size-3.5" />
         Fit
       </ToolbarButton>
@@ -107,6 +116,7 @@ export const CanvasToolbar = observer(function CanvasToolbar() {
               source: 'command',
             });
             const created = result.ok ? result.plan.created[0] : undefined;
+            if (created) store.goToRegion(created);
             if (created) store.setRenamingRegion(created);
           }
         }}
@@ -150,6 +160,64 @@ export const CanvasToolbar = observer(function CanvasToolbar() {
         {store.visibleAgentEntries.length} agents · {working} working
       </span>
     </div>
+  );
+});
+
+/**
+ * While the user is in a sub-canvas: the way out (to its parent or the main canvas), where they
+ * are, and the sub-canvases beside it.
+ */
+const ScopeSegment = observer(function ScopeSegment({ regionId }: { regionId: string }) {
+  const store = getCanvasStore();
+  const region = store.regionEntry(regionId);
+  if (!region) return null;
+  const parent = region.parentId ? store.regionEntry(region.parentId) : undefined;
+  const layout = store.layoutState;
+  const previous = adjacentRegion(layout, regionId, -1);
+  const next = adjacentRegion(layout, regionId, 1);
+  const nameOf = (id: string | null) => (id ? (layout.regions[id]?.name ?? 'Sub-canvas') : '');
+  return (
+    <>
+      <ToolbarButton
+        label={`Back to ${parent ? parent.name : 'the main canvas'} (Esc)`}
+        onClick={() => store.up()}
+        className="text-blue-700 dark:text-blue-300"
+      >
+        <ArrowLeft className="size-3.5" />
+        {parent ? parent.name : 'Main canvas'}
+      </ToolbarButton>
+      <Divider />
+      <ToolbarButton
+        label={
+          previous
+            ? `Previous sub-canvas: ${nameOf(previous)} (Ctrl+Alt+PageUp)`
+            : 'No other sub-canvas here'
+        }
+        onClick={() => store.goToAdjacentRegion(-1)}
+        disabled={!previous}
+      >
+        <ChevronLeft className="size-3.5" />
+      </ToolbarButton>
+      <span
+        className="max-w-48 truncate px-1 text-sm font-semibold text-foreground"
+        title={region.name}
+      >
+        {region.name}
+      </span>
+      <span className="text-foreground-muted tabular-nums">
+        {region.windowCount} window{region.windowCount === 1 ? '' : 's'}
+      </span>
+      <ToolbarButton
+        label={
+          next ? `Next sub-canvas: ${nameOf(next)} (Ctrl+Alt+PageDown)` : 'No other sub-canvas here'
+        }
+        onClick={() => store.goToAdjacentRegion(1)}
+        disabled={!next}
+      >
+        <ChevronRight className="size-3.5" />
+      </ToolbarButton>
+      <Divider />
+    </>
   );
 });
 

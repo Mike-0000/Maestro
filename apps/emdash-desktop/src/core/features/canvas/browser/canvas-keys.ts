@@ -32,7 +32,9 @@ function keyboardTargets(store: CanvasStore): string[] {
  * - Ctrl+G: group the selection into a new region; Ctrl+Shift+G: ungroup a selected region.
  * - Alt+Arrow: nudge; Alt+Shift+Arrow: narrower/wider, shorter/taller.
  * - Ctrl+Enter: open the selection (or the region you are in) on the stage; Esc leaves it.
- * - Ctrl+Alt+Left/Right/Up: back, forward, and up a level; Ctrl+Alt+Home: the whole board.
+ * - Esc on the board: out of the sub-canvas you are in, one level at a time.
+ * - Ctrl+Alt+Left/Right/Up: back, forward, and up a level; Ctrl+Alt+Home: the main canvas.
+ * - Ctrl+Alt+PageDown/PageUp: the next or previous sub-canvas.
  */
 export function handleCanvasKey(store: CanvasStore, event: KeyboardEvent): boolean {
   if (event.defaultPrevented || isTypingTarget(event.target)) return false;
@@ -48,7 +50,8 @@ export function handleCanvasKey(store: CanvasStore, event: KeyboardEvent): boole
       store.setRenamingRegion(null);
       return true;
     }
-    return store.leaveStage();
+    if (store.leaveStage()) return true;
+    return store.focusedRegionId !== null && store.up();
   }
 
   if (mod && !event.altKey) {
@@ -87,6 +90,8 @@ export function handleCanvasKey(store: CanvasStore, event: KeyboardEvent): boole
       store.home();
       return true;
     }
+    if (key === 'PageDown') return store.goToAdjacentRegion(1) !== null;
+    if (key === 'PageUp') return store.goToAdjacentRegion(-1) !== null;
   }
 
   const direction = ARROWS[key];

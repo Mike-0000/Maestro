@@ -6,6 +6,7 @@ import { planLayout, readingOrder, regionAt, type LayoutEnv, type LayoutOp } fro
 import { rectContains, rectsOverlap, TILE_GAP } from './canvas-model';
 import {
   childRegions,
+  contentBox,
   EMPTY_LAYOUT,
   isRegionId,
   MAX_REGION_DEPTH,
@@ -16,6 +17,7 @@ import {
   type LayoutState,
   type LayoutWindow,
 } from './canvas-regions';
+import { workspaceSize } from './region-tiling';
 
 function agents(names: string[], task = (i: number) => `task${i}`): LayoutWindow[] {
   return names.map((name, i) => ({
@@ -130,7 +132,7 @@ describe('planLayout', () => {
     expect(result.state.regions[result.created[0] as string]?.name).toBe('Cedar group');
   });
 
-  it('moves a window into a region and grows the region', () => {
+  it('moves a window into a region, which re-tiles to share its space', () => {
     const first = plan(
       base,
       [{ op: 'createRegion', name: 'Review', members: ['agent:atlas'] }],
@@ -144,8 +146,37 @@ describe('planLayout', () => {
       env(windows, 2)
     );
     expect(second.state.membership['agent:echo']).toBe(regionId);
+    expect(second.state.regions[regionId]!.rect).toEqual(before);
+    const atlas = second.state.tiles['agent:atlas']!;
+    const echo = second.state.tiles['agent:echo']!;
+    expect(atlas.w).toBeLessThan(first.state.tiles['agent:atlas']!.w);
+    expect(echo).toMatchObject({ y: atlas.y, w: atlas.w, h: atlas.h });
+    expect(checkInvariants(second.state, windows)).toEqual([]);
+  });
+
+  it('grows a free region to fit a window moved into it', () => {
+    const first = plan(
+      base,
+      [{ op: 'createRegion', name: 'Review', members: ['agent:atlas'] }],
+      env(windows)
+    );
+    const regionId = first.created[0] as string;
+    const free = {
+      ...first.state,
+      regions: {
+        ...first.state.regions,
+        [regionId]: { ...first.state.regions[regionId]!, arrangement: 'free' as const },
+      },
+    };
+    const before = free.regions[regionId]!.rect;
+    const second = plan(
+      free,
+      [{ op: 'move', targets: ['agent:echo'], to: { kind: 'region', region: regionId } }],
+      env(windows, 2)
+    );
     const after = second.state.regions[regionId]!.rect;
     expect(after.w * after.h).toBeGreaterThan(before.w * before.h);
+    expect(second.state.tiles['agent:atlas']).toEqual(free.tiles['agent:atlas']);
     expect(checkInvariants(second.state, windows)).toEqual([]);
   });
 
@@ -299,11 +330,12 @@ describe('planLayout', () => {
       base,
       [
         { op: 'createRegion', name: 'Review', members: ['agent:atlas'] },
-        { op: 'resize', targets: ['agent:atlas'], size: { kind: 'preset', preset: 'large' } },
+        { op: 'resize', targets: ['agent:bravo'], size: { kind: 'preset', preset: 'large' } },
       ],
       env(windows)
     );
-    expect(result.state.tiles['agent:atlas']).toMatchObject({ w: 1080, h: 690 });
+    expect(result.state.membership['agent:atlas']).toBe(result.created[0]);
+    expect(result.state.tiles['agent:bravo']).toMatchObject({ w: 1080, h: 690 });
     expect(checkInvariants(result.state, windows)).toEqual([]);
   });
 
@@ -491,5 +523,196 @@ describe('region roster', () => {
   it('ids are recognizable', () => {
     expect(isRegionId('region:x')).toBe(true);
     expect(isRegionId('agent:x')).toBe(false);
+  });
+});
+
+describe('sub-canvas tiling', () => {
+  const windows = agents(['Atlas', 'Bravo', 'Cedar', 'Delta', 'Echo']);
+  const browser: LayoutWindow = {
+    tileId: 'browser:task0',
+    kind: 'browser',
+    name: 'task0 app',
+    taskId: 'task0',
+    taskName: 'task0',
+  };
+  const all = [...windows, browser];
+  const base: LayoutState = {
+    ...row(windows),
+    tiles: { ...row(windows).tiles, 'browser:task0': { x: 0, y: 1200, w: 960, h: 640 } },
+  };
+  const four = ['agent:atlas', 'agent:bravo', 'agent:cedar', 'agent:delta'];
+
+  function grouped(members: string[], e = env(all)) {
+    const result = plan(base, [{ op: 'createRegion', name: 'Summit', members }], e);
+    return { state: result.state, regionId: result.created[0] as string };
+  }
+
+  it('lays four agents out as quadrants of a screen-sized workspace', () => {
+    const { state, regionId } = grouped(four);
+    const region = state.regions[regionId]!;
+    expect(region.arrangement).toBe('tiled');
+    expect({ w: region.rect.w, h: region.rect.h }).toEqual(workspaceSize(env(all).screen));
+    const rects = four.map((id) => state.tiles[id]!);
+    expect(new Set(rects.map((rect) => rect.x)).size).toBe(2);
+    expect(new Set(rects.map((rect) => rect.y)).size).toBe(2);
+    expect(new Set(rects.map((rect) => `${rect.w}x${rect.h}`)).size).toBe(1);
+    // No waste: the quadrants reach the content box's far edges.
+    const box = contentBox(region, 36);
+    expect(Math.max(...rects.map((rect) => rect.x + rect.w))).toBe(box.x + box.w);
+    expect(Math.max(...rects.map((rect) => rect.y + rect.h))).toBe(box.y + box.h);
+    expect(checkInvariants(state, all)).toEqual([]);
+  });
+
+  it('gives an app browser more room than the agent beside it', () => {
+    const { state } = grouped(['agent:atlas', 'browser:task0']);
+    const agent = state.tiles['agent:atlas']!;
+    const app = state.tiles['browser:task0']!;
+    expect(app.h).toBe(agent.h);
+    expect(app.w / agent.w).toBeCloseTo(1.5, 1);
+    expect(checkInvariants(state, all)).toEqual([]);
+  });
+
+  it('re-tiles when windows leave, close, come back, or join', () => {
+    const { state, regionId } = grouped(['agent:atlas', 'agent:bravo', 'agent:cedar']);
+    const hidden = plan(state, [{ op: 'hide', targets: ['agent:cedar'] }], env(all, 2)).state;
+    const box = contentBox(hidden.regions[regionId]!, 36);
+    expect(hidden.tiles['agent:atlas']!.h).toBe(box.h);
+    expect(hidden.tiles['agent:bravo']!.h).toBe(box.h);
+    const shown = plan(hidden, [{ op: 'show', targets: ['agent:cedar'] }], env(all, 3)).state;
+    expect(shown.tiles['agent:cedar']!.h).toBeLessThan(box.h);
+    const joined = plan(
+      shown,
+      [{ op: 'move', targets: ['agent:delta'], to: { kind: 'region', region: regionId } }],
+      env(all, 4)
+    ).state;
+    const quadrants = four.map((id) => joined.tiles[id]!);
+    expect(new Set(quadrants.map((rect) => rect.y)).size).toBe(2);
+    const left = plan(
+      joined,
+      [{ op: 'move', targets: ['agent:delta'], to: { kind: 'region', region: null } }],
+      env(all, 5)
+    ).state;
+    expect(parentOf(left, 'agent:delta')).toBeNull();
+    expect(left.tiles['agent:atlas']!.h).toBeGreaterThan(quadrants[0]!.h);
+    for (const next of [hidden, shown, joined, left]) {
+      expect(checkInvariants(next, all)).toEqual([]);
+    }
+  });
+
+  it('makes a window larger by giving it a bigger share, not by overlapping', () => {
+    const { state, regionId } = grouped([...four.slice(0, 3), 'browser:task0']);
+    const before = state.tiles['browser:task0']!;
+    const next = plan(
+      state,
+      [
+        {
+          op: 'resize',
+          targets: ['browser:task0'],
+          size: { kind: 'relative', axis: 'both', factor: 'more', direction: 'grow' },
+        },
+      ],
+      env(all, 2)
+    ).state;
+    const after = next.tiles['browser:task0']!;
+    expect(after.w * after.h).toBeGreaterThan(before.w * before.h);
+    expect(next.regions[regionId]!.rect).toEqual(state.regions[regionId]!.rect);
+    expect(next.regions[regionId]!.weights).toEqual({ 'browser:task0': 1.5 });
+    expect(checkInvariants(next, all)).toEqual([]);
+  });
+
+  it('keeps a hand placement: dragging inside a tiled region frees it', () => {
+    const { state, regionId } = grouped(four);
+    const atlas = state.tiles['agent:atlas']!;
+    const dragged = plan(
+      state,
+      [
+        {
+          op: 'move',
+          targets: ['agent:atlas'],
+          to: { kind: 'exact', x: atlas.x + 24, y: atlas.y, region: regionId },
+        },
+      ],
+      env(all, 2)
+    ).state;
+    expect(dragged.regions[regionId]!.arrangement).toBe('free');
+    expect(dragged.tiles['agent:atlas']!.x).toBe(atlas.x + 24);
+    expect(dragged.tiles['agent:bravo']).toEqual(state.tiles['agent:bravo']);
+    // Tiling again puts it back in its quadrant.
+    const retiled = plan(
+      dragged,
+      [{ op: 'arrange', targets: null, scope: regionId, layout: 'tile' }],
+      env(all, 3)
+    );
+    expect(retiled.state.regions[regionId]!.arrangement).toBe('tiled');
+    expect(retiled.state.tiles['agent:atlas']).toEqual(atlas);
+    expect(retiled.summary).toContain('quadrants');
+  });
+
+  it('tiles loose windows on the board into quadrants where they are', () => {
+    const result = plan(
+      base,
+      [{ op: 'arrange', targets: four, scope: null, layout: 'tile' }],
+      env(all)
+    );
+    const rects = four.map((id) => result.state.tiles[id]!);
+    expect(new Set(rects.map((rect) => rect.x)).size).toBe(2);
+    expect(new Set(rects.map((rect) => rect.y)).size).toBe(2);
+    expect(Math.min(...rects.map((rect) => rect.x))).toBe(0);
+    expect(checkInvariants(result.state, all)).toEqual([]);
+  });
+
+  it('makes an empty top-level sub-canvas the size of the screen', () => {
+    const result = plan(base, [{ op: 'createRegion', name: 'Scratch', members: [] }], env(all));
+    const region = result.state.regions[result.created[0] as string]!;
+    expect({ w: region.rect.w, h: region.rect.h }).toEqual(workspaceSize(env(all).screen));
+    expect(checkInvariants(result.state, all)).toEqual([]);
+  });
+
+  it('tiles a nested sub-canvas as one pane of its parent', () => {
+    const { state, regionId } = grouped(four);
+    const nested = plan(
+      state,
+      [
+        {
+          op: 'createRegion',
+          name: 'Pair',
+          members: ['agent:cedar', 'agent:delta'],
+          parent: regionId,
+        },
+      ],
+      env(all, 2)
+    );
+    const pairId = nested.created[0] as string;
+    const next = nested.state;
+    expect(parentOf(next, pairId)).toBe(regionId);
+    expect(next.regions[pairId]!.arrangement).toBe('tiled');
+    const pair = contentBox(next.regions[pairId]!, 36);
+    expect(next.tiles['agent:cedar']!.x).toBe(pair.x);
+    expect(checkInvariants(next, all)).toEqual([]);
+  });
+
+  it('follows the screen when a tiled workspace is refitted', () => {
+    const { state, regionId } = grouped(four);
+    const wide = { ...env(all, 2), screen: { width: 2400, height: 1300 } };
+    const next = plan(state, [{ op: 'fitRegion', region: regionId }], wide).state;
+    const rect = next.regions[regionId]!.rect;
+    expect({ w: rect.w, h: rect.h }).toEqual(workspaceSize(wide.screen));
+    expect(checkInvariants(next, all)).toEqual([]);
+  });
+
+  it('grows past the screen rather than squeezing windows below their minimum', () => {
+    const many = agents(['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'A8', 'A9', 'A10', 'A11']);
+    const small = { ...env(many), screen: { width: 1200, height: 700 } };
+    const result = plan(
+      row(many),
+      [{ op: 'createRegion', name: 'Swarm', members: many.map((w) => w.tileId) }],
+      small
+    );
+    for (const window of many) {
+      const rect = result.state.tiles[window.tileId]!;
+      expect(rect.w).toBeGreaterThanOrEqual(360);
+      expect(rect.h).toBeGreaterThanOrEqual(220);
+    }
+    expect(checkInvariants(result.state, many)).toEqual([]);
   });
 });

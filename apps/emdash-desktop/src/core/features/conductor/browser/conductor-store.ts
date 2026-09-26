@@ -4,7 +4,7 @@ import type {
   AgentTileEntry,
   CanvasStore,
 } from '@core/features/canvas/api/browser/stores/canvas-store';
-import type { LayoutOp } from '@core/features/canvas/api/canvas-layout';
+import type { LayoutOp, LayoutPlan } from '@core/features/canvas/api/canvas-layout';
 import { isWithin } from '@core/features/canvas/api/canvas-regions';
 import { spokenProviderLabel } from '@core/features/canvas/api/provider-names';
 import { getCanvasBrowserHost } from '@core/features/canvas/contributions/browser/app-stores';
@@ -693,11 +693,14 @@ export class ConductorStore {
         return canvas.back() ? quiet('Back.') : said('Nowhere to go back to.');
       case 'forward':
         return canvas.forward() ? quiet('Forward.') : said('Nowhere to go forward to.');
-      case 'up':
-        return canvas.up() ? quiet('Up a level.') : said('Already showing the whole board.');
+      case 'up': {
+        if (!canvas.up()) return said('Already on the main canvas.');
+        const region = canvas.currentRegion();
+        return quiet(region ? `Back in ${canvas.windowName(region)}.` : 'Main canvas.');
+      }
       case 'home':
         canvas.home();
-        return quiet('Whole board.');
+        return quiet('Main canvas.');
       case 'leaveStage':
         return canvas.leaveStage() ? quiet('Back to the canvas.') : said('The stage is not open.');
       case 'page': {
@@ -715,8 +718,12 @@ export class ConductorStore {
         return this.stageAction(action.ids, action.immersive === true);
       case 'goToRegion':
         return canvas.goToRegion(action.regionId)
-          ? quiet(`Showing ${canvas.windowName(action.regionId)}.`)
+          ? this.arrival(action.regionId)
           : said('That region is gone.');
+      case 'adjacentRegion': {
+        const region = canvas.goToAdjacentRegion(action.step);
+        return region ? this.arrival(region) : said('There is no other sub-canvas here.');
+      }
       case 'renameAgent': {
         const entry = canvas.entryForTile(action.id);
         if (!entry) return said('That agent is gone.');
@@ -744,6 +751,30 @@ export class ConductorStore {
     }
   }
 
+  /**
+   * What to say on arriving in a sub-canvas. The move is visible, so only an empty one is spoken,
+   * with how to fill it.
+   */
+  private arrival(regionId: string): { reply: string; speak: boolean } {
+    const region = this.canvas.regionEntry(regionId);
+    if (!region) return { reply: 'That region is gone.', speak: true };
+    if (region.windowCount === 0) {
+      return {
+        reply: `${region.name} is empty. Say "move Atlas here" to add windows.`,
+        speak: true,
+      };
+    }
+    const count = `${region.windowCount} window${region.windowCount === 1 ? '' : 's'}`;
+    return { reply: `In ${region.name}, ${count}. Say "main canvas" to go back.`, speak: false };
+  }
+
+  /** A single new sub-canvas made by voice opens so it fills the screen. */
+  private enterCreated(plan: LayoutPlan): void {
+    const created = plan.created.filter((id) => id.startsWith('region:'));
+    const [only] = created;
+    if (created.length === 1 && only && !this.canvas.stageActive) this.canvas.goToRegion(only);
+  }
+
   /** Applies layout ops; a large change is previewed as outlines behind a short cancel window. */
   private async applyLayout(
     ops: readonly LayoutOp[],
@@ -754,6 +785,7 @@ export class ConductorStore {
     if (!result.ok) return { reply: result.reason, speak: true };
     const failures = result.plan.failures.length > 0 ? ` ${result.plan.failures.join(' ')}` : '';
     if (result.applied) {
+      this.enterCreated(result.plan);
       return { reply: `${result.plan.summary}${failures}`, speak: failures !== '' };
     }
     const startedAt = Date.now();
@@ -775,6 +807,7 @@ export class ConductorStore {
     const applied = canvas.applyGhost();
     if (!applied) return { reply: 'Cancelled.', speak: false };
     if (!applied.ok) return { reply: applied.reason, speak: true };
+    this.enterCreated(applied.plan);
     return { reply: `${applied.plan.summary}${failures}`, speak: failures !== '' };
   }
 
@@ -906,12 +939,24 @@ export class ConductorStore {
         if (!region || !region.startsWith('region:')) {
           return { content: 'Name a region to go to.', isError: true };
         }
-        canvas.goToRegion(region);
-        return { content: `Showing ${canvas.windowName(region)}.` };
+        if (!canvas.goToRegion(region)) return { content: 'That region is gone.', isError: true };
+        return { content: this.arrival(region).reply };
+      }
+      case 'leave_region': {
+        if (!canvas.up()) return { content: 'Already on the main canvas.', isError: true };
+        const parent = canvas.currentRegion();
+        return { content: parent ? `Back in ${canvas.windowName(parent)}.` : 'Main canvas.' };
+      }
+      case 'next_region':
+      case 'previous_region': {
+        const region = canvas.goToAdjacentRegion(input.action === 'next_region' ? 1 : -1);
+        return region
+          ? { content: this.arrival(region).reply }
+          : { content: 'There is no other sub-canvas here.', isError: true };
       }
       case 'home':
         canvas.home();
-        return { content: 'Showing the whole board.' };
+        return { content: 'Showing the main canvas.' };
       case 'back':
         return canvas.back()
           ? { content: 'Went back.' }

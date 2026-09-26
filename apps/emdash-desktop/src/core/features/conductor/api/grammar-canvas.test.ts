@@ -350,3 +350,120 @@ describe('arrange_canvas steps', () => {
     expect(result).toEqual({ error: expect.stringContaining('Step 2') });
   });
 });
+
+describe('sub-canvas voice', () => {
+  const four: CanvasEntity[] = [
+    ...entities.filter((entity) => entity.id !== 'agent:d'),
+    { id: 'agent:e', kind: 'agent', name: 'Echo', parentId: null },
+    { id: 'agent:f', kind: 'agent', name: 'Foxtrot', parentId: null },
+    { id: 'agent:g', kind: 'agent', name: 'Golf', parentId: null },
+  ];
+  const quad = ['agent:a', 'agent:b', 'agent:c', 'agent:e'];
+
+  it('tiles four selected agents into quadrants', () => {
+    expect(
+      ops(parse('put these four agents in quadrants', { entities: four, selection: quad }))
+    ).toEqual([{ op: 'arrange', targets: quad, scope: null, layout: 'tile' }]);
+    expect(
+      ops(parse('put Atlas, Bravo, Cedar and Echo in a 2 by 2 grid', { entities: four }))
+    ).toEqual([{ op: 'arrange', targets: quad, scope: null, layout: 'tile' }]);
+  });
+
+  it('asks when the count does not match what is meant', () => {
+    const three = ['agent:a', 'agent:b', 'agent:c'];
+    expect(
+      parse('put these four agents in quadrants', { entities: four, selection: three })
+    ).toMatchObject({ kind: 'clarify' });
+  });
+
+  it('tiles the sub-canvas the user is in, or a named one', () => {
+    const here = { op: 'arrange', targets: null, scope: 'region:review', layout: 'tile' };
+    expect(ops(parse('tile this', { currentRegion: 'region:review' }))).toEqual([here]);
+    expect(ops(parse('tile', { currentRegion: 'region:review' }))).toEqual([here]);
+    expect(ops(parse('tile the review region'))).toEqual([here]);
+  });
+
+  it('gives a window more room', () => {
+    expect(ops(parse('give the browser more room'))).toEqual([
+      {
+        op: 'resize',
+        targets: ['browser:t1'],
+        size: { kind: 'relative', axis: 'both', factor: 'more', direction: 'grow' },
+      },
+    ]);
+  });
+
+  it('goes into a sub-canvas on open rather than staging it', () => {
+    expect(parse('open review')).toEqual({
+      kind: 'canvas',
+      action: { type: 'goToRegion', regionId: 'region:review' },
+    });
+    expect(parse('full screen review')).toMatchObject({
+      kind: 'canvas',
+      action: { type: 'stage' },
+    });
+  });
+
+  it('switches to the newest sub-canvas, and asks when there is none', () => {
+    expect(parse('switch to the new one', { newestRegion: 'region:backend' })).toEqual({
+      kind: 'canvas',
+      action: { type: 'goToRegion', regionId: 'region:backend' },
+    });
+    expect(
+      parse('switch to this new sub canvas', { newestRegion: 'region:backend' })
+    ).toMatchObject({ action: { regionId: 'region:backend' } });
+    expect(parse('switch to the new one')).toMatchObject({ kind: 'clarify' });
+  });
+
+  it('switches back to the previous sub-canvas, else goes back', () => {
+    expect(parse('switch back', { previousRegion: 'region:review' })).toEqual({
+      kind: 'canvas',
+      action: { type: 'goToRegion', regionId: 'region:review' },
+    });
+    expect(parse('switch back')).toEqual({ kind: 'canvas', action: { type: 'back' } });
+  });
+
+  it('steps to the next and previous sub-canvas', () => {
+    expect(parse('next sub canvas')).toEqual({
+      kind: 'canvas',
+      action: { type: 'adjacentRegion', step: 1 },
+    });
+    expect(parse('go to the previous workspace')).toEqual({
+      kind: 'canvas',
+      action: { type: 'adjacentRegion', step: -1 },
+    });
+  });
+
+  it('leaves the sub-canvas, and says so on the main canvas', () => {
+    expect(parse('leave this sub canvas', { currentRegion: 'region:review' })).toEqual({
+      kind: 'canvas',
+      action: { type: 'up' },
+    });
+    expect(parse('exit')).toMatchObject({ kind: 'clarify' });
+    expect(parse('exit', { onStage: true })).toEqual({
+      kind: 'canvas',
+      action: { type: 'leaveStage' },
+    });
+  });
+
+  it('goes to the main canvas', () => {
+    for (const text of ['main canvas', 'back to the main canvas', 'switch to the main canvas']) {
+      expect(parse(text, { currentRegion: 'region:review' })).toEqual({
+        kind: 'canvas',
+        action: { type: 'home' },
+      });
+    }
+  });
+
+  it('resolves "this one" to the sub-canvas the user is in', () => {
+    expect(
+      resolveCanvasRef('this sub canvas', context({ currentRegion: 'region:review' }))
+    ).toEqual({ kind: 'match', ids: ['region:review'] });
+  });
+
+  it('maps the tile layout from the model tool', () => {
+    expect(stepsToOps([{ op: 'arrange', region: 'Review', layout: 'tile' }], context())).toEqual({
+      ops: [{ op: 'arrange', targets: null, scope: 'region:review', layout: 'tile' }],
+    });
+  });
+});

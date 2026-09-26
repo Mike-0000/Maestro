@@ -1,5 +1,5 @@
 import { toast } from '@emdash/ui/react/primitives';
-import { action, makeObservable, observable, reaction, runInAction } from 'mobx';
+import { action, comparer, makeObservable, observable, reaction, runInAction } from 'mobx';
 import { browserSessionStore } from '@core/features/browser/api/browser/browser-session-store';
 import { getBrowserClient } from '@core/features/browser/api/browser/client';
 import {
@@ -65,6 +65,8 @@ export class CanvasBrowserHost {
   readonly previews = observable.map<string, string>();
   /** Tasks whose app is starting from the canvas ("Run app"). */
   readonly starting = observable.set<string>();
+  /** Browsers in the sub-canvas the user is in: kept alive while it is focused. */
+  pinned: ReadonlySet<string> = new Set();
   private readonly lastUsed = new Map<string, number>();
   private readonly servers = new Map<string, PreviewServerStore>();
   private readonly registered = new Set<string>();
@@ -80,6 +82,8 @@ export class CanvasBrowserHost {
   constructor(private readonly canvas: CanvasStore) {
     makeObservable<CanvasBrowserHost, 'suspendOverBudget'>(this, {
       alive: observable.ref,
+      pinned: observable.ref,
+      setPinned: action,
       ensureAlive: action,
       suspend: action,
       placeSurface: action,
@@ -91,6 +95,18 @@ export class CanvasBrowserHost {
     void this.refreshSettings();
     void this.subscribe();
     this.disposers.push(
+      // Entering a sub-canvas mounts every app browser in it, and keeps them mounted while the
+      // user stays; leaving releases them to the usual most-recently-used budget.
+      reaction(
+        () => {
+          const promoted = this.canvas.promotedSet;
+          return this.canvas.browserEntries
+            .filter((entry) => promoted.has(entry.tileId))
+            .map((entry) => entry.browserId);
+        },
+        (ids) => this.setPinned(ids),
+        { fireImmediately: true, equals: comparer.structural }
+      ),
       // Sessions for every browser on the board; control synced whenever it changes.
       reaction(
         () => this.canvas.browserEntries.map((entry) => `${entry.browserId}:${entry.control}`),
@@ -143,6 +159,16 @@ export class CanvasBrowserHost {
     this.suspendOverBudget();
   }
 
+  /** Pins the focused sub-canvas's browsers (mounting them); unpinned ones become suspendable. */
+  setPinned(browserIds: readonly string[]): void {
+    this.pinned = new Set(browserIds);
+    const missing = browserIds.filter((id) => !this.alive.includes(id));
+    const now = Date.now();
+    for (const id of browserIds) this.lastUsed.set(id, now);
+    if (missing.length > 0) this.alive = [...this.alive, ...missing];
+    this.suspendOverBudget();
+  }
+
   touch(browserId: string): void {
     this.lastUsed.set(browserId, Date.now());
   }
@@ -181,6 +207,7 @@ export class CanvasBrowserHost {
       alive: this.alive,
       lastUsed: this.lastUsed,
       leased,
+      pinned: this.pinned,
       budget: this.settings.maxAliveBrowsers,
     });
     if (suspend.length === 0) return;

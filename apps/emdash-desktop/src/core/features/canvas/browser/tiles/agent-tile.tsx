@@ -18,6 +18,7 @@ import {
   resolveTileDetail,
   zoomBand,
 } from '../../api/canvas-model';
+import { outsideLiveBudget } from '../../api/region-tiling';
 import { getCanvasStore } from '../../contributions/browser/app-stores';
 import { AgentAcpLive, AgentAcpPreview } from './agent-acp';
 import { AgentPreview } from './agent-preview';
@@ -41,13 +42,17 @@ export const AgentTileNode = observer(function AgentTileNode({ data, selected }:
 
   if (!entry) return null;
 
+  // Windows of the sub-canvas the user is in render fully; the rest of the board shares what is
+  // left of the usual live budget, by their own focus order.
+  const promoted = store.isPromoted(tileId);
   const detail = resolveTileDetail({
     zoom: detailZoomForBand(band),
     // onlyRenderVisibleElements unmounts off-screen nodes; a mounted tile is visible.
     visible: true,
-    focusRank: store.focusRank(tileId),
-    liveBudget: DEFAULT_LIVE_TILE_BUDGET,
+    focusRank: store.outsideFocusRank(tileId),
+    liveBudget: outsideLiveBudget(DEFAULT_LIVE_TILE_BUDGET, store.promotedTileIds.length),
     hasSession: store.shouldAttach(entry),
+    promoted,
   });
   const focused = store.focusedTileId === tileId;
   const attention = needsAttention(entry);
@@ -106,7 +111,7 @@ export const AgentTileNode = observer(function AgentTileNode({ data, selected }:
             interactive={band === 'interactive'}
             autoFocus={focused}
             onActivate={() => store.requestFocus(tileId)}
-            onReleaseFocus={() => store.requestFit()}
+            onReleaseFocus={() => store.reframe()}
           />
         ) : (
           <AgentPreview entry={entry} onActivate={() => store.requestFocus(tileId)} />

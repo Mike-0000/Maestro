@@ -63,6 +63,9 @@ const regionSchema = z.object({
   color: z.enum(REGION_COLORS).optional(),
   createdAt: z.number(),
   auto: z.boolean().optional(),
+  arrangement: z.enum(['tiled', 'free']).optional(),
+  weights: z.record(z.string(), z.number()).optional(),
+  screenSized: z.boolean().optional(),
 });
 
 const splitNodeSchema: z.ZodType<SplitNode> = z.lazy(() =>

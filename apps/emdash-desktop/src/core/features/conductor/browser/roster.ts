@@ -87,6 +87,8 @@ export function buildCanvasRefContext(canvas: CanvasStore, now = Date.now()): Ca
     change && now - change.at < RECENT_CHANGE_MS
       ? change.targets.filter((id) => entities.some((entity) => entity.id === id))
       : [];
+  const known = (id: string | null) =>
+    id && entities.some((entity) => entity.id === id) ? id : null;
   return {
     entities,
     selection: [...canvas.selection],
@@ -94,6 +96,8 @@ export function buildCanvasRefContext(canvas: CanvasStore, now = Date.now()): Ca
     recent,
     currentRegion: canvas.currentRegion(),
     onStage: canvas.stageActive,
+    newestRegion: known(canvas.newestRegionId),
+    previousRegion: known(canvas.previousRegionId),
   };
 }
 

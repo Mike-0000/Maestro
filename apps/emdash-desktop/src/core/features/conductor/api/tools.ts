@@ -121,7 +121,12 @@ export const conductorToolSchemas = {
           slot: z.enum(ARRANGE_SLOTS).optional().describe('place: spot in the view instead.'),
           size: z.enum(ARRANGE_SIZES).optional(),
           like: z.string().optional().describe("resize: match this window's size."),
-          layout: z.enum(['grid', 'row', 'column', 'tidy']).optional(),
+          layout: z
+            .enum(['grid', 'row', 'column', 'tidy', 'tile'])
+            .optional()
+            .describe(
+              'arrange: tile fills the region (or a new one) as a weighted split; four make quadrants.'
+            ),
           by: z.enum(['task', 'project', 'status', 'provider']).optional(),
         })
       )
@@ -129,7 +134,18 @@ export const conductorToolSchemas = {
       .max(12),
   }),
   canvas_view: z.object({
-    action: z.enum(['stage', 'leave_stage', 'go_to_region', 'home', 'back', 'undo', 'redo']),
+    action: z.enum([
+      'stage',
+      'leave_stage',
+      'go_to_region',
+      'leave_region',
+      'next_region',
+      'previous_region',
+      'home',
+      'back',
+      'undo',
+      'redo',
+    ]),
     windows: z
       .array(z.string().min(1))
       .optional()
@@ -181,7 +197,7 @@ const descriptions: Record<ConductorToolName, string> = {
   arrange_canvas:
     'Rearrange canvas windows in one undoable change: group windows into named regions (sub-canvases), move them into or out of regions, place them next to each other or in a spot, resize, line up, organize by task/project/status/provider, swap, and rename, recolor, collapse, fit, or dissolve regions. Steps run in order; large changes are previewed briefly first. Windows keep running; nothing is closed.',
   canvas_view:
-    'Change what the user looks at: put windows or a region on the stage (tiled full screen, live), leave the stage, zoom to a region, show the whole board, go back, or undo/redo the last layout change.',
+    'Change what the user looks at: put windows or a region on the stage (tiled full screen, live), leave the stage, go into a sub-canvas (it fills the screen), leave it for its parent, go to the next or previous sub-canvas, show the main canvas, go back, or undo/redo the last layout change.',
   stop_agent:
     "Stop an agent's session entirely (ends its process; the conversation is kept and can be resumed). Only when the user asks to stop, kill, or shut down an agent, not to interrupt its current step; the user confirms first.",
 };

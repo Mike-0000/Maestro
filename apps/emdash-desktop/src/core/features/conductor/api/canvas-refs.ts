@@ -1,8 +1,9 @@
 /**
  * Resolves spoken references to canvas windows and regions: names ("Atlas", "the Review region"),
  * lists ("Atlas and Bravo"), pronouns ("these" is the selection, "them" what the last change
- * touched, "this" the focused window), status groups ("the waiting ones"), and kinds ("the
- * browsers"). Pure; never guesses between two candidates.
+ * touched, "this" the focused window), status groups ("the waiting ones"), kinds ("the
+ * browsers"), counts ("these four agents"), and sub-canvases by recency ("the new one", "the other
+ * one"). Pure; never guesses between two candidates.
  */
 
 import type { WindowStatus } from '@core/features/canvas/api/canvas-regions';
@@ -41,6 +42,10 @@ export type CanvasRefContext = {
   /** The region the user is looking at (board scope or stage region). */
   readonly currentRegion: string | null;
   readonly onStage: boolean;
+  /** Region made most recently ("the new sub-canvas", "the one I just made"). */
+  readonly newestRegion?: string | null;
+  /** Region the user was in before this one ("the other one", "switch back"). */
+  readonly previousRegion?: string | null;
 };
 
 export type RefResult =
@@ -58,8 +63,28 @@ const THEM = /^(?:them|those|they|those ones|those windows|those agents|both|bot
 const IT = /^(?:it|that|that one|that window|that agent)$/;
 const THIS =
   /^(?:this|this one|this window|this agent|current|focused|the focused one|the current one)$/;
-const HERE_REGION =
-  /^(?:here|this region|this group|this area|the current region|current region|the region i'?m in)$/;
+const REGION_WORD = '(?:region|group|area|sub ?canvas|workspace|space)';
+const HERE_REGION = new RegExp(
+  `^(?:here|this ${REGION_WORD}|the current ${REGION_WORD}|current ${REGION_WORD}|the ${REGION_WORD} i'?m in)$`
+);
+const NEW_REGION = new RegExp(
+  `^(?:(?:this |that )?new(?:est)?(?: one| ${REGION_WORD})?|latest(?: one| ${REGION_WORD})?|(?:the )?(?:one|${REGION_WORD}) (?:i|we|you) just (?:made|created|opened|set up)|last ${REGION_WORD} (?:i|we|you) (?:made|created))$`
+);
+const PREVIOUS_REGION = new RegExp(
+  `^(?:(?:the )?(?:other|previous|last|old) (?:one|${REGION_WORD})|(?:the )?(?:one|${REGION_WORD}) (?:i was (?:in|on|just in)|before)|where i was)$`
+);
+const COUNTED =
+  /^(?:(these|those|them|the|all|all the|all of the|all of these) )?(two|three|four|five|six|seven|eight|nine|2|3|4|5|6|7|8|9)(?: of them)?(?: (agents|windows|ones|browsers|apps))?$/;
+const COUNT_WORDS: Record<string, number> = {
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+};
 const ALL =
   /^(?:all|everything|everyone|every window|every agent|all windows|all agents|all (?:the )?(?:windows|agents)|all of them)$/;
 const BROWSERS = /^(?:browsers|apps|app browsers|all (?:the )?(?:browsers|apps|app browsers))$/;
@@ -67,8 +92,8 @@ const ONE_BROWSER = /^(?:browser|app|app browser|the browser|the app)$/;
 const NOTES = /^(?:notes|all (?:the )?notes|sticky notes)$/;
 const ONE_NOTE = /^(?:note|the note|sticky note)$/;
 const TASK_BROWSER = /^(.+?)(?:'s)? (?:app|browser|app browser)$/;
-const REGION_QUALIFIED_BEFORE = /^(?:region|group|area|sub ?canvas|space|zone)\s+(.+)$/;
-const REGION_QUALIFIED_AFTER = /^(.+?)\s+(?:region|group|area|sub ?canvas|space|zone)$/;
+const REGION_QUALIFIED_BEFORE = /^(?:region|group|area|sub ?canvas|workspace|space|zone)\s+(.+)$/;
+const REGION_QUALIFIED_AFTER = /^(.+?)\s+(?:region|group|area|sub ?canvas|workspace|space|zone)$/;
 
 const STATUS_WORDS: Record<string, WindowStatus> = {
   waiting: 'needs-you',
@@ -163,11 +188,83 @@ export function resolveNamed(spoken: string, candidates: readonly CanvasEntity[]
   return NONE;
 }
 
+/** "The new one", "the other one": a region by when the user made or visited it. */
+function recencyRegion(text: string, context: CanvasRefContext): RefResult {
+  const known = (id: string | null | undefined) =>
+    id && context.entities.some((entity) => entity.id === id && entity.kind === 'region');
+  if (NEW_REGION.test(text)) {
+    return known(context.newestRegion)
+      ? match([context.newestRegion as string])
+      : { kind: 'clarify', question: 'I have not made a sub-canvas yet. Which one do you mean?' };
+  }
+  if (PREVIOUS_REGION.test(text)) {
+    return known(context.previousRegion)
+      ? match([context.previousRegion as string])
+      : { kind: 'clarify', question: 'You have not been in another sub-canvas yet. Which one?' };
+  }
+  return NONE;
+}
+
+/** True when `id` is inside `regionId` at any depth. */
+function isInside(context: CanvasRefContext, id: string, regionId: string): boolean {
+  const byId = new Map(context.entities.map((entity) => [entity.id, entity]));
+  let parent = byId.get(id)?.parentId ?? null;
+  const seen = new Set<string>();
+  while (parent && !seen.has(parent)) {
+    if (parent === regionId) return true;
+    seen.add(parent);
+    parent = byId.get(parent)?.parentId ?? null;
+  }
+  return false;
+}
+
+/**
+ * "These four agents", "the two browsers", "all three": a pool (the selection, what was just
+ * touched, the region in view, or the board) that must hold exactly that many, else a question.
+ */
+function resolveCounted(text: string, context: CanvasRefContext): RefResult {
+  const counted = COUNTED.exec(text);
+  if (!counted?.[2]) return NONE;
+  const [, pronoun, number, noun] = counted;
+  const count = COUNT_WORDS[number as string] ?? Number(number);
+  const kind: CanvasEntityKind | null =
+    noun === 'agents' ? 'agent' : noun === 'browsers' || noun === 'apps' ? 'browser' : null;
+  const ofKind = (ids: readonly string[]) =>
+    ids.filter((id) => {
+      const entity = context.entities.find((candidate) => candidate.id === id);
+      return entity && entity.kind !== 'region' && (!kind || entity.kind === kind);
+    });
+  const visible = windows(context).filter((entity) => !kind || entity.kind === kind);
+  const here = context.currentRegion
+    ? visible.filter((entity) => isInside(context, entity.id, context.currentRegion as string))
+    : visible;
+  const inView = here.map((entity) => entity.id);
+  // "These" is what is selected, else what is in view; "those" what was just touched.
+  const pools =
+    pronoun === 'these' || pronoun === 'all of these'
+      ? [ofKind(context.selection), inView]
+      : pronoun === 'those' || pronoun === 'them'
+        ? [ofKind(context.recent), ofKind(context.selection)]
+        : [inView];
+  const pool = pools.find((ids) => ids.length > 0) ?? [];
+  if (pool.length === count) return match(pool);
+  const label = noun && noun !== 'ones' ? noun : 'windows';
+  return {
+    kind: 'clarify',
+    question:
+      pool.length === 0
+        ? `I don't see ${count} ${label} here. Which ones?`
+        : `I see ${pool.length} ${label} here, not ${count}. Which ${count}?`,
+  };
+}
+
 /** A region reference only: "Review", "the Review region", "region Review", "here". */
 export function resolveRegionRef(reference: string, context: CanvasRefContext): RefResult {
   const text = tidy(reference);
   if (!text) return NONE;
   if (HERE_REGION.test(text)) return match(context.currentRegion ? [context.currentRegion] : []);
+  const recent = recencyRegion(text, context);
+  if (recent.kind !== 'none') return recent;
   if (SELECTION.test(text) || THIS.test(text) || IT.test(text)) {
     const pool = SELECTION.test(text)
       ? context.selection
@@ -210,6 +307,12 @@ function resolveSingle(text: string, context: CanvasRefContext, prefer: RefPrefe
   }
   if (HERE_REGION.test(text)) return resolveRegionRef(text, context);
   if (ALL.test(text)) return match(windows(context).map((entity) => entity.id));
+  const counted = resolveCounted(text, context);
+  if (counted.kind !== 'none') return counted;
+  if (prefer !== 'window') {
+    const recent = recencyRegion(text, context);
+    if (recent.kind !== 'none') return recent;
+  }
   if (NEEDS_ME.test(text)) {
     return match(
       windows(context)

@@ -17,14 +17,16 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CanvasStore } from '@core/features/canvas/api/browser/stores/canvas-store';
 import { cn } from '@core/primitives/styling/browser/cn';
 import { regionAt } from '../api/canvas-layout';
-import { MAX_ZOOM, MIN_ZOOM, type TileRect } from '../api/canvas-model';
+import { MAX_ZOOM, MIN_ZOOM, viewportRect, type TileRect } from '../api/canvas-model';
 import {
   descendantRegions,
   descendantTiles,
   isRegionId,
   isWithin,
   regionFootprint,
+  type LayoutState,
 } from '../api/canvas-regions';
+import { frameViewport } from '../api/region-tiling';
 import { getCanvasStore } from '../contributions/browser/app-stores';
 import { handleCanvasKey } from './canvas-keys';
 import { CanvasToolbar } from './canvas-toolbar';
@@ -47,6 +49,10 @@ const nodeTypes: NodeTypes = {
 const overlayProps = { [CANVAS_OVERLAY_ATTRIBUTE]: '' };
 
 const FOCUS_ANIMATION_MS = 350;
+/** Entering, leaving, and switching sub-canvases: a little slower, so the move reads. */
+const SCOPE_ANIMATION_MS = 420;
+/** Windows and regions outside the sub-canvas the user is in recede. */
+const OUTSIDE_SCOPE_OPACITY = 0.3;
 /** How long layout changes animate and their targets glow. */
 const LAYOUT_ANIMATION_MS = 450;
 const FLASH_MS = 1600;
@@ -63,9 +69,19 @@ function tileNode(type: string, rect: TileRect, id: string, data: Record<string,
   };
 }
 
+/** Whether a node is outside the focused sub-canvas (it recedes while the user is in one). */
+function outsideScope(layout: LayoutState, scope: string | null, id: string): boolean {
+  return scope !== null && !isWithin(layout, id, scope);
+}
+
+const recede = (outside: boolean) => (outside ? { opacity: OUTSIDE_SCOPE_OPACITY } : undefined);
+
 /** Desired node geometry from the store; React Flow keeps selection and drag state. */
 function buildNodes(store: CanvasStore): Node[] {
   const nodes: Node[] = [];
+  const layout = store.layoutState;
+  const scope = store.focusedRegionId;
+  const outside = (id: string) => outsideScope(layout, scope, id);
   // Regions first and lowest (nested ones above their parents), then task frames, then windows.
   // Only their header strips take pointer input.
   for (const region of store.regionEntries) {
@@ -77,7 +93,7 @@ function buildNodes(store: CanvasStore): Node[] {
       height: region.rect.h,
       zIndex: -20 + region.depth,
       dragHandle: '.chorus-region-handle',
-      style: { pointerEvents: 'none' },
+      style: { pointerEvents: 'none', ...recede(outside(region.regionId)) },
       data: { regionId: region.regionId },
     });
   }
@@ -91,37 +107,40 @@ function buildNodes(store: CanvasStore): Node[] {
       zIndex: -1,
       selectable: false,
       dragHandle: '.chorus-frame-handle',
-      style: { pointerEvents: 'none' },
+      style: { pointerEvents: 'none', ...recede(frame.tileIds.some(outside)) },
       data: { frameId: frame.frameId },
     });
   }
   for (const entry of store.visibleAgentEntries) {
     if (store.isFolded(entry.tileId)) continue;
-    nodes.push(
-      tileNode('agent', store.tileRect(entry.tileId), entry.tileId, {
+    nodes.push({
+      ...tileNode('agent', store.tileRect(entry.tileId), entry.tileId, {
         tileId: entry.tileId,
         projectId: entry.projectId,
         taskId: entry.taskId,
         conversationId: entry.conversationId,
-      })
-    );
+      }),
+      style: recede(outside(entry.tileId)),
+    });
   }
   for (const browser of store.visibleBrowserEntries) {
     if (store.isFolded(browser.tileId)) continue;
-    nodes.push(
-      tileNode('browser', store.tileRect(browser.tileId), browser.tileId, {
+    nodes.push({
+      ...tileNode('browser', store.tileRect(browser.tileId), browser.tileId, {
         tileId: browser.tileId,
-      })
-    );
+      }),
+      style: recede(outside(browser.tileId)),
+    });
   }
   for (const note of store.noteEntries) {
     if (store.isFolded(note.tileId)) continue;
-    nodes.push(
-      tileNode('note', store.tileRect(note.tileId), note.tileId, {
+    nodes.push({
+      ...tileNode('note', store.tileRect(note.tileId), note.tileId, {
         tileId: note.tileId,
         noteId: note.noteId,
-      })
-    );
+      }),
+      style: recede(outside(note.tileId)),
+    });
   }
   nodes.push(...ghostNodes(store));
   return nodes;
@@ -173,6 +192,7 @@ function mergeNodes(previous: Node[], next: Node[]): Node[] {
       width: node.width,
       height: node.height,
       zIndex: node.zIndex,
+      style: node.style,
     };
   });
 }
@@ -229,22 +249,38 @@ const Board = observer(function Board({ container }: { container: HTMLDivElement
         (command) => {
           if (!command) return;
           store.consumeViewportCommand(command.id);
-          if (command.kind === 'focus') {
-            const rect = isRegionId(command.tileId)
-              ? store.regionEntry(command.tileId)?.rect
-              : store.tileRect(command.tileId);
-            if (!rect) return;
-            void flow.setCenter(rect.x + rect.w / 2, rect.y + rect.h / 2, {
-              zoom: 1,
-              duration: FOCUS_ANIMATION_MS,
-            });
-          } else {
-            void flow.fitView({
-              nodes: command.tileIds?.map((id) => ({ id })),
-              padding: 0.12,
-              duration: FOCUS_ANIMATION_MS,
-              maxZoom: 1,
-            });
+          switch (command.kind) {
+            case 'focus': {
+              const rect = isRegionId(command.tileId)
+                ? store.regionEntry(command.tileId)?.rect
+                : store.tileRect(command.tileId);
+              if (!rect) return;
+              void flow.setCenter(rect.x + rect.w / 2, rect.y + rect.h / 2, {
+                zoom: 1,
+                duration: FOCUS_ANIMATION_MS,
+              });
+              return;
+            }
+            case 'fit':
+              void flow.fitView({
+                nodes: command.tileIds?.map((id) => ({ id })),
+                padding: 0.12,
+                duration: FOCUS_ANIMATION_MS,
+                maxZoom: 1,
+              });
+              return;
+            case 'frame': {
+              // The sub-canvas fills the screen below the toolbar; screen-sized ones land at zoom 1.
+              const rect = store.regionEntry(command.regionId)?.rect;
+              if (!rect) return;
+              const viewport = frameViewport(rect, store.boardSize);
+              store.setScopeFramedZoom(viewport.zoom);
+              void flow.setViewport(viewport, { duration: SCOPE_ANIMATION_MS });
+              return;
+            }
+            case 'restore':
+              void flow.setViewport(command.viewport, { duration: SCOPE_ANIMATION_MS });
+              return;
           }
         },
         { fireImmediately: true }
@@ -416,8 +452,22 @@ const Board = observer(function Board({ container }: { container: HTMLDivElement
         const [only] = dragged;
         if (dragged.length === 1 && only?.id.startsWith('note:')) store.noteDropped(only.id);
       }}
-      onMoveEnd={(_event, viewport) => store.setViewport(viewport)}
-      onPaneClick={() => store.focusTile(null)}
+      onMoveEnd={(event, viewport) => {
+        store.setViewport(viewport);
+        // Only the user's own pans and zooms leave a sub-canvas; framing it never does.
+        if (event) store.cameraMoved(viewportRect(viewport, store.boardSize), viewport.zoom);
+      }}
+      onPaneClick={(event) => {
+        store.focusTile(null);
+        // Clicking the receded board outside the sub-canvas steps out of it.
+        const scope = store.focusedRegionId;
+        const rect = scope ? store.regionEntry(scope)?.rect : undefined;
+        if (!rect) return;
+        const at = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
+        const inside =
+          at.x >= rect.x && at.x <= rect.x + rect.w && at.y >= rect.y && at.y <= rect.y + rect.h;
+        if (!inside) store.leaveScope();
+      }}
       onDoubleClick={(event) => {
         // Double-clicking empty canvas drops a note there.
         const target = event.target as HTMLElement;
@@ -461,15 +511,17 @@ const Board = observer(function Board({ container }: { container: HTMLDivElement
       )}
     >
       <Background variant={BackgroundVariant.Dots} gap={24} size={1.2} className="opacity-40" />
-      <MiniMap
-        pannable
-        zoomable
-        nodeColor={minimapColor}
-        nodeStrokeWidth={0}
-        maskColor="rgb(0 0 0 / 0.08)"
-        className="!rounded-lg !border !border-border !bg-background-secondary"
-        {...overlayProps}
-      />
+      {!store.focusedRegionId && (
+        <MiniMap
+          pannable
+          zoomable
+          nodeColor={minimapColor}
+          nodeStrokeWidth={0}
+          maskColor="rgb(0 0 0 / 0.08)"
+          className="!rounded-lg !border !border-border !bg-background-secondary"
+          {...overlayProps}
+        />
+      )}
       <Panel position="top-left" {...overlayProps}>
         <CanvasToolbar />
       </Panel>

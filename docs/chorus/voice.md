@@ -74,6 +74,13 @@ terminal agent that is showing a permission prompt; say "allow" or "deny" instea
 Windows can be grouped into named **regions** (sub-canvases) that nest, and any region or set of
 windows can go on the **stage**: tiled full screen, live, without moving anything on the board.
 
+A sub-canvas is a workspace. Going into one zooms it to fill the screen, and every window in it
+runs live (terminals interactive, browsers awake) for as long as you are there. A new sub-canvas
+made by voice opens by itself. A **tiled** sub-canvas splits its space between its windows with
+no gaps or overlap: four windows make quadrants, and a browser gets more room than a terminal.
+When windows join or leave, the split redraws. When the app window resizes, a sub-canvas that
+fills the screen resizes with it. If you size or place it yourself, it keeps your layout.
+
 | Say | What happens |
 | --- | --- |
 | "Group Atlas and Bravo as Review" / "make a region called Docs with Cedar" | New region around those windows |
@@ -82,15 +89,22 @@ windows can go on the **stage**: tiled full screen, live, without moving anythin
 | "Put Cedar next to Atlas" / "move the browser to the top right" / "move Atlas a bit left" | Places windows |
 | "Make Atlas bigger" / "make the browser half the screen" / "make Cedar the same size as Atlas" | Resizes |
 | "Put Atlas and Bravo side by side" / "tidy up" / "swap Atlas and Cedar" | Lines windows up |
+| "Put these four agents in quadrants" / "tile them" / "tile this" | Tiles the windows, or the sub-canvas you are in |
+| "Make the browser larger" / "give Atlas more room" | In a tiled sub-canvas, shifts space between its windows |
 | "Organize by status" (task, project, provider) / "organize the Review region by task" | One region per group (previewed first) |
 | "Rename Review to QA" / "make Backend green" / "collapse Review" / "ungroup Backend" | Edits a region |
 | "Full screen Review" / "put Atlas and Bravo on the stage" / "just Atlas" / "exit full screen" | The stage |
+| "Open Backend" / "switch to the new one" / "this one" / "switch back" | Goes into a sub-canvas (fills the screen) |
+| "Next sub-canvas" / "previous sub-canvas" | Steps between sub-canvases at the same level |
+| "Leave this sub-canvas" / "exit" / "main canvas" | Out one level, or all the way to the main canvas |
 | "Go to Backend" / "go back" / "up a level" / "go home" | Moves around the canvas |
 | "What's in Review" / "list regions" / "where is Cedar" | Answers out loud |
 | "Undo" / "redo" | Reverts or re-applies the last layout change |
 
-"These" means the selection, "them" what the last change touched, and "here" the region you are
-in. Layout changes are shown, not spoken (turn on spoken confirmations in the canvas layout
+"These" means the selection, "them" what the last change touched, and "here" or "this one"
+the region you are in. "The new one" is the sub-canvas made most recently, and "the other one" is
+the one you were in before. A count must match: "these four agents" with three selected is asked
+about, not guessed. So is "the new one" before any sub-canvas exists. Layout changes are shown, not spoken (turn on spoken confirmations in the canvas layout
 settings), and the HUD shows **Undo** for a few seconds after each one. Anything the grammar
 cannot place ("arrange my review agents so the failing one is biggest") goes to the conductor,
 which has the same abilities through its `arrange_canvas` tool. Rearranging never closes, stops,
