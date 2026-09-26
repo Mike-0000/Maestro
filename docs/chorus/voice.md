@@ -137,7 +137,15 @@ short preview of each finished agent's reply, and `read_agent` returns the whole
 You hear each completion once. If there is no reply, the follow-up is off, the conductor is busy with
 your request, or the model call fails, you get the fixed sentence instead, which still names the
 reported app URL. Turn it off with **Report what finished agents said** in Settings → Voice &
-Conductor. Codex's Stop hook currently sends no reply text, so Codex completions use the fixed sentence.
+Conductor.
+
+Codex's notify hook sends no reply text, and neither does any hook without
+`last_assistant_message`. For these terminal agents Chorus reads the last 2,000 characters of the
+agent's terminal instead, about one screen, where the TUI prints its closing message. Box-drawing
+borders and blank runs are dropped, and the text is redacted like a reply. The conductor is told
+this is terminal output, which can include tool output, status lines, and the input box, and works
+out what the agent said from it. The same safety limits apply. Because it is a screen tail, it can
+include whatever the TUI showed last, such as reasoning summaries that Codex prints.
 
 Add an Anthropic API key in **Settings → Voice & Conductor**. The default model is
 `claude-opus-5` with low effort for commands and high effort for plans; both are configurable,

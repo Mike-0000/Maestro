@@ -191,7 +191,9 @@ export function finishedReplyLines(
         ? `${flat.slice(0, CONTEXT_REPLY_PREVIEW_CHARS - 1)}…`
         : flat;
     const urls = report.appUrls.length > 0 ? `; local app URLs: ${report.appUrls.join(', ')}` : '';
-    lines.push(`- ${canvas.spokenName(entry.conversationId)}: “${preview}”${urls}`);
+    const from =
+      report.source === 'terminal-tail' ? ' (end of its terminal; no reply reported)' : '';
+    lines.push(`- ${canvas.spokenName(entry.conversationId)}${from}: “${preview}”${urls}`);
   }
   return lines;
 }

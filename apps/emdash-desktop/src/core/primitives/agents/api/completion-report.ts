@@ -18,6 +18,11 @@ export type CompletionReport = {
   readonly truncated: boolean;
   /** Loopback URLs the reply mentions (dev servers), normalized, first mention first. */
   readonly appUrls: readonly string[];
+  /**
+   * Set when the agent reported no final reply and the text is instead the tail of its terminal
+   * (see `terminalTailReport`): it may include tool output and interface chrome.
+   */
+  readonly source?: 'terminal-tail';
 };
 
 export const COMPLETION_REPORT_MAX_CHARS = 4_000;
@@ -53,6 +58,38 @@ export function buildCompletionReport(
     truncated: true,
     appUrls,
   };
+}
+
+/** How much of a terminal's tail stands in for a missing final reply: about one screen. */
+export const TERMINAL_TAIL_REPORT_CHARS = 2_000;
+
+/**
+ * A stand-in report for an agent whose completion carried no reply text (Codex's notify hook, a
+ * hook without `last_assistant_message`): the last `maxChars` of its terminal, where TUI agents
+ * print their closing summary. Box-drawing borders and blank runs are dropped so the characters go
+ * to text; the start is cut, never the end. Redacted like a reply; null when nothing is left.
+ */
+export function terminalTailReport(
+  terminalText: string | null | undefined,
+  maxChars = TERMINAL_TAIL_REPORT_CHARS
+): CompletionReport | null {
+  if (typeof terminalText !== 'string') return null;
+  const lines = redactReply(terminalText.slice(-MAX_INPUT_CHARS))
+    .split('\n')
+    .map((line) => line.replace(/[─-▟]+/g, ' ').replace(/[ \t]+$/g, ''))
+    // Keep single blank lines between paragraphs; drop runs of them.
+    .filter((line, index, all) => line.trim() !== '' || (all[index - 1] ?? '').trim() !== '');
+  const text = lines.join('\n').trim();
+  if (!text) return null;
+  const truncated = text.length > maxChars;
+  // Start on a whole line rather than mid-word.
+  const tail = truncated
+    ? text
+        .slice(-maxChars)
+        .replace(/^[^\n]*\n/, '')
+        .trimStart()
+    : text;
+  return { text: tail, truncated, appUrls: extractAppUrls(tail), source: 'terminal-tail' };
 }
 
 /** Removes control sequences and secrets and trims blank space. */

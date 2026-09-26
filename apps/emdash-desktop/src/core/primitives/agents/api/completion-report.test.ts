@@ -6,6 +6,8 @@ import {
   finalAssistantReply,
   isLocalAppUrl,
   spokenAppUrl,
+  TERMINAL_TAIL_REPORT_CHARS,
+  terminalTailReport,
 } from './completion-report';
 
 const NODE_APP_REPLY = `I scaffolded the Express todo app and started the dev server.
@@ -125,5 +127,50 @@ describe('finalAssistantReply', () => {
     ).toBe('Here is the plan.');
     expect(finalAssistantReply([{ kind: 'message', role: 'user', text: 'hi' }])).toBeNull();
     expect(finalAssistantReply([])).toBeNull();
+  });
+});
+
+describe('terminalTailReport', () => {
+  // What a Codex TUI shows when it finishes: tool output, then its closing message, then chrome.
+  const CODEX_SCREEN = [
+    '• Ran npm install',
+    '  └ added 212 packages in 9s',
+    '',
+    '',
+    '',
+    '╭──────────────────────────────────────────╮',
+    '│ Built the todo app and started it on      │',
+    '│ http://0.0.0.0:5173 — run npm test to    │',
+    '│ check it. Token: sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCD │',
+    '╰──────────────────────────────────────────╯',
+    '',
+    '› Ask Codex to do anything',
+    '  ⏎ send   ⌃J newline   ⌃C quit',
+  ].join('\n');
+
+  it('keeps the closing message and URLs, drops borders and blank runs, redacts', () => {
+    const report = terminalTailReport(CODEX_SCREEN)!;
+    expect(report.source).toBe('terminal-tail');
+    expect(report.truncated).toBe(false);
+    expect(report.text).toContain('Built the todo app and started it on');
+    expect(report.appUrls).toEqual(['http://localhost:5173/']);
+    expect(report.text).not.toMatch(/[╭╰│─]/);
+    expect(report.text).not.toMatch(/\n{3,}/);
+    expect(report.text).not.toContain('abcdefghijklmnopqrstuvwxyz');
+  });
+
+  it('keeps the end of a long terminal and starts on a whole line', () => {
+    const scrollback = Array.from({ length: 400 }, (_, i) => `line ${i} of tool output`).join('\n');
+    const report = terminalTailReport(`${scrollback}\nDone: open http://localhost:3000`)!;
+    expect(report.truncated).toBe(true);
+    expect(report.text.length).toBeLessThanOrEqual(TERMINAL_TAIL_REPORT_CHARS);
+    expect(report.text).toMatch(/^line \d+ of tool output/);
+    expect(report.text.endsWith('Done: open http://localhost:3000')).toBe(true);
+  });
+
+  it('returns null for a missing or blank terminal', () => {
+    expect(terminalTailReport(null)).toBeNull();
+    expect(terminalTailReport(undefined)).toBeNull();
+    expect(terminalTailReport('\n  \n╭────╮\n╰────╯\n')).toBeNull();
   });
 });

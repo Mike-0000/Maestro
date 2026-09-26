@@ -128,6 +128,25 @@ export async function readFinalChatReply(entry: AgentTileEntry): Promise<string 
   return null;
 }
 
+/** Rows of a TUI agent's terminal read when it finished without reporting a reply. */
+const FINISHED_TERMINAL_ROWS = 200;
+/** A completion can land a frame before the TUI paints its closing message. */
+const TERMINAL_SETTLE_MS = 300;
+
+/**
+ * The recent terminal text of a TUI agent that just finished, for agents whose completion carried
+ * no reply (see `terminalTailReport`). Null for chat agents or when there is no terminal.
+ */
+export async function readFinishedTerminal(entry: AgentTileEntry): Promise<string | null> {
+  if (entry.type === 'acp') return null;
+  const session = conversationRegistry.get(entry.taskId)?.sessions.get(entry.conversationId);
+  if (!session) return null;
+  await session.connect().catch(() => {});
+  await sleep(TERMINAL_SETTLE_MS);
+  const terminal = session.pty?.terminal;
+  return terminal ? readTerminalTail(terminal, FINISHED_TERMINAL_ROWS).join('\n') : null;
+}
+
 /** The last meaningful line of output, for one-sentence spoken status. */
 export async function lastMeaningfulLine(entry: AgentTileEntry): Promise<string | null> {
   const output = await readAgentOutput(entry, 30);

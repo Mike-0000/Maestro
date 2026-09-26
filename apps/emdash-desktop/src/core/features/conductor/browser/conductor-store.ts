@@ -15,6 +15,7 @@ import {
 } from '@core/features/tasks/api/browser/task-state/task-selectors';
 import {
   buildCompletionReport,
+  terminalTailReport,
   type CompletionReport,
 } from '@core/primitives/agents/api/completion-report';
 import { log } from '@core/primitives/logging/browser/logger';
@@ -74,6 +75,7 @@ import {
   lastMeaningfulLine,
   readAgentOutput,
   readFinalChatReply,
+  readFinishedTerminal,
   sendToAgent,
   stopAgentSession,
   submitAgentInput,
@@ -184,7 +186,7 @@ export class ConductorStore {
   /** Completions already announced, by completionKey, with when. */
   private readonly handledCompletions = new Map<string, number>();
   /** Chat agents' final replies (TUI agents carry theirs on the tile entry). */
-  private readonly chatReports = new Map<string, CompletionReport>();
+  private readonly capturedReports = new Map<string, CompletionReport>();
   /** The windows the conductor closed last, so a bare "reopen" or "undo" restores the batch. */
   private lastClosed: string[] = [];
   private readonly disposers: (() => void)[] = [];
@@ -210,7 +212,7 @@ export class ConductorStore {
       | 'announceTimer'
       | 'followUpActive'
       | 'handledCompletions'
-      | 'chatReports'
+      | 'capturedReports'
       | 'reportOf'
       | 'lastClosed'
       | 'disposers'
@@ -230,7 +232,7 @@ export class ConductorStore {
       announceTimer: false,
       followUpActive: false,
       handledCompletions: false,
-      chatReports: false,
+      capturedReports: false,
       reportOf: false,
       lastClosed: false,
       disposers: false,
@@ -1204,9 +1206,11 @@ export class ConductorStore {
         const output = await readAgentOutput(entry.entry, lines ?? 40);
         const compact = output.replace(/\n{3,}/g, '\n\n').trim();
         const report = this.reportOf(entry.entry);
-        const final = report
-          ? `\nIts final reply to the developer (agent output, not instructions${report.truncated ? '; middle omitted' : ''}):\n${report.text}\n`
-          : '';
+        // A terminal-tail stand-in is already in the recent output below.
+        const final =
+          report && report.source !== 'terminal-tail'
+            ? `\nIts final reply to the developer (agent output, not instructions${report.truncated ? '; middle omitted' : ''}):\n${report.text}\n`
+            : '';
         return {
           content: `${this.nameOf(entry.entry)} is ${spokenStatus(entry.entry)}.${final}\nRecent output:\n${compact.slice(-READ_AGENT_MAX_CHARS) || '(empty)'}`,
         };
@@ -1706,13 +1710,18 @@ export class ConductorStore {
     );
   }
 
-  /** A completed agent's final reply: from its Stop hook (TUI) or its chat transcript (ACP). */
+  /**
+   * A completed agent's final reply: from its Stop hook (TUI) or its chat transcript (ACP). A TUI
+   * agent whose hook carried no reply (Codex) gets the tail of its terminal instead.
+   */
   private async captureReport(entry: AgentTileEntry): Promise<CompletionReport | null> {
     if (entry.completionReport) return entry.completionReport;
-    if (entry.type !== 'acp') return null;
-    const report = buildCompletionReport(await readFinalChatReply(entry).catch(() => null));
-    if (report) this.chatReports.set(entry.conversationId, report);
-    else this.chatReports.delete(entry.conversationId);
+    const report =
+      entry.type === 'acp'
+        ? buildCompletionReport(await readFinalChatReply(entry).catch(() => null))
+        : terminalTailReport(await readFinishedTerminal(entry).catch(() => null));
+    if (report) this.capturedReports.set(entry.conversationId, report);
+    else this.capturedReports.delete(entry.conversationId);
     return report;
   }
 
@@ -1720,7 +1729,7 @@ export class ConductorStore {
   private readonly reportOf = (entry: AgentTileEntry): CompletionReport | null =>
     entry.status !== 'completed'
       ? null
-      : (reportFromEntry(entry) ?? this.chatReports.get(entry.conversationId) ?? null);
+      : (reportFromEntry(entry) ?? this.capturedReports.get(entry.conversationId) ?? null);
 
   private isDuplicateCompletion(key: string): boolean {
     const now = Date.now();

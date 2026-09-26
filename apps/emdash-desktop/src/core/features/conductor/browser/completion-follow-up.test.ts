@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   sendToAgent: vi.fn(async () => {}),
   stopAgentSession: vi.fn(async () => {}),
   readFinalChatReply: vi.fn(async (): Promise<string | null> => null),
+  readFinishedTerminal: vi.fn(async (): Promise<string | null> => null),
 }));
 
 vi.mock('../api/browser/client', () => ({
@@ -60,6 +61,7 @@ vi.mock('./agent-io', () => ({
   lastMeaningfulLine: vi.fn(),
   readAgentOutput: vi.fn(async () => '(terminal)'),
   readFinalChatReply: mocks.readFinalChatReply,
+  readFinishedTerminal: mocks.readFinishedTerminal,
   sendToAgent: mocks.sendToAgent,
   stopAgentSession: mocks.stopAgentSession,
   submitAgentInput: vi.fn(),
@@ -298,6 +300,25 @@ describe('completion follow-ups', () => {
     await announce();
     expect(lastUserText(sentMessages(0))).toContain('http://localhost:4173/');
     expect(speech.announce).toHaveBeenCalledWith('Zulu has a preview up at localhost port 4173.');
+  });
+
+  it("reads a Codex agent's terminal tail when its hook sent no reply", async () => {
+    mocks.readFinishedTerminal.mockResolvedValueOnce(
+      '• Ran npm run dev\n\nThe API is up at http://localhost:8080. Run npm test next.\n› Ask Codex'
+    );
+    const { speech, store, announce } = setup(
+      agent({ providerId: 'codex', completionReport: null, completionSummary: null })
+    );
+    mocks.runTurn.mockResolvedValueOnce(text('Zulu has the API up at localhost port 8080.'));
+    await announce();
+    const event = lastUserText(sentMessages(0));
+    expect(event).toContain('source="terminal-tail"');
+    expect(event).toContain('The API is up at http://localhost:8080.');
+    expect(speech.announce).toHaveBeenCalledOnce();
+    expect(speech.announce).toHaveBeenCalledWith('Zulu has the API up at localhost port 8080.');
+    // read_agent shows the terminal once, not again as a "final reply".
+    const outcome = await store['executeTool']('read_agent', { agent: 'Zulu' });
+    expect(outcome.content).not.toContain('final reply to the developer');
   });
 
   it('gives read_agent the full final reply afterwards', async () => {
