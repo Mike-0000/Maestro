@@ -44,7 +44,11 @@ export type BrowserOperations = {
   }): Result<void, BrowserAutomationError>;
   stopLease(browserId: string): BrowserActionResult;
   forgetControl(browserId: string): BrowserActionResult;
-  ackOpenRequest(input: { requestId: string; browserId: string | null }): BrowserActionResult;
+  ackOpenRequest(input: {
+    requestId: string;
+    browserId: string | null;
+    denial?: 'disabled' | 'declined' | 'consent-pending';
+  }): BrowserActionResult;
   capturePreview(input: { browserId: string; maxEdge: number }): Promise<BrowserImage | null>;
 };
 

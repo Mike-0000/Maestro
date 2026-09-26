@@ -19,7 +19,10 @@ import type {
   AgentAuthStatus,
   IAgentAuthBehavior,
 } from '#services/agent-plugins/api/plugins/capabilities/auth';
-import type { McpServerRegistration } from '#services/agent-plugins/api/plugins/capabilities/mcp';
+import type {
+  McpServerRegistration,
+  SessionMcpLaunch,
+} from '#services/agent-plugins/api/plugins/capabilities/mcp';
 import type {
   AgentCommand,
   CommandContext,
@@ -269,17 +272,32 @@ export class AgentPluginHost {
 
   async buildPromptCommand(
     providerId: string,
-    ctx: Omit<CommandContext, 'cli'>
+    ctx: Omit<CommandContext, 'cli'>,
+    sessionMcp?: SessionMcpLaunch
   ): Promise<Result<AgentCommand, AgentHostError>> {
     const provider = this.resolveTuiProvider(providerId);
     if (!provider) return err({ type: 'capability-unsupported', providerId, capability: 'prompt' });
     const spawnContext = await this.resolveSpawnContext(providerId);
     if (!spawnContext.success) return err(spawnContext.error);
-    const command = provider.buildCommand({ ...ctx, cli: spawnContext.data.cli });
+    // Session MCP servers go ahead of the user's extra args, so both land before the prompt.
+    const mcpArgs = sessionMcp?.servers.length ? this.sessionMcpArgs(providerId, sessionMcp) : [];
+    const extraArgs = mcpArgs.length > 0 ? [...mcpArgs, ...(ctx.extraArgs ?? [])] : ctx.extraArgs;
+    const command = provider.buildCommand({
+      ...ctx,
+      ...(extraArgs ? { extraArgs } : {}),
+      cli: spawnContext.data.cli,
+    });
     return ok({
       ...command,
       env: mergeAgentEnvLayers(this.agentEnvPlatform, spawnContext.data.agentEnv, command.env),
     });
+  }
+
+  /** Per-session MCP arguments for a provider; empty when it has no per-invocation flag. */
+  sessionMcpArgs(providerId: string, launch: SessionMcpLaunch): string[] {
+    const behavior = this.resolveMcpBehavior(providerId);
+    if (!behavior.success || !behavior.data.sessionArgs) return [];
+    return behavior.data.sessionArgs(launch);
   }
 
   async buildAcpSpawn(

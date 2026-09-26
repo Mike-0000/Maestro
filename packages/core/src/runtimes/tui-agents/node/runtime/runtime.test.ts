@@ -569,6 +569,28 @@ describe('TuiAgentsRuntime', () => {
     expect(cleanup).toHaveBeenCalledOnce();
   });
 
+  it('hands session MCP servers to the provider command builder', async () => {
+    const { runtime, agentHost } = createRuntime();
+    const sessionMcp = {
+      configPath: '/data/agent-mcp/conversation-1.json',
+      servers: [
+        {
+          name: 'chorus-browser',
+          url: 'http://127.0.0.1:4100/mcp',
+          tokenEnvVar: 'CHORUS_BROWSER_MCP_TOKEN',
+        },
+      ],
+    };
+
+    await runtime.startSession(startInput({ sessionMcp }));
+
+    expect(agentHost.buildPromptCommand).toHaveBeenCalledWith(
+      'test',
+      expect.objectContaining({ sessionId: 'conversation-1' }),
+      sessionMcp
+    );
+  });
+
   it('stops and deletes sessions while cleaning up tmux', async () => {
     const identity = 'project:task:conversation-1';
     const sessionName = makeTmuxSessionName(identity, 'workspace');

@@ -1,5 +1,6 @@
 import { PageLayout } from '@emdash/ui/react/patterns';
 import { BrowserSettingsCard } from '../components/BrowserSettingsCard';
+import { CanvasBrowserSettingsCard } from '../components/CanvasBrowserSettingsCard';
 
 export function BrowserSettingsPage() {
   return (
@@ -10,6 +11,7 @@ export function BrowserSettingsPage() {
         description="Manage browser profiles and their stored logins."
       />
       <BrowserSettingsCard />
+      <CanvasBrowserSettingsCard />
     </div>
   );
 }

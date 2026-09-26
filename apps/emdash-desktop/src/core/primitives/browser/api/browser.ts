@@ -17,8 +17,10 @@ export type BrowserEvent =
       leaseUntil?: number;
     }
   /**
-   * Main asks the renderer to open (or resume) the agent-controllable canvas browser of a task.
-   * Only the renderer can mount a webview; it answers with `browser.ackOpenRequest`.
+   * Main asks the renderer to open (or resume) the canvas browser of a task. Only the renderer can
+   * mount a webview; it answers with `browser.ackOpenRequest`. `access: 'observe'` only needs the
+   * page live (a screenshot or outline); `'control'` also needs the tile handed to agents, which
+   * may ask the user.
    */
   | {
       type: 'open-request';
@@ -28,7 +30,13 @@ export type BrowserEvent =
       taskId: string;
       url: string | null;
       actor: BrowserAutomationActor;
+      access: BrowserOpenAccess;
     };
+
+export type BrowserOpenAccess = 'observe' | 'control';
+
+/** Why the renderer answered an open request without a browser. */
+export type BrowserOpenDenial = 'disabled' | 'declined' | 'consent-pending';
 
 export const BROWSER_PARTITION_PREFIX = 'persist:emdash-browser';
 

@@ -20,7 +20,7 @@ export const DEFAULT_CANVAS_BROWSER_SETTINGS: CanvasBrowserSettings = {
   enabled: true,
   autoOpenOnRun: true,
   conductorControl: true,
-  agentControl: false,
+  agentControl: true,
   sendPageContentToModel: true,
   maxAliveBrowsers: 4,
 };

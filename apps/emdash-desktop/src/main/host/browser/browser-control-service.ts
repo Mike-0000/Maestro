@@ -16,6 +16,8 @@ import {
   type BrowserEvent,
   type BrowserObservation,
   type BrowserObserveInput,
+  type BrowserOpenAccess,
+  type BrowserOpenDenial,
 } from '@core/primitives/browser/api';
 import type { BrowserAutomation } from './browser-automation';
 import type { BrowserConsoleBuffer } from './browser-console-buffer';
@@ -23,10 +25,12 @@ import type { BrowserWebContentsRegistry } from './browser-webcontents-registry'
 
 /**
  * Policy gate for model-driven browsing. Every conductor and agent call passes through here:
- * the browser must be an isolated-per-task tile the user handed to agents, the actor must be
- * allowed (conductor setting, or an agent scoped to that same task), navigation stays on the
- * task's dev-server origins, and calls are rate limited. While a model holds the control lease,
- * navigations the page starts on its own are held to the same origin policy.
+ * the browser must be an isolated-per-task tile, the actor must be allowed (conductor setting, or
+ * an agent scoped to that same task), navigation stays on the task's dev-server origins, and calls
+ * are rate limited. Acting needs the tile handed to agents; an agent may also watch (screenshot,
+ * outline, text, console) its own task's tile while the user drives it, since watching changes
+ * nothing. While a model holds the control lease, navigations the page starts on its own are held
+ * to the same origin policy.
  */
 
 export type BrowserControl = 'user' | 'agents';
@@ -52,8 +56,10 @@ type ControlEntry = BrowserTaskIdentity & {
   lease: { actorKey: string; actor: BrowserAutomationActor; until: number } | null;
 };
 
+type OpenAnswer = { browserId: string | null; denial?: BrowserOpenDenial };
+
 type PendingOpen = {
-  resolve: (browserId: string | null) => void;
+  resolve: (answer: OpenAnswer) => void;
   timer: ReturnType<typeof setTimeout>;
 };
 
@@ -73,7 +79,8 @@ export type BrowserControlDeps = {
 };
 
 export const CONTROL_LEASE_MS = 60_000;
-const OPEN_REQUEST_TIMEOUT_MS = 10_000;
+/** Covers the renderer asking the user to hand a tile to agents (it answers within 25 s). */
+const OPEN_REQUEST_TIMEOUT_MS = 30_000;
 const BIND_TIMEOUT_MS = 10_000;
 const ACT_LIMIT = { count: 30, windowMs: 10_000 };
 const OBSERVE_LIMIT = { count: 20, windowMs: 10_000 };
@@ -152,18 +159,30 @@ export class BrowserControlService {
     this.emitLease(entry, actor, 'stopped by user', true);
   }
 
-  /** The agent-controllable browser of a task, if one is registered. */
-  findTaskBrowser(taskId: string): string | null {
+  /**
+   * A task's canvas browser, if one is registered. `control` finds only a tile handed to agents;
+   * `observe` also finds the tile while the user drives it (always an isolated partition).
+   */
+  findTaskBrowser(taskId: string, access: BrowserOpenAccess = 'control'): string | null {
+    let observable: string | null = null;
     for (const entry of this.entries.values()) {
-      if (entry.taskId === taskId && entry.control === 'agents') return entry.browserId;
+      if (entry.taskId !== taskId) continue;
+      if (entry.control === 'agents') return entry.browserId;
+      if (access === 'observe' && observable === null && this.isIsolated(entry.browserId)) {
+        observable = entry.browserId;
+      }
     }
-    return null;
+    return observable;
   }
 
-  describeTaskBrowser(
-    taskId: string
-  ): { browserId: string; url: string | null; live: boolean; allowedOrigins: string[] } | null {
-    const browserId = this.findTaskBrowser(taskId);
+  describeTaskBrowser(taskId: string): {
+    browserId: string;
+    url: string | null;
+    live: boolean;
+    control: BrowserControl;
+    allowedOrigins: string[];
+  } | null {
+    const browserId = this.findTaskBrowser(taskId, 'observe');
     const entry = browserId ? this.entries.get(browserId) : undefined;
     if (!browserId || !entry) return null;
     const webContents = this.deps.registry.getBoundWebContents(browserId);
@@ -171,6 +190,7 @@ export class BrowserControlService {
       browserId,
       url: webContents?.getURL() ?? null,
       live: webContents !== null,
+      control: entry.control,
       allowedOrigins: this.allowedOrigins(entry),
     };
   }
@@ -181,14 +201,15 @@ export class BrowserControlService {
    */
   async requestOpen(
     scope: BrowserActorScope & { kind: 'agent' },
-    url: string | null
+    url: string | null,
+    access: BrowserOpenAccess = 'control'
   ): Promise<Result<string, BrowserAutomationError>> {
     const settings = await this.deps.getSettings();
     const denied = this.actorDenied(scope, settings);
     if (denied) return err(denied);
     if (url) {
       // The renderer loads this URL without asking again: hold it to the task's origins now.
-      const entryId = this.findTaskBrowser(scope.taskId);
+      const entryId = this.findTaskBrowser(scope.taskId, 'observe');
       const entry = entryId ? this.entries.get(entryId) : undefined;
       const decision = evaluateNavigation(url, {
         allowedOrigins: entry ? this.allowedOrigins(entry) : this.devServerOrigins(scope),
@@ -203,10 +224,10 @@ export class BrowserControlService {
       }
     }
     const requestId = randomUUID();
-    const browserId = await new Promise<string | null>((resolve) => {
+    const answer = await new Promise<OpenAnswer>((resolve) => {
       const timer = setTimeout(() => {
         this.pendingOpens.delete(requestId);
-        resolve(null);
+        resolve({ browserId: null });
       }, OPEN_REQUEST_TIMEOUT_MS);
       this.pendingOpens.set(requestId, { resolve, timer });
       this.deps.emit({
@@ -217,24 +238,19 @@ export class BrowserControlService {
         taskId: scope.taskId,
         url,
         actor: publicActor(scope),
+        access,
       });
     });
-    if (!browserId) {
-      return err({
-        type: 'not-controllable',
-        message:
-          'Chorus did not open a browser for this task. The user may need to open the canvas or hand the app to agents.',
-      });
-    }
-    return ok(browserId);
+    if (!answer.browserId) return err(openDenied(answer.denial));
+    return ok(answer.browserId);
   }
 
-  ackOpenRequest(requestId: string, browserId: string | null): void {
+  ackOpenRequest(requestId: string, browserId: string | null, denial?: BrowserOpenDenial): void {
     const pending = this.pendingOpens.get(requestId);
     if (!pending) return;
     clearTimeout(pending.timer);
     this.pendingOpens.delete(requestId);
-    pending.resolve(browserId);
+    pending.resolve({ browserId, ...(denial ? { denial } : {}) });
   }
 
   async observe(
@@ -322,16 +338,14 @@ export class BrowserControlService {
     const denied = this.actorDenied(scope, settings);
     if (denied) return err(denied);
     const entry = this.entries.get(browserId);
-    const partition = this.deps.registry.getPartition(browserId);
-    if (
-      !entry ||
-      entry.control !== 'agents' ||
-      !partition ||
-      !isIsolatedBrowserPartition(partition)
-    ) {
+    // Agents may watch their own task's isolated tile while the user drives it; acting (and the
+    // conductor, which is not task-scoped) needs the tile handed to agents.
+    const watchOnly = kind === 'observe' && scope.kind === 'agent';
+    if (!entry || !this.isIsolated(browserId) || (entry.control !== 'agents' && !watchOnly)) {
       return err({
         type: 'not-controllable',
-        message: "This browser is under the user's control. Ask them to hand it to agents.",
+        message:
+          'The user is driving this browser (its tile is set to "You"). Call open_app to ask them to hand it to agents; look_at_app and app_screenshot still work meanwhile.',
       });
     }
     if (scope.kind === 'agent' && scope.taskId !== entry.taskId) {
@@ -347,7 +361,13 @@ export class BrowserControlService {
       });
     }
     const actorKey = actorKeyOf(scope);
-    if (entry.lease && entry.lease.until > this.now() && entry.lease.actorKey !== actorKey) {
+    // Reading never conflicts with another actor's lease; only acting waits it out.
+    if (
+      kind === 'act' &&
+      entry.lease &&
+      entry.lease.until > this.now() &&
+      entry.lease.actorKey !== actorKey
+    ) {
       return err({
         type: 'busy',
         message: `${actorLabel(entry.lease.actor)} is using this browser right now.`,
@@ -357,7 +377,12 @@ export class BrowserControlService {
     if (!limiter.tryAcquire(`${browserId}:${actorKey}`)) {
       return err({ type: 'rate-limited', message: 'Too many browser calls; slow down.' });
     }
-    const webContents = await this.liveWebContents(entry, scope, options.requireLive ?? true);
+    const webContents = await this.liveWebContents(
+      entry,
+      scope,
+      options.requireLive ?? true,
+      kind === 'act' ? 'control' : 'observe'
+    );
     if (!webContents) {
       return err({
         type: 'not-bound',
@@ -371,7 +396,8 @@ export class BrowserControlService {
   private async liveWebContents(
     entry: ControlEntry,
     scope: BrowserActorScope,
-    requireLive: boolean
+    requireLive: boolean,
+    access: BrowserOpenAccess
   ): Promise<WebContents | null> {
     const bound = this.deps.registry.getBoundWebContents(entry.browserId);
     if (bound || !requireLive) return bound;
@@ -383,6 +409,7 @@ export class BrowserControlService {
       taskId: entry.taskId,
       url: null,
       actor: publicActor(scope),
+      access,
     });
     const deadline = this.now() + BIND_TIMEOUT_MS;
     while (this.now() < deadline) {
@@ -409,6 +436,11 @@ export class BrowserControlService {
       return { type: 'disabled', message: 'Agent browser control is turned off in settings.' };
     }
     return null;
+  }
+
+  private isIsolated(browserId: string): boolean {
+    const partition = this.deps.registry.getPartition(browserId);
+    return partition !== null && isIsolatedBrowserPartition(partition);
   }
 
   private policy(entry: ControlEntry) {
@@ -502,6 +534,31 @@ export class BrowserControlService {
       ok: okValue,
       detail,
     });
+  }
+}
+
+function openDenied(denial: BrowserOpenDenial | undefined): BrowserAutomationError {
+  switch (denial) {
+    case 'disabled':
+      return { type: 'disabled', message: 'Canvas browsers are turned off in Chorus settings.' };
+    case 'declined':
+      return {
+        type: 'not-controllable',
+        message:
+          'The user kept control of the app browser. Watching still works (look_at_app, app_screenshot); ask them before trying again.',
+      };
+    case 'consent-pending':
+      return {
+        type: 'not-controllable',
+        message:
+          'Chorus asked the user to let agents use the app browser and is waiting for an answer. Watching works meanwhile; retry open_app once they allow it.',
+      };
+    default:
+      return {
+        type: 'not-bound',
+        message:
+          'Chorus did not open a browser for this task. The Chorus window may be closed or still starting; retry shortly.',
+      };
   }
 }
 

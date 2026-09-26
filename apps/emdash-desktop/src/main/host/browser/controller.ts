@@ -8,6 +8,7 @@ import {
   type BrowserDataClearKind,
   type BrowserImage,
   type BrowserObserveInput,
+  type BrowserOpenDenial,
 } from '@core/primitives/browser/api';
 import { getAppSettingsService } from '@main/bootstrap/core/service-instances';
 import {
@@ -100,8 +101,12 @@ export const browserOperations = {
     return { success: true as const };
   },
 
-  ackOpenRequest: (input: { requestId: string; browserId: string | null }) => {
-    browserControlService.ackOpenRequest(input.requestId, input.browserId);
+  ackOpenRequest: (input: {
+    requestId: string;
+    browserId: string | null;
+    denial?: BrowserOpenDenial;
+  }) => {
+    browserControlService.ackOpenRequest(input.requestId, input.browserId, input.denial);
     return { success: true as const };
   },
 

@@ -139,7 +139,10 @@ import { runLocalCommand } from '@main/core/utils/exec';
 import { cleanupLegacyOperationsDatabases } from '@main/db/legacy-operations-cleanup';
 import type { DesktopRuntimes } from '@main/gateway/desktop-runtimes';
 import { createDesktopWorkspaceRuntimeAcquirer } from '@main/gateway/workspace-runtime';
-import { browserControlServer } from '@main/host/browser/browser-control-instance';
+import {
+  browserControlServer,
+  resolveBrowserControlSessionMcp,
+} from '@main/host/browser/browser-control-instance';
 import { setBrowserCorsRelaxationSettings } from '@main/host/browser/browser-profile-session';
 import { browserWebContentsRegistry } from '@main/host/browser/browser-webcontents-registry';
 import { HostAttachmentRegistry } from '@main/host/host-attachment-registry';
@@ -278,6 +281,7 @@ export async function bootServices(
     // this phase; sessions only call this after boot completes.
     resolveSessionGitCredentials: (params: { projectId: string; host: HostRef }) =>
       gitCredentials.resolveSessionSpec(params),
+    resolveSessionMcp: resolveBrowserControlSessionMcp,
   };
   const projectAttachmentAdapter = createProjectAttachmentAdapter({
     db,
@@ -350,6 +354,7 @@ export async function bootServices(
       {
         projectId: options.projectId,
         taskId: options.taskId,
+        workspaceId: options.workspaceId,
         taskPath: options.taskPath,
         host: options.host,
         tuiAgents: options.tuiAgents,

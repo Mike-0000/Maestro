@@ -183,5 +183,16 @@ export const provider = registerPluginBehavior(plugin, {
       }),
   },
   hooks: buildCodexHookConfig(),
-  mcp: codexMcpAdapter(),
+  mcp: {
+    ...codexMcpAdapter(),
+    // Unquoted values: Codex keeps a value that is not valid TOML as a literal string, and quotes
+    // do not survive Windows .cmd shims. The token stays in the env var, never in argv.
+    sessionArgs: (launch) =>
+      launch.servers.flatMap((server) => [
+        '-c',
+        `mcp_servers.${server.name}.url=${server.url}`,
+        '-c',
+        `mcp_servers.${server.name}.bearer_token_env_var=${server.tokenEnvVar}`,
+      ]),
+  },
 });

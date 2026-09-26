@@ -225,14 +225,96 @@ describe('BrowserControlService', () => {
     expect(h.automation.release).toHaveBeenCalled();
   });
 
+  describe('while the user drives the tile', () => {
+    beforeEach(() => {
+      h.service.setControl({ browserId: 'b-iso', control: 'user', ...identity });
+    });
+
+    it('lets the task agent watch it (screenshot, outline) but not act', async () => {
+      expect(h.service.findTaskBrowser('t1', 'observe')).toBe('b-iso');
+      expect(h.service.findTaskBrowser('t1', 'control')).toBeNull();
+      expect(h.service.describeTaskBrowser('t1')).toMatchObject({ control: 'user' });
+
+      const shot = await h.service.observe(agent, { browserId: 'b-iso', mode: 'screenshot' });
+      expect(shot.success).toBe(true);
+      const outline = await h.service.observe(agent, { browserId: 'b-iso', mode: 'outline' });
+      expect(outline.success).toBe(true);
+      expect(h.automation.observe).toHaveBeenCalledTimes(2);
+
+      const acted = await h.service.act(agent, { browserId: 'b-iso', action: { kind: 'reload' } });
+      expect(acted).toMatchObject({ success: false, error: { type: 'not-controllable' } });
+      expect(h.automation.act).not.toHaveBeenCalled();
+      // Watching shows up in the tile's activity line but never takes the lease.
+      const activity = h.events.filter((event) => event.type === 'automation');
+      expect(activity.length).toBeGreaterThan(0);
+      expect(activity.some((event) => 'leaseUntil' in event || event.action === 'lease')).toBe(
+        false
+      );
+    });
+
+    it('keeps other tasks and the conductor out', async () => {
+      const other = await h.service.observe(
+        { ...agent, taskId: 't2' },
+        { browserId: 'b-iso', mode: 'screenshot' }
+      );
+      expect(other).toMatchObject({ success: false, error: { type: 'not-controllable' } });
+      const conductor = await h.service.observe(
+        { kind: 'conductor' },
+        { browserId: 'b-iso', mode: 'screenshot' }
+      );
+      expect(conductor).toMatchObject({ success: false, error: { type: 'not-controllable' } });
+      expect(h.automation.observe).not.toHaveBeenCalled();
+    });
+
+    it('never offers a shared-profile tile to agents, even to watch', () => {
+      expect(h.service.findTaskBrowser('t9', 'observe')).toBeNull();
+    });
+  });
+
+  it('lets an agent watch while another actor holds the lease', async () => {
+    h.service.setControl({ browserId: 'b-iso', control: 'agents', ...identity });
+    await h.service.act({ kind: 'conductor' }, { browserId: 'b-iso', action: { kind: 'reload' } });
+    const shot = await h.service.observe(agent, { browserId: 'b-iso', mode: 'screenshot' });
+    expect(shot.success).toBe(true);
+    const acted = await h.service.act(agent, { browserId: 'b-iso', action: { kind: 'reload' } });
+    expect(acted).toMatchObject({ success: false, error: { type: 'busy' } });
+  });
+
   it('round-trips open requests through the renderer', async () => {
     const pending = h.service.requestOpen(agent, 'http://localhost:5173/');
     await Promise.resolve();
     await Promise.resolve();
     const request = h.events.find((event) => event.type === 'open-request');
-    expect(request).toMatchObject({ taskId: 't1', url: 'http://localhost:5173/' });
+    expect(request).toMatchObject({
+      taskId: 't1',
+      url: 'http://localhost:5173/',
+      access: 'control',
+    });
     if (request?.type !== 'open-request') throw new Error('no request');
     h.service.ackOpenRequest(request.requestId, 'b-iso');
     expect(await pending).toEqual({ success: true, data: 'b-iso' });
+  });
+
+  it.each([
+    ['declined', 'not-controllable', /kept control/],
+    ['consent-pending', 'not-controllable', /waiting for an answer/],
+    ['disabled', 'disabled', /turned off/],
+  ] as const)('explains a %s open request', async (denial, type, message) => {
+    const pending = h.service.requestOpen(agent, null, 'control');
+    await Promise.resolve();
+    await Promise.resolve();
+    const request = h.events.find((event) => event.type === 'open-request');
+    if (request?.type !== 'open-request') throw new Error('no request');
+    h.service.ackOpenRequest(request.requestId, null, denial);
+    const result = await pending;
+    expect(result).toMatchObject({ success: false, error: { type } });
+    if (result.success) throw new Error('expected a denial');
+    expect(result.error.message).toMatch(message);
+  });
+
+  it('refuses open requests off the task origin before asking the renderer', async () => {
+    const result = await h.service.requestOpen(agent, 'https://evil.example/');
+    expect(result).toMatchObject({ success: false, error: { type: 'origin-denied' } });
+    expect(h.events.some((event) => event.type === 'open-request')).toBe(false);
   });
 });

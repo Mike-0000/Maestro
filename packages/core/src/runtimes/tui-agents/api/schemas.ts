@@ -30,6 +30,22 @@ export const tuiAgentStartInputSchema = z.object({
   rows: z.number().int(),
   shellSetup: z.string().optional(),
   tmux: z.object({ identity: z.string().min(1) }).optional(),
+  /**
+   * Loopback MCP servers for this session only (Chorus's browser tools). Tokens are not part of
+   * the input: each server names the `providerVars` entry holding it.
+   */
+  sessionMcp: z
+    .object({
+      configPath: z.string(),
+      servers: z.array(
+        z.object({
+          name: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
+          url: z.string().url(),
+          tokenEnvVar: z.string().regex(/^[A-Z_][A-Z0-9_]*$/),
+        })
+      ),
+    })
+    .optional(),
 });
 
 export type TuiAgentStartInput = z.infer<typeof tuiAgentStartInputSchema>;

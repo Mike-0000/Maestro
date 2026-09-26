@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Conversation } from '@core/primitives/conversations/api';
 import {
   TuiConversationProvider,
+  type TuiConversationProviderDependencies,
   type TuiConversationProviderOptions,
 } from './tui-conversation-provider';
 
@@ -15,6 +16,67 @@ describe('TuiConversationProvider', () => {
     resume.mockReset();
     start.mockResolvedValue(ok({ outcome: 'started' }));
     resume.mockResolvedValue(ok({ outcome: 'resumed' }));
+  });
+
+  describe('browser tools for terminal agents', () => {
+    const sessionMcp = {
+      configPath: '/data/agent-mcp/conversation-1.json',
+      servers: [
+        {
+          name: 'chorus-browser',
+          url: 'http://127.0.0.1:4100/mcp',
+          tokenEnvVar: 'CHORUS_BROWSER_MCP_TOKEN',
+        },
+      ],
+    };
+
+    it('scopes the session MCP server to the task and passes the token through env', async () => {
+      const resolveSessionMcp = vi.fn(async () => ({
+        sessionMcp,
+        env: { CHORUS_BROWSER_MCP_TOKEN: 'chorus_bt_secret' },
+      }));
+      const provider = createProvider({ resolveSessionMcp });
+
+      await provider.ensureSession({ conversation: conversation({}), mode: 'start' });
+
+      expect(resolveSessionMcp).toHaveBeenCalledWith({
+        conversationId: 'conversation-1',
+        projectId: 'project-1',
+        workspaceId: 'workspace-1',
+        taskId: 'task-1',
+        title: 'Conversation',
+      });
+      const input = start.mock.calls[0]?.[0];
+      expect(input.sessionMcp).toEqual(sessionMcp);
+      expect(input.providerVars).toMatchObject({ CHORUS_BROWSER_MCP_TOKEN: 'chorus_bt_secret' });
+      expect(input.extraArgs.join(' ')).not.toContain('chorus_bt_secret');
+    });
+
+    it('skips remote hosts, which cannot reach the loopback server', async () => {
+      const resolveSessionMcp = vi.fn(async () => ({ sessionMcp, env: {} }));
+      const provider = createProvider({
+        host: { type: 'remote', id: 'ssh-1' },
+        resolveSessionMcp,
+      });
+
+      await provider.ensureSession({ conversation: conversation({}), mode: 'start' });
+
+      expect(resolveSessionMcp).not.toHaveBeenCalled();
+      expect(start.mock.calls[0]?.[0]).not.toHaveProperty('sessionMcp');
+    });
+
+    it('still starts the agent when the browser tools cannot be set up', async () => {
+      const provider = createProvider({
+        resolveSessionMcp: vi.fn(async () => {
+          throw new Error('disk full');
+        }),
+      });
+
+      await expect(
+        provider.ensureSession({ conversation: conversation({}), mode: 'start' })
+      ).resolves.toEqual({ outcome: 'started' });
+      expect(start.mock.calls[0]?.[0]).not.toHaveProperty('sessionMcp');
+    });
   });
 
   it('routes fresh starts to the runtime start path with the initial prompt', async () => {
@@ -215,6 +277,7 @@ function createProvider(
     autoTrustWorktrees?: boolean;
     getTaskSettings?: () => Promise<{ autoTrustWorktrees: boolean }>;
     launchContextSource?: TuiConversationProviderOptions['launchContextSource'];
+    resolveSessionMcp?: TuiConversationProviderDependencies['resolveSessionMcp'];
   } = {}
 ): TuiConversationProvider {
   return new TuiConversationProvider(
@@ -223,6 +286,7 @@ function createProvider(
       tuiAgents: { start, resume } as never,
       projectId: 'project-1',
       taskId: 'task-1',
+      workspaceId: 'workspace-1',
       taskPath: '/workspace',
       launchContextSource: overrides.launchContextSource ?? {
         resolve: async () =>
@@ -246,6 +310,7 @@ function createProvider(
         (() => Promise.resolve({ autoTrustWorktrees: overrides.autoTrustWorktrees ?? false })),
       getTerminalColorEnv: () => Promise.resolve({}),
       resolveSessionGitCredentials: () => Promise.resolve(undefined),
+      ...(overrides.resolveSessionMcp ? { resolveSessionMcp: overrides.resolveSessionMcp } : {}),
     }
   );
 }

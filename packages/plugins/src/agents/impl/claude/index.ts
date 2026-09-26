@@ -169,6 +169,10 @@ export const provider = registerPluginBehavior(plugin, {
       }),
   },
   hooks: buildClaudeHookConfig(),
-  mcp: passthroughMcpAdapter('.claude.json'),
+  mcp: {
+    ...passthroughMcpAdapter('.claude.json'),
+    // `=` form: --mcp-config is variadic and would otherwise swallow the prompt.
+    sessionArgs: (launch) => [`--mcp-config=${launch.configPath}`],
+  },
   trust: buildClaudeTrustBehavior(),
 });

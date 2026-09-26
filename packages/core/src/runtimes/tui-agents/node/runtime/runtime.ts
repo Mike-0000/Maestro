@@ -495,7 +495,7 @@ export class TuiAgentsRuntime {
       startedAt,
     });
 
-    const commandResult = await this.deps.agentHost.buildPromptCommand(config.input.providerId, {
+    const commandContext = {
       extraArgs: config.input.extraArgs,
       autoApprove: config.input.autoApprove ?? false,
       initialPrompt: isResuming ? undefined : config.input.initialPrompt,
@@ -503,7 +503,15 @@ export class TuiAgentsRuntime {
       providerSessionId: config.input.sessionId ?? undefined,
       isResuming,
       model: config.input.model ?? '',
-    });
+    };
+    const sessionMcp = config.input.sessionMcp;
+    const commandResult = sessionMcp
+      ? await this.deps.agentHost.buildPromptCommand(
+          config.input.providerId,
+          commandContext,
+          sessionMcp
+        )
+      : await this.deps.agentHost.buildPromptCommand(config.input.providerId, commandContext);
     if (!this.isCurrentGeneration(config.input.conversationId, generation)) {
       return this.cancelledSpawn(config.input.conversationId);
     }

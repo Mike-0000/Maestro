@@ -761,10 +761,38 @@ focused unit tests pass, and `tooling/chorus/steps/browser-canvas.mjs` drives th
   `clip-path` instead of dropping the tile to snapshot mode.
 - `BrowserSurface` moved to the browser slice's `contributions/browser/` (module boundaries).
 
+### Coding agents and their task's app browser (follow-up, 2026-09-25)
+
+Agents reported they could not use the app browser open next to them. Causes: `agentControl`
+defaulted to off with no switch in the UI, terminal (TUI) agents never received the MCP server,
+and a tile in "You" mode refused agents outright with a generic error. Now:
+
+- **Tools** (`chorus-browser` MCP server): `app_screenshot` (new, read-only), `look_at_app`
+  (outline / screenshot / text, read-only), `use_app` (click, type, select, press, scroll,
+  navigate, reload, back, forward, wait), `open_app`, `app_console` (read-only). Read-only tools
+  carry `readOnlyHint`; the server instructions describe both ways of working: visual
+  (`app_screenshot`, then `use_app` with x/y in that image's pixels) and structural
+  (`look_at_app` outline, then `use_app` with refs, no screenshot needed).
+- **Watching vs. acting.** An agent may watch its own task's isolated tile whoever drives it;
+  watching never takes the lease and is not blocked by another actor's lease. Acting still needs
+  the tile set to Agents. `use_app` / `open_app` on a "You" tile ask the user with a toast
+  ("Let agents drive"); open requests carry `access: 'observe' | 'control'`, and denials come
+  back as `disabled`, `declined` or `consent-pending` with a specific message for the agent. The
+  conductor still needs Agents mode for both.
+- **Settings**: `canvasBrowser.agentControl` now defaults to on; Settings, Browser has a "Canvas
+  app browser" card with the three switches.
+- **TUI agents (P4b)**: local terminal sessions get the server through the provider's
+  `mcp.sessionArgs`: Claude `--mcp-config=<file>` (a 0600 file under
+  `userData/chorus/agent-mcp/`, cleared at startup and removed when agent control is off), Codex
+  `-c mcp_servers.chorus-browser.url=…` and `bearer_token_env_var=CHORUS_BROWSER_MCP_TOKEN`. The
+  token travels in the session env, never in argv. Other TUI providers and remote hosts get no
+  server.
+
 ### Deferred or not done
 
 - Shift+Esc to take control back from a lease (Stop button and You toggle exist).
-- TUI agents (P4b): only ACP agents with HTTP MCP support get the `chorus-browser` server.
+- TUI agents other than Claude and Codex have no per-session MCP flag wired up; remote (SSH)
+  sessions cannot reach the loopback server.
 - Reserving the git credential server's loopback port (unlisted loopback ports are denied anyway).
 - `press` (`Input.dispatchKeyEvent`) on a hidden page is unverified; it may be dropped like
   `insertText`. `type` with `submit` relies on it.

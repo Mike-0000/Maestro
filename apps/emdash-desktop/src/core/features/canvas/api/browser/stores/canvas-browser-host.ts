@@ -43,6 +43,10 @@ export type BrowserSurfaceLayout = {
 export type BrowserLease = { until: number; actor: BrowserAutomationActor };
 
 const APP_START_TIMEOUT_MS = 90_000;
+/** How long an agent's request waits for the user's answer (main waits 30 s in total). */
+const CONSENT_ANSWER_MS = 25_000;
+/** The offer stays up longer; a late "Allow" still hands the tile over for the agent's retry. */
+const CONSENT_TOAST_MS = 120_000;
 const PREVIEW_REFRESH_MS = 2_500;
 
 /**
@@ -67,6 +71,8 @@ export class CanvasBrowserHost {
   private readonly disposers: Array<() => void> = [];
   private readonly startTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly leaseTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Open consent prompts per task; concurrent agent requests share one prompt. */
+  private readonly consents = new Map<string, Promise<boolean>>();
   private unsubscribeEvents: (() => void) | null = null;
   private settings: CanvasBrowserSettings = DEFAULT_CANVAS_BROWSER_SETTINGS;
   private disposed = false;
@@ -465,8 +471,10 @@ export class CanvasBrowserHost {
   }
 
   /**
-   * An agent (via main) wants its task's browser. Opens or resumes the tile under agent control
-   * (the agent-control setting is the user's consent) and answers with its browser id.
+   * An agent (via main) wants its task's browser. `observe` only resumes an existing tile so it
+   * can be read. `control` opens or resumes the tile under agent control: a new tile starts that
+   * way (the agent-control setting is the user's consent), while a tile the user set to "You" is
+   * only handed over when they allow it.
    */
   private async handleOpenRequest(
     event: Extract<BrowserEvent, { type: 'open-request' }>
@@ -474,10 +482,36 @@ export class CanvasBrowserHost {
     await this.refreshSettings();
     const client = await getBrowserClient();
     if (!this.settings.enabled) {
-      await client.ackOpenRequest({ requestId: event.requestId, browserId: null });
+      await client.ackOpenRequest({
+        requestId: event.requestId,
+        browserId: null,
+        denial: 'disabled',
+      });
       return;
     }
     const existing = this.canvas.browserForTask(event.taskId);
+    if (event.access === 'observe') {
+      if (existing) {
+        this.ensureSession(existing);
+        this.ensureAlive(existing.browserId);
+      }
+      await client.ackOpenRequest({
+        requestId: event.requestId,
+        browserId: existing?.browserId ?? null,
+      });
+      return;
+    }
+    if (existing?.control === 'user') {
+      const answer = await withTimeout(this.askToShare(existing, event.actor), CONSENT_ANSWER_MS);
+      if (answer !== true) {
+        await client.ackOpenRequest({
+          requestId: event.requestId,
+          browserId: null,
+          denial: answer === false ? 'declined' : 'consent-pending',
+        });
+        return;
+      }
+    }
     const browserId = this.openForTask(
       {
         projectId: event.projectId,
@@ -485,7 +519,7 @@ export class CanvasBrowserHost {
         taskId: event.taskId,
         ...(event.url ? { url: event.url } : {}),
       },
-      { control: existing?.control ?? 'agents', focus: false }
+      { control: 'agents', focus: false }
     );
     const entry = this.canvas.browserForTask(event.taskId);
     if (entry) await this.syncControl(entry);
@@ -494,6 +528,43 @@ export class CanvasBrowserHost {
       browserId: entry?.control === 'agents' ? browserId : null,
     });
   }
+
+  /** Asks the user to let agents drive a tile they control. Resolves true once handed over. */
+  private askToShare(entry: BrowserTileEntry, actor: BrowserAutomationActor): Promise<boolean> {
+    const pending = this.consents.get(entry.taskId);
+    if (pending) return pending;
+    const prompt = new Promise<boolean>((resolve) => {
+      toast(`${actorName(actor)} wants to use the app browser`, {
+        id: `canvas-browser-consent-${entry.taskId}`,
+        description:
+          'Agents can already see it. Allow clicking and typing on this task\'s app? Switch back with "You" any time.',
+        duration: CONSENT_TOAST_MS,
+        action: {
+          label: 'Let agents drive',
+          onClick: () => {
+            const current = this.canvas.browserForTask(entry.taskId);
+            if (!current) return resolve(false);
+            void this.applyControl(current, 'agents').then(resolve);
+          },
+        },
+      });
+    });
+    const tracked = prompt.finally(() => this.consents.delete(entry.taskId));
+    this.consents.set(entry.taskId, tracked);
+    setTimeout(() => this.consents.delete(entry.taskId), CONSENT_TOAST_MS);
+    return tracked;
+  }
+}
+
+/** Resolves with the promise's value, or `null` if it has not settled in time. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), ms);
+    void promise.then((value) => {
+      clearTimeout(timer);
+      resolve(value);
+    });
+  });
 }
 
 function actorName(actor: BrowserAutomationActor): string {

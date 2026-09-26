@@ -1,5 +1,5 @@
 import type { GitCredentialsSessionSpec } from '@emdash/core/primitives/git-credentials/api';
-import type { HostRef } from '@emdash/core/primitives/host/api';
+import { isLocalHostRef, type HostRef } from '@emdash/core/primitives/host/api';
 import type { TuiAgentStartInput } from '@emdash/core/runtimes/tui-agents/api';
 import { and, eq } from 'drizzle-orm';
 import { conversationRegistryTable as conversations } from '@core/features/conversations/api/node/registry';
@@ -34,8 +34,15 @@ export type TuiConversationProviderOptions = {
   tuiAgents: TuiAgentsRuntimeClient;
   projectId: string;
   taskId: string;
+  workspaceId?: string;
   taskPath: string;
   launchContextSource: TaskSessionLaunchContextSource;
+};
+
+export type TuiSessionMcp = {
+  sessionMcp: NonNullable<TuiAgentStartInput['sessionMcp']>;
+  /** Secrets the CLI reads by name (for example bearer tokens); merged into the session env. */
+  env: Record<string, string>;
 };
 
 export type TuiConversationProviderDependencies = {
@@ -52,6 +59,17 @@ export type TuiConversationProviderDependencies = {
     projectId: string;
     host: HostRef;
   }): Promise<GitCredentialsSessionSpec | undefined>;
+  /**
+   * Per-session loopback MCP servers (Chorus's browser tools). Only asked for local sessions,
+   * since loopback servers cannot reach agents on other hosts.
+   */
+  resolveSessionMcp?(context: {
+    conversationId: string;
+    projectId: string;
+    workspaceId: string;
+    taskId: string;
+    title: string;
+  }): Promise<TuiSessionMcp | undefined>;
 };
 
 function parseExtraArgs(value: string | undefined): string[] {
@@ -62,6 +80,7 @@ function parseExtraArgs(value: string | undefined): string[] {
 export class TuiConversationProvider implements ConversationProvider {
   private readonly projectId: string;
   private readonly taskId: string;
+  private readonly workspaceId: string | undefined;
   private readonly taskPath: string;
   private readonly host: HostRef;
   private readonly tuiAgents: TuiAgentsRuntimeClient;
@@ -73,6 +92,7 @@ export class TuiConversationProvider implements ConversationProvider {
   ) {
     this.projectId = options.projectId;
     this.taskId = options.taskId;
+    this.workspaceId = options.workspaceId;
     this.taskPath = options.taskPath;
     this.host = options.host;
     this.tuiAgents = options.tuiAgents;
@@ -129,7 +149,7 @@ export class TuiConversationProvider implements ConversationProvider {
     const agentSession = resolveAgentSession(conversation, mode);
     const effectiveInitialPrompt =
       !agentSession.isResuming && mode === 'start' ? initialPrompt : undefined;
-    const [providerConfig, taskSettings, colorEnv, launchContext, gitCredentials] =
+    const [providerConfig, taskSettings, colorEnv, launchContext, gitCredentials, sessionMcp] =
       await Promise.all([
         this.dependencies.getProviderConfig(conversation.providerId),
         conversation.autoApprove === true
@@ -141,6 +161,7 @@ export class TuiConversationProvider implements ConversationProvider {
           projectId: this.projectId,
           host: this.host,
         }),
+        this.resolveSessionMcp(conversation),
       ]);
     if (!launchContext.success) {
       throw new Error(`Could not resolve task session launch context: ${launchContext.error.type}`);
@@ -151,6 +172,7 @@ export class TuiConversationProvider implements ConversationProvider {
       ...(providerConfig?.env ?? {}),
       ...colorEnv,
       ...launchContext.data.env,
+      ...sessionMcp?.env,
     };
     const sessionId = makePtySessionId(this.projectId, this.taskId, conversation.id);
 
@@ -169,11 +191,25 @@ export class TuiConversationProvider implements ConversationProvider {
       extraArgs: parseExtraArgs(providerConfig?.extraArgs),
       providerVars,
       gitCredentials,
+      ...(sessionMcp ? { sessionMcp: sessionMcp.sessionMcp } : {}),
       cols: initialSize.cols,
       rows: initialSize.rows,
       shellSetup: launchContext.data.shellSetup,
       tmux: launchContext.data.tmux ? { identity: sessionId } : undefined,
     };
+  }
+
+  /** Best effort: a session without browser tools beats a session that fails to start. */
+  private async resolveSessionMcp(conversation: Conversation): Promise<TuiSessionMcp | undefined> {
+    const resolve = this.dependencies.resolveSessionMcp;
+    if (!resolve || !this.workspaceId || !isLocalHostRef(this.host)) return undefined;
+    return resolve({
+      conversationId: conversation.id,
+      projectId: this.projectId,
+      workspaceId: this.workspaceId,
+      taskId: this.taskId,
+      title: conversation.title,
+    }).catch(() => undefined);
   }
 }
 

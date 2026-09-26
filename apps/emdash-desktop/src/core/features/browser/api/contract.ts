@@ -105,7 +105,11 @@ export const browserContract = defineContract({
   }),
   /** Renderer answer to an `open-request` event. */
   ackOpenRequest: procedure({
-    input: z.object({ requestId: z.string(), browserId: z.string().nullable() }),
+    input: z.object({
+      requestId: z.string(),
+      browserId: z.string().nullable(),
+      denial: z.enum(['disabled', 'declined', 'consent-pending']).optional(),
+    }),
     output: z.custom<BrowserActionResult>(),
   }),
   /** Small preview for a suspended or off-screen tile; user-facing, no model involved. */

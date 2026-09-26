@@ -8,7 +8,10 @@ import type {
   IAgentAuthBehavior,
 } from '#services/agent-plugins/api/plugins/capabilities/auth';
 import type { CanonicalHookEvent } from '#services/agent-plugins/api/plugins/capabilities/hooks';
-import type { McpServerRegistration } from '#services/agent-plugins/api/plugins/capabilities/mcp';
+import type {
+  McpServerRegistration,
+  SessionMcpLaunch,
+} from '#services/agent-plugins/api/plugins/capabilities/mcp';
 import type {
   AgentCommand,
   CommandContext,
@@ -363,6 +366,61 @@ describe('AgentPluginHost', () => {
 
     await expect(host.readMcpServers('test')).resolves.toEqual({ success: true, data: servers });
     expect(readServers).toHaveBeenCalledWith(expect.any(Object));
+  });
+
+  it('puts session MCP args ahead of user extra args and the prompt', async () => {
+    const buildCommand = vi.fn(
+      (ctx: CommandContext): AgentCommand => ({
+        command: ctx.cli,
+        args: [...(ctx.extraArgs ?? []), 'PROMPT'],
+        env: {},
+      })
+    );
+    const sessionArgs = vi.fn((launch: SessionMcpLaunch) => [`--mcp-config=${launch.configPath}`]);
+    const host = createHost([
+      plugin({
+        mcp: { kind: 'supported', scope: 'global', supportedTransports: ['http'] },
+        behavior: {
+          prompt: { buildCommand },
+          mcp: {
+            readServers: async () => [],
+            writeServers: async () => {},
+            removeServer: async () => {},
+            sessionArgs,
+          },
+        },
+      }),
+    ]);
+    const launch: SessionMcpLaunch = {
+      configPath: '/data/agent-mcp/c1.json',
+      servers: [{ name: 'chorus-browser', url: 'http://127.0.0.1:4100/mcp', tokenEnvVar: 'TOK' }],
+    };
+
+    const result = await host.buildPromptCommand(
+      'test',
+      { autoApprove: false, model: '', extraArgs: ['--verbose'] },
+      launch
+    );
+
+    expect(result).toMatchObject({
+      success: true,
+      data: { args: ['--mcp-config=/data/agent-mcp/c1.json', '--verbose', 'PROMPT'] },
+    });
+    expect(sessionArgs).toHaveBeenCalledWith(launch);
+    // No servers: nothing added and the provider is not asked.
+    await host.buildPromptCommand('test', { autoApprove: false, model: '' });
+    expect(buildCommand).toHaveBeenLastCalledWith(expect.not.objectContaining({ extraArgs: [] }));
+    expect(sessionArgs).toHaveBeenCalledTimes(1);
+  });
+
+  it('adds no session MCP args for providers without a per-session flag', () => {
+    const host = createHost([plugin()]);
+    expect(
+      host.sessionMcpArgs('test', {
+        configPath: '/x.json',
+        servers: [{ name: 's', url: 'http://127.0.0.1:1/mcp', tokenEnvVar: 'TOK' }],
+      })
+    ).toEqual([]);
   });
 
   it('loads the current user environment for each agent spawn context', async () => {

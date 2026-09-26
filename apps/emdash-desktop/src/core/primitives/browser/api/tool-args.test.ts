@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatObservation, parseLookArgs, parseUseArgs } from './tool-args';
+import { formatObservation, parseLookArgs, parseScreenshotArgs, parseUseArgs } from './tool-args';
 
 describe('parseUseArgs', () => {
   it('parses ref and coordinate targets', () => {
@@ -55,7 +55,27 @@ describe('parseLookArgs', () => {
   });
 });
 
+describe('parseScreenshotArgs', () => {
+  it('needs no arguments and rounds the size', () => {
+    expect(parseScreenshotArgs({})).toEqual({ includeConsole: false });
+    expect(parseScreenshotArgs({ max_edge: 640.4, include_console: true })).toEqual({
+      maxEdge: 640,
+      includeConsole: true,
+    });
+    expect(parseScreenshotArgs({ max_edge: 'big' })).toBe('max_edge must be a number.');
+  });
+});
+
 describe('formatObservation', () => {
+  it('tells the model screenshot pixels are use_app coordinates', () => {
+    const text = formatObservation({
+      url: 'http://localhost:5173/',
+      title: 'App',
+      image: { mediaType: 'image/jpeg', data: 'AAAA', width: 1280, height: 720 },
+    });
+    expect(text).toContain('Screenshot 1280×720 attached; use_app x/y are in these pixels.');
+  });
+
   it('frames the page title and console output as untrusted', () => {
     const text = formatObservation({
       url: 'http://localhost:5173/',
