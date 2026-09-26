@@ -17,6 +17,12 @@ export type PromptSpillResult = {
 
 export type PromptSpillDeps = {
   maxChars?: number;
+  /**
+   * Also spill any prompt with a line break. On Windows the provider command line often runs
+   * through cmd.exe (always for npm-style `.cmd` shims), which ends a command at a line break, so
+   * an inline multi-line prompt would reach the agent cut to its first line.
+   */
+  spillLineBreaks?: boolean;
   createTempDir?: () => Promise<string>;
   writeContextFile?: (filePath: string, contents: string) => Promise<void>;
   removeTempDir?: (directory: string) => Promise<void>;
@@ -35,23 +41,31 @@ const noopCleanup = (): Promise<void> => Promise.resolve();
 
 export function buildPromptPointerMessage(filePath: string): string {
   return (
-    `The full task context was too large to pass on the command line, so it has ` +
+    `The full task context could not be passed intact on the command line, so it has ` +
     `been written to a file. Read the file at ${filePath} and complete the task ` +
     `described in it.`
   );
 }
 
+/** True when a prompt must be spilled rather than passed inline on the provider command line. */
+export function shouldSpillPrompt(
+  prompt: string,
+  options: Pick<PromptSpillDeps, 'maxChars' | 'spillLineBreaks'> = {}
+): boolean {
+  if (prompt.length > (options.maxChars ?? MAX_INLINE_PROMPT_CHARS)) return true;
+  return options.spillLineBreaks === true && /[\r\n]/.test(prompt);
+}
+
 /**
- * Spill a large prompt on the machine that hosts the TUI runtime. The returned pointer is still
- * delivered through the provider's normal prompt path, so provider permission behavior is
- * unchanged.
+ * Spill a large (or, with `spillLineBreaks`, multi-line) prompt on the machine that hosts the TUI
+ * runtime. The returned pointer is still delivered through the provider's normal prompt path, so
+ * provider permission behavior is unchanged.
  */
 export async function spillLargePrompt(
   prompt: string,
   deps: PromptSpillDeps = {}
 ): Promise<PromptSpillResult> {
-  const maxChars = deps.maxChars ?? MAX_INLINE_PROMPT_CHARS;
-  if (prompt.length <= maxChars) {
+  if (!shouldSpillPrompt(prompt, deps)) {
     return { prompt, spilled: false, cleanup: noopCleanup };
   }
 

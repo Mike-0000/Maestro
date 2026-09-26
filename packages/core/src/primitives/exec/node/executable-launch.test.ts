@@ -1,5 +1,9 @@
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { planExecutableLaunch } from './executable-launch';
+import { planExecutableLaunch, toChildProcessLaunch } from './executable-launch';
 
 describe('planExecutableLaunch', () => {
   it('keeps POSIX argv as a direct launch', () => {
@@ -53,7 +57,7 @@ describe('planExecutableLaunch', () => {
         kind: 'windows-command-line',
         executable: 'C:\\Windows\\System32\\cmd.exe',
         rawArguments:
-          '/d /s /c ""C:\\Program Files\\npm shims\\provider.CMD" "" "hello world" "embedded^"quote" "%%TOKEN%%" "bang^^!" "caret^^" "ampersand^&" "pipe^|" "less^<" "greater^>" "^(parentheses^)" "space trailing\\" ユニコード /c "x ^& echo injected""',
+          '/d /s /c ""C:\\Program Files\\npm shims\\provider.CMD" "" "hello world" "embedded""quote" "%%cd:~,%TOKEN%%cd:~,%" "bang!" "caret^" "ampersand&" "pipe|" "less<" "greater>" "(parentheses)" "space trailing\\\\" ユニコード /c "x & echo injected""',
       },
       cwd: 'C:\\Work Space',
       diagnostics: [],
@@ -279,5 +283,42 @@ describe('planExecutableLaunch', () => {
     });
 
     expect(plan.invocation.executable).toBe('C:\\Windows\\System32\\cmd.exe');
+  });
+});
+
+// Runs a real cmd.exe and an npm-style shim that forwards %* to node, so the quoting is checked
+// against cmd itself rather than against a copy of its rules.
+describe.runIf(process.platform === 'win32')('planExecutableLaunch through a real cmd shim', () => {
+  it('delivers every argument verbatim', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'emdash-cmd-shim-'));
+    try {
+      const echo = path.join(dir, 'argv.js');
+      writeFileSync(echo, 'process.stdout.write(JSON.stringify(process.argv.slice(2)));');
+      const shim = path.join(dir, 'provider.cmd');
+      writeFileSync(shim, `@echo off\r\n"${process.execPath}" "${echo}" %*\r\n`);
+      const args = [
+        'plain',
+        'Review the plan: (1) quadrants & (2) focus | stage > board < region ^ done',
+        'say "hi" & echo injected',
+        'x" & echo injected & "',
+        '100% sure %PATH% %%x%% %~dp0 %1 %*',
+        'bang! !PATH!',
+        'C:\\dir name\\',
+        'a\\"b',
+        '',
+      ];
+      const plan = planExecutableLaunch({ platform: 'win32', command: shim, args, cwd: dir });
+      const launch = toChildProcessLaunch(plan.invocation);
+      const result = spawnSync(launch.executable, launch.args, {
+        cwd: dir,
+        encoding: 'utf8',
+        windowsVerbatimArguments: launch.windowsVerbatimArguments,
+      });
+
+      expect(result.stderr).toBe('');
+      expect(JSON.parse(result.stdout)).toEqual(args);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

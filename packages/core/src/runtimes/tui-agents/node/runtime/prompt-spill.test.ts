@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   buildPromptPointerMessage,
   cleanupStalePromptSpills,
+  shouldSpillPrompt,
   spillLargePrompt,
 } from './prompt-spill';
 
@@ -38,6 +39,36 @@ describe('TUI prompt spilling', () => {
 
     await result.cleanup();
     expect(removeTempDir).toHaveBeenCalledWith('/host/tmp/emdash-tui-prompt-abc');
+  });
+
+  it('spills short multi-line prompts only when asked to keep line breaks', async () => {
+    const createTempDir = vi.fn(async () => '/host/tmp/emdash-tui-prompt-abc');
+    const writeContextFile = vi.fn(async () => undefined);
+    const prompt = 'Review the sub-canvas system.\r\n\r\nFour agents should form quadrants.';
+
+    await expect(
+      spillLargePrompt(prompt, { createTempDir, writeContextFile })
+    ).resolves.toMatchObject({ prompt, spilled: false });
+    expect(createTempDir).not.toHaveBeenCalled();
+
+    const result = await spillLargePrompt(prompt, {
+      spillLineBreaks: true,
+      createTempDir,
+      writeContextFile,
+    });
+    expect(result).toMatchObject({ spilled: true });
+    expect(result.prompt).not.toMatch(/[\r\n]/);
+    expect(writeContextFile).toHaveBeenCalledWith(
+      expect.stringMatching(/emdash-tui-prompt-abc[\\/]task-context\.md$/),
+      prompt
+    );
+  });
+
+  it('keeps single-line prompts inline even when line breaks would spill', () => {
+    expect(shouldSpillPrompt('one line', { spillLineBreaks: true })).toBe(false);
+    expect(shouldSpillPrompt('two\nlines', { spillLineBreaks: true })).toBe(true);
+    expect(shouldSpillPrompt('two\nlines')).toBe(false);
+    expect(shouldSpillPrompt('x'.repeat(6), { maxChars: 5 })).toBe(true);
   });
 
   it('falls back to the inline prompt when Host storage fails', async () => {

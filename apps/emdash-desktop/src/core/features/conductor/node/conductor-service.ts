@@ -36,6 +36,11 @@ import { InteractionDiagnostics } from './diagnostics';
 import { evaluateWithJev, JevRequestError, type JevVia } from './jev-client';
 
 const LOG_FILE = 'conductor-log.jsonl';
+/**
+ * Room for a whole agent prompt in a logged action input, so a log review sees exactly what an
+ * agent was sent (the log is opt-in, bounded by age, and redacted).
+ */
+const LOG_ACTION_INPUT_CHARS = 16_000;
 const FALLBACK_BETA = 'server-side-fallback-2026-06-01';
 /** Models that take adaptive thinking and output_config.effort. */
 const ADAPTIVE_MODEL_PREFIXES = [
@@ -343,7 +348,7 @@ export class ConductorService {
         reply: record.reply.slice(0, 4000),
         actions: record.actions.slice(0, 20).map((action) => ({
           ...action,
-          input: JSON.stringify(action.input)?.slice(0, 2000) ?? null,
+          input: JSON.stringify(action.input)?.slice(0, LOG_ACTION_INPUT_CHARS) ?? null,
           outcome: action.outcome.slice(0, 4000),
         })),
       };

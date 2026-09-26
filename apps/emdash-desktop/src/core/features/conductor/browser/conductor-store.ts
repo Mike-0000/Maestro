@@ -43,6 +43,7 @@ import {
   urgencyQuestions,
   type SubtaskSize,
 } from '../api/jev';
+import { deliveryNote, describePrompt, withVerbatimRequest } from '../api/prompt-fidelity';
 import { resolveAgent, type RosterAgent } from '../api/resolver';
 import { conductorUserMessage } from '../api/system-prompt';
 import {
@@ -1165,17 +1166,19 @@ export class ConductorStore {
         const blocked = this.permissionBlock(entry.entry);
         if (blocked) return { content: blocked, isError: true };
         const target = this.nameOf(entry.entry);
+        const message = withVerbatimRequest(text, this.lastUtterance);
         if (
           !(await this.requestPending(`Send to ${target}: “${truncate(text, 90)}”`, confirmKind))
         ) {
           return { content: 'The user cancelled this before it was sent.' };
         }
         const wasRunning = this.isRunning(entry.entry);
-        await this.deliver(entry.entry, text, submit ?? true);
+        await this.deliver(entry.entry, message, submit ?? true);
+        const delivered = deliveryNote(text, message);
         return {
           content: wasRunning
-            ? `Sent to ${target}.`
-            : `${target} was not running; it is starting and will get the message when ready.`,
+            ? `Sent to ${target} (${delivered}).`
+            : `${target} was not running; it is starting and will get the message (${delivered}) when ready.`,
         };
       }
       case 'interrupt_agent': {
@@ -1208,7 +1211,8 @@ export class ConductorStore {
         }
         const projectId = resolveProjectId(spawn.project, this.focusedEntry()?.projectId);
         if (!projectId) return { content: 'No project is open.', isError: true };
-        const label = `Start ${spawn.provider} on “${truncate(spawn.task_name, 60)}”`;
+        const prompt = withVerbatimRequest(spawn.prompt, this.lastUtterance);
+        const label = `Start ${spawn.provider} on “${truncate(spawn.task_name, 60)}” · ${describePrompt(prompt)}`;
         if (!(await this.requestPending(label, confirmKind))) {
           return { content: 'The user cancelled the new agent.' };
         }
@@ -1219,7 +1223,7 @@ export class ConductorStore {
           projectId,
           providerId: spawn.provider,
           taskName: spawn.task_name,
-          prompt: spawn.prompt,
+          prompt,
           conversationId,
           title: name,
         }).catch((error: unknown) => {
@@ -1246,11 +1250,11 @@ export class ConductorStore {
               { tool: 'spawn_agent', status: 'session-started' },
               interactionId
             );
-            if (result.promptDeferred && spawn.prompt.trim()) {
+            if (result.promptDeferred && prompt.trim()) {
               const delivered = await deliverPromptWhenReady(
                 this.canvas,
                 result.conversationId,
-                spawn.prompt
+                prompt
               );
               this.trace(
                 'action-result',
@@ -1269,7 +1273,7 @@ export class ConductorStore {
             )
           );
         return {
-          content: `Created task "${spawn.task_name}" in a new worktree; the agent is starting. It will appear on the canvas as ${name}.`,
+          content: `Created task "${spawn.task_name}" in a new worktree with a prompt of ${deliveryNote(spawn.prompt, prompt)}; the agent is starting. It will appear on the canvas as ${name}.`,
         };
       }
       case 'propose_plan': {

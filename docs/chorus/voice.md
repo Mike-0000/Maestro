@@ -108,6 +108,13 @@ Anything the grammar does not recognise goes to Claude, which can:
   can run after one another, and a conflict radar (`git merge-tree`, read-only) warns when two
   branches would conflict.
 
+Long dictated briefs reach agents intact. The conductor writes an organized prompt from what you
+said, and when a request is long (50 words or more) Chorus also attaches your verbatim transcript
+to `spawn_agent` and `send_to_agent` prompts, so details such as examples and emphasis do not
+depend on the model's summary. The start/send countdown shows the prompt's size and first line,
+and the tool result tells the conductor exactly how much was delivered. If you say an agent got
+too little, the conductor reads what the agent actually received before resending.
+
 Add an Anthropic API key in **Settings → Voice & Conductor**. The default model is
 `claude-opus-5` with low effort for commands and high effort for plans; both are configurable,
 and a daily token budget (3M by default) stops runaway spend. **Diagnostic history is off by

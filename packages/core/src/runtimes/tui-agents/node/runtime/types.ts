@@ -26,7 +26,10 @@ export interface TuiAgentsRuntimeDeps {
     session?: IdlePolicyConfig;
     sweepIntervalMs?: number;
   };
-  spillPrompt?: (prompt: string) => Promise<PromptSpillResult>;
+  spillPrompt?: (
+    prompt: string,
+    options: { spillLineBreaks: boolean }
+  ) => Promise<PromptSpillResult>;
   logger: Logger;
 }
 

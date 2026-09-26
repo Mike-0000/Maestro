@@ -21,7 +21,29 @@ describe('quoteArg', () => {
   it('quotes cmd.exe arguments', () => {
     expect(quoteArg('', 'windows-cmd')).toBe('""');
     expect(quoteArg('plain', 'windows-cmd')).toBe('plain');
-    expect(quoteArg('a b&%x!', 'windows-cmd')).toBe('"a b^&%%x^^!"');
+    expect(quoteArg('a b&%x!', 'windows-cmd')).toBe('"a b&%%cd:~,%x!"');
+  });
+
+  it('keeps cmd.exe metacharacters literal inside the quotes', () => {
+    expect(quoteArg('(1) a ^ b | c < d > e', 'windows-cmd')).toBe('"(1) a ^ b | c < d > e"');
+  });
+
+  it('doubles embedded quotes so cmd quote state stays balanced', () => {
+    expect(quoteArg('x" & echo injected & "', 'windows-cmd')).toBe('"x"" & echo injected & """');
+  });
+
+  it('doubles backslashes only before a quote or the closing quote', () => {
+    expect(quoteArg('C:\\dir name\\', 'windows-cmd')).toBe('"C:\\dir name\\\\"');
+    expect(quoteArg('a\\"b', 'windows-cmd')).toBe('"a\\\\""b"');
+    expect(quoteArg('C:\\a b\\c', 'windows-cmd')).toBe('"C:\\a b\\c"');
+  });
+
+  it('keeps percent signs from expanding variables', () => {
+    expect(quoteArg('%PATH% 100%', 'windows-cmd')).toBe('"%%cd:~,%PATH%%cd:~,% 100%%cd:~,%"');
+  });
+
+  it('flattens line breaks, which would end a cmd.exe command', () => {
+    expect(quoteArg('line 1\r\nline 2\nline 3', 'windows-cmd')).toBe('"line 1 line 2 line 3"');
   });
 
   it('quotes PowerShell arguments', () => {

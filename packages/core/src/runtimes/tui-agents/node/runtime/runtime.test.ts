@@ -36,7 +36,10 @@ function createRuntime(
     conversationReports?: ConversationLifecycleReporter;
     hooks?: ResolvedTuiProvider['hooks'];
     trustWorkspace?: ITrustBehavior['trustWorkspace'];
-    spillPrompt?: (prompt: string) => Promise<PromptSpillResult>;
+    spillPrompt?: (
+      prompt: string,
+      options: { spillLineBreaks: boolean }
+    ) => Promise<PromptSpillResult>;
     platform?: NodeJS.Platform;
     userEnv?: NodeJS.ProcessEnv;
     commandEnv?: Record<string, string>;
@@ -557,7 +560,9 @@ describe('TuiAgentsRuntime', () => {
 
     await runtime.startSession(startInput({ initialPrompt: largePrompt }));
 
-    expect(spillPrompt).toHaveBeenCalledWith(largePrompt);
+    expect(spillPrompt).toHaveBeenCalledWith(largePrompt, {
+      spillLineBreaks: process.platform === 'win32',
+    });
     expect(agentHost.buildPromptCommand).toHaveBeenCalledWith(
       'test',
       expect.objectContaining({
@@ -568,6 +573,26 @@ describe('TuiAgentsRuntime', () => {
     await runtime.stopSession('conversation-1');
     expect(cleanup).toHaveBeenCalledOnce();
   });
+
+  it.each([
+    ['win32', true],
+    ['linux', false],
+  ] as const)(
+    'asks to spill multi-line prompts only where cmd.exe may carry them (%s)',
+    async (platform, spillLineBreaks) => {
+      const spillPrompt = vi.fn(async (prompt: string) => ({
+        prompt,
+        spilled: false,
+        cleanup: async () => undefined,
+      }));
+      const { runtime } = createRuntime({ spillPrompt, platform });
+      const prompt = 'Review the sub-canvas system.\n\nFour agents should form quadrants.';
+
+      await runtime.startSession(startInput({ initialPrompt: prompt }));
+
+      expect(spillPrompt).toHaveBeenCalledWith(prompt, { spillLineBreaks });
+    }
+  );
 
   it('hands session MCP servers to the provider command builder', async () => {
     const { runtime, agentHost } = createRuntime();

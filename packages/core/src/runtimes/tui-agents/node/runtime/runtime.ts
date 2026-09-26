@@ -690,18 +690,20 @@ export class TuiAgentsRuntime {
   private async preparePromptInput(input: TuiAgentStartInput): Promise<TuiAgentStartInput> {
     if (!input.initialPrompt) return input;
     await this.cleanupPromptSpill(input.conversationId);
+    const options = { spillLineBreaks: (this.deps.platform ?? process.platform) === 'win32' };
     const spill = await (
       this.deps.spillPrompt ??
-      ((prompt) =>
+      ((prompt, { spillLineBreaks }) =>
         spillLargePrompt(prompt, {
+          spillLineBreaks,
           onError: (error, promptLength) =>
-            this.deps.logger.warn('Failed to spill large TUI prompt; passing it inline', {
+            this.deps.logger.warn('Failed to spill TUI prompt; passing it inline', {
               conversationId: input.conversationId,
               promptLength,
               error: String(error),
             }),
         }))
-    )(input.initialPrompt);
+    )(input.initialPrompt, options);
     if (spill.spilled) this.promptSpills.set(input.conversationId, spill);
     return spill.prompt === input.initialPrompt ? input : { ...input, initialPrompt: spill.prompt };
   }

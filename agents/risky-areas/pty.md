@@ -35,5 +35,12 @@
   host process captures it, spawning runtimes receive a parent-owned source and resolve that source
   exactly once per spawn, never as an ambient fallback or immutable worker config
 - do not weaken quoting or spawn behavior casually
+- cmd.exe arguments (`quoteArg(..., 'windows-cmd')`) stay entirely inside double quotes: no `^`
+  escapes inside quotes (they reach the program), `"` becomes `""`, `%` becomes `%%cd:~,%`, and
+  line breaks are flattened because cmd ends a command at one. The Windows-only round trip in
+  `packages/core/src/primitives/exec/node/executable-launch.test.ts` runs a real `.cmd` shim; run
+  it on Windows after touching this quoting
+- TUI initial prompts with line breaks are spilled to a file on Windows (`spillLineBreaks` in
+  `runtimes/tui-agents/node/runtime/prompt-spill.ts`); inline they would be cut at the first line
 - validate both direct spawn and shell-wrapped spawn cases when changing PTY startup logic
 - confirm renderer event flow if hook/plugin payload or agent status behavior changes

@@ -41,13 +41,36 @@ function quoteCshArg(value: string): string {
   return quotePosixArg(value).replaceAll('!', '\\!');
 }
 
+/**
+ * Quotes one argument for a cmd.exe command line (`cmd /c`), including one that runs a `.cmd`
+ * shim which forwards `%*` to a program. The whole value stays inside double quotes, where cmd
+ * treats `^ & | < > ( )` literally, so none of them are escaped: a caret would reach the program.
+ * Embedded quotes become `""`, which keeps cmd's quote state balanced and which the Microsoft C
+ * runtime (and so node, Bun, and most Windows programs) reads back as one literal quote;
+ * backslashes before a quote or the closing quote are doubled for the same parser. `%` becomes
+ * `%%cd:~,%` (a literal `%` followed by an empty substring expansion), because cmd expands
+ * `%VAR%` even inside quotes and does not collapse `%%` on a command line. cmd ends a command at a
+ * line break, so line breaks are flattened to spaces: callers that must keep them (multi-line
+ * prompts) need another channel, such as a file.
+ */
 function quoteCmdArg(value: string): string {
   if (value.length === 0) return '""';
   if (!/[\s"^&|<>()%!]/.test(value)) return value;
-  return `"${value
-    .replaceAll('%', '%%')
-    .replaceAll('!', '^!')
-    .replace(/(["^&|<>()])/g, '^$1')}"`;
+  let quoted = '"';
+  let backslashes = 0;
+  for (const char of value.replace(/\r\n|[\r\n]/g, ' ')) {
+    if (char === '\\') {
+      backslashes += 1;
+      continue;
+    }
+    if (char === '"') {
+      quoted += `${'\\'.repeat(backslashes * 2)}""`;
+    } else {
+      quoted += '\\'.repeat(backslashes) + (char === '%' ? '%%cd:~,%' : char);
+    }
+    backslashes = 0;
+  }
+  return `${quoted}${'\\'.repeat(backslashes * 2)}"`;
 }
 
 function quotePowerShellArg(value: string): string {

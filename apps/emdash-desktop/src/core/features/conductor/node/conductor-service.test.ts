@@ -375,4 +375,22 @@ describe('ConductorService log', () => {
     const records = await conductor.readLog(2);
     expect(records.map((record) => record.utterance)).toEqual(['two', 'three']);
   });
+  it('keeps a whole multi-paragraph agent prompt in the logged action input', async () => {
+    const conductor = service();
+    await conductor.updateSettings({ diagnosticHistory: true });
+    const prompt = Array.from({ length: 12 }, (_, index) => `Requirement ${index}. `.repeat(20))
+      .join('\n\n')
+      .trim();
+    await conductor.appendLog({
+      at: new Date().toISOString(),
+      utterance: 'create an agent',
+      route: 'llm',
+      actions: [{ tool: 'spawn_agent', input: { prompt }, outcome: 'Created task.' }],
+      reply: '',
+      latencyMs: 1,
+    });
+    const [record] = await conductor.readLog(1);
+    expect(prompt.length).toBeGreaterThan(2000);
+    expect(JSON.parse(record!.actions[0]!.input as string)).toEqual({ prompt });
+  });
 });
