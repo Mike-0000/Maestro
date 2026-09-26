@@ -5,6 +5,7 @@ import {
   type AgentStatus,
   type AgentStatusSignal,
 } from '@core/primitives/agents/api';
+import { buildCompletionReport } from '@core/primitives/agents/api/completion-report';
 import { summarizeCompletionMessage } from '@core/primitives/agents/api/completion-summary';
 import type { ConversationEvent } from '@core/primitives/conversations/api';
 import { HookCore, type Hookable } from '@core/primitives/hooks/api/hookable';
@@ -116,9 +117,13 @@ export class AgentStatusService implements Hookable<AgentStatusServiceHooks> {
         projectId: row.projectId,
         status,
         seen: (row.agentStatusSeen ?? derivedSeen) === 1,
-        // Only the condensed synopsis leaves the main process, never the full reply.
+        // The final reply leaves the main process only redacted and bounded; reasoning and the
+        // rest of the transcript never do.
         ...(status === 'completed'
-          ? { completionSummary: summarizeCompletionMessage(signal.payload.lastAssistantMessage) }
+          ? {
+              completionSummary: summarizeCompletionMessage(signal.payload.lastAssistantMessage),
+              completionReport: buildCompletionReport(signal.payload.lastAssistantMessage),
+            }
           : {}),
       });
     } else {

@@ -4,6 +4,7 @@ import type {
   BrowserTileEntry,
   CanvasStore,
 } from '@core/features/canvas/api/browser/stores/canvas-store';
+import { isLocalAppUrl } from '@core/primitives/agents/api/completion-report';
 import {
   describeBrowserAction,
   formatActResult,
@@ -80,12 +81,27 @@ export class ConductorAppTools {
     if ('error' in resolved) return { content: resolved.error, isError: true };
     const { task } = resolved;
     const existing = this.deps.canvas.browserForTask(task.taskId);
+    const known = existing?.url && existing.url !== 'about:blank' ? existing.url : undefined;
+    const served = this.deps.host.devServerUrls(task)[0];
+    const reported = this.reportedAppUrl(task.taskId);
     let url: string | undefined;
     if (input.url) {
-      const base = existing?.url ?? this.deps.host.devServerUrls(task)[0];
-      const parsed = parseUseArgs({ action: 'navigate', url: input.url }, base);
+      const parsed = parseUseArgs(
+        { action: 'navigate', url: input.url },
+        known ?? served ?? reported
+      );
       if (typeof parsed === 'string') return { content: parsed, isError: true };
       if (parsed.kind === 'navigate') url = parsed.url;
+      // Agent replies can name any URL; the canvas browser only opens the task's own app.
+      if (url && !isLocalAppUrl(url) && !sameOrigin(url, known ?? served)) {
+        return {
+          content: `Not opening ${url}: show_app only opens the task's app on this machine (localhost) or its current origin.`,
+          isError: true,
+        };
+      }
+    } else if (!known && !served && reported) {
+      // No dev server detected (the agent started it itself): use the URL it reported.
+      url = reported;
     }
     this.deps.host.openForTask({ ...task, ...(url ? { url } : {}) });
     const entry = this.deps.canvas.browserForTask(task.taskId);
@@ -134,6 +150,16 @@ export class ConductorAppTools {
     const result = await client.act({ browserId: target.entry.browserId, action });
     if (!result.success) return { content: formatAutomationError(result.error), isError: true };
     return { content: formatActResult(action, result.data) };
+  }
+
+  /** A local app URL that one of the task's agents reported in its latest final reply. */
+  private reportedAppUrl(taskId: string): string | undefined {
+    for (const entry of this.deps.canvas.agentEntries) {
+      if (entry.taskId !== taskId || entry.status !== 'completed') continue;
+      const url = entry.completionReport?.appUrls[0];
+      if (url) return url;
+    }
+    return undefined;
   }
 
   /** Forgets approvals (the user stopped the lease or took the app back). */
@@ -209,5 +235,14 @@ export class ConductorAppTools {
     if (!(await this.deps.requestPending(label, 'countdown'))) return false;
     this.approvedUntil.set(entry.browserId, this.now() + DRIVE_GRACE_MS);
     return true;
+  }
+}
+
+function sameOrigin(url: string, base: string | undefined): boolean {
+  if (!base) return false;
+  try {
+    return new URL(url).origin === new URL(base).origin;
+  } catch {
+    return false;
   }
 }

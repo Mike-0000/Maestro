@@ -16,6 +16,7 @@ import type { FrontendPtyConnector } from '@core/features/terminals/api/browser/
 import { PtySession } from '@core/features/terminals/api/browser/pty/pty-session';
 import { createXtermLogSink } from '@core/features/terminals/api/browser/pty/xterm-log-sink';
 import { type AgentStatus, type NotificationType } from '@core/primitives/agents/api';
+import type { CompletionReport } from '@core/primitives/agents/api/completion-report';
 import { Resource } from '@core/primitives/async-resource/browser/resource';
 import {
   type Conversation,
@@ -275,6 +276,8 @@ export class ConversationManagerStore implements Disposable {
       }
       conversationStore.completionSummary =
         payload.status === 'completed' ? (payload.completionSummary ?? null) : null;
+      conversationStore.completionReport =
+        payload.status === 'completed' ? (payload.completionReport ?? null) : null;
     });
   }
 
@@ -608,6 +611,8 @@ export class ConversationStore {
   lastNotificationType: NotificationType | null = null;
   /** What the agent last finished, in a few words; set only while status is 'completed'. */
   completionSummary: string | null = null;
+  /** The agent's final reply, redacted and bounded; set only while status is 'completed'. */
+  completionReport: CompletionReport | null = null;
 
   constructor(conversation: Conversation) {
     this.data = conversation;
@@ -619,6 +624,7 @@ export class ConversationStore {
       seen: observable,
       lastNotificationType: observable,
       completionSummary: observable,
+      completionReport: observable.ref,
       setStatus: action,
       setAwaitingInput: action,
       setWorking: action,
@@ -648,7 +654,10 @@ export class ConversationStore {
     if (status !== 'awaiting-input') {
       this.lastNotificationType = null;
     }
-    if (status !== 'completed') this.completionSummary = null;
+    if (status !== 'completed') {
+      this.completionSummary = null;
+      this.completionReport = null;
+    }
   }
 
   setAwaitingInput(notificationType: NotificationType) {

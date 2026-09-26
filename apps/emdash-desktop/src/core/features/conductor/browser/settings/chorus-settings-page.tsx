@@ -678,6 +678,19 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
           }
         />
         <SettingsRow
+          label="Report what finished agents said"
+          description="When an agent finishes, the conductor reads its final reply to tell you what it did (say, the URL of the app it started) and to do follow-ups you asked for, such as opening that app. Off: a short fixed announcement."
+          control={
+            <Switch
+              checked={conductorSettings?.completionFollowUp ?? true}
+              disabled={!conductorSettings}
+              onCheckedChange={(completionFollowUp) =>
+                void conductor.updateSettings({ completionFollowUp })
+              }
+            />
+          }
+        />
+        <SettingsRow
           label="Daily token budget"
           description={
             conductor.status

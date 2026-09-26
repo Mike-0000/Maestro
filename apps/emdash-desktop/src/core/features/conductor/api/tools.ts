@@ -171,7 +171,7 @@ const descriptions: Record<ConductorToolName, string> = {
   start_app:
     "Run a task's app (its run script) and open it in a browser tile on the canvas once its dev server is up.",
   show_app:
-    "Open or focus a task's app browser on the canvas, optionally at a URL on the app's own origin.",
+    "Open or focus a task's app browser on the canvas, optionally at a URL on the app's own origin or on localhost (such as the dev server URL an agent reported). Without a url it opens the running app, or the local URL the task's agent reported.",
   look_at_app: LOOK_AT_APP_DESCRIPTION,
   use_app: `${USE_APP_DESCRIPTION} The first use in a while gives the user a short window to cancel.`,
   stop_app: "Stop a task's app (its dev server). The browser tile stays with its last view.",

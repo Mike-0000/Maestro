@@ -44,3 +44,9 @@
   `runtimes/tui-agents/node/runtime/prompt-spill.ts`); inline they would be cut at the first line
 - validate both direct spawn and shell-wrapped spawn cases when changing PTY startup logic
 - confirm renderer event flow if hook/plugin payload or agent status behavior changes
+- a completed agent's `lastAssistantMessage` leaves the main process only through
+  `buildCompletionReport` (`src/core/primitives/agents/api/completion-report.ts`): redacted,
+  bounded, with no reasoning or transcript. The conductor treats it as untrusted data. A
+  completion follow-up turn may run only `COMPLETION_FOLLOW_UP_TOOLS`
+  (`src/core/features/conductor/api/completion-follow-up.ts`), and `show_app` opens only
+  loopback or same-origin URLs. Keep both fences when changing either side.

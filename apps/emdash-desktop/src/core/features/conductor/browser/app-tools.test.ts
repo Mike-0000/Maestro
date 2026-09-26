@@ -14,7 +14,15 @@ const task: AppTask = { taskId: 't1', projectId: 'p1', workspaceId: 'w1', name: 
 
 type Entry = { taskId: string; browserId: string; url: string; control: 'user' | 'agents' };
 
-function setup(options: { entry?: Entry; running?: boolean; answers?: boolean[] } = {}) {
+type AgentEntry = {
+  taskId: string;
+  status: string;
+  completionReport: { appUrls: string[] } | null;
+};
+
+function setup(
+  options: { entry?: Entry; running?: boolean; answers?: boolean[]; agents?: AgentEntry[] } = {}
+) {
   let entry = options.entry;
   const answers = [...(options.answers ?? [])];
   const requestPending = vi.fn(async () => answers.shift() ?? true);
@@ -39,7 +47,7 @@ function setup(options: { entry?: Entry; running?: boolean; answers?: boolean[] 
       return true;
     }),
   };
-  const canvas = { browserForTask: vi.fn(() => entry) };
+  const canvas = { browserForTask: vi.fn(() => entry), agentEntries: options.agents ?? [] };
   let now = 1_000;
   const deps = {
     canvas,
@@ -144,6 +152,60 @@ describe('ConductorAppTools', () => {
     expect((await tools.useApp({ action: 'reload' })).content).toBe('Cancelled by the user.');
     expect(await tools.useApp({ action: 'click' })).toMatchObject({ isError: true });
     expect(client.act).not.toHaveBeenCalled();
+  });
+
+  it('opens the local URL a finished agent reported when no dev server is detected', async () => {
+    const { tools, host } = setup({
+      agents: [
+        {
+          taskId: 't1',
+          status: 'completed',
+          completionReport: { appUrls: ['http://localhost:3000/'] },
+        },
+      ],
+    });
+    const outcome = await tools.showApp({ agent: 'Atlas' });
+    expect(host.openForTask).toHaveBeenCalledWith({ ...task, url: 'http://localhost:3000/' });
+    expect(outcome.content).toContain('http://localhost:3000/');
+  });
+
+  it('prefers a detected dev server over a reported URL', async () => {
+    const { tools, host } = setup({
+      running: true,
+      agents: [
+        {
+          taskId: 't1',
+          status: 'completed',
+          completionReport: { appUrls: ['http://localhost:3000/'] },
+        },
+      ],
+    });
+    await tools.showApp({});
+    expect(host.openForTask).toHaveBeenCalledWith(task);
+  });
+
+  it('opens local URLs but refuses other origins, whoever named them', async () => {
+    const local = setup();
+    expect(await local.tools.showApp({ url: 'http://127.0.0.1:8080/admin' })).not.toMatchObject({
+      isError: true,
+    });
+    expect(local.host.openForTask).toHaveBeenCalledWith({
+      ...task,
+      url: 'http://127.0.0.1:8080/admin',
+    });
+
+    const remote = setup({ running: true });
+    const outcome = await remote.tools.showApp({ url: 'https://evil.example/login' });
+    expect(outcome).toMatchObject({ isError: true });
+    expect(outcome.content).toContain('only opens');
+    expect(remote.host.openForTask).not.toHaveBeenCalled();
+
+    const relative = setup({ running: true });
+    await relative.tools.showApp({ url: '/settings' });
+    expect(relative.host.openForTask).toHaveBeenCalledWith({
+      ...task,
+      url: 'http://localhost:5173/settings',
+    });
   });
 
   it('refuses to observe when there is neither a browser nor a dev server', async () => {

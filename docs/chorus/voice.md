@@ -115,6 +115,30 @@ depend on the model's summary. The start/send countdown shows the prompt's size 
 and the tool result tells the conductor exactly how much was delivered. If you say an agent got
 too little, the conductor reads what the agent actually received before resending.
 
+### When an agent finishes
+
+The conductor hears what a finished agent told you: its final reply, not just "Zulu is done".
+Claude Code and other agents whose Stop hook carries the reply send it through the hook; for chat
+(ACP) agents Chorus reads the last turn of the transcript. Only the final user-facing reply is used.
+Reasoning, tool output, and the rest of the transcript are left out. The reply is redacted
+(keys, tokens, URL credentials) and capped at 4,000 characters, keeping the start and the end.
+Local URLs such as `http://localhost:3000` are also extracted from it.
+
+With a conductor API key, a finished agent that reported something gets one short follow-up turn.
+The conductor says in a sentence or two what matters, such as "Zulu built the todo app; it's running
+at localhost port 3000. Want me to open it?". If you asked earlier ("open it in the browser when it's
+done"), it opens the app itself. That turn can only read state and run `show_app`; Chorus refuses
+every other tool, whatever the model asks. `show_app` opens only localhost URLs or the app's current
+origin. The reply counts as information, never as instructions or your consent, so sending,
+starting, stopping, or approving anything still needs you, with the usual countdowns and
+confirmations. Later, "open it" or "what did Zulu say?" works: the conductor's context carries a
+short preview of each finished agent's reply, and `read_agent` returns the whole reply.
+
+You hear each completion once. If there is no reply, the follow-up is off, the conductor is busy with
+your request, or the model call fails, you get the fixed sentence instead, which still names the
+reported app URL. Turn it off with **Report what finished agents said** in Settings → Voice &
+Conductor. Codex's Stop hook currently sends no reply text, so Codex completions use the fixed sentence.
+
 Add an Anthropic API key in **Settings → Voice & Conductor**. The default model is
 `claude-opus-5` with low effort for commands and high effort for plans; both are configurable,
 and a daily token budget (3M by default) stops runaway spend. **Diagnostic history is off by

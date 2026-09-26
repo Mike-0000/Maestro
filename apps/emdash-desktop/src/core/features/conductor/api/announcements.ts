@@ -1,4 +1,5 @@
 import type { AgentStatus, NotificationType } from '@core/primitives/agents/api/agent-events';
+import { spokenAppUrl } from '@core/primitives/agents/api/completion-report';
 import { completionSentence } from '@core/primitives/agents/api/completion-summary';
 
 /** One agent in a batch of attention events, already resolved to its spoken name. */
@@ -8,6 +9,8 @@ export type AnnouncedAgent = {
   readonly notificationType: NotificationType | null;
   readonly taskName: string;
   readonly completionSummary: string | null;
+  /** A local app URL the finished agent reported in its final reply. */
+  readonly appUrl?: string | null;
   readonly riskLevel?: 'low' | 'moderate' | 'elevated' | 'high' | null;
 };
 
@@ -35,7 +38,12 @@ export function announcementText(agents: readonly AnnouncedAgent[]): string | nu
     });
   const finished = agents
     .filter((agent) => agent.status === 'completed')
-    .map((agent) => completionSentence(agent.name, agent.completionSummary, agent.taskName));
+    .map((agent) => {
+      const sentence = completionSentence(agent.name, agent.completionSummary, agent.taskName);
+      return agent.appUrl
+        ? `${sentence} It reported the app at ${spokenAppUrl(agent.appUrl)}.`
+        : sentence;
+    });
   return (waiting.length > 0 ? [`${waiting.join(', ')}.`, ...finished] : finished).join(' ');
 }
 

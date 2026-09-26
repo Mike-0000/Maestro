@@ -28,6 +28,11 @@ export const conductorSettingsSchema = z.object({
   planEffort: conductorEffortSchema,
   /** Spawn planned agents without waiting for an explicit approval. */
   autoApprovePlans: z.boolean(),
+  /**
+   * When an agent finishes with a final reply, let the model read it to narrate what the agent
+   * reported and take follow-ups the user asked for (opening its app). Off: a fixed sentence.
+   */
+  completionFollowUp: z.boolean(),
   /** Upper bound on agents one plan may start. */
   maxAgentsPerPlan: z.number().int().min(1).max(12),
   /** Daily conductor token budget (input + output); 0 disables the guard. */
@@ -55,6 +60,7 @@ export const DEFAULT_CONDUCTOR_SETTINGS: ConductorSettings = {
   commandEffort: 'low',
   planEffort: 'high',
   autoApprovePlans: false,
+  completionFollowUp: true,
   maxAgentsPerPlan: 4,
   dailyTokenBudget: 3_000_000,
   jevEnabled: true,

@@ -2,6 +2,7 @@ import type { AgentTileEntry } from '@core/features/canvas/api/browser/stores/ca
 import { readTerminalTail } from '@core/features/canvas/api/browser/terminal-tail';
 import { getConversationsClient } from '@core/features/conversations/api/browser/client';
 import { conversationRegistry } from '@core/features/conversations/api/browser/stores/conversation-registry';
+import { finalAssistantReply } from '@core/primitives/agents/api/completion-report';
 import { buildPromptInjectionPayload } from '@core/primitives/prompt-injection/api/prompt-injection';
 
 /** Pause between a bracketed paste and Enter so TUIs finish ingesting the paste first. */
@@ -104,6 +105,27 @@ export async function readAgentOutput(entry: AgentTileEntry, lines = 40): Promis
   const terminal = session.pty?.terminal;
   if (!terminal) return '(no output yet)';
   return readTerminalTail(terminal, lines).join('\n');
+}
+
+/** Chat transcripts can trail the completion event by a moment; one retry covers it. */
+const CHAT_REPLY_RETRY_MS = 500;
+
+/**
+ * A chat (ACP) agent's final reply in its latest turn: the assistant text after its last tool
+ * call, never its thinking. TUI agents report theirs through their Stop hook instead.
+ */
+export async function readFinalChatReply(entry: AgentTileEntry): Promise<string | null> {
+  if (entry.type !== 'acp') return null;
+  const client = await getConversationsClient();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) await sleep(CHAT_REPLY_RETRY_MS);
+    const result = await client.acp.loadHistory({ conversationId: entry.conversationId, limit: 1 });
+    if (!result.success || result.data.unavailable) continue;
+    const turn = result.data.turns.at(-1);
+    const reply = turn ? finalAssistantReply(turn.items) : null;
+    if (reply) return reply;
+  }
+  return null;
 }
 
 /** The last meaningful line of output, for one-sentence spoken status. */

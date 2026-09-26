@@ -194,9 +194,12 @@ describe('AgentStatusService', () => {
     expect(completed).toMatchObject({
       status: 'completed',
       completionSummary: 'fixed the flaky login test and added a retry guard',
+      completionReport: { truncated: false, appUrls: [] },
     });
-    expect(JSON.stringify(completed)).not.toContain('TOKEN');
+    expect(completed.completionReport.text).toContain('I fixed the flaky login test');
+    expect(JSON.stringify(completed)).not.toContain('abc123');
     expect(working).not.toHaveProperty('completionSummary');
+    expect(working).not.toHaveProperty('completionReport');
   });
 
   it('publishes a null synopsis when the stop signal has no final reply', async () => {
@@ -207,7 +210,11 @@ describe('AgentStatusService', () => {
 
     expect(mocks.emit).toHaveBeenCalledWith(
       undefined,
-      expect.objectContaining({ status: 'completed', completionSummary: null })
+      expect.objectContaining({
+        status: 'completed',
+        completionSummary: null,
+        completionReport: null,
+      })
     );
   });
 

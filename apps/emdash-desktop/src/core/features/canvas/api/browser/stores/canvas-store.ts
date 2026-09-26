@@ -7,6 +7,7 @@ import type { TaskStore } from '@core/features/tasks/api/browser/stores/task-sto
 import { getTaskManagerStore } from '@core/features/tasks/api/browser/task-state/task-selectors';
 import { taskManagerStoreToken } from '@core/features/tasks/contributions/browser/project-store-tokens';
 import type { AgentStatus, NotificationType } from '@core/primitives/agents/api';
+import type { CompletionReport } from '@core/primitives/agents/api/completion-report';
 import { log } from '@core/primitives/logging/browser/logger';
 import type { MementoHandle } from '@core/primitives/mementos/browser';
 import { isProvisioned } from '@core/primitives/task-state/browser/task-state';
@@ -87,6 +88,8 @@ export type AgentTileEntry = {
   readonly notificationType: NotificationType | null;
   /** Few-word synopsis of what the agent finished (status 'completed' only). */
   readonly completionSummary: string | null;
+  /** The agent's final reply, redacted and bounded (status 'completed' only). */
+  readonly completionReport: CompletionReport | null;
   /** True when the task workspace is provisioned (its sessions can attach). */
   readonly taskProvisioned: boolean;
   /** True when the host reports a running session for this conversation. */
@@ -1967,6 +1970,7 @@ function toAgentEntry(
     seen: conversation.seen,
     notificationType: conversation.lastNotificationType,
     completionSummary: conversation.completionSummary,
+    completionReport: conversation.completionReport,
     taskProvisioned: isProvisioned(task),
     sessionActive: runtime.sessionActive,
     workspaceId: task.workspaceId,

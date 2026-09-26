@@ -27,6 +27,19 @@ describe('announcementText', () => {
     );
   });
 
+  it('says where a finished agent reported its app running', () => {
+    expect(
+      announcementText([
+        agent('Zulu', {
+          completionSummary: 'built the todo app and started the dev server',
+          appUrl: 'http://localhost:3000/',
+        }),
+      ])
+    ).toBe(
+      'Zulu built the todo app and started the dev server. It reported the app at localhost port 3000.'
+    );
+  });
+
   it('falls back to the task name, then to the generic sentence', () => {
     expect(announcementText([agent('Kilo', { taskName: 'Research speech-to-text models' })])).toBe(
       'Kilo finished researching speech-to-text models.'

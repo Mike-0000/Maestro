@@ -1,5 +1,6 @@
 import type { AgentProviderId } from '@emdash/plugins/agents/types';
 import type { AgentStatus } from '@core/primitives/agents/api';
+import type { CompletionReport } from '@core/primitives/agents/api/completion-report';
 
 export const MAX_CONVERSATION_TITLE_LENGTH = 100;
 
@@ -79,6 +80,8 @@ export type ConversationEvent =
       seen: boolean;
       /** Few-word synopsis of what a completed agent did, from its final reply; null if unknown. */
       completionSummary?: string | null;
+      /** The completed agent's final reply, redacted and bounded; null if it reported none. */
+      completionReport?: CompletionReport | null;
     };
 
 export type RenameConversationParams = {

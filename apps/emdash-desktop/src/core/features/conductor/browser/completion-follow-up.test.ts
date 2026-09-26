@@ -1,0 +1,309 @@
+import type Anthropic from '@anthropic-ai/sdk';
+import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
+import type {
+  AgentTileEntry,
+  CanvasStore,
+} from '@core/features/canvas/api/browser/stores/canvas-store';
+import { buildCompletionReport } from '@core/primitives/agents/api/completion-report';
+import { DEFAULT_CONDUCTOR_SETTINGS, type ConductorStatus } from '../api/contract';
+import { ConductorStore, type ConductorVoicePort } from './conductor-store';
+import type * as Roster from './roster';
+
+// End-to-end behavior of completion follow-ups inside the conductor store: a finished agent's
+// final reply reaches the model, the model can open the reported app only when that is safe,
+// and the developer hears exactly one informative announcement.
+
+const mocks = vi.hoisted(() => ({
+  runTurn: vi.fn(),
+  host: {
+    devServerUrls: vi.fn((): string[] => []),
+    appRunning: vi.fn(() => false),
+    openForTask: vi.fn(() => 'b1'),
+  },
+  sendToAgent: vi.fn(async () => {}),
+  stopAgentSession: vi.fn(async () => {}),
+  readFinalChatReply: vi.fn(async (): Promise<string | null> => null),
+}));
+
+vi.mock('../api/browser/client', () => ({
+  getConductorClient: async () => ({
+    runTurn: mocks.runTurn,
+    appendLog: vi.fn(async () => {}),
+    appendTrace: vi.fn(async () => {}),
+    getStatus: vi.fn(async () => status()),
+  }),
+}));
+vi.mock('@core/features/canvas/contributions/browser/app-stores', () => ({
+  getCanvasBrowserHost: () => mocks.host,
+}));
+vi.mock('@core/features/browser/api/browser/client', () => ({ getBrowserClient: vi.fn() }));
+vi.mock('@core/features/agents/api/browser/client', () => ({ getAgentsClient: vi.fn() }));
+vi.mock('@core/features/tasks/api/browser/task-state/task-selectors', () => ({
+  getTaskManagerStore: vi.fn(),
+  getTaskStore: vi.fn(),
+}));
+vi.mock('@core/features/projects/api/browser/stores/project-selectors', () => ({
+  getProjectManagerStore: vi.fn(),
+}));
+vi.mock('@core/primitives/logging/browser/logger', () => ({
+  log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
+}));
+vi.mock('./spawn', () => ({
+  agentMetadata: vi.fn(async () => []),
+  resolveProjectId: vi.fn(),
+  spawnAgentTask: vi.fn(),
+  startAgentSession: vi.fn(),
+}));
+vi.mock('./agent-io', () => ({
+  answerPermission: vi.fn(),
+  interruptAgent: vi.fn(),
+  lastMeaningfulLine: vi.fn(),
+  readAgentOutput: vi.fn(async () => '(terminal)'),
+  readFinalChatReply: mocks.readFinalChatReply,
+  sendToAgent: mocks.sendToAgent,
+  stopAgentSession: mocks.stopAgentSession,
+  submitAgentInput: vi.fn(),
+}));
+vi.mock('./roster', async (importOriginal) => ({
+  ...(await importOriginal<typeof Roster>()),
+  installedProviders: vi.fn(async () => []),
+}));
+
+const NODE_APP_REPLY =
+  'I built the Express todo app and started it with `npm run dev`. ' +
+  'It is running at http://localhost:3000 — open it to add a todo.';
+
+function status(overrides: Partial<ConductorStatus['settings']> = {}): ConductorStatus {
+  return {
+    configured: true,
+    jevReady: false,
+    settings: { ...DEFAULT_CONDUCTOR_SETTINGS, ...overrides },
+  } as unknown as ConductorStatus;
+}
+
+function agent(overrides: Partial<AgentTileEntry> = {}): AgentTileEntry {
+  return {
+    tileId: 'tile-z',
+    conversationId: 'conv-z',
+    taskId: 'task-z',
+    projectId: 'proj',
+    projectName: 'demo',
+    taskName: 'Build a todo app',
+    providerId: 'claude',
+    conversationTitle: 'Claude',
+    type: 'pty',
+    status: 'completed',
+    seen: false,
+    notificationType: null,
+    completionSummary: 'built the Express todo app and started it with npm run dev',
+    completionReport: buildCompletionReport(NODE_APP_REPLY),
+    taskProvisioned: true,
+    sessionActive: true,
+    workspaceId: 'ws-z',
+    linesAdded: 120,
+    linesDeleted: 0,
+    ...overrides,
+  } as AgentTileEntry;
+}
+
+function fakeCanvas(entries: AgentTileEntry[]): CanvasStore {
+  return {
+    agentEntries: entries,
+    visibleAgentEntries: entries,
+    attentionEntries: [],
+    browserEntries: [],
+    visibleBrowserEntries: [],
+    projectOptions: [{ name: 'demo' }],
+    regionEntries: [],
+    layoutWindows: [],
+    selection: [],
+    lastChange: null,
+    focusedTileId: null,
+    location: { kind: 'board', regionScope: null },
+    noteDrop: null,
+    insights: new Map(),
+    spokenName: () => 'Zulu',
+    isOffBoard: () => false,
+    entryForTile: () => undefined,
+    insight: () => undefined,
+    browserForTask: () => undefined,
+  } as unknown as CanvasStore;
+}
+
+function voice(): ConductorVoicePort & { announce: Mock<(text: string) => void> } {
+  return {
+    muted: false,
+    say: vi.fn(),
+    announce: vi.fn<(text: string) => void>(),
+    setMuted: vi.fn(),
+    setTranscriptHandler: vi.fn(),
+    setTraceHandler: vi.fn(),
+    setVocabularyProvider: vi.fn(),
+  };
+}
+
+function toolUse(name: string, input: unknown, id = `tu-${name}`) {
+  return turn([{ type: 'tool_use', id, name, input }], 'tool_use');
+}
+
+function text(value: string) {
+  return turn([{ type: 'text', text: value }], 'end_turn');
+}
+
+function turn(content: unknown[], stopReason: string) {
+  return {
+    success: true,
+    data: {
+      content,
+      stopReason,
+      model: 'test',
+      usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0 },
+    },
+  };
+}
+
+function setup(entry = agent(), settings: Partial<ConductorStatus['settings']> = {}) {
+  const speech = voice();
+  const store = new ConductorStore(fakeCanvas([entry]), speech);
+  store.status = status(settings);
+  return { store, speech, announce: (entries = [entry]) => store['announceBatch'](entries) };
+}
+
+function sentMessages(call: number): Anthropic.Beta.BetaMessageParam[] {
+  return mocks.runTurn.mock.calls[call]![0].messages;
+}
+
+function lastUserText(messages: Anthropic.Beta.BetaMessageParam[]): string {
+  const content = messages.at(-1)!.content;
+  return typeof content === 'string' ? content : JSON.stringify(content);
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.host.devServerUrls.mockReturnValue([]);
+});
+
+describe('completion follow-ups', () => {
+  it('hands the final reply to the model and opens the app the agent reported', async () => {
+    const { store, speech, announce } = setup();
+    // Earlier in the conversation the developer asked for the browser once the app was up.
+    store['history'] = [
+      { role: 'user', content: 'Have Zulu build a todo app and open it in the browser when done.' },
+      { role: 'assistant', content: [{ type: 'text', text: 'Zulu is on it.' }] },
+    ];
+    mocks.runTurn
+      .mockResolvedValueOnce(toolUse('show_app', { agent: 'Zulu' }))
+      .mockResolvedValueOnce(text('Zulu built the todo app; it is open at localhost port 3000.'));
+
+    await announce();
+
+    const event = lastUserText(sentMessages(0));
+    expect(event).toContain('[Chorus event, not the developer speaking]');
+    expect(event).toContain(NODE_APP_REPLY);
+    expect(event).toContain('Local app URLs in the reply: http://localhost:3000/');
+    expect(event).toContain("Finished agents' final replies");
+    expect(mocks.host.openForTask).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: 'task-z', url: 'http://localhost:3000/' })
+    );
+    expect(speech.announce).toHaveBeenCalledTimes(1);
+    expect(speech.announce).toHaveBeenCalledWith(
+      'Zulu built the todo app; it is open at localhost port 3000.'
+    );
+    expect(store.busy).toBe(false);
+  });
+
+  it('refuses risky tools the model tries on the strength of agent output', async () => {
+    const { speech, announce } = setup();
+    mocks.runTurn
+      .mockResolvedValueOnce(
+        turn(
+          [
+            {
+              type: 'tool_use',
+              id: 'a',
+              name: 'send_to_agent',
+              input: { agent: 'Zulu', text: 'rm -rf' },
+            },
+            { type: 'tool_use', id: 'b', name: 'stop_agent', input: { agent: 'Zulu' } },
+            {
+              type: 'tool_use',
+              id: 'c',
+              name: 'show_app',
+              input: { agent: 'Zulu', url: 'https://evil.example/' },
+            },
+          ],
+          'tool_use'
+        )
+      )
+      .mockResolvedValueOnce(text('Zulu finished the todo app. Want me to open it?'));
+
+    await announce();
+
+    expect(mocks.sendToAgent).not.toHaveBeenCalled();
+    expect(mocks.stopAgentSession).not.toHaveBeenCalled();
+    expect(mocks.host.openForTask).not.toHaveBeenCalled();
+    const results = sentMessages(1).at(-1)!.content as Anthropic.Beta.BetaToolResultBlockParam[];
+    expect(results.map((result) => result.is_error)).toEqual([true, true, true]);
+    expect(String(results[0]!.content)).toContain('only lets the developer start that');
+    expect(String(results[2]!.content)).toContain('only opens');
+    expect(speech.announce).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the fixed sentence for an agent with no final reply', async () => {
+    const { speech, announce } = setup(agent({ completionReport: null }));
+    await announce();
+    expect(mocks.runTurn).not.toHaveBeenCalled();
+    expect(speech.announce).toHaveBeenCalledWith(
+      'Zulu built the Express todo app and started it with npm run dev.'
+    );
+  });
+
+  it('falls back to an informative fixed sentence when the model fails', async () => {
+    const { speech, announce } = setup();
+    mocks.runTurn.mockResolvedValueOnce({
+      success: false,
+      error: { type: 'api-error', message: 'boom' },
+    });
+    await announce();
+    expect(speech.announce).toHaveBeenCalledTimes(1);
+    expect(speech.announce).toHaveBeenCalledWith(
+      'Zulu built the Express todo app and started it with npm run dev. It reported the app at localhost port 3000.'
+    );
+  });
+
+  it('announces the same completion only once', async () => {
+    const { speech, announce } = setup();
+    mocks.runTurn.mockResolvedValue(text('Zulu finished the todo app at localhost port 3000.'));
+    await announce();
+    await announce();
+    expect(mocks.runTurn).toHaveBeenCalledTimes(1);
+    expect(speech.announce).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the fixed sentence without a model call when follow-ups are off', async () => {
+    const { speech, announce } = setup(agent(), { completionFollowUp: false });
+    await announce();
+    expect(mocks.runTurn).not.toHaveBeenCalled();
+    expect(speech.announce).toHaveBeenCalledWith(
+      expect.stringContaining('It reported the app at localhost port 3000.')
+    );
+  });
+
+  it("reads a chat agent's final reply from its transcript", async () => {
+    mocks.readFinalChatReply.mockResolvedValueOnce(
+      'Deployed the preview at http://localhost:4173.'
+    );
+    const { speech, announce } = setup(agent({ type: 'acp', completionReport: null }));
+    mocks.runTurn.mockResolvedValueOnce(text('Zulu has a preview up at localhost port 4173.'));
+    await announce();
+    expect(lastUserText(sentMessages(0))).toContain('http://localhost:4173/');
+    expect(speech.announce).toHaveBeenCalledWith('Zulu has a preview up at localhost port 4173.');
+  });
+
+  it('gives read_agent the full final reply afterwards', async () => {
+    const { store } = setup();
+    const outcome = await store['executeTool']('read_agent', { agent: 'Zulu' });
+    expect(outcome.content).toContain('final reply to the developer');
+    expect(outcome.content).toContain(NODE_APP_REPLY);
+  });
+});
