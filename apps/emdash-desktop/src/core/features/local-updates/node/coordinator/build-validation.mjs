@@ -1,6 +1,6 @@
 import { execFile as execFileCallback } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { access, mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -9,6 +9,7 @@ export const REQUIRED_BUILD_CHECKS = [
   'frozen-install',
   'workspace-build',
   'workspace-check',
+  'electron-native-rebuild',
   'windows-package',
 ];
 
@@ -79,6 +80,9 @@ export async function validateIntegratedCandidate({ repositoryPath, candidate, s
       ['frozen-install', 'corepack pnpm install --frozen-lockfile --ignore-scripts'],
       ['workspace-build', 'corepack pnpm run build'],
       ['workspace-check', 'corepack pnpm run check'],
+      // The frozen install deliberately skips lifecycle scripts, including the app's Electron-ABI
+      // rebuild. electron-builder has npmRebuild: false, so build the addon explicitly before packing.
+      ['electron-native-rebuild', 'corepack pnpm exec electron-rebuild -f --only=better-sqlite3'],
       [
         'windows-package',
         'corepack pnpm exec electron-builder --win --dir --publish never --config electron-builder.config.ts',
@@ -86,7 +90,9 @@ export async function validateIntegratedCandidate({ repositoryPath, candidate, s
     ];
     for (const [name, command] of commands) {
       const workingDirectory =
-        name === 'windows-package' ? join(buildRoot, 'apps', 'emdash-desktop') : buildRoot;
+        name === 'windows-package' || name === 'electron-native-rebuild'
+          ? join(buildRoot, 'apps', 'emdash-desktop')
+          : buildRoot;
       const output = await runFixedCommand(
         command,
         workingDirectory,
@@ -102,10 +108,23 @@ export async function validateIntegratedCandidate({ repositoryPath, candidate, s
         );
         provenance.pnpmVersion = pnpmVersion.trim().split(/\r?\n/).at(-1) ?? '';
       }
+      if (name === 'electron-native-rebuild') {
+        await assertSqliteBinding(join(buildRoot, 'node_modules', 'better-sqlite3'));
+      }
       checks.push({ name, success: true, output: output.slice(-4000) });
     }
     const executablePath = join(artifactRoot, 'win-unpacked', 'Chorus.exe');
     await access(executablePath);
+    await assertSqliteBinding(
+      join(
+        artifactRoot,
+        'win-unpacked',
+        'resources',
+        'app.asar.unpacked',
+        'node_modules',
+        'better-sqlite3'
+      )
+    );
     const hashes = await hashTree(join(artifactRoot, 'win-unpacked'));
     const artifactDigest = createHash('sha256')
       .update(hashes.map(({ path, sha256 }) => `${path}\0${sha256}\n`).join(''))
@@ -148,6 +167,14 @@ export async function validateIntegratedCandidate({ repositoryPath, candidate, s
         // Keep the failed build worktree registered so an operator can inspect and remove it.
       }
     }
+  }
+}
+
+export async function assertSqliteBinding(moduleRoot) {
+  const binding = join(moduleRoot, 'build', 'Release', 'better_sqlite3.node');
+  const file = await stat(binding).catch(() => null);
+  if (!file?.isFile() || file.size === 0) {
+    throw new Error(`Windows package is missing the better-sqlite3 native binding: ${binding}`);
   }
 }
 
