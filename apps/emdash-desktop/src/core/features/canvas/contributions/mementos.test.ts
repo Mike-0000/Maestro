@@ -93,6 +93,26 @@ describe('canvasBoardSchema', () => {
     });
   });
 
+  it('defaults placeNewWindowsInProjectRegion on older layout settings', () => {
+    const v4 = {
+      ...v2,
+      ...v4Defaults,
+      version: '4',
+      browsers: {},
+      layoutSettings: {
+        showNamesWhileListening: true,
+        speakLayoutConfirmations: false,
+        groupPlanAgents: true,
+        placeNewAgentsInCurrentRegion: true,
+      },
+    };
+    const parsed = canvasBoardSchema.safeParse(v4);
+    expect(parsed.status).toBe('ok');
+    if (parsed.status === 'ok') {
+      expect(parsed.data.layoutSettings.placeNewWindowsInProjectRegion).toBe(true);
+    }
+  });
+
   it('rejects an unknown control value', () => {
     const bad = {
       ...v2,

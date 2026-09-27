@@ -1058,6 +1058,18 @@ const CanvasSettings = observer(function CanvasSettings() {
         }
       />
       <SettingsRow
+        label="Spawn windows in a project sub-canvas"
+        description="New agents and app browsers open in that project's main sub-canvas. If none exists yet, one is created and named after the project. Turn off to place them on the board."
+        control={
+          <Switch
+            checked={canvas.layoutSettings.placeNewWindowsInProjectRegion}
+            onCheckedChange={(next) =>
+              canvas.setLayoutSettings({ placeNewWindowsInProjectRegion: next })
+            }
+          />
+        }
+      />
+      <SettingsRow
         label="Group plan agents"
         description="Put the agents a plan starts into one region named after the plan."
         control={
@@ -1068,8 +1080,8 @@ const CanvasSettings = observer(function CanvasSettings() {
         }
       />
       <SettingsRow
-        label="New agents join the region in view"
-        description="When you are zoomed into a region or have it on the stage, new agents are placed in it."
+        label="New windows join the region in view"
+        description="When you are zoomed into a region or have it on the stage, new agents and app browsers go there instead of the project's main sub-canvas."
         control={
           <Switch
             checked={canvas.layoutSettings.placeNewAgentsInCurrentRegion}

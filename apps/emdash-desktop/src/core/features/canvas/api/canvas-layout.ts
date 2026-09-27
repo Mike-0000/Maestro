@@ -131,6 +131,8 @@ export type LayoutOp =
       readonly members: readonly string[];
       readonly parent?: string | null;
       readonly color?: RegionColor;
+      readonly auto?: boolean;
+      readonly projectId?: string;
     }
   | { readonly op: 'renameRegion'; readonly region: string; readonly name: string }
   | { readonly op: 'recolorRegion'; readonly region: string; readonly color: RegionColor | null }
@@ -1360,6 +1362,15 @@ function opArrange(
   }
 }
 
+function projectIdsOf(draft: Draft, members: readonly string[]): Set<string> {
+  const ids = new Set<string>();
+  for (const member of members) {
+    const projectId = draft.windows.get(member)?.projectId;
+    if (projectId) ids.add(projectId);
+  }
+  return ids;
+}
+
 function groupKey(
   window: LayoutWindow,
   by: OrganizeBy,
@@ -1424,9 +1435,15 @@ function opOrganize(draft: Draft, scope: string | null, by: OrganizeBy): OpResul
   const regionIds: string[] = [];
   labels.forEach((label, index) => {
     const members = groups.get(label) ?? [];
-    const existing = childRegions(draft.state, scope).find(
-      (id) => nameKey(draft.regions[id]?.name ?? '') === nameKey(label)
-    );
+    const existing = childRegions(draft.state, scope).find((id) => {
+      const region = draft.regions[id];
+      if (!region) return false;
+      if (by === 'project') {
+        const ids = projectIdsOf(draft, members);
+        if (ids.size === 1 && region.projectId === [...ids][0]) return true;
+      }
+      return nameKey(region.name) === nameKey(label);
+    });
     let regionId = existing;
     if (!regionId) {
       regionId = newRegionId(draft.env.newId());
@@ -1435,6 +1452,7 @@ function opOrganize(draft: Draft, scope: string | null, by: OrganizeBy): OpResul
         by === 'status'
           ? STATUS_GROUPS.find((group) => group.label === label)?.color
           : REGION_COLORS[index % (REGION_COLORS.length - 1)];
+      const projectIds = by === 'project' ? projectIdsOf(draft, members) : new Set<string>();
       draft.regions[regionId] = {
         name: uniqueName(label, taken),
         parentId: scope,
@@ -1443,10 +1461,18 @@ function opOrganize(draft: Draft, scope: string | null, by: OrganizeBy): OpResul
         createdAt: draft.env.now,
         auto: true,
         ...(color ? { color } : {}),
+        ...(projectIds.size === 1 ? { projectId: [...projectIds][0] } : {}),
       };
       draft.created.push(regionId);
-    } else if (draft.regions[regionId]?.collapsed) {
-      draft.setRegion(regionId, { collapsed: false });
+    } else {
+      if (draft.regions[regionId]?.collapsed) draft.setRegion(regionId, { collapsed: false });
+      if (by === 'project') {
+        const ids = projectIdsOf(draft, members);
+        const [only] = [...ids];
+        if (ids.size === 1 && only && !draft.regions[regionId]?.projectId) {
+          draft.setRegion(regionId, { projectId: only });
+        }
+      }
     }
     const depthProblem = canReparent(draft, members[0] as string, regionId);
     if (depthProblem) return;
@@ -1626,6 +1652,8 @@ function opCreateRegion(draft: Draft, op: Extract<LayoutOp, { op: 'createRegion'
     createdAt: draft.env.now,
     // New regions are workspaces: members fill them and re-tile as they come and go.
     arrangement: 'tiled',
+    ...(op.auto ? { auto: true } : {}),
+    ...(op.projectId ? { projectId: op.projectId } : {}),
     ...(color ? { color } : {}),
   };
 
