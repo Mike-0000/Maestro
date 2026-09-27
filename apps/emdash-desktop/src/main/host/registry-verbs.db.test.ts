@@ -15,9 +15,14 @@ import { createTestWire } from '@emdash/wire/testing';
 import { expect, it } from 'vitest';
 import { createWorktreeThroughRegistry } from '@core/features/workspaces/api/node/registry-verbs';
 
-it.each(['repository', 'worktree'] as const)(
-  'creates and replays a task from a %s project without changing its registration',
-  async (kind) => {
+it.each([
+  { kind: 'repository', registration: 'existing' },
+  { kind: 'worktree', registration: 'existing' },
+  { kind: 'worktree', registration: 'absent' },
+  { kind: 'repository', registration: 'directory' },
+] as const)(
+  'automatically provisions a $kind project with $registration registration and replays safely',
+  async ({ kind, registration }) => {
     const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'project-registry-')));
     const handle = await workspaceRegistryStore.openTemp();
     const runtime = new WorkspaceRegistryRuntime({
@@ -33,6 +38,11 @@ it.each(['repository', 'worktree'] as const)(
     try {
       const repositoryPath = path.join(root, 'repository');
       await fs.mkdir(repositoryPath);
+      if (registration === 'directory') {
+        expect(
+          await wire.client.createWorkspace({ workspaceId: 'project', path: repositoryPath })
+        ).toMatchObject({ success: true, data: { kind: 'directory' } });
+      }
       git(repositoryPath, 'init', '--initial-branch=main');
       git(
         repositoryPath,
@@ -60,15 +70,14 @@ it.each(['repository', 'worktree'] as const)(
           'experimental change'
         );
       }
-      const registered = await wire.client.createWorkspace({
-        workspaceId: 'project',
-        path: projectPath,
-      });
-      expect(registered).toMatchObject({ success: true, data: { kind } });
-      if (!registered.success) throw new Error('Project registration failed');
+      if (registration === 'existing') {
+        expect(
+          await wire.client.createWorkspace({ workspaceId: 'project', path: projectPath })
+        ).toMatchObject({ success: true, data: { kind } });
+      }
       const spec = {
         host: LOCAL_HOST_REF,
-        repositoryWorkspaceId: registered.data.id,
+        repositoryWorkspaceId: 'project',
         repositoryPath: projectPath,
         workspaceId: 'task',
         branch: 'task-branch',
@@ -80,6 +89,16 @@ it.each(['repository', 'worktree'] as const)(
       expect(await createWorktreeThroughRegistry(runtimes, spec)).toEqual(ok(undefined));
       expect(git(spec.path, 'branch', '--show-current')).toBe('task-branch');
       expect(git(spec.path, 'rev-parse', 'HEAD')).toBe(git(projectPath, 'rev-parse', 'HEAD'));
+      const registered = await wire.client.createWorkspace({
+        workspaceId: 'project',
+        path: projectPath,
+      });
+      expect(registered).toMatchObject({
+        success: true,
+        data: { id: 'project', kind, path: projectPath },
+      });
+      if (!registered.success) throw new Error('Automatic project registration failed');
+      if (kind === 'worktree') expect(registered.data.parentId).not.toBeNull();
       const task = await wire.client.createWorkspace({ workspaceId: 'task', path: spec.path });
       expect(task).toMatchObject({
         success: true,
