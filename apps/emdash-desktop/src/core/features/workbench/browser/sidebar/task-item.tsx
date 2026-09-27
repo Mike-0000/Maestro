@@ -2,6 +2,7 @@ import { observer } from 'mobx-react-lite';
 import { projectViewDef } from '@core/features/projects/contributions/views';
 import { useAppSettingsKey } from '@core/features/settings/api/browser/use-app-settings-key';
 import {
+  canIntegrateTask,
   getTaskGitCheckoutStore,
   getTaskPrAssociationStore,
 } from '@core/features/source-control/api/browser/stores/task-source-control-selectors';
@@ -41,6 +42,7 @@ export const SidebarTaskItem = observer(function SidebarTaskItem({
   const { navigate } = useNavigate();
   const openRename = useOpenModal('renameTaskModal');
   const openDeleteTask = useOpenModal('deleteTaskModal');
+  const openIntegrate = useOpenModal('integrateWorktreeModal');
 
   const { currentView } = useWorkspaceSlots();
   const params = useViewParams(taskViewDef);
@@ -90,6 +92,9 @@ export const SidebarTaskItem = observer(function SidebarTaskItem({
   const showPrStatus = interfaceSettings?.showLeftSidebarPrStatus ?? true;
   const showTimestamps = interfaceSettings?.showLeftSidebarTimestamps ?? true;
   const branchName = git?.branchName ?? undefined;
+  const handleIntegrate = canIntegrateTask(projectId, taskId)
+    ? () => void openIntegrate({ projectId, taskId })
+    : undefined;
   const handleReconnect =
     workspaceStore?.connectionState != null ? () => workspaceStore.reconnect() : undefined;
 
@@ -105,6 +110,7 @@ export const SidebarTaskItem = observer(function SidebarTaskItem({
       onArchive={handleArchive}
       onReconnect={handleReconnect}
       onConvertAutomation={undefined}
+      onIntegrate={handleIntegrate}
       onDelete={handleDelete}
     >
       <SidebarMenuRow

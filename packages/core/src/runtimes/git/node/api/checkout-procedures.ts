@@ -13,6 +13,8 @@ export function createCheckoutProcedures(runtime: GitCheckoutRuntime) {
     getCommit: (input) => runtime.getCommit(input),
     getCommitFiles: (input) => runtime.getCommitFiles(input),
     blame: (input) => runtime.blame(input),
+    previewIntegration: (input) => runtime.previewIntegration(input),
+    integrate: (input) => runtime.integrate(input),
     push: { run: (input, context) => runtime.push(input, context) },
     publish: { run: (input, context) => runtime.publish(input, context) },
     pull: { run: (input, context) => runtime.pull(input, context) },

@@ -89,6 +89,65 @@ describe('createSourceControlWireController', () => {
     );
   });
 
+  it('integrates a task workspace into its project main directory', async () => {
+    const integrate = vi.fn(async () =>
+      ok({ mode: 'fast-forward', branch: 'refs/heads/main', previousHead: 'a', commit: 'b' })
+    );
+    const client = vi.fn(async () => ok({ git: { checkout: { integrate } } }));
+    const resolveProject = vi.fn(async () => projectIdentity);
+    const controller = createSourceControlWireController({
+      runtimes: { client } as never,
+      workspaceIdentity: { resolve: vi.fn(async () => checkoutIdentity), resolveProject },
+      projects: attachedProjects({}),
+      mintOperationCredentials: vi.fn(async () => undefined),
+    });
+
+    await controller.call('checkout.integrate', {
+      workspaceId: checkoutIdentity.workspaceId,
+      expectedTargetHead: 'a',
+      expectedSourceHead: 'b',
+    });
+
+    expect(resolveProject).toHaveBeenCalledWith(checkoutIdentity.projectId);
+    expect(integrate).toHaveBeenCalledWith(
+      {
+        checkout: hostPathFromNative(projectIdentity.path),
+        source: hostPathFromNative(checkoutIdentity.path),
+        expectedTargetHead: 'a',
+        expectedSourceHead: 'b',
+      },
+      { timeoutMs: 120_000 }
+    );
+  });
+
+  it('refuses to integrate across hosts or without a main directory', async () => {
+    const previewIntegration = vi.fn();
+    const client = vi.fn(async () => ok({ git: { checkout: { previewIntegration } } }));
+    const resolveProject = vi.fn();
+    const controller = createSourceControlWireController({
+      runtimes: { client } as never,
+      workspaceIdentity: { resolve: vi.fn(async () => checkoutIdentity), resolveProject },
+      projects: attachedProjects({}),
+      mintOperationCredentials: vi.fn(async () => undefined),
+    });
+    const input = { workspaceId: checkoutIdentity.workspaceId };
+
+    resolveProject.mockResolvedValueOnce(null);
+    await expect(controller.call('checkout.previewIntegration', input)).resolves.toMatchObject({
+      success: false,
+      error: { type: 'git_error' },
+    });
+    resolveProject.mockResolvedValueOnce({
+      ...projectIdentity,
+      host: { type: 'remote', id: 'remote-1' },
+    });
+    await expect(controller.call('checkout.previewIntegration', input)).resolves.toMatchObject({
+      success: false,
+      error: { type: 'git_error', message: expect.stringContaining('different hosts') },
+    });
+    expect(previewIntegration).not.toHaveBeenCalled();
+  });
+
   it('translates mutation selectors and cursors back to project identities', async () => {
     const mutate = vi.fn(async (_name, envelope) =>
       ok({

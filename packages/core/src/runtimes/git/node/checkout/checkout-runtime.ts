@@ -15,6 +15,9 @@ import {
   type GitFileContentKey,
   type GitLogOptions,
   type GitTransferProgress,
+  type IntegrateInput,
+  type IntegrationInput,
+  type IntegrationPreview,
   type NormalizedDiffTarget,
   type PullJobInput,
   type PublishJobInput,
@@ -118,6 +121,22 @@ export class GitCheckoutRuntime {
     return this.run(input, (checkout) => checkout.blame(input.path, input.ref));
   }
 
+  previewIntegration(input: IntegrationInput) {
+    return this.runPair<IntegrationPreview, never>(input, async (target, source) =>
+      ok(await target.previewIntegration(source))
+    );
+  }
+
+  integrate(input: IntegrateInput) {
+    return this.runPair(input, (target, source) =>
+      target.integrate(source, {
+        expectedTargetHead: input.expectedTargetHead,
+        expectedSourceHead: input.expectedSourceHead,
+        message: input.message,
+      })
+    );
+  }
+
   push(input: PushJobInput, context: LiveJobContext<GitTransferProgress>) {
     return this.run(input, (checkout) =>
       checkout.push(input.options, {
@@ -178,6 +197,16 @@ export class GitCheckoutRuntime {
       case 'head':
         return checkout.state('head') as unknown as Query<T>;
     }
+  }
+
+  /** Leases the target (`checkout`) and source checkouts together for one operation. */
+  private runPair<T, E>(
+    input: IntegrationInput,
+    run: (target: CheckoutResource, source: CheckoutResource) => Promise<Result<T, E>>
+  ): Promise<Result<T, E | GitCommandError>> {
+    return this.run(input, (target) =>
+      this.allocations.useCheckout({ checkout: input.source }, (source) => run(target, source))
+    );
   }
 
   private async run<T, E>(

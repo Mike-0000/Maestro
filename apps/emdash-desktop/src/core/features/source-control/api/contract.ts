@@ -139,6 +139,22 @@ const sourceControlCheckoutContract = defineContract({
     checkout.blame.input.omit({ checkout: true }).extend(workspaceKeySchema.shape),
     checkout.blame.output
   ),
+  /**
+   * Integrates the workspace's committed HEAD into the branch checked out in its project's
+   * main directory. The target is resolved from the project, never supplied by the caller.
+   */
+  previewIntegration: runtimeFallibleProcedure(
+    checkout.previewIntegration.input
+      .omit({ checkout: true, source: true })
+      .extend(workspaceKeySchema.shape),
+    checkout.previewIntegration.output
+  ),
+  integrate: runtimeFallibleProcedure(
+    checkout.integrate.input
+      .omit({ checkout: true, source: true })
+      .extend(workspaceKeySchema.shape),
+    checkout.integrate.output
+  ),
   push: liveJob({
     input: checkout.push.input.omit({ checkout: true }).extend(workspaceKeySchema.shape),
     progress: checkout.push.progress,

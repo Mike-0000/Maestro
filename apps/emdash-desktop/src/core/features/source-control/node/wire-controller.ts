@@ -1,3 +1,4 @@
+import { hostRefEquals } from '@emdash/core/primitives/host/api';
 import { err, ok, type Result } from '@emdash/shared';
 import {
   createLiveJobReplicaCache,
@@ -120,6 +121,14 @@ export function createSourceControlWireController(
       blame: (input, meta) =>
         withCheckoutRuntime(options, input, (git, mapped) =>
           git.checkout.blame(mapped, callOptions(meta))
+        ),
+      previewIntegration: (input, meta) =>
+        withIntegrationPair(options, input, (git, mapped) =>
+          git.checkout.previewIntegration(mapped, integrationCallOptions(meta))
+        ),
+      integrate: (input, meta) =>
+        withIntegrationPair(options, input, (git, mapped) =>
+          git.checkout.integrate(mapped, integrationCallOptions(meta))
         ),
       push: job<typeof sourceControlContract.checkout.push>((input, context) =>
         runCheckoutJob(
@@ -265,6 +274,50 @@ async function withCheckoutRuntime<T extends { workspaceId: string }, R, E>(
   );
 }
 
+/**
+ * Pairs a task workspace (the integration source) with its project's main directory (the
+ * target). Both must live on the same host because the merge runs inside one repository.
+ */
+async function withIntegrationPair<T extends { workspaceId: string }, R, E>(
+  options: CreateSourceControlWireControllerOptions,
+  input: T,
+  work: (
+    git: HostRuntimesClient['git'],
+    mapped: Omit<T, 'workspaceId'> & {
+      checkout: ReturnType<typeof hostPathFromNative>;
+      source: ReturnType<typeof hostPathFromNative>;
+    }
+  ) => Promise<Result<R, E>>
+): Promise<Result<R, E | IntegrationPairError | RuntimeResolveError>> {
+  const { workspaceId, ...rest } = input;
+  return withIdentityRuntime<R, E | IntegrationPairError>(
+    options.runtimes,
+    options.workspaceIdentity.resolve(workspaceId),
+    async (client, source) => {
+      const target = await options.workspaceIdentity.resolveProject(source.projectId);
+      if (!target) {
+        return err({
+          type: 'git_error',
+          message: "The project's main directory could not be found.",
+        });
+      }
+      if (!hostRefEquals(target.host, source.host)) {
+        return err({
+          type: 'git_error',
+          message: "The task and the project's main directory are on different hosts.",
+        });
+      }
+      return work(client.git, {
+        ...rest,
+        checkout: hostPathFromNative(target.path),
+        source: hostPathFromNative(source.path),
+      });
+    }
+  );
+}
+
+type IntegrationPairError = { type: 'git_error'; message: string };
+
 async function withIdentityRuntime<T, E>(
   runtimes: SourceControlRuntimeBroker,
   identityPromise: Promise<WorkspaceIdentity | null>,
@@ -297,6 +350,13 @@ async function requireIdentity(
 
 function callOptions(meta: CallMeta): { signal?: AbortSignal } {
   return meta.signal ? { signal: meta.signal } : {};
+}
+
+/** Integration may compute a merge over a large history; allow more than the default call timeout. */
+const INTEGRATION_CALL_TIMEOUT_MS = 120_000;
+
+function integrationCallOptions(meta: CallMeta): { signal?: AbortSignal; timeoutMs: number } {
+  return { ...callOptions(meta), timeoutMs: INTEGRATION_CALL_TIMEOUT_MS };
 }
 
 function job<Def extends LiveJobEndpointDef>(

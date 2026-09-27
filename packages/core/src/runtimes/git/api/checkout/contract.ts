@@ -22,6 +22,13 @@ import { transferProgressSchema } from '#runtimes/git/api/schemas';
 import { checkoutSelectorSchema } from '#runtimes/git/api/selectors';
 import { gitFileContentKeySchema } from './file-content-key';
 import {
+  integrateErrorSchema,
+  integrateInputSchema,
+  integrateResultSchema,
+  integrationInputSchema,
+  integrationPreviewSchema,
+} from './integration';
+import {
   blameResultSchema,
   commitFileSchema,
   commitOptionsSchema,
@@ -116,6 +123,17 @@ export const gitCheckoutContract = defineContract({
     }),
     data: blameResultSchema,
     error: gitCommandErrorSchema,
+  }),
+
+  previewIntegration: fallible({
+    input: integrationInputSchema,
+    data: integrationPreviewSchema,
+    error: gitCommandErrorSchema,
+  }),
+  integrate: fallible({
+    input: integrateInputSchema,
+    data: integrateResultSchema,
+    error: integrateErrorSchema,
   }),
 
   push: liveJob({
