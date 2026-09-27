@@ -17,6 +17,9 @@ For Chorus task submission and combining parallel task work into one local insta
 - branch prefix defaults to `chorus` and is configurable in app settings
 - generated task branch names use the configured prefix plus a random suffix by default; app repository settings can disable only the random suffix
 - worktree creation is managed by the project provider pattern
+- a project may point at a linked worktree: desktop tasks and automation runs use that
+  workspace record's `parentId` for `createWorktree`, while retaining the project's
+  original checkout registration and selected base ref
 - creation runs a fast foreground pipeline (`inspect → resolve-base → add-worktree → verify`);
   the base ref is fetched only when it is not locally resolvable
 - newly created task branches use `git worktree add --no-track`; the selected base ref is a

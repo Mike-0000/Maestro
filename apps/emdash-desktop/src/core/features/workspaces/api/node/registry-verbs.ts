@@ -87,7 +87,11 @@ export async function createWorktreeThroughRegistry(
       message: describeCreateWorkspaceError(repository.error),
     });
   }
-  const repositoryId = repository.data.id;
+  // A project may itself be a linked worktree; new tasks belong to its repository.
+  const repositoryId =
+    repository.data.kind === 'worktree'
+      ? (repository.data.parentId ?? repository.data.id)
+      : repository.data.id;
 
   const created = await registry.createWorktree({
     workspaceId: spec.workspaceId,

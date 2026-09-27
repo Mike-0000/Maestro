@@ -161,7 +161,12 @@ async function registerRepository(
     { workspaceId: randomUUID(), path: repositoryPath },
     { signal }
   );
-  if (result.success) return ok(result.data.id);
+  if (result.success) {
+    // Linked-worktree projects create siblings under the owning repository record.
+    return ok(
+      result.data.kind === 'worktree' ? (result.data.parentId ?? result.data.id) : result.data.id
+    );
+  }
   return err({
     code: result.error.type,
     message: describeCreateWorkspaceError(result.error),
