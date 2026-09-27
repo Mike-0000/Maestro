@@ -13,6 +13,7 @@ it('requires the Electron-ABI rebuild before accepting a Windows package', () =>
   expect(REQUIRED_BUILD_CHECKS).toEqual([
     'frozen-install',
     'workspace-build',
+    'node-test-deps',
     'workspace-check',
     'electron-native-rebuild',
     'windows-package',

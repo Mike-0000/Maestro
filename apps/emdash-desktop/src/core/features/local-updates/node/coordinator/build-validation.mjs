@@ -8,6 +8,7 @@ const execFile = promisify(execFileCallback);
 export const REQUIRED_BUILD_CHECKS = [
   'frozen-install',
   'workspace-build',
+  'node-test-deps',
   'workspace-check',
   'electron-native-rebuild',
   'windows-package',
@@ -79,7 +80,14 @@ export async function validateIntegratedCandidate({ repositoryPath, candidate, s
     const commands = [
       ['frozen-install', 'corepack pnpm install --frozen-lockfile --ignore-scripts'],
       ['workspace-build', 'corepack pnpm run build'],
+      // The root frozen install skips the app postinstall that provisions the separate system-Node
+      // better-sqlite3 copy used by Vitest. CI installs it explicitly before the test target.
+      [
+        'node-test-deps',
+        'corepack pnpm --dir apps/emdash-desktop/tooling/node-deps install --frozen-lockfile && corepack pnpm --dir apps/emdash-desktop/tooling/node-deps rebuild better-sqlite3 && corepack pnpm --filter @emdash/core rebuild node-pty',
+      ],
       ['workspace-check', 'corepack pnpm run check'],
+
       // The frozen install deliberately skips lifecycle scripts, including the app's Electron-ABI
       // rebuild. electron-builder has npmRebuild: false, so build the addon explicitly before packing.
       ['electron-native-rebuild', 'corepack pnpm exec electron-rebuild -f --only=better-sqlite3'],
@@ -107,6 +115,25 @@ export async function validateIntegratedCandidate({ repositoryPath, candidate, s
           join(logRoot, 'pnpm-version.log')
         );
         provenance.pnpmVersion = pnpmVersion.trim().split(/\r?\n/).at(-1) ?? '';
+      }
+      if (name === 'node-test-deps') {
+        await assertSqliteBinding(
+          join(
+            buildRoot,
+            'apps',
+            'emdash-desktop',
+            'tooling',
+            'node-deps',
+            'node_modules',
+            'better-sqlite3'
+          )
+        );
+        await runFixedCommand(
+          "corepack pnpm exec node -e \"require('better-sqlite3')(':memory:').close()\"",
+          join(buildRoot, 'apps', 'emdash-desktop', 'tooling', 'node-deps'),
+          environment,
+          join(logRoot, 'node-test-deps-load.log')
+        );
       }
       if (name === 'electron-native-rebuild') {
         await assertSqliteBinding(join(buildRoot, 'node_modules', 'better-sqlite3'));
