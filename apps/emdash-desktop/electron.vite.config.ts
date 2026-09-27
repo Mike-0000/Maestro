@@ -64,6 +64,9 @@ export default defineConfig({
         exclude: workspacePackages,
       },
       rollupOptions: {
+        // Electron provides original-fs at runtime; it reads the physical app.asar bytes
+        // for delivery hashing rather than traversing Electron's virtual asar filesystem.
+        external: ['original-fs'],
         input: {
           index: resolve('src/entry/main.ts'),
           ...desktopWorkerBuildInputs(),
