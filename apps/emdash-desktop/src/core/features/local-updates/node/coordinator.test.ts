@@ -570,7 +570,16 @@ describe('persistent Chorus delivery coordinator', () => {
       candidateId: candidate.id,
     });
     const validatedCandidate = (await fixture.coordinator.status(fixture.repositoryPath)).candidate;
-    if (!validatedCandidate?.validation) throw new Error('Expected a validated package manifest.');
+    const receipt = validatedCandidate?.validation;
+    if (
+      !receipt ||
+      !('artifactDigest' in receipt) ||
+      !receipt.artifactDigest ||
+      !('buildId' in receipt) ||
+      !receipt.buildId
+    ) {
+      throw new Error('Expected a validated package manifest.');
+    }
     await fixture.coordinator.promote({
       repositoryPath: fixture.repositoryPath,
       candidateId: candidate.id,
@@ -595,8 +604,8 @@ describe('persistent Chorus delivery coordinator', () => {
       candidateId: candidate.id,
       health: {
         commit: candidate.commit,
-        artifactDigest: validatedCandidate.validation.artifactDigest,
-        buildId: validatedCandidate.validation.buildId,
+        artifactDigest: receipt.artifactDigest,
+        buildId: receipt.buildId,
         readyAt: '2026-09-26T12:00:00.000Z',
         backupRoot: 'C:/Programs/Chorus.backup',
         previousBuild,

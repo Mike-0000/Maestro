@@ -643,6 +643,19 @@ export function createLocalUpdateService(
       }
       await coordinator.beginApply({ repositoryPath, candidateId });
       const launchNonce = randomUUID();
+      const receipt = candidate.validation;
+      if (
+        !('artifactRoot' in receipt) ||
+        !receipt.artifactRoot ||
+        !('manifestPath' in receipt) ||
+        !receipt.manifestPath ||
+        !('artifactDigest' in receipt) ||
+        !receipt.artifactDigest ||
+        !('buildId' in receipt) ||
+        !receipt.buildId
+      ) {
+        throw new Error('The validated candidate is missing its Windows package receipt.');
+      }
       await launchInstallWorker({
         stateRoot,
         workerPath: host.delivery.installWorkerPath,
@@ -657,10 +670,10 @@ export function createLocalUpdateService(
           stateRoot,
           installRoot: host.delivery.installRoot,
           profileRoot: host.delivery.profileRoot,
-          artifactRoot: candidate.validation.artifactRoot,
-          manifestPath: candidate.validation.manifestPath,
-          artifactDigest: candidate.validation.artifactDigest,
-          buildId: candidate.validation.buildId,
+          artifactRoot: receipt.artifactRoot,
+          manifestPath: receipt.manifestPath,
+          artifactDigest: receipt.artifactDigest,
+          buildId: receipt.buildId,
           commit: candidate.commit,
         },
       });
