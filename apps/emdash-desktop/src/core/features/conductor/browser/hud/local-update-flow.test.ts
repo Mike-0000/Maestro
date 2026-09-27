@@ -97,4 +97,36 @@ describe('one-button local update flow', () => {
     ).rejects.toThrow('Build failed');
     expect(test.calls).toEqual([]);
   });
+
+  it('surfaces lastError when validation leaves the candidate blocked without candidate.error', async () => {
+    let state = 'integrated';
+    const test = fixture(state);
+    test.client.status = vi.fn(async () => ({
+      success: true as const,
+      data: {
+        enabled: true,
+        lastError: 'workspace-static-check failed: format',
+        candidate: {
+          id,
+          state,
+          eligible: true,
+          included: [{ taskId: 'task-1', taskName: 'Ready change', commit: 'a'.repeat(40) }],
+          error: null,
+          validation:
+            state === 'blocked' ? { error: 'workspace-static-check failed: format' } : null,
+        },
+      },
+    }));
+    test.client.validate = vi.fn(async () => {
+      state = 'blocked';
+      return { success: true as const, data: { validated: false, state: 'blocked' } };
+    });
+    await expect(
+      runLocalUpdateFlow(test.client, 'project-1', {
+        confirmPromote: async () => true,
+        confirmSchedule: async () => true,
+        onStage: () => {},
+      })
+    ).rejects.toThrow('workspace-static-check failed: format');
+  });
 });

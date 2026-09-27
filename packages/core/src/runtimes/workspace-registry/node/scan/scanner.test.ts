@@ -43,7 +43,13 @@ type LandingLog = {
 
 function fakeLanding(records: DurableWorkspaceRecord[]): { landing: ScanLanding; log: LandingLog } {
   const byId = new Map(records.map((entry) => [entry.id, entry]));
-  const log: LandingLog = { observations: [], vanished: [], refreshed: [], events: [], patches: [] };
+  const log: LandingLog = {
+    observations: [],
+    vanished: [],
+    refreshed: [],
+    events: [],
+    patches: [],
+  };
   const landing: ScanLanding = {
     get: (id) => byId.get(id),
     list: () => [...byId.values()],

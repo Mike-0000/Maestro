@@ -551,7 +551,11 @@ export function createLocalUpdateService(
 
   async function validate(projectId: string, candidateId: string) {
     const repositoryPath = await localRepository(projectId);
-    return coordinator.validateCandidate({ repositoryPath, candidateId });
+    const result = await coordinator.validateCandidate({ repositoryPath, candidateId });
+    if (!result.validated) {
+      throw new Error(result.error ?? 'Validation failed.');
+    }
+    return result;
   }
 
   async function promote(projectId: string, candidateId: string) {

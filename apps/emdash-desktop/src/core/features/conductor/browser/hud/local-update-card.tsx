@@ -244,8 +244,12 @@ export const LocalUpdateCard = observer(function LocalUpdateCard({
                   New project work made this candidate stale.
                 </p>
               )}
-              {candidate.error && (
-                <p className="mt-1 text-red-600 dark:text-red-300">{candidate.error}</p>
+              {(candidate.error ||
+                candidate.validation?.error ||
+                (candidate.state === 'blocked' && status.lastError)) && (
+                <p className="mt-1 text-red-600 dark:text-red-300">
+                  {candidate.error ?? candidate.validation?.error ?? status.lastError}
+                </p>
               )}
               {candidate.error?.startsWith('Integration conflict in ') && (
                 <p className="mt-1 text-foreground-muted">

@@ -58,7 +58,7 @@ export type DeliveryStatus = {
     eligible: boolean;
     worktreePath: string;
     error: string | null;
-    validation: DeliveryValidation | null;
+    validation: (DeliveryValidation & { error?: string }) | { error: string } | null;
     githubBackup: null | {
       state: 'pending' | 'backed-up';
       remote: string;
