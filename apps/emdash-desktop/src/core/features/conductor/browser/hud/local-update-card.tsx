@@ -12,6 +12,7 @@ import {
 } from '@core/features/projects/api/browser/stores/project-selectors';
 import { useOpenModal } from '@core/manifests/browser/modal-api';
 import { cn } from '@core/primitives/styling/browser/cn';
+import { runLocalUpdateFlow } from './local-update-flow';
 
 export const LocalUpdateCard = observer(function LocalUpdateCard({
   onHide,
@@ -27,6 +28,7 @@ export const LocalUpdateCard = observer(function LocalUpdateCard({
   const [status, setStatus] = useState<LocalUpdateStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [stage, setStage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!projects.some((project) => project.id === projectId)) {
@@ -35,120 +37,108 @@ export const LocalUpdateCard = observer(function LocalUpdateCard({
     }
   }, [projectId, projects]);
 
-  const refresh = useCallback(async () => {
-    if (!projectId) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await (await getLocalUpdatesClient()).status({ projectId });
-      if (!result.success) {
-        setError(result.error.message);
+  const refresh = useCallback(
+    async (clearError = true) => {
+      if (!projectId) return;
+      setBusy(true);
+      if (clearError) setError(null);
+      try {
+        const result = await (await getLocalUpdatesClient()).status({ projectId });
+        if (!result.success) {
+          setError(result.error.message);
+          setStatus(null);
+        } else {
+          setStatus(result.data);
+        }
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
         setStatus(null);
-      } else {
-        setStatus(result.data);
+      } finally {
+        setBusy(false);
       }
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-      setStatus(null);
-    } finally {
-      setBusy(false);
-    }
-  }, [projectId]);
+    },
+    [projectId]
+  );
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
+  async function runUpdate() {
+    if (!projectId || !status || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await runLocalUpdateFlow(await getLocalUpdatesClient(), projectId, {
+        onStage: setStage,
+        confirmPromote: async (candidate) =>
+          (
+            await openConfirmation({
+              title: 'Promote changes to local chorus/main?',
+              description: `Validated candidate ${candidate.id.slice(0, 8)} includes ${candidate.included.map((task) => task.taskName).join(', ')}. This fast-forwards local chorus/main if its checkout is clean and unchanged.`,
+              confirmLabel: 'Promote locally',
+            })
+          ).success,
+        confirmSchedule: async (candidate) =>
+          (
+            await openConfirmation({
+              title: 'Schedule the local Chorus install?',
+              description: `Candidate ${candidate.id.slice(0, 8)} is promoted. No agents, terminals, or remote sessions can be active. Chorus stays open until you quit normally; the installer then replaces the app and checks that it starts. New agent work is paused while the installer waits.`,
+              confirmLabel: 'Schedule install',
+            })
+          ).success,
+      });
+      await getConductorStore().plans.refreshDeliveryReadiness();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setStage(null);
+      await refresh(false);
+      setBusy(false);
+    }
+  }
+
   async function run(
-    operation:
-      | 'enable'
-      | 'snapshot'
-      | 'follow'
-      | 'resume'
-      | 'validate'
-      | 'promote'
-      | 'push-backup'
-      | 'schedule'
-      | 'cancel-install'
-      | 'cancel-candidate'
-      | 'rollback',
+    operation: 'resume' | 'push-backup' | 'cancel-install' | 'cancel-candidate' | 'rollback',
     selectedCandidateId = status?.candidate?.id
   ) {
     if (!projectId) return;
     setBusy(true);
     setError(null);
     try {
-      if (
-        ['promote', 'push-backup', 'schedule', 'rollback'].includes(operation) &&
-        selectedCandidateId
-      ) {
+      if (['push-backup', 'rollback'].includes(operation) && selectedCandidateId) {
         const confirmation = await openConfirmation({
           title:
-            operation === 'promote'
-              ? 'Promote changes to local chorus/main?'
-              : operation === 'push-backup'
-                ? 'Push this candidate to GitHub origin/main?'
-                : operation === 'rollback'
-                  ? 'Restore the retained Chorus build and its profile?'
-                  : 'Schedule the local Chorus install?',
+            operation === 'push-backup'
+              ? 'Push this candidate to GitHub origin/main?'
+              : 'Restore the retained Chorus build and its profile?',
           description:
-            operation === 'promote'
-              ? 'This fast-forwards the local chorus/main branch if its checkout is clean and unchanged.'
-              : operation === 'push-backup'
-                ? 'This pushes the exact promoted commit to origin/main without force. A rejected push leaves the GitHub backup pending.'
-                : operation === 'rollback'
-                  ? 'The installer restores the exact retained pre-update Chorus build and its matched pre-update profile. The current profile is preserved in local recovery storage. Stop every agent, terminal, and remote session; Chorus stays open until you quit normally, then the rollback starts and verifies startup.'
-                  : 'No agents, terminals, or remote sessions can be active. Chorus stays open until you quit normally; the installer then replaces the app and checks that it starts. New agent work is paused while the installer waits.',
-          confirmLabel:
-            operation === 'promote'
-              ? 'Promote locally'
-              : operation === 'push-backup'
-                ? 'Push backup'
-                : operation === 'rollback'
-                  ? 'Restore previous build'
-                  : 'Schedule install',
+            operation === 'push-backup'
+              ? 'This pushes the exact promoted commit to origin/main without force. A rejected push leaves the GitHub backup pending.'
+              : 'The installer restores the exact retained pre-update Chorus build and its matched pre-update profile. The current profile is preserved in local recovery storage. Stop every agent, terminal, and remote session; Chorus stays open until you quit normally, then the rollback starts and verifies startup.',
+          confirmLabel: operation === 'push-backup' ? 'Push backup' : 'Restore previous build',
         });
         if (!confirmation.success) return;
       }
       const client = await getLocalUpdatesClient();
       const result =
-        operation === 'enable'
-          ? await client.enable({ projectId })
-          : operation === 'snapshot'
-            ? await client.prepare({ projectId, policy: 'snapshot' })
-            : operation === 'follow'
-              ? await client.prepare({ projectId, policy: 'follow-project' })
-              : operation === 'resume' && status?.candidate
-                ? await client.resume({ projectId, candidateId: status.candidate.id })
-                : operation === 'validate' && selectedCandidateId
-                  ? await client.validate({ projectId, candidateId: selectedCandidateId })
-                  : operation === 'promote' && selectedCandidateId
-                    ? await client.promote({ projectId, candidateId: selectedCandidateId })
-                    : operation === 'push-backup' && selectedCandidateId
-                      ? await client.pushBackup({ projectId, candidateId: selectedCandidateId })
-                      : operation === 'schedule' && selectedCandidateId
-                        ? await client.schedule({
-                            projectId,
-                            candidateId: selectedCandidateId,
-                            restartPolicy: 'manual',
-                          })
-                        : operation === 'cancel-install' && selectedCandidateId
-                          ? await client.cancel({ projectId, candidateId: selectedCandidateId })
-                          : operation === 'cancel-candidate' && selectedCandidateId
-                            ? await client.cancel({ projectId, candidateId: selectedCandidateId })
-                            : operation === 'rollback' && selectedCandidateId
-                              ? await client.rollback({
-                                  projectId,
-                                  candidateId: selectedCandidateId,
-                                  restoreProfile: true,
-                                })
-                              : null;
+        operation === 'resume' && selectedCandidateId
+          ? await client.resume({ projectId, candidateId: selectedCandidateId })
+          : operation === 'push-backup' && selectedCandidateId
+            ? await client.pushBackup({ projectId, candidateId: selectedCandidateId })
+            : (operation === 'cancel-install' || operation === 'cancel-candidate') &&
+                selectedCandidateId
+              ? await client.cancel({ projectId, candidateId: selectedCandidateId })
+              : operation === 'rollback' && selectedCandidateId
+                ? await client.rollback({
+                    projectId,
+                    candidateId: selectedCandidateId,
+                    restoreProfile: true,
+                  })
+                : null;
       if (!result) return;
       if (!result.success) setError(result.error.message);
-      else if (operation === 'promote') {
-        await getConductorStore().plans.refreshDeliveryReadiness();
-      }
-      await refresh();
+      await refresh(false);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -173,6 +163,7 @@ export const LocalUpdateCard = observer(function LocalUpdateCard({
             aria-label="Delivery project"
             className="max-w-48 rounded border border-border bg-background px-2 py-1 text-xs"
             value={projectId ?? ''}
+            disabled={busy}
             onChange={(event) => setProjectId(event.target.value)}
           >
             {projects.map((project) => (
@@ -199,13 +190,15 @@ export const LocalUpdateCard = observer(function LocalUpdateCard({
           type="button"
           aria-label="Hide local Chorus update"
           title="Hide local Chorus update"
+          disabled={busy}
           onClick={onHide}
-          className="rounded p-1 text-foreground-muted hover:bg-background-secondary"
+          className="rounded p-1 text-foreground-muted hover:bg-background-secondary disabled:opacity-50"
         >
           <X className="size-3.5" />
         </button>
       </header>
 
+      {stage && <p className="mt-2 text-xs text-foreground-muted">{stage}</p>}
       {error && <p className="mt-2 text-xs text-red-600 dark:text-red-300">{error}</p>}
       {!status && !error && (
         <p className="mt-2 text-xs text-foreground-muted">Loading delivery status…</p>
@@ -314,58 +307,42 @@ export const LocalUpdateCard = observer(function LocalUpdateCard({
             </ul>
           )}
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {!status.enabled ? (
-              <ActionButton disabled={busy} onClick={() => void run('enable')}>
-                Enable coordinator
+            {(!candidate ||
+              !candidate.eligible ||
+              [
+                'installed',
+                'cancelled',
+                'rolled-back',
+                'integrated',
+                'validated',
+                'promoted',
+              ].includes(candidate.state) ||
+              (candidate.state === 'blocked' &&
+                !candidate.error?.startsWith('Integration conflict in '))) && (
+              <ActionButton disabled={busy} onClick={() => void runUpdate()}>
+                {busy ? (stage ?? 'Updating…') : 'Update Chorus'}
               </ActionButton>
-            ) : (
-              <>
-                <ActionButton disabled={busy} onClick={() => void run('snapshot')}>
-                  Prepare ready snapshot
-                </ActionButton>
-                <ActionButton disabled={busy} onClick={() => void run('follow')}>
-                  Wait for all active work
-                </ActionButton>
-                {candidate?.state === 'integrated' && (
-                  <ActionButton
-                    disabled={busy || !candidate.eligible}
-                    onClick={() => void run('validate')}
-                  >
-                    Validate package
-                  </ActionButton>
-                )}
-                {candidate?.state === 'blocked' &&
-                  candidate.error?.startsWith('Integration conflict in ') && (
-                    <ActionButton disabled={busy} onClick={() => void run('resume')}>
-                      Resume resolved integration
-                    </ActionButton>
-                  )}
-                {candidate?.state === 'validated' && candidate.eligible && (
-                  <ActionButton disabled={busy} onClick={() => void run('promote')}>
-                    Promote to chorus/main
-                  </ActionButton>
-                )}
-                {candidate?.state === 'promoted' && candidate.eligible && (
-                  <>
-                    <ActionButton disabled={busy} onClick={() => void run('schedule')}>
-                      Schedule local install
-                    </ActionButton>
-                    <ActionButton
-                      disabled={busy}
-                      onClick={() => void run('cancel-candidate', candidate.id)}
-                    >
-                      Cancel install candidate
-                    </ActionButton>
-                  </>
-                )}
-                {candidate?.state === 'installed' &&
-                  candidate.health?.previousBuild?.deliveryProtocol === 1 && (
-                    <ActionButton disabled={busy} onClick={() => void run('rollback')}>
-                      Roll back local install
-                    </ActionButton>
-                  )}
-              </>
             )}
+            {candidate?.state === 'blocked' &&
+              candidate.error?.startsWith('Integration conflict in ') && (
+                <ActionButton disabled={busy} onClick={() => void run('resume')}>
+                  Resume resolved integration
+                </ActionButton>
+              )}
+            {candidate?.state === 'promoted' && (
+              <ActionButton
+                disabled={busy}
+                onClick={() => void run('cancel-candidate', candidate.id)}
+              >
+                Cancel install candidate
+              </ActionButton>
+            )}
+            {candidate?.state === 'installed' &&
+              candidate.health?.previousBuild?.deliveryProtocol === 1 && (
+                <ActionButton disabled={busy} onClick={() => void run('rollback')}>
+                  Roll back local install
+                </ActionButton>
+              )}
           </div>
         </>
       )}
