@@ -1,5 +1,6 @@
 import type { DeliveryCandidate, DeliveryValidation } from './coordinator.mjs';
 
+export const VALIDATION_COMMANDS: readonly (readonly [name: string, command: string])[];
 export const REQUIRED_BUILD_CHECKS: readonly string[];
 
 export function validateIntegratedCandidate(input: {

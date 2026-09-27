@@ -44,9 +44,11 @@ coordinator per Git common directory. Its journal and snapshot live under
    merges commits in dependency order, and preserves conflict worktrees for manual resolution.
    Resolve and commit a merge in that worktree, then resume integration to merge the remaining
    selected commits.
-3. Fixed repository checks and an unpacked Windows package build run on a second detached worktree
-   pinned to the integrated commit. The coordinator records the checks, toolchain, manifest, and
-   SHA-256 inventory of every package file.
+3. A frozen install, workspace build, full-tree format/lint/typecheck, focused Chorus delivery
+   and Wire timeout tests, native-addon rebuild, and unpacked Windows package build run on a second
+   detached worktree pinned to the integrated commit. The unrelated inherited Emdash/Unix test suite
+   still runs in the normal repository gate, but does not block a Windows local install. The
+   coordinator records the checks, toolchain, manifest, and SHA-256 inventory of every package file.
 4. Promotion is a separate, user-confirmed fast-forward of local `chorus/main`. It refuses a moved
    branch or dirty canonical checkout. A separate confirmed backup action pushes that exact commit
    to `origin/main` without force; a rejected push remains visibly pending.

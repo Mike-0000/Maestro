@@ -5,14 +5,34 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 const execFile = promisify(execFileCallback);
-export const REQUIRED_BUILD_CHECKS = [
-  'frozen-install',
-  'workspace-build',
-  'node-test-deps',
-  'workspace-check',
-  'electron-native-rebuild',
-  'windows-package',
+export const VALIDATION_COMMANDS = [
+  ['frozen-install', 'corepack pnpm install --frozen-lockfile --ignore-scripts'],
+  ['workspace-build', 'corepack pnpm run build'],
+  // The frozen install skips the app postinstall that provisions the separate system-Node
+  // better-sqlite3 copy used by Vitest. CI installs it explicitly before the test target.
+  [
+    'node-test-deps',
+    'corepack pnpm --dir apps/emdash-desktop/tooling/node-deps install --frozen-lockfile && corepack pnpm --dir apps/emdash-desktop/tooling/node-deps rebuild better-sqlite3 && corepack pnpm --filter @emdash/core rebuild node-pty',
+  ],
+  // Keep static checks for the whole tree without making a Windows install depend on
+  // unrelated Linux-only or inherited Emdash tests.
+  [
+    'workspace-static-check',
+    'corepack pnpm run format:check && corepack pnpm run lint && corepack pnpm run typecheck',
+  ],
+  [
+    'chorus-delivery-tests',
+    'corepack pnpm --dir apps/emdash-desktop exec vitest run --project node src/core/features/local-updates/node src/core/features/conductor/browser/hud/local-update-flow.test.ts && corepack pnpm --dir packages/wire exec vitest run src/api/connection-robustness.test.ts',
+  ],
+  // The frozen install deliberately skips lifecycle scripts, including the app's Electron-ABI
+  // rebuild. electron-builder has npmRebuild: false, so build the addon explicitly before packing.
+  ['electron-native-rebuild', 'corepack pnpm exec electron-rebuild -f --only=better-sqlite3'],
+  [
+    'windows-package',
+    'corepack pnpm exec electron-builder --win --dir --publish never --config electron-builder.config.ts',
+  ],
 ];
+export const REQUIRED_BUILD_CHECKS = VALIDATION_COMMANDS.map(([name]) => name);
 
 export async function validateIntegratedCandidate({ repositoryPath, candidate, stateRoot, git }) {
   if (process.platform !== 'win32') {
@@ -77,26 +97,7 @@ export async function validateIntegratedCandidate({ repositoryPath, candidate, s
     const pathKey = Object.keys(environment).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH';
     environment[pathKey] = `${toolchainRoot};${environment[pathKey] ?? ''}`;
     const checks = [];
-    const commands = [
-      ['frozen-install', 'corepack pnpm install --frozen-lockfile --ignore-scripts'],
-      ['workspace-build', 'corepack pnpm run build'],
-      // The root frozen install skips the app postinstall that provisions the separate system-Node
-      // better-sqlite3 copy used by Vitest. CI installs it explicitly before the test target.
-      [
-        'node-test-deps',
-        'corepack pnpm --dir apps/emdash-desktop/tooling/node-deps install --frozen-lockfile && corepack pnpm --dir apps/emdash-desktop/tooling/node-deps rebuild better-sqlite3 && corepack pnpm --filter @emdash/core rebuild node-pty',
-      ],
-      ['workspace-check', 'corepack pnpm run check'],
-
-      // The frozen install deliberately skips lifecycle scripts, including the app's Electron-ABI
-      // rebuild. electron-builder has npmRebuild: false, so build the addon explicitly before packing.
-      ['electron-native-rebuild', 'corepack pnpm exec electron-rebuild -f --only=better-sqlite3'],
-      [
-        'windows-package',
-        'corepack pnpm exec electron-builder --win --dir --publish never --config electron-builder.config.ts',
-      ],
-    ];
-    for (const [name, command] of commands) {
+    for (const [name, command] of VALIDATION_COMMANDS) {
       const workingDirectory =
         name === 'windows-package' || name === 'electron-native-rebuild'
           ? join(buildRoot, 'apps', 'emdash-desktop')
