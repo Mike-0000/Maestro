@@ -8,7 +8,7 @@ function spawnReturning(status: number | null) {
 describe('runRootTests', () => {
   it('delegates to the Nx test targets across the workspace', () => {
     const spawn = spawnReturning(0);
-    runRootTests({ argv: [], spawn, log: vi.fn() });
+    runRootTests({ argv: [], spawn, log: vi.fn(), env: {} });
 
     expect(spawn).toHaveBeenCalledWith(
       'pnpm',
@@ -19,7 +19,7 @@ describe('runRootTests', () => {
 
   it('forwards extra CLI arguments to nx', () => {
     const spawn = spawnReturning(0);
-    runRootTests({ argv: ['--verbose'], spawn, log: vi.fn() });
+    runRootTests({ argv: ['--verbose'], spawn, log: vi.fn(), env: {} });
 
     expect(spawn).toHaveBeenCalledWith(
       'pnpm',
@@ -28,21 +28,32 @@ describe('runRootTests', () => {
     );
   });
 
+  it('re-invokes the running pnpm through node instead of a shell lookup', () => {
+    const spawn = spawnReturning(0);
+    runRootTests({ argv: [], spawn, log: vi.fn(), env: { npm_execpath: '/pnpm/bin/pnpm.cjs' } });
+
+    expect(spawn).toHaveBeenCalledWith(
+      process.execPath,
+      ['/pnpm/bin/pnpm.cjs', 'exec', 'nx', 'run-many', '-t', 'test', '--all'],
+      expect.objectContaining({ stdio: 'inherit', shell: false })
+    );
+  });
+
   it('returns 0 and stays quiet when the suite passes', () => {
     const log = vi.fn();
-    expect(runRootTests({ argv: [], spawn: spawnReturning(0), log })).toBe(0);
+    expect(runRootTests({ argv: [], spawn: spawnReturning(0), log, env: {} })).toBe(0);
     expect(log).not.toHaveBeenCalled();
   });
 
   it('surfaces the doctor referral and the exit code on failure', () => {
     const log = vi.fn();
-    expect(runRootTests({ argv: [], spawn: spawnReturning(3), log })).toBe(3);
+    expect(runRootTests({ argv: [], spawn: spawnReturning(3), log, env: {} })).toBe(3);
     expect(log).toHaveBeenCalledWith(expect.stringContaining('pnpm run doctor'));
   });
 
   it('returns 1 when the runner dies without an exit code', () => {
     const log = vi.fn();
-    expect(runRootTests({ argv: [], spawn: spawnReturning(null), log })).toBe(1);
+    expect(runRootTests({ argv: [], spawn: spawnReturning(null), log, env: {} })).toBe(1);
     expect(log).toHaveBeenCalledWith(expect.stringContaining(DOCTOR_HINT));
   });
 });

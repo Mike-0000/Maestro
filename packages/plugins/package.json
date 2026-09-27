@@ -84,7 +84,7 @@
           "build"
         ],
         "options": {
-          "command": "pnpm exec vitest run",
+          "command": "vitest run",
           "cwd": "packages/plugins"
         }
       },
@@ -96,7 +96,7 @@
         ],
         "cache": false,
         "options": {
-          "command": "pnpm exec vitest",
+          "command": "vitest",
           "cwd": "packages/plugins"
         }
       }

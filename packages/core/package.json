@@ -402,7 +402,7 @@
       "test": {
         "executor": "nx:run-commands",
         "options": {
-          "command": "pnpm exec vitest run",
+          "command": "vitest run",
           "cwd": "packages/core"
         }
       }

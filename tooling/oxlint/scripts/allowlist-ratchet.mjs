@@ -12,6 +12,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { pnpmCommand } from '../../scripts/pnpm-command.mjs';
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -87,11 +88,12 @@ export function listAllowlistFiles(allowlistsDir = ALLOWLISTS_DIR) {
  * expected whenever allowlisted violations exist.
  */
 export function collectViolationsFromOxlint(repoRoot = REPO_ROOT) {
-  const result = spawnSync('pnpm', ['exec', 'oxlint', '--format', 'json', '--quiet', '.'], {
+  const pnpm = pnpmCommand(['exec', 'oxlint', '--format', 'json', '--quiet', '.']);
+  const result = spawnSync(pnpm.command, pnpm.args, {
     cwd: repoRoot,
     encoding: 'utf8',
     maxBuffer: 256 * 1024 * 1024,
-    shell: process.platform === 'win32',
+    shell: pnpm.shell,
     env: { ...process.env, EMDASH_DISABLE_BOUNDARY_ALLOWLISTS: '1' },
   });
   if (result.error) throw result.error;

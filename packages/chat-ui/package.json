@@ -86,7 +86,7 @@
       "test": {
         "executor": "nx:run-commands",
         "options": {
-          "command": "pnpm exec vitest run --project \"!perf\"",
+          "command": "vitest run --project \"!perf\"",
           "cwd": "packages/chat-ui"
         }
       },
@@ -97,7 +97,7 @@
         ],
         "cache": false,
         "options": {
-          "command": "pnpm exec vitest run --project perf",
+          "command": "vitest run --project perf",
           "cwd": "packages/chat-ui"
         }
       },
@@ -108,7 +108,7 @@
         ],
         "cache": false,
         "options": {
-          "command": "pnpm exec vitest bench --project browser",
+          "command": "vitest bench --project browser",
           "cwd": "packages/chat-ui"
         }
       }
