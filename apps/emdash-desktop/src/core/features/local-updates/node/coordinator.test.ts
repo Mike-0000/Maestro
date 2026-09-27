@@ -170,6 +170,109 @@ describe('persistent Chorus delivery coordinator', () => {
     ).toBe(commit);
   });
 
+  it('withdraws archived unfinished work so it no longer blocks following the project', async () => {
+    const fixture = await createFixture();
+    const second = join(fixture.root, 'task-b');
+    await git(fixture.repositoryPath, ['worktree', 'add', '-b', 'agent/b', second, fixture.base]);
+    await fixture.coordinator.join({
+      repositoryPath: fixture.repositoryPath,
+      projectId: 'project-a',
+      taskId: 'task-b',
+      taskName: 'Abandoned change',
+      worktreePath: second,
+    });
+    await writeFile(join(fixture.worktreePath, 'feature.txt'), 'first\n');
+    await git(fixture.worktreePath, ['add', 'feature.txt']);
+    await git(fixture.worktreePath, ['commit', '-m', 'first change']);
+    const commit = await git(fixture.worktreePath, ['rev-parse', 'HEAD']);
+    await fixture.coordinator.submit({
+      repositoryPath: fixture.repositoryPath,
+      taskId: 'task-a',
+      commit,
+      base: fixture.base,
+      summary: 'First feature',
+    });
+    await expect(
+      fixture.coordinator.prepare({
+        repositoryPath: fixture.repositoryPath,
+        policy: 'follow-project',
+      })
+    ).rejects.toThrow('Abandoned change');
+
+    // Archiving finished work keeps its handoff; archiving unfinished work withdraws it.
+    const kept = await fixture.coordinator.retire({
+      repositoryPath: fixture.repositoryPath,
+      taskId: 'task-a',
+      reason: 'archived',
+    });
+    const withdrawn = await fixture.coordinator.retire({
+      repositoryPath: fixture.repositoryPath,
+      taskId: 'task-b',
+      reason: 'archived',
+    });
+    const repeated = await fixture.coordinator.retire({
+      repositoryPath: fixture.repositoryPath,
+      taskId: 'task-b',
+      reason: 'archived',
+    });
+    const unknown = await fixture.coordinator.retire({
+      repositoryPath: fixture.repositoryPath,
+      taskId: 'never-enrolled',
+      reason: 'deleted',
+    });
+
+    expect(kept.withdrawn).toBe(false);
+    expect(withdrawn.withdrawn).toBe(true);
+    expect(repeated.withdrawn).toBe(false);
+    expect(unknown.withdrawn).toBe(false);
+    const status = await fixture.coordinator.status(fixture.repositoryPath);
+    expect(status.generation).toBe(repeated.generation);
+    expect(status.tasks).toEqual([
+      expect.objectContaining({ taskId: 'task-a', state: 'submitted', withdrawnReason: null }),
+      expect.objectContaining({
+        taskId: 'task-b',
+        state: 'withdrawn',
+        withdrawnReason: 'archived',
+      }),
+    ]);
+    const candidate = await fixture.coordinator.prepare({
+      repositoryPath: fixture.repositoryPath,
+      policy: 'follow-project',
+    });
+    expect(candidate.included).toEqual([expect.objectContaining({ taskId: 'task-a', commit })]);
+  });
+
+  it('rejoins a restored task but keeps an explicit withdrawal until it rejoins explicitly', async () => {
+    const fixture = await createFixture();
+    const task = {
+      repositoryPath: fixture.repositoryPath,
+      projectId: 'project-a',
+      taskId: 'task-a',
+      taskName: 'First change',
+      worktreePath: fixture.worktreePath,
+    };
+    await fixture.coordinator.retire({ ...task, reason: 'archived' });
+
+    const rejoined = await fixture.coordinator.join(task);
+    const afterRestore = await fixture.coordinator.status(fixture.repositoryPath);
+    expect(rejoined).toMatchObject({ result: { joined: true, rejoined: true } });
+    expect(afterRestore.tasks[0]).toMatchObject({
+      state: 'working',
+      withdrawnReason: null,
+      revision: 1,
+    });
+
+    await fixture.coordinator.withdraw(task);
+    const ignored = await fixture.coordinator.join(task);
+    await fixture.coordinator.invalidate(task);
+    const afterExplicit = await fixture.coordinator.status(fixture.repositoryPath);
+    expect(ignored).toMatchObject({ result: { joined: false } });
+    expect(afterExplicit.tasks[0]).toMatchObject({
+      state: 'withdrawn',
+      withdrawnReason: 'explicit',
+    });
+  });
+
   it('serializes a late join during validation ahead of a following candidate apply', async () => {
     const fixture = await createFixture();
     await writeFile(join(fixture.worktreePath, 'feature.txt'), 'first\n');

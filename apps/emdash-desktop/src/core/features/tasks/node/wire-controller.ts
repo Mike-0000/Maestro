@@ -32,12 +32,24 @@ export function createTasksWireController(options: {
   telemetry: TelemetryService;
   localUpdates?: {
     onTaskCreated(task: Task): Promise<void>;
+    onTaskRetired(projectId: string, taskId: string, reason: 'archived' | 'deleted'): Promise<void>;
+    onTaskUpdated(task: Task): Promise<void>;
     resolveTaskBase(projectId: string): Promise<string | null>;
   };
 }): TasksWireController {
-  const removeTaskCreatedHook = options.localUpdates
-    ? options.service.on('task:created', (task) => options.localUpdates?.onTaskCreated(task))
-    : () => undefined;
+  const localUpdates = options.localUpdates;
+  const removeLocalUpdateHooks = localUpdates
+    ? [
+        options.service.on('task:created', (task) => localUpdates.onTaskCreated(task)),
+        options.service.on('task:updated', (task) => localUpdates.onTaskUpdated(task)),
+        options.service.on('task:archived', (taskId, projectId) =>
+          localUpdates.onTaskRetired(projectId, taskId, 'archived')
+        ),
+        options.service.on('task:deleted', (taskId, projectId) =>
+          localUpdates.onTaskRetired(projectId, taskId, 'deleted')
+        ),
+      ]
+    : [];
   const taskOperations = createTaskOperations(options);
   const taskListFamily = family(
     ({ projectId }: { projectId: string }, scope) =>
@@ -189,7 +201,7 @@ export function createTasksWireController(options: {
       },
     },
     async dispose() {
-      removeTaskCreatedHook();
+      for (const removeHook of removeLocalUpdateHooks) removeHook();
       await taskListProvider.dispose();
       await taskStatsProvider.dispose();
       await taskListFamily.dispose();

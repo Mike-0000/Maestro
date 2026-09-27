@@ -109,6 +109,20 @@ export function applyEvent(previous, event) {
       const task = requireTask(next, event.taskId);
       task.state = 'withdrawn';
       task.ready = null;
+      // Lifecycle withdrawals (archived or deleted tasks) can be reversed by restoring the task;
+      // an explicit withdrawal stays until the task rejoins explicitly.
+      task.withdrawnReason = event.reason ?? 'explicit';
+      task.updatedAt = event.at;
+      next.generation += 1;
+      break;
+    }
+    case 'task-rejoined': {
+      const task = requireTask(next, event.taskId);
+      if (task.state !== 'withdrawn') throw new Error('Only withdrawn work can rejoin.');
+      task.state = 'working';
+      task.ready = null;
+      task.withdrawnReason = null;
+      task.revision += 1;
       task.updatedAt = event.at;
       next.generation += 1;
       break;

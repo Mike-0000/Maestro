@@ -18,6 +18,7 @@ export type LocalUpdateStatus = {
     taskName: string;
     mode: 'shipping' | 'research';
     state: string;
+    withdrawnReason: 'explicit' | 'archived' | 'deleted' | null;
     commit: string | null;
     revision: number;
   }>;

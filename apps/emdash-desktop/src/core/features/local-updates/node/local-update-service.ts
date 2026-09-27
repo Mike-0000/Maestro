@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { access, readFile, readdir, unlink } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { log } from '@emdash/shared/logger';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import {
   liveWorkspaces,
   workspaceRegistryTable as workspaces,
@@ -443,8 +443,45 @@ export function createLocalUpdateService(
     }
   }
 
+  /**
+   * Withdraws enrolled work whose Chorus task was archived or deleted without the coordinator
+   * hearing about it (tasks archived before this reconciliation existed, or a lost background
+   * hook). Coordinator state is shared by every Chorus clone on this machine, so a task that is
+   * merely absent from this profile's database is withdrawn only once its worktree is gone too.
+   */
+  async function reconcileMembership(repositoryPath: string): Promise<void> {
+    const current = await coordinator.status(repositoryPath);
+    if (!current.enabled) return;
+    const working = current.tasks.filter((task) => task.state === 'working');
+    if (working.length === 0) return;
+    const rows = await db
+      .select({
+        id: tasks.id,
+        projectId: tasks.projectId,
+        archivedAt: tasks.archivedAt,
+        deletedAt: tasks.deletedAt,
+      })
+      .from(tasks)
+      .where(
+        inArray(
+          tasks.id,
+          working.map((task) => task.taskId)
+        )
+      );
+    for (const { task, reason } of await findRetiredTasks(working, rows, pathExists)) {
+      try {
+        await coordinator.retire({ repositoryPath, taskId: task.taskId, reason });
+      } catch (error) {
+        log.warn('local updates: stale task withdrawal failed', { taskId: task.taskId, error });
+      }
+    }
+  }
+
   async function status(projectId: string): Promise<LocalUpdateStatus> {
     const repositoryPath = await localRepository(projectId);
+    await reconcileMembership(repositoryPath).catch((error) => {
+      log.warn('local updates: task membership reconciliation failed', { projectId, error });
+    });
     const pendingGate = await readInstallTargetGate(stateRoot);
     if (
       pendingGate &&
@@ -780,6 +817,30 @@ export function createLocalUpdateService(
     await joinTask(task.projectId, repositoryPath, task.id);
   }
 
+  async function onTaskRetired(
+    projectId: string,
+    taskId: string,
+    reason: 'archived' | 'deleted'
+  ): Promise<void> {
+    const repositoryPath = await localRepository(projectId).catch(() => null);
+    if (!repositoryPath) return;
+    const current = await coordinator.status(repositoryPath).catch(() => null);
+    if (!current?.enabled || !current.tasks.some((task) => task.taskId === taskId)) return;
+    await coordinator.retire({ repositoryPath, taskId, reason });
+  }
+
+  /** Re-enrolls a task restored from the archive; other task updates leave membership alone. */
+  async function onTaskUpdated(task: Task): Promise<void> {
+    if (task.archivedAt) return;
+    const repositoryPath = await localRepository(task.projectId).catch(() => null);
+    if (!repositoryPath) return;
+    const current = await coordinator.status(repositoryPath).catch(() => null);
+    if (!current?.enabled) return;
+    const enrolled = current.tasks.find((entry) => entry.taskId === task.id);
+    if (enrolled && enrolled.withdrawnReason !== 'archived') return;
+    await joinTask(task.projectId, repositoryPath, task.id);
+  }
+
   async function resolveTaskBase(projectId: string): Promise<string | null> {
     const repositoryPath = await localRepository(projectId).catch(() => null);
     if (!repositoryPath) return null;
@@ -826,6 +887,12 @@ export function createLocalUpdateService(
       });
       const current = await coordinator.status(project.path).catch(() => null);
       if (!current?.enabled) continue;
+      await reconcileMembership(project.path).catch((error) => {
+        log.warn('local updates: task membership reconciliation failed', {
+          projectId: project.id,
+          error,
+        });
+      });
       const rows = await db
         .select({ id: tasks.id, archivedAt: tasks.archivedAt })
         .from(tasks)
@@ -857,10 +924,54 @@ export function createLocalUpdateService(
     cancel,
     rollback,
     onTaskCreated,
+    onTaskRetired,
+    onTaskUpdated,
     resolveTaskBase,
     recordWorkStarted,
     reconcile,
   };
+}
+
+type EnrolledTask = { taskId: string; projectId: string; worktreePath: string };
+type TaskRow = {
+  id: string;
+  projectId: string;
+  archivedAt: string | null;
+  deletedAt: string | null;
+};
+
+/**
+ * Picks enrolled tasks whose Chorus task has been archived or deleted. A task missing from this
+ * profile's database may belong to another Chorus clone, so it counts as deleted only when its
+ * worktree is gone as well.
+ */
+export async function findRetiredTasks<T extends EnrolledTask>(
+  enrolled: T[],
+  rows: TaskRow[],
+  exists: (path: string) => Promise<boolean>
+): Promise<Array<{ task: T; reason: 'archived' | 'deleted' }>> {
+  const rowsById = new Map(rows.map((row) => [row.id, row]));
+  const retired: Array<{ task: T; reason: 'archived' | 'deleted' }> = [];
+  for (const task of enrolled) {
+    const row = rowsById.get(task.taskId);
+    if (row) {
+      if (row.projectId !== task.projectId) continue;
+      if (row.deletedAt) retired.push({ task, reason: 'deleted' });
+      else if (row.archivedAt) retired.push({ task, reason: 'archived' });
+    } else if (!(await exists(task.worktreePath))) {
+      retired.push({ task, reason: 'deleted' });
+    }
+  }
+  return retired;
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function combineReleases(...releases: Array<() => void>): () => void {
