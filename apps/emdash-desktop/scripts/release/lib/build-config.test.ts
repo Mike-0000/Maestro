@@ -12,12 +12,12 @@ const packageFile = fileURLToPath(new URL('../../../package.json', import.meta.u
 const projectDir = dirname(packageFile);
 
 describe.each([
-  { channel: 'stable', baseConfig: stableConfig, desktopId: 'Chorus', productName: 'Chorus' },
+  { channel: 'stable', baseConfig: stableConfig, desktopId: 'Maestro', productName: 'Maestro' },
   {
     channel: 'canary',
     baseConfig: canaryConfig,
-    desktopId: 'chorus-canary',
-    productName: 'Chorus Canary',
+    desktopId: 'maestro-canary',
+    productName: 'Maestro Canary',
   },
 ])('$channel Linux desktop identity', ({ channel, baseConfig, desktopId, productName }) => {
   it.each(['local', 'release'])('matches the %s launcher on Wayland and X11', async (mode) => {

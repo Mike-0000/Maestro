@@ -100,7 +100,7 @@ describe('ErrorBoundary reload', () => {
   });
 
   it('keeps technical details collapsed until requested', async () => {
-    expect(container.querySelector('h1')?.textContent).toBe('Chorus couldn’t display that view');
+    expect(container.querySelector('h1')?.textContent).toBe('Maestro couldn’t display that view');
     expect(container.textContent).toContain('Reload to try again with your saved layout.');
     expect(button('Error details').getAttribute('aria-expanded')).toBe('false');
     expect(container.textContent).not.toContain('Cannot render saved layout');

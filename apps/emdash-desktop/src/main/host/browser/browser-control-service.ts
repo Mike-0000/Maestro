@@ -481,7 +481,7 @@ export class BrowserControlService {
       event.preventDefault();
       this.deps.consoleBuffer.push(browserId, {
         level: 'warning',
-        message: `Chorus blocked navigation to ${url} while a model controls this browser.`,
+        message: `Maestro blocked navigation to ${url} while a model controls this browser.`,
       });
       this.emitAutomation(entry, { kind: 'conductor' }, 'navigation-blocked', false, url, {
         actor: entry.lease?.actor,
@@ -540,7 +540,7 @@ export class BrowserControlService {
 function openDenied(denial: BrowserOpenDenial | undefined): BrowserAutomationError {
   switch (denial) {
     case 'disabled':
-      return { type: 'disabled', message: 'Canvas browsers are turned off in Chorus settings.' };
+      return { type: 'disabled', message: 'Canvas browsers are turned off in Maestro settings.' };
     case 'declined':
       return {
         type: 'not-controllable',
@@ -551,13 +551,13 @@ function openDenied(denial: BrowserOpenDenial | undefined): BrowserAutomationErr
       return {
         type: 'not-controllable',
         message:
-          'Chorus asked the user to let agents use the app browser and is waiting for an answer. Watching works meanwhile; retry open_app once they allow it.',
+          'Maestro asked the user to let agents use the app browser and is waiting for an answer. Watching works meanwhile; retry open_app once they allow it.',
       };
     default:
       return {
         type: 'not-bound',
         message:
-          'Chorus did not open a browser for this task. The Chorus window may be closed or still starting; retry shortly.',
+          'Maestro did not open a browser for this task. The Maestro window may be closed or still starting; retry shortly.',
       };
   }
 }

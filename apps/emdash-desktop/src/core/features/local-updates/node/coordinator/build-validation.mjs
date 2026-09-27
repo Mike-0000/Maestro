@@ -61,7 +61,7 @@ export function deliveryBootstrapCommands(environment = process.env, platform = 
 
 export async function validateIntegratedCandidate({ repositoryPath, candidate, stateRoot, git }) {
   if (process.platform !== 'win32') {
-    throw new Error('Local Chorus installation builds currently require Windows.');
+    throw new Error('Local Maestro installation builds currently require Windows.');
   }
   const buildId = randomUUID();
   const buildRoot = resolve(stateRoot, 'BuildWorktrees', candidate.id);
@@ -166,7 +166,7 @@ export async function validateIntegratedCandidate({ repositoryPath, candidate, s
       }
       checks.push({ name, success: true, output: output.slice(-4000) });
     }
-    const executablePath = join(artifactRoot, 'win-unpacked', 'Chorus.exe');
+    const executablePath = join(artifactRoot, 'win-unpacked', 'Maestro.exe');
     await access(executablePath);
     await assertSqliteBinding(
       join(

@@ -61,7 +61,7 @@ export function createLocalUpdateService(
     const gate = await readInstallTargetGate(stateRoot);
     if (gate) {
       throw new Error(
-        `Chorus installation is reserved for candidate ${gate.candidateId}; new sessions are paused.`
+        `Maestro installation is reserved for candidate ${gate.candidateId}; new sessions are paused.`
       );
     }
   }
@@ -394,7 +394,7 @@ export function createLocalUpdateService(
       .leftJoin(workspaces, eq(projects.repositoryWorkspaceId, workspaces.id))
       .where(and(eq(projects.id, projectId), isNull(projects.deletedAt), liveWorkspaces()))
       .limit(1);
-    if (!project) throw new Error('The selected Chorus project is unavailable.');
+    if (!project) throw new Error('The selected Maestro project is unavailable.');
     if (!project.path || project.location !== 'local') {
       throw new Error('Local installation updates require a local Git project.');
     }
@@ -540,7 +540,7 @@ export function createLocalUpdateService(
     const repositoryPath = await localRepository(projectId);
     const current = await coordinator.status(repositoryPath);
     if (!current.enabled)
-      throw new Error('Enable the Chorus delivery coordinator before preparing an update.');
+      throw new Error('Enable the Maestro delivery coordinator before preparing an update.');
     return coordinator.prepare({ repositoryPath, policy, taskIds: taskIds ?? null });
   }
 
@@ -572,7 +572,7 @@ export function createLocalUpdateService(
     const repositoryPath = await localRepository(projectId);
     if (!host.delivery.installRoot || !host.delivery.installWorkerPath) {
       throw new Error(
-        'Local Chorus installation replacement is available only in the packaged Windows app.'
+        'Local Maestro installation replacement is available only in the packaged Windows app.'
       );
     }
     const pendingGate = await readInstallTargetGate(stateRoot);
@@ -601,7 +601,7 @@ export function createLocalUpdateService(
       !candidate.validation ||
       !candidate.commit
     ) {
-      throw new Error('Promote the currently validated Chorus candidate before installing it.');
+      throw new Error('Promote the currently validated Maestro candidate before installing it.');
     }
     const reservation = await reserveInstallTargetGate({
       stateRoot,
@@ -625,7 +625,7 @@ export function createLocalUpdateService(
       const sessions = await dependencies.getActiveSessionSummary();
       if (sessions.incomplete) {
         throw new Error(
-          'Chorus could not confirm that all local and remote sessions are idle. Try again when session status is available.'
+          'Maestro could not confirm that all local and remote sessions are idle. Try again when session status is available.'
         );
       }
       const activeCount =
@@ -635,7 +635,7 @@ export function createLocalUpdateService(
         sessions.terminals;
       if (activeCount > 0) {
         throw new Error(
-          `Wait for all Chorus sessions and terminals to stop before installing (${activeCount} still active).`
+          `Wait for all Maestro sessions and terminals to stop before installing (${activeCount} still active).`
         );
       }
       if (candidate.state === 'promoted') {
@@ -732,7 +732,7 @@ export function createLocalUpdateService(
       throw new Error('Rollback requires explicit consent to restore the matched profile backup.');
     const repositoryPath = await localRepository(projectId);
     if (!host.delivery.installRoot || !host.delivery.installWorkerPath) {
-      throw new Error('Rollback is available only in the packaged Windows Chorus app.');
+      throw new Error('Rollback is available only in the packaged Windows Maestro app.');
     }
     const pendingGate = await readInstallTargetGate(stateRoot);
     if (pendingGate) await completeInstallResults(pendingGate.repositoryPath);
@@ -745,7 +745,7 @@ export function createLocalUpdateService(
       !candidate.health?.backupRoot ||
       candidate.health.previousBuild?.deliveryProtocol !== 1
     ) {
-      throw new Error('A compatible retained Chorus install is not available for rollback.');
+      throw new Error('A compatible retained Maestro install is not available for rollback.');
     }
     const reservation = await reserveInstallTargetGate({
       stateRoot,
@@ -757,14 +757,16 @@ export function createLocalUpdateService(
     });
     if (!reservation.owned) {
       throw new Error(
-        `Chorus install target is already reserved by candidate ${reservation.gate.candidateId}.`
+        `Maestro install target is already reserved by candidate ${reservation.gate.candidateId}.`
       );
     }
     try {
       await waitForDispatchLeases();
       const sessions = await dependencies.getActiveSessionSummary();
       if (sessions.incomplete) {
-        throw new Error('Chorus could not verify that every session is idle; rollback is blocked.');
+        throw new Error(
+          'Maestro could not verify that every session is idle; rollback is blocked.'
+        );
       }
       const activeCount =
         sessions.acpSessions +
@@ -773,7 +775,7 @@ export function createLocalUpdateService(
         sessions.terminals;
       if (activeCount > 0) {
         throw new Error(
-          `Wait for all Chorus sessions and terminals to stop before rollback (${activeCount} active).`
+          `Wait for all Maestro sessions and terminals to stop before rollback (${activeCount} active).`
         );
       }
 

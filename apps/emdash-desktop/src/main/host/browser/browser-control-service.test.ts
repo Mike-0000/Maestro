@@ -150,7 +150,7 @@ describe('BrowserControlService', () => {
     ).toMatchObject({ success: false, error: { type: 'disabled' } });
   });
 
-  it('blocks navigation off the dev-server origin and to Chorus ports', async () => {
+  it('blocks navigation off the dev-server origin and to Maestro ports', async () => {
     h.service.setControl({ browserId: 'b-iso', control: 'agents', ...identity });
     const external = await h.service.act(agent, {
       browserId: 'b-iso',

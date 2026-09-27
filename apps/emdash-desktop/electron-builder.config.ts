@@ -61,9 +61,9 @@ const config: Configuration = {
     entitlementsInherit: 'build/entitlements.mac.plist',
     extendInfo: {
       NSMicrophoneUsageDescription:
-        'Chorus needs microphone access for voice commands and dictation.',
+        'Maestro needs microphone access for voice commands and dictation.',
       NSLocalNetworkUsageDescription:
-        'Chorus needs local network access to connect to SSH hosts on your network.',
+        'Maestro needs local network access to connect to SSH hosts on your network.',
     },
     target: [
       { target: 'dmg', arch: ['arm64'] },
