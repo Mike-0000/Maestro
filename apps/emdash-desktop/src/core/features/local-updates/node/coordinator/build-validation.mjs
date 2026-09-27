@@ -166,8 +166,7 @@ export async function validateIntegratedCandidate({ repositoryPath, candidate, s
       }
       checks.push({ name, success: true, output: output.slice(-4000) });
     }
-    const executablePath = join(artifactRoot, 'win-unpacked', 'Maestro.exe');
-    await access(executablePath);
+    await assertWindowsExecutables(join(artifactRoot, 'win-unpacked'));
     await assertSqliteBinding(
       join(
         artifactRoot,
@@ -219,6 +218,16 @@ export async function validateIntegratedCandidate({ repositoryPath, candidate, s
       } catch {
         // Keep the failed build worktree registered so an operator can inspect and remove it.
       }
+    }
+  }
+}
+
+async function assertWindowsExecutables(packageRoot) {
+  for (const name of ['Maestro.exe', 'Chorus.exe']) {
+    const executablePath = join(packageRoot, name);
+    const file = await stat(executablePath).catch(() => null);
+    if (!file?.isFile() || file.size === 0) {
+      throw new Error(`Windows package is missing ${name}: ${executablePath}`);
     }
   }
 }

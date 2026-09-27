@@ -24,7 +24,12 @@ describe.each([
     const versionOverride =
       mode === 'release' && channel === 'canary' ? '9.9.9-canary.123' : undefined;
     // Desktop identity is independent of packaging hooks, which cannot be structured-cloned.
-    const launcherConfig = { ...baseConfig, beforePack: undefined, afterPack: undefined };
+    const launcherConfig = {
+      ...baseConfig,
+      beforePack: undefined,
+      afterPack: undefined,
+      afterSign: undefined,
+    };
     const config =
       mode === 'release'
         ? createReleaseBuildConfig(
@@ -61,6 +66,7 @@ describe('createReleaseBuildConfig', () => {
     const config = createReleaseBuildConfig(stableConfig, packageJson.devDependencies.electron);
     expect(config.beforePack).toBe(stableConfig.beforePack);
     expect(config.afterPack).toBe(stableConfig.afterPack);
+    expect(config.afterSign).toBe(stableConfig.afterSign);
     expect(config.extraMetadata).not.toBe(stableConfig.extraMetadata);
   });
 
