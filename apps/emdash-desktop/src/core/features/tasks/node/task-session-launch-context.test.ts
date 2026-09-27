@@ -111,7 +111,8 @@ describe('TaskSessionLaunchContextResolver', () => {
     expect(second).toMatchObject({
       success: true,
       data: {
-        tmux: true,
+        // Local sessions never use tmux on Windows, whatever the resolved setting says.
+        tmux: resolveSessionTmux(identity.host, true),
         shellSetup: 'source new-profile',
         env: {
           CLAUDE_CONFIG_DIR: '/tmp/claude-new',

@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 const repoRoot = path.resolve(import.meta.dirname, '../../..');
+const oxlintBin = path.join(repoRoot, 'node_modules/oxlint/bin/oxlint');
 
 test('reports dynamic imports and allows static imports', async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'emdash-no-dynamic-imports-'));
@@ -38,7 +39,7 @@ test('reports dynamic imports and allows static imports', async () => {
 
 function runOxlint(config, file) {
   return new Promise((resolve, reject) => {
-    const child = spawn('pnpm', ['exec', 'oxlint', '--config', config, file], {
+    const child = spawn(process.execPath, [oxlintBin, '--config', config, file], {
       cwd: repoRoot,
       stdio: ['ignore', 'pipe', 'pipe'],
     });

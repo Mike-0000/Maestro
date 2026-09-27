@@ -11,6 +11,7 @@ import {
 } from './core-module-boundaries.js';
 
 const repoRoot = path.resolve(import.meta.dirname, '../../..');
+const oxlintBin = path.join(repoRoot, 'node_modules/oxlint/bin/oxlint');
 const coreSrcRoot = path.join(repoRoot, 'packages/core/src');
 const desktopCoreSrcRoot = path.join(repoRoot, 'apps/emdash-desktop/src/core');
 
@@ -313,7 +314,7 @@ test('a missing crossSlice allowlist key is valid and means no exceptions', asyn
 
 function runOxlint(config, file) {
   return new Promise((resolve, reject) => {
-    const child = spawn('pnpm', ['exec', 'oxlint', '--config', config, file], {
+    const child = spawn(process.execPath, [oxlintBin, '--config', config, file], {
       cwd: repoRoot,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
