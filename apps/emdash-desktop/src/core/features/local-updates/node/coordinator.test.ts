@@ -560,6 +560,12 @@ describe('persistent Chorus delivery coordinator', () => {
         previousBuild,
       },
     });
+    // A matched startup receipt completes the isolated coordinator flow; no real app is replaced.
+    expect(await fixture.coordinator.status(fixture.repositoryPath)).toMatchObject({
+      installedCandidateId: candidate.id,
+      applyingCandidateId: null,
+      candidate: { state: 'installed' },
+    });
 
     await fixture.coordinator.beginRollback({
       repositoryPath: fixture.repositoryPath,

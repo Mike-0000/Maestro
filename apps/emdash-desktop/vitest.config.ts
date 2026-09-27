@@ -25,6 +25,9 @@ const systemNodeAlias = {
 export default defineConfig({
   resolve: { alias },
   test: {
+    // CI and isolated delivery builds run the entire workspace gate; cap app test workers
+    // to avoid exhausting memory while loading hundreds of test modules.
+    maxWorkers: process.env.CI ? 2 : undefined,
     projects: [
       {
         // All existing tests that run in a Node.js environment.

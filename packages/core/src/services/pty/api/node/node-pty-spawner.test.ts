@@ -83,7 +83,7 @@ describe('NodePtySpawner', () => {
 
     expect(spawnMock).toHaveBeenLastCalledWith(
       'C:\\Windows\\System32\\cmd.exe',
-      '/d /s /c ""C:\\Program Files\\npm\\pi.cmd" "hello world" "embedded^"quote""',
+      '/d /s /c ""C:\\Program Files\\npm\\pi.cmd" "hello world" "embedded""quote""',
       expect.objectContaining({ cwd: 'C:\\workspace' })
     );
   });

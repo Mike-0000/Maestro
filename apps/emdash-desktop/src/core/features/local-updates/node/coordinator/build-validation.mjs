@@ -5,13 +5,59 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 const execFile = promisify(execFileCallback);
-export const REQUIRED_BUILD_CHECKS = [
-  'frozen-install',
-  'workspace-build',
-  'workspace-check',
-  'electron-native-rebuild',
-  'windows-package',
+export const VALIDATION_COMMANDS = [
+  ['frozen-install', 'corepack pnpm install --frozen-lockfile --ignore-scripts'],
+  ['workspace-build', 'corepack pnpm run build'],
+  // The frozen install skips the app postinstall that provisions the separate system-Node
+  // better-sqlite3 copy used by Vitest. CI installs it explicitly before the test target.
+  [
+    'node-test-deps',
+    'corepack pnpm --dir apps/emdash-desktop/tooling/node-deps install --frozen-lockfile && corepack pnpm --dir apps/emdash-desktop/tooling/node-deps rebuild better-sqlite3 && corepack pnpm --filter @emdash/core rebuild node-pty',
+  ],
+  // Keep static checks for the whole tree without making a Windows install depend on
+  // unrelated Linux-only or inherited Emdash tests.
+  [
+    'workspace-static-check',
+    'corepack pnpm run format:check && corepack pnpm run lint && corepack pnpm run typecheck',
+  ],
+  [
+    'chorus-delivery-tests',
+    'corepack pnpm --dir apps/emdash-desktop exec vitest run --project node src/core/features/local-updates/node src/core/features/conductor/browser/hud/local-update-flow.test.ts && corepack pnpm --dir packages/wire exec vitest run src/api/connection-robustness.test.ts',
+  ],
+  // The frozen install deliberately skips lifecycle scripts, including the app's Electron-ABI
+  // rebuild. electron-builder has npmRebuild: false, so build the addon explicitly before packing.
+  ['electron-native-rebuild', 'corepack pnpm exec electron-rebuild -f --only=better-sqlite3'],
+  [
+    'windows-package',
+    'corepack pnpm exec electron-builder --win --dir --publish never --config electron-builder.config.ts',
+  ],
 ];
+export const REQUIRED_BUILD_CHECKS = VALIDATION_COMMANDS.map(([name]) => name);
+
+// Older installed Chorus builds call `pnpm run check` in the candidate's checkout. Let that
+// fixed command run the same native setup, static checks, and focused tests as the new validator
+// rather than the inherited Unix/Emdash suite. This changes no packaging or install safeguards.
+export function deliveryBootstrapCommands(environment = process.env, platform = process.platform) {
+  if (
+    platform !== 'win32' ||
+    environment.CI !== 'true' ||
+    !environment.CHORUS_DELIVERY_BUILD_OUTPUT ||
+    !environment.CHORUS_BUILD_PROVENANCE_JSON
+  ) {
+    return null;
+  }
+  try {
+    const provenance = JSON.parse(environment.CHORUS_BUILD_PROVENANCE_JSON);
+    if (provenance.deliveryProtocol !== 1 || !provenance.candidateId || !provenance.commit) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+  return VALIDATION_COMMANDS.filter(([name]) =>
+    ['node-test-deps', 'workspace-static-check', 'chorus-delivery-tests'].includes(name)
+  );
+}
 
 export async function validateIntegratedCandidate({ repositoryPath, candidate, stateRoot, git }) {
   if (process.platform !== 'win32') {
@@ -76,19 +122,7 @@ export async function validateIntegratedCandidate({ repositoryPath, candidate, s
     const pathKey = Object.keys(environment).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH';
     environment[pathKey] = `${toolchainRoot};${environment[pathKey] ?? ''}`;
     const checks = [];
-    const commands = [
-      ['frozen-install', 'corepack pnpm install --frozen-lockfile --ignore-scripts'],
-      ['workspace-build', 'corepack pnpm run build'],
-      ['workspace-check', 'corepack pnpm run check'],
-      // The frozen install deliberately skips lifecycle scripts, including the app's Electron-ABI
-      // rebuild. electron-builder has npmRebuild: false, so build the addon explicitly before packing.
-      ['electron-native-rebuild', 'corepack pnpm exec electron-rebuild -f --only=better-sqlite3'],
-      [
-        'windows-package',
-        'corepack pnpm exec electron-builder --win --dir --publish never --config electron-builder.config.ts',
-      ],
-    ];
-    for (const [name, command] of commands) {
+    for (const [name, command] of VALIDATION_COMMANDS) {
       const workingDirectory =
         name === 'windows-package' || name === 'electron-native-rebuild'
           ? join(buildRoot, 'apps', 'emdash-desktop')
@@ -107,6 +141,25 @@ export async function validateIntegratedCandidate({ repositoryPath, candidate, s
           join(logRoot, 'pnpm-version.log')
         );
         provenance.pnpmVersion = pnpmVersion.trim().split(/\r?\n/).at(-1) ?? '';
+      }
+      if (name === 'node-test-deps') {
+        await assertSqliteBinding(
+          join(
+            buildRoot,
+            'apps',
+            'emdash-desktop',
+            'tooling',
+            'node-deps',
+            'node_modules',
+            'better-sqlite3'
+          )
+        );
+        await runFixedCommand(
+          "corepack pnpm exec node -e \"require('better-sqlite3')(':memory:').close()\"",
+          join(buildRoot, 'apps', 'emdash-desktop', 'tooling', 'node-deps'),
+          environment,
+          join(logRoot, 'node-test-deps-load.log')
+        );
       }
       if (name === 'electron-native-rebuild') {
         await assertSqliteBinding(join(buildRoot, 'node_modules', 'better-sqlite3'));
@@ -201,17 +254,24 @@ async function runFixedCommand(command, cwd, env, logPath) {
   return stdout;
 }
 
-async function hashTree(root) {
+export async function hashTree(root) {
+  // Electron's fs shim treats app.asar as a virtual directory, so reading the archive itself
+  // fails with ENOENT. Hash physical package bytes, including the asar, via original-fs.
+  let physicalFs = { readFile, readdir };
+  if (process.versions.electron) {
+    // oxlint-disable-next-line emdash/no-dynamic-imports -- Electron-only builtin is absent in system Node.
+    physicalFs = (await import('original-fs')).promises;
+  }
   const files = [];
   async function visit(directory) {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
+    for (const entry of await physicalFs.readdir(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name);
       if (entry.isSymbolicLink()) throw new Error(`Packaged artifact contains a link: ${path}`);
       if (entry.isDirectory()) {
         await visit(path);
       } else if (entry.isFile()) {
         const sha256 = createHash('sha256')
-          .update(await readFile(path))
+          .update(await physicalFs.readFile(path))
           .digest('hex');
         files.push({ path: relative(root, path).replaceAll('\\', '/'), sha256 });
       } else {

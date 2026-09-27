@@ -12,17 +12,19 @@ const packageFile = fileURLToPath(new URL('../../../package.json', import.meta.u
 const projectDir = dirname(packageFile);
 
 describe.each([
-  { channel: 'stable', baseConfig: stableConfig, desktopId: 'Emdash', productName: 'Emdash' },
+  { channel: 'stable', baseConfig: stableConfig, desktopId: 'Chorus', productName: 'Chorus' },
   {
     channel: 'canary',
     baseConfig: canaryConfig,
-    desktopId: 'emdash-canary',
-    productName: 'Emdash Canary',
+    desktopId: 'chorus-canary',
+    productName: 'Chorus Canary',
   },
 ])('$channel Linux desktop identity', ({ channel, baseConfig, desktopId, productName }) => {
   it.each(['local', 'release'])('matches the %s launcher on Wayland and X11', async (mode) => {
     const versionOverride =
       mode === 'release' && channel === 'canary' ? '9.9.9-canary.123' : undefined;
+    // Desktop identity is independent of packaging hooks, which cannot be structured-cloned.
+    const launcherConfig = { ...baseConfig, beforePack: undefined, afterPack: undefined };
     const config =
       mode === 'release'
         ? createReleaseBuildConfig(
@@ -30,7 +32,7 @@ describe.each([
             packageJson.devDependencies.electron,
             versionOverride
           )
-        : structuredClone(baseConfig);
+        : structuredClone(launcherConfig);
     const packager = new Packager({ projectDir, config });
     await packager.validateConfig();
     packager._appInfo = new AppInfo(packager, null);
@@ -55,6 +57,13 @@ describe.each([
 });
 
 describe('createReleaseBuildConfig', () => {
+  it('preserves stable packaging hooks without trying to clone functions', () => {
+    const config = createReleaseBuildConfig(stableConfig, packageJson.devDependencies.electron);
+    expect(config.beforePack).toBe(stableConfig.beforePack);
+    expect(config.afterPack).toBe(stableConfig.afterPack);
+    expect(config.extraMetadata).not.toBe(stableConfig.extraMetadata);
+  });
+
   it('isolates nested configuration between architecture builds', () => {
     const original = structuredClone(canaryConfig);
     const first = createReleaseBuildConfig(canaryConfig, packageJson.devDependencies.electron);
