@@ -28,8 +28,10 @@ export type RegionState = {
   readonly collapsed: boolean;
   readonly color?: RegionColor;
   readonly createdAt: number;
-  /** Created by "organize"; a later organize may regroup its windows. */
+  /** Created by "organize" or auto-spawn; a later organize may regroup its windows. */
   readonly auto?: boolean;
+  /** Project this region is the main sub-canvas for (auto-spawn and organize-by-project). */
+  readonly projectId?: string;
   /**
    * `tiled`: members fill the region as a weighted split and re-tile when members come or go.
    * `free`: members keep the places they were given. Absent means free (regions made before
@@ -73,6 +75,7 @@ export type LayoutWindow = {
   readonly taskId?: string;
   readonly taskName?: string;
   readonly projectName?: string;
+  readonly projectId?: string;
   readonly providerLabel?: string;
   readonly status?: WindowStatus;
 };
@@ -348,6 +351,31 @@ export function uniqueName(preferred: string, taken: Iterable<string>): string {
   let n = 2;
   while (used.has(nameKey(`${base} ${n}`))) n++;
   return `${base} ${n}`;
+}
+
+/**
+ * The project's main sub-canvas: a region tagged with `projectId`, else an auto region at the
+ * board root named after the project (from organize-by-project). User-made regions with the same
+ * name are left alone.
+ */
+export function projectRegionId(
+  state: LayoutState,
+  projectId: string,
+  projectName: string
+): string | null {
+  if (projectId) {
+    for (const [id, region] of Object.entries(state.regions)) {
+      if (region.projectId === projectId) return id;
+    }
+  }
+  const key = nameKey(projectName);
+  if (!key) return null;
+  for (const [id, region] of Object.entries(state.regions)) {
+    if (!region.auto) continue;
+    if (parentOf(state, id) !== null) continue;
+    if (nameKey(region.name) === key) return id;
+  }
+  return null;
 }
 
 /** Region id by (case-insensitive) name. */

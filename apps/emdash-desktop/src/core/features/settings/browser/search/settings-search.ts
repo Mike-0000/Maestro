@@ -66,6 +66,14 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     description: 'Model, reasoning effort, plans, and the daily token budget.',
     keywords: ['model', 'effort', 'plan', 'budget', 'tokens'],
   },
+  {
+    id: 'spawn-windows-in-a-project-sub-canvas',
+    label: 'Spawn windows in a project sub-canvas',
+    tab: 'chorus',
+    description:
+      "New agents and app browsers open in that project's main sub-canvas. Turn off to place them on the board.",
+    keywords: ['canvas', 'region', 'sub-canvas', 'subcanvas', 'project', 'spawn', 'group'],
+  },
   // General
   {
     id: 'version',

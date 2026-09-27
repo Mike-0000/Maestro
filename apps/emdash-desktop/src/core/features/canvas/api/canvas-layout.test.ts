@@ -274,6 +274,39 @@ describe('planLayout', () => {
     expect(second.state.membership['agent:atlas']).toBe(mine);
   });
 
+  it('stamps auto and projectId on a created project region', () => {
+    const result = plan(
+      base,
+      [
+        {
+          op: 'createRegion',
+          name: 'Emdash',
+          members: ['agent:atlas'],
+          auto: true,
+          projectId: 'p1',
+        },
+      ],
+      env(windows)
+    );
+    const region = result.state.regions[result.created[0] as string]!;
+    expect(region.auto).toBe(true);
+    expect(region.projectId).toBe('p1');
+  });
+
+  it('organizes by project and tags the region with projectId', () => {
+    const shared = agents(['Atlas', 'Bravo']).map((window) => ({
+      ...window,
+      projectName: 'Emdash',
+      projectId: 'p1',
+    }));
+    const result = plan(row(shared), [{ op: 'organize', scope: null, by: 'project' }], env(shared));
+    const [region] = Object.values(result.state.regions);
+    expect(region?.name).toBe('Emdash');
+    expect(region?.auto).toBe(true);
+    expect(region?.projectId).toBe('p1');
+    expect(checkInvariants(result.state, shared)).toEqual([]);
+  });
+
   it('arranges a region as a row and shrink-wraps it', () => {
     const first = plan(
       base,

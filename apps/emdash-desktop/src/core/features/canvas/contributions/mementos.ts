@@ -63,6 +63,7 @@ const regionSchema = z.object({
   color: z.enum(REGION_COLORS).optional(),
   createdAt: z.number(),
   auto: z.boolean().optional(),
+  projectId: z.string().optional(),
   arrangement: z.enum(['tiled', 'free']).optional(),
   weights: z.record(z.string(), z.number()).optional(),
   screenSized: z.boolean().optional(),
@@ -111,6 +112,8 @@ const layoutSettingsSchema = z.object({
   groupPlanAgents: z.boolean(),
   /** New agents join the region the user is looking at. */
   placeNewAgentsInCurrentRegion: z.boolean(),
+  /** New agents and app browsers open in that project's main sub-canvas. */
+  placeNewWindowsInProjectRegion: z.boolean().default(true),
 });
 
 const canvasBoardV4Schema = canvasBoardV3Schema.extend({
@@ -133,6 +136,7 @@ export const DEFAULT_LAYOUT_SETTINGS = {
   speakLayoutConfirmations: false,
   groupPlanAgents: true,
   placeNewAgentsInCurrentRegion: true,
+  placeNewWindowsInProjectRegion: true,
 };
 
 export const canvasBoardSchema = defineVersionedSchema()

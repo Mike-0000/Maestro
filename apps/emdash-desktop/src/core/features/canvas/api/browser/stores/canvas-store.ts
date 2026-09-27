@@ -68,7 +68,7 @@ import {
   newRegionId,
   nodeRect,
   parentOf,
-  regionByName,
+  projectRegionId,
   regionDepth,
   regionFootprint,
   regionPath,
@@ -79,6 +79,12 @@ import {
   type RegionColor,
   type WindowStatus,
 } from '../../canvas-regions';
+import {
+  homeForNewWindow,
+  opsForNewWindowHome,
+  withProjectRegionTags,
+  type NewWindowHome,
+} from '../../canvas-spawn';
 import { spokenProviderLabel } from '../../provider-names';
 import {
   adjacentRegion,
@@ -868,41 +874,71 @@ export class CanvasStore {
       }
       return { ...current, tiles, spokenNames };
     });
-    if (missing.length > 0) this.joinRegions(missing.map((entry) => entry.conversationId));
+    if (missing.length > 0) {
+      this.joinNewTiles(
+        missing.map((entry) => ({
+          tileId: entry.tileId,
+          conversationId: entry.conversationId,
+          projectId: entry.projectId,
+          projectName: entry.projectName,
+        }))
+      );
+    }
   }
 
   /**
-   * New agents join a region: the one reserved for them (a plan's agents), else the region the user
-   * is looking at when that setting is on. Not undoable (it is where they were born).
+   * New windows join a region: a reserved plan region, the region in view when that setting is on,
+   * or the project's main sub-canvas (created if needed). Not undoable (birth placement).
    */
-  private joinRegions(conversationIds: readonly string[]): void {
-    const byName = new Map<string, string[]>();
-    const current: string[] = [];
-    const scope = this.currentRegion();
-    for (const id of conversationIds) {
-      const reserved = this.pendingRegions.get(id);
-      this.pendingRegions.delete(id);
-      if (reserved) byName.set(reserved, [...(byName.get(reserved) ?? []), agentTileId(id)]);
-      else if (scope && this.layoutSettings.placeNewAgentsInCurrentRegion) {
-        current.push(agentTileId(id));
-      }
+  private joinNewTiles(
+    tiles: readonly {
+      tileId: string;
+      conversationId?: string;
+      projectId: string;
+      projectName: string;
+    }[]
+  ): void {
+    const settings = this.layoutSettings;
+    const currentRegionId = this.currentRegion();
+    const layout = this.layoutState;
+    const buckets = new Map<string, { home: NewWindowHome; tiles: string[] }>();
+    for (const tile of tiles) {
+      const reservedName = tile.conversationId
+        ? this.pendingRegions.get(tile.conversationId)
+        : undefined;
+      if (tile.conversationId) this.pendingRegions.delete(tile.conversationId);
+      const home = homeForNewWindow({
+        reservedName,
+        currentRegionId,
+        projectId: tile.projectId,
+        projectName: tile.projectName,
+        layout,
+        settings,
+      });
+      if (home.kind === 'root') continue;
+      const key =
+        home.kind === 'reserved'
+          ? 'reserved:' + home.name
+          : home.kind === 'current'
+            ? 'current:' + home.regionId
+            : 'project:' + home.projectId;
+      const bucket = buckets.get(key);
+      if (bucket) bucket.tiles.push(tile.tileId);
+      else buckets.set(key, { home, tiles: [tile.tileId] });
     }
-    const ops: LayoutOp[] = [];
-    for (const [name, tiles] of byName) {
-      const existing = regionByName(this.layoutState, name);
-      ops.push(
-        existing
-          ? { op: 'move', targets: tiles, to: { kind: 'region', region: existing } }
-          : { op: 'createRegion', name, members: tiles }
-      );
-    }
-    if (scope && current.length > 0) {
-      ops.push({ op: 'move', targets: current, to: { kind: 'region', region: scope } });
-    }
+    const ops = [...buckets.values()].flatMap(({ home, tiles: ids }) =>
+      opsForNewWindowHome(home, ids)
+    );
     if (ops.length === 0) return;
     const result = this.planOps(ops);
     if (!result.ok) return;
-    this.writeLayout(result.plan.state);
+    const tags = [...buckets.values()].flatMap(({ home }) => {
+      if (home.kind !== 'project') return [];
+      const regionId =
+        home.regionId ?? projectRegionId(result.plan.state, home.projectId, home.name);
+      return regionId ? [{ regionId, projectId: home.projectId }] : [];
+    });
+    this.writeLayout(withProjectRegionTags(result.plan.state, tags));
     const created = result.plan.created.filter(isRegionId).at(-1);
     if (created) this.newestRegionId = created;
     this.markChanged(result.plan.summary, result.plan.targets, 'command', []);
@@ -1067,8 +1103,8 @@ export class CanvasStore {
   // ── App browsers ───────────────────────────────────────────────────────────
 
   /**
-   * Adds a task's app browser (or updates its URL) and places it beside the task's agents.
-   * Returns the tile id.
+   * Adds a task's app browser (or updates its URL) and places it beside the task's agents,
+   * then joins the project sub-canvas by default. Returns the tile id.
    */
   openBrowser(input: {
     projectId: string;
@@ -1080,6 +1116,7 @@ export class CanvasStore {
   }): string {
     const tileId = browserTileId(input.taskId);
     const existing = this.state.browsers[input.taskId];
+    const hadTile = Boolean(this.state.tiles[tileId]);
     this.updateState((current) => {
       const browsers = {
         ...current.browsers,
@@ -1107,6 +1144,13 @@ export class CanvasStore {
         tiles: { ...current.tiles, [tileId]: rect ?? { ...anchor, ...BROWSER_TILE_SIZE } },
       };
     });
+    if (!hadTile) {
+      const projectName =
+        this.browserEntries.find((entry) => entry.taskId === input.taskId)?.projectName ??
+        this.projectManager.projects.get(input.projectId)?.name ??
+        'Project';
+      this.joinNewTiles([{ tileId, projectId: input.projectId, projectName }]);
+    }
     if (input.focus !== false) this.requestFocus(tileId);
     return tileId;
   }
@@ -1178,6 +1222,7 @@ export class CanvasStore {
         taskId: entry.taskId,
         taskName: entry.taskName,
         projectName: entry.projectName,
+        projectId: entry.projectId,
         providerLabel: spokenProviderLabel(entry.providerId),
         status: windowStatus(entry),
       });
@@ -1190,6 +1235,7 @@ export class CanvasStore {
         taskId: entry.taskId,
         taskName: entry.taskName,
         projectName: entry.projectName,
+        projectId: entry.projectId,
       });
     }
     for (const entry of this.noteEntries) {
@@ -1253,13 +1299,13 @@ export class CanvasStore {
   }
 
   get layoutSettings(): CanvasLayoutSettings {
-    return this.state.layoutSettings ?? DEFAULT_LAYOUT_SETTINGS;
+    return { ...DEFAULT_LAYOUT_SETTINGS, ...this.state.layoutSettings };
   }
 
   setLayoutSettings(patch: Partial<CanvasLayoutSettings>): void {
     this.updateState((current) => ({
       ...current,
-      layoutSettings: { ...current.layoutSettings, ...patch },
+      layoutSettings: { ...DEFAULT_LAYOUT_SETTINGS, ...current.layoutSettings, ...patch },
     }));
   }
 
