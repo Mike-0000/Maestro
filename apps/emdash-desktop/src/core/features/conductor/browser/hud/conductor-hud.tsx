@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  GitMerge,
   History,
   Keyboard,
   Loader2,
@@ -18,6 +19,7 @@ import { getCanvasStore } from '@core/features/canvas/contributions/browser/app-
 import { settingsViewDef } from '@core/features/settings/contributions/views';
 import { getVoiceStore } from '@core/features/voice/contributions/browser/app-stores';
 import { getNavigation } from '@core/primitives/navigation/browser/navigation-selectors';
+import { useLocalStorage } from '@core/primitives/react-hooks/browser/useLocalStorage';
 import { cn } from '@core/primitives/styling/browser/cn';
 import { getConductorStore } from '../../contributions/browser/app-stores';
 import { ConductorLogPanel } from './conductor-log-panel';
@@ -41,6 +43,7 @@ export const ConductorHud = observer(function ConductorHud() {
   const [typing, setTyping] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const [setupOpen, setSetupOpen] = useState(false);
+  const [showLocalUpdate, setShowLocalUpdate] = useLocalStorage('chorus:show-local-update', true);
   const needsSetup = voice.settings !== null && !voice.settings.onboarded;
   const replyVisible = useRecentlyChanged(conductor.replyAt, REPLY_VISIBLE_MS);
 
@@ -83,7 +86,7 @@ export const ConductorHud = observer(function ConductorHud() {
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex flex-col items-center gap-2 px-4">
       <PlanPanel />
-      <LocalUpdateCard />
+      {showLocalUpdate && <LocalUpdateCard onHide={() => setShowLocalUpdate(false)} />}
       {setupOpen && <VoiceSetupPanel onClose={() => setSetupOpen(false)} />}
       <div
         role="status"
@@ -99,6 +102,14 @@ export const ConductorHud = observer(function ConductorHud() {
             <StatusLine />
           </div>
           <ManualListenControls />
+          {!showLocalUpdate && (
+            <HudIconButton
+              label="Show local Chorus update"
+              onClick={() => setShowLocalUpdate(true)}
+            >
+              <GitMerge className="size-4" />
+            </HudIconButton>
+          )}
           {needsSetup && !setupOpen && (
             <button
               type="button"

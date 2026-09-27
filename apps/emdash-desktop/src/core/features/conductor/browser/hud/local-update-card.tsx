@@ -1,4 +1,4 @@
-import { GitMerge, LoaderCircle, RefreshCw, ShieldCheck } from 'lucide-react';
+import { GitMerge, LoaderCircle, RefreshCw, ShieldCheck, X } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useCallback, useEffect, useState } from 'react';
 import { getConductorStore } from '@core/features/conductor/contributions/browser/app-stores';
@@ -13,7 +13,11 @@ import {
 import { useOpenModal } from '@core/manifests/browser/modal-api';
 import { cn } from '@core/primitives/styling/browser/cn';
 
-export const LocalUpdateCard = observer(function LocalUpdateCard() {
+export const LocalUpdateCard = observer(function LocalUpdateCard({
+  onHide,
+}: {
+  onHide: () => void;
+}) {
   const openConfirmation = useOpenModal('confirmActionModal');
   const projects = [...getProjectManagerStore().projects.values()].flatMap((project) => {
     if (!asAvailableProject(project) || projectData(project)?.type !== 'local') return [];
@@ -190,6 +194,15 @@ export const LocalUpdateCard = observer(function LocalUpdateCard() {
           ) : (
             <RefreshCw className="size-3.5" />
           )}
+        </button>
+        <button
+          type="button"
+          aria-label="Hide local Chorus update"
+          title="Hide local Chorus update"
+          onClick={onHide}
+          className="rounded p-1 text-foreground-muted hover:bg-background-secondary"
+        >
+          <X className="size-3.5" />
         </button>
       </header>
 
