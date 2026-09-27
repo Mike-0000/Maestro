@@ -15,3 +15,4 @@ export function validateIntegratedCandidate(input: {
 }): Promise<DeliveryValidation>;
 
 export function assertSqliteBinding(moduleRoot: string): Promise<void>;
+export function hashTree(root: string): Promise<{ path: string; sha256: string }[]>;

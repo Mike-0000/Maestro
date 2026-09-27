@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -5,6 +6,7 @@ import { afterEach, expect, it } from 'vitest';
 import {
   assertSqliteBinding,
   deliveryBootstrapCommands,
+  hashTree,
   REQUIRED_BUILD_CHECKS,
   VALIDATION_COMMANDS,
 } from './coordinator/build-validation.mjs';
@@ -61,6 +63,16 @@ it('runs the same focused checks through older installed Windows coordinators', 
     deliveryBootstrapCommands({ ...environment, CHORUS_BUILD_PROVENANCE_JSON: '{}' }, 'win32')
   ).toBeNull();
   expect(deliveryBootstrapCommands({}, 'win32')).toBeNull();
+});
+
+it('hashes the physical app.asar bytes as a package file', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'chorus-package-hash-'));
+  roots.push(root);
+  const bytes = Buffer.from('physical asar bytes');
+  await writeFile(join(root, 'app.asar'), bytes);
+  expect(await hashTree(root)).toEqual([
+    { path: 'app.asar', sha256: createHash('sha256').update(bytes).digest('hex') },
+  ]);
 });
 
 it('rejects packages without a nonempty better-sqlite3 binding', async () => {

@@ -254,17 +254,22 @@ async function runFixedCommand(command, cwd, env, logPath) {
   return stdout;
 }
 
-async function hashTree(root) {
+export async function hashTree(root) {
+  // Electron's fs shim treats app.asar as a virtual directory, so reading the archive itself
+  // fails with ENOENT. Hash physical package bytes, including the asar, via original-fs.
+  const physicalFs = process.versions.electron
+    ? (await import('original-fs')).promises
+    : { readFile, readdir };
   const files = [];
   async function visit(directory) {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
+    for (const entry of await physicalFs.readdir(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name);
       if (entry.isSymbolicLink()) throw new Error(`Packaged artifact contains a link: ${path}`);
       if (entry.isDirectory()) {
         await visit(path);
       } else if (entry.isFile()) {
         const sha256 = createHash('sha256')
-          .update(await readFile(path))
+          .update(await physicalFs.readFile(path))
           .digest('hex');
         files.push({ path: relative(root, path).replaceAll('\\', '/'), sha256 });
       } else {
