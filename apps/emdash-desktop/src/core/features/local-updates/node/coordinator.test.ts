@@ -31,10 +31,12 @@ async function createFixture() {
   const base = await git(repositoryPath, ['rev-parse', 'HEAD']);
   await git(repositoryPath, ['worktree', 'add', '-b', 'agent/a', worktreePath, base]);
   let beforeValidation: (() => Promise<void>) | undefined;
+  let failValidationWith: string | null = null;
   const coordinator = createCoordinator({
     stateRoot: join(root, 'state'),
     runValidation: async ({ candidate }) => {
       await beforeValidation?.();
+      if (failValidationWith) throw new Error(failValidationWith);
       return {
         integratedCommit: candidate.commit as string,
         checks: [...REQUIRED_BUILD_CHECKS],
@@ -67,6 +69,9 @@ async function createFixture() {
     coordinator,
     setBeforeValidation(callback: () => Promise<void>) {
       beforeValidation = callback;
+    },
+    failValidation(message: string) {
+      failValidationWith = message;
     },
   };
 }
@@ -388,6 +393,43 @@ describe('persistent Chorus delivery coordinator', () => {
     expect(conflict).toContain('<<<<<<<');
   });
 
+  it('records a validation failure on the candidate and lastError', async () => {
+    const fixture = await createFixture();
+    await writeFile(join(fixture.worktreePath, 'feature.txt'), 'ready\n');
+    await git(fixture.worktreePath, ['add', 'feature.txt']);
+    await git(fixture.worktreePath, ['commit', '-m', 'ready change']);
+    const commit = await git(fixture.worktreePath, ['rev-parse', 'HEAD']);
+    await fixture.coordinator.submit({
+      repositoryPath: fixture.repositoryPath,
+      taskId: 'task-a',
+      commit,
+      base: fixture.base,
+      summary: 'Ready change',
+    });
+    const candidate = await fixture.coordinator.prepare({
+      repositoryPath: fixture.repositoryPath,
+      policy: 'snapshot',
+    });
+    fixture.failValidation('workspace-static-check failed: format');
+    await expect(
+      fixture.coordinator.validateCandidate({
+        repositoryPath: fixture.repositoryPath,
+        candidateId: candidate.id,
+      })
+    ).resolves.toMatchObject({
+      validated: false,
+      state: 'blocked',
+      error: 'workspace-static-check failed: format',
+    });
+    const status = await fixture.coordinator.status(fixture.repositoryPath);
+    expect(status.candidate).toMatchObject({
+      state: 'blocked',
+      error: 'workspace-static-check failed: format',
+      validation: { error: 'workspace-static-check failed: format' },
+    });
+    expect(status.lastError).toBe('workspace-static-check failed: format');
+  });
+
   it('promotes only a validated fast-forward on a clean canonical branch', async () => {
     const fixture = await createFixture();
     await writeFile(join(fixture.worktreePath, 'feature.txt'), 'ready\n');
@@ -528,7 +570,16 @@ describe('persistent Chorus delivery coordinator', () => {
       candidateId: candidate.id,
     });
     const validatedCandidate = (await fixture.coordinator.status(fixture.repositoryPath)).candidate;
-    if (!validatedCandidate?.validation) throw new Error('Expected a validated package manifest.');
+    const receipt = validatedCandidate?.validation;
+    if (
+      !receipt ||
+      !('artifactDigest' in receipt) ||
+      !receipt.artifactDigest ||
+      !('buildId' in receipt) ||
+      !receipt.buildId
+    ) {
+      throw new Error('Expected a validated package manifest.');
+    }
     await fixture.coordinator.promote({
       repositoryPath: fixture.repositoryPath,
       candidateId: candidate.id,
@@ -553,8 +604,8 @@ describe('persistent Chorus delivery coordinator', () => {
       candidateId: candidate.id,
       health: {
         commit: candidate.commit,
-        artifactDigest: validatedCandidate.validation.artifactDigest,
-        buildId: validatedCandidate.validation.buildId,
+        artifactDigest: receipt.artifactDigest,
+        buildId: receipt.buildId,
         readyAt: '2026-09-26T12:00:00.000Z',
         backupRoot: 'C:/Programs/Chorus.backup',
         previousBuild,

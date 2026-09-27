@@ -140,7 +140,11 @@ export function applyEvent(previous, event) {
       candidate.state = event.success ? 'validated' : 'blocked';
       candidate.validation = event.validation;
       candidate.updatedAt = event.at;
-      if (!event.success) next.lastError = event.validation?.error ?? 'Validation failed.';
+      if (!event.success) {
+        const message = event.validation?.error ?? 'Validation failed.';
+        candidate.error = message;
+        next.lastError = message;
+      }
       break;
     }
     case 'candidate-validation-started': {

@@ -34,14 +34,15 @@ export type LocalUpdateStatus = {
     worktreePath: string;
     error: string | null;
     validation: null | {
-      integratedCommit: string;
-      checks: string[];
-      artifactDigest: string;
-      manifestPath: string;
-      buildId: string;
-      artifactRoot: string;
-      toolchain: { node: string; pnpm: string };
-      checkedAt: string;
+      error?: string;
+      integratedCommit?: string;
+      checks?: string[];
+      artifactDigest?: string;
+      manifestPath?: string;
+      buildId?: string;
+      artifactRoot?: string;
+      toolchain?: { node: string; pnpm: string };
+      checkedAt?: string;
     };
     githubBackup: null | {
       state: 'pending' | 'backed-up';

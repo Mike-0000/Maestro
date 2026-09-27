@@ -11,11 +11,14 @@ function fixture(initialState: string | null = null) {
   const snapshot = () =>
     ({
       enabled: true,
+      lastError: state === 'blocked' ? 'workspace-static-check failed: format' : null,
       candidate: state && {
         id,
         state,
         eligible: true,
         included: [{ taskId: 'task-1', taskName: 'Ready change', commit: 'a'.repeat(40) }],
+        error: null,
+        validation: state === 'blocked' ? { error: 'workspace-static-check failed: format' } : null,
       },
     }) as LocalUpdateStatus;
   const client = {
@@ -45,7 +48,14 @@ function fixture(initialState: string | null = null) {
       return { success: true as const, data: {} };
     }),
   } as unknown as LocalUpdatesClient;
-  return { client, calls, snapshot };
+  return {
+    client,
+    calls,
+    snapshot,
+    setState(next: string) {
+      state = next;
+    },
+  };
 }
 
 describe('one-button local update flow', () => {
@@ -96,5 +106,20 @@ describe('one-button local update flow', () => {
       })
     ).rejects.toThrow('Build failed');
     expect(test.calls).toEqual([]);
+  });
+
+  it('surfaces lastError when validation leaves the candidate blocked without candidate.error', async () => {
+    const test = fixture('integrated');
+    test.client.validate = vi.fn(async () => {
+      test.setState('blocked');
+      return { success: true as const, data: { validated: false, state: 'blocked' } };
+    });
+    await expect(
+      runLocalUpdateFlow(test.client, 'project-1', {
+        confirmPromote: async () => true,
+        confirmSchedule: async () => true,
+        onStage: () => {},
+      })
+    ).rejects.toThrow('workspace-static-check failed: format');
   });
 });

@@ -666,7 +666,13 @@ export function createCoordinator({
             : null,
         result:
           state.candidates[candidateId]?.state === 'validating'
-            ? { validated, state: validated ? 'validated' : 'blocked' }
+            ? validated
+              ? { validated, state: 'validated' }
+              : {
+                  validated: false,
+                  state: 'blocked',
+                  error: 'The build receipt did not certify the integrated commit and package.',
+                }
             : { validated: false, state: state.candidates[candidateId]?.state ?? 'missing' },
       }));
       return result.result;

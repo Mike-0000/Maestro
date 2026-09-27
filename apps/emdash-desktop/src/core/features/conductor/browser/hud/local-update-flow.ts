@@ -3,6 +3,11 @@ import type { LocalUpdatesClient } from '@core/features/local-updates/api/browse
 
 type Candidate = NonNullable<LocalUpdateStatus['candidate']>;
 
+function candidateFailure(current: LocalUpdateStatus): string | null {
+  const candidate = current.candidate;
+  return candidate?.error ?? candidate?.validation?.error ?? current.lastError ?? null;
+}
+
 type FlowOptions = {
   confirmPromote(candidate: Candidate): Promise<boolean>;
   confirmSchedule(candidate: Candidate): Promise<boolean>;
@@ -23,9 +28,12 @@ export async function runLocalUpdateFlow(
   }
   function requireCandidate(current: LocalUpdateStatus, state: string): Candidate {
     const candidate = current.candidate;
-    if (candidate?.state === 'blocked' && candidate.error) throw new Error(candidate.error);
+    const failure = candidateFailure(current);
+    if (candidate?.state === 'blocked' && failure) throw new Error(failure);
     if (!candidate || candidate.state !== state || !candidate.eligible) {
-      throw new Error('The update changed while it was running. Refresh and review the candidate.');
+      throw new Error(
+        failure ?? 'The update changed while it was running. Refresh and review the candidate.'
+      );
     }
     return candidate;
   }

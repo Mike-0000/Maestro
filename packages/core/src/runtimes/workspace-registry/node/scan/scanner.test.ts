@@ -38,16 +38,24 @@ type LandingLog = {
   vanished: string[];
   refreshed: string[];
   events: string[];
+  patches: Array<{ id: string; patch: Partial<DurableWorkspaceRecord> }>;
 };
 
 function fakeLanding(records: DurableWorkspaceRecord[]): { landing: ScanLanding; log: LandingLog } {
   const byId = new Map(records.map((entry) => [entry.id, entry]));
-  const log: LandingLog = { observations: [], vanished: [], refreshed: [], events: [] };
+  const log: LandingLog = {
+    observations: [],
+    vanished: [],
+    refreshed: [],
+    events: [],
+    patches: [],
+  };
   const landing: ScanLanding = {
     get: (id) => byId.get(id),
     list: () => [...byId.values()],
-    observation: async (id) => {
+    observation: async (id, patch) => {
       log.observations.push(id);
+      log.patches.push({ id, patch });
       log.events.push(`observation:${id}`);
     },
     vanished: async (id) => {
@@ -200,5 +208,42 @@ describe('RegistryScanner', () => {
     expect(log.observations).toEqual([]);
     expect(log.vanished).toEqual([]);
     expect(log.refreshed).toEqual([]);
+  });
+
+  it('promotes a directory record when inspect reports a repository', async () => {
+    const target = await standaloneRecord('ws-became-repo');
+    target.kind = 'directory';
+    const { landing, log } = fakeLanding([target]);
+    const scanner = new RegistryScanner(landing, {
+      git: createRegistryGitContext(),
+      inspect: async () => ({ kind: 'repository' }),
+      observe: { full: async () => null, refs: async () => null },
+    });
+
+    await scanner.scanRecord(target.id);
+
+    expect(log.patches).toEqual([
+      {
+        id: target.id,
+        patch: { kind: 'repository', observedStatus: 'present', git: null },
+      },
+    ]);
+  });
+
+  it('does not promote a directory that is still a plain folder', async () => {
+    const target = await standaloneRecord('ws-still-dir');
+    target.kind = 'directory';
+    const { landing, log } = fakeLanding([target]);
+    const scanner = new RegistryScanner(landing, {
+      git: createRegistryGitContext(),
+      inspect: async () => ({ kind: 'directory' }),
+      observe: { full: async () => null, refs: async () => null },
+    });
+
+    await scanner.scanRecord(target.id);
+
+    expect(log.patches).toEqual([
+      { id: target.id, patch: { observedStatus: 'present', git: null } },
+    ]);
   });
 });

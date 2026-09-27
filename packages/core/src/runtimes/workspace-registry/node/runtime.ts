@@ -439,6 +439,7 @@ export class WorkspaceRegistryRuntime {
     };
     const scannerDeps: RegistryScannerDeps = {
       git: this.gitContext,
+      inspect: this.inspector,
       clock: this.clock,
       logger: this.logger,
     };
@@ -733,9 +734,7 @@ export class WorkspaceRegistryRuntime {
   async createWorktree(
     input: CreateWorktreeInput
   ): Promise<Result<WorkspaceRecord, CreateWorktreeError>> {
-    const registration = await this.enqueue(() =>
-      Promise.resolve(this.registerWorktreeCreation(input))
-    );
+    const registration = await this.enqueue(() => this.registerWorktreeCreation(input));
     if (!registration.success) return registration;
     if (registration.data.execute === false) {
       return ok(this.toWire(registration.data.record));
@@ -1037,8 +1036,9 @@ export class WorkspaceRegistryRuntime {
     const existing = this.store.get(input.workspaceId);
     if (existing) {
       if (this.store.pathsEqual(existing.path, canonical)) {
-        // Idempotent replay: same id, same path — no-op success.
-        return ok(this.toWire(existing));
+        // Same id, same path: replay is success. Kind is host-detected, so a
+        // directory that is now a repository is promoted in place.
+        return ok(this.toWire(await this.promoteDirectoryToRepository(existing)));
       }
       return err({
         type: 'immutable-field-mismatch',
@@ -1050,7 +1050,7 @@ export class WorkspaceRegistryRuntime {
     const byPath = this.store.getByPath(canonical);
     if (byPath) {
       // The Host owns path identity: a second desktop consumes the canonical record.
-      return ok(this.toWire(byPath));
+      return ok(this.toWire(await this.promoteDirectoryToRepository(byPath)));
     }
 
     const inspection = await this.inspector(canonical);
@@ -1104,14 +1104,21 @@ export class WorkspaceRegistryRuntime {
    * The fast durable half of createWorktree: the record exists with outcome 'started'
    * before any git work begins, so a crash mid-flight leaves a visible, retryable fact.
    */
-  private registerWorktreeCreation(
+  private async registerWorktreeCreation(
     input: CreateWorktreeInput
-  ): Result<
-    { execute: boolean; record: DurableWorkspaceRecord; repository: DurableWorkspaceRecord },
-    CreateWorktreeError
+  ): Promise<
+    Result<
+      { execute: boolean; record: DurableWorkspaceRecord; repository: DurableWorkspaceRecord },
+      CreateWorktreeError
+    >
   > {
-    const repository = this.store.get(input.repositoryId);
-    if (!repository || repository.kind !== 'repository') {
+    const current = this.store.get(input.repositoryId);
+    if (!current) {
+      return err({ type: 'repository-not-found', repositoryId: input.repositoryId });
+    }
+    // A folder registered before git existed can become a repository later.
+    const repository = await this.promoteDirectoryToRepository(current);
+    if (repository.kind !== 'repository') {
       return err({ type: 'repository-not-found', repositoryId: input.repositoryId });
     }
 
@@ -1791,6 +1798,35 @@ export class WorkspaceRegistryRuntime {
     };
     this.store.update(record);
     this.publish(record);
+  }
+
+  /**
+   * Kind is host-detected (ADR 0005). A directory record whose path is now the
+   * toplevel of a git repository is promoted in place — same id, same path.
+   * Repository and worktree kinds never demote.
+   */
+  private async promoteDirectoryToRepository(
+    record: DurableWorkspaceRecord
+  ): Promise<DurableWorkspaceRecord> {
+    if (record.kind !== 'directory') return record;
+    const inspection = await this.inspector(record.path);
+    if (inspection.kind !== 'repository') return record;
+    const now = this.clock.now();
+    const updated: DurableWorkspaceRecord = {
+      ...record,
+      kind: 'repository',
+      parentId: null,
+      gitAdminName: null,
+      observedStatus: 'present',
+      updatedAt: now,
+      lastObservedAt: now,
+    };
+    this.store.update(updated);
+    this.publish(updated);
+    this.logger.info?.(`workspace '${record.id}' promoted from directory to repository`, {
+      path: record.path,
+    });
+    return updated;
   }
 
   /**
