@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import {
   assertSqliteBinding,
+  deliveryBootstrapCommands,
   REQUIRED_BUILD_CHECKS,
   VALIDATION_COMMANDS,
 } from './coordinator/build-validation.mjs';
@@ -37,6 +38,29 @@ it('requires static checks, Chorus delivery tests, and the Electron-ABI rebuild'
   expect(VALIDATION_COMMANDS.every(([, command]) => !command.includes('pnpm run check'))).toBe(
     true
   );
+});
+
+it('runs the same focused checks through older installed Windows coordinators', () => {
+  const environment = {
+    CI: 'true',
+    CHORUS_DELIVERY_BUILD_OUTPUT: 'C:\\scratch\\artifacts',
+    CHORUS_BUILD_PROVENANCE_JSON: JSON.stringify({
+      deliveryProtocol: 1,
+      candidateId: 'candidate',
+      commit: 'commit',
+    }),
+  };
+  expect(deliveryBootstrapCommands(environment, 'win32')?.map(([name]) => name)).toEqual([
+    'node-test-deps',
+    'workspace-static-check',
+    'chorus-delivery-tests',
+  ]);
+  expect(deliveryBootstrapCommands(environment, 'linux')).toBeNull();
+  expect(deliveryBootstrapCommands({ ...environment, CI: 'false' }, 'win32')).toBeNull();
+  expect(
+    deliveryBootstrapCommands({ ...environment, CHORUS_BUILD_PROVENANCE_JSON: '{}' }, 'win32')
+  ).toBeNull();
+  expect(deliveryBootstrapCommands({}, 'win32')).toBeNull();
 });
 
 it('rejects packages without a nonempty better-sqlite3 binding', async () => {

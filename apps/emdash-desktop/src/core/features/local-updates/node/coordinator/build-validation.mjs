@@ -34,6 +34,31 @@ export const VALIDATION_COMMANDS = [
 ];
 export const REQUIRED_BUILD_CHECKS = VALIDATION_COMMANDS.map(([name]) => name);
 
+// Older installed Chorus builds call `pnpm run check` in the candidate's checkout. Let that
+// fixed command run the same native setup, static checks, and focused tests as the new validator
+// rather than the inherited Unix/Emdash suite. This changes no packaging or install safeguards.
+export function deliveryBootstrapCommands(environment = process.env, platform = process.platform) {
+  if (
+    platform !== 'win32' ||
+    environment.CI !== 'true' ||
+    !environment.CHORUS_DELIVERY_BUILD_OUTPUT ||
+    !environment.CHORUS_BUILD_PROVENANCE_JSON
+  ) {
+    return null;
+  }
+  try {
+    const provenance = JSON.parse(environment.CHORUS_BUILD_PROVENANCE_JSON);
+    if (provenance.deliveryProtocol !== 1 || !provenance.candidateId || !provenance.commit) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+  return VALIDATION_COMMANDS.filter(([name]) =>
+    ['node-test-deps', 'workspace-static-check', 'chorus-delivery-tests'].includes(name)
+  );
+}
+
 export async function validateIntegratedCandidate({ repositoryPath, candidate, stateRoot, git }) {
   if (process.platform !== 'win32') {
     throw new Error('Local Chorus installation builds currently require Windows.');

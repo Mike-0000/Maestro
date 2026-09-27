@@ -49,6 +49,9 @@ coordinator per Git common directory. Its journal and snapshot live under
    detached worktree pinned to the integrated commit. The unrelated inherited Emdash/Unix test suite
    still runs in the normal repository gate, but does not block a Windows local install. The
    coordinator records the checks, toolchain, manifest, and SHA-256 inventory of every package file.
+   For older installed coordinators whose fixed check invokes `pnpm run check`, the candidate's
+   check script recognizes Windows delivery provenance and runs this same native setup, static
+   checks, and focused tests. Ordinary repository checks continue running the full suite.
 4. Promotion is a separate, user-confirmed fast-forward of local `chorus/main`. It refuses a moved
    branch or dirty canonical checkout. A separate confirmed backup action pushes that exact commit
    to `origin/main` without force; a rejected push remains visibly pending.
