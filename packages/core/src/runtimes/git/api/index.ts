@@ -17,6 +17,24 @@ export {
 } from '#runtimes/git/api/selectors';
 export { gitCheckoutContract, type GitCheckoutContract } from '#runtimes/git/api/checkout/contract';
 export {
+  describeIntegrationBlocker,
+  integrateErrorSchema,
+  integrateInputSchema,
+  integrateResultSchema,
+  integrationBlockerSchema,
+  integrationInputSchema,
+  integrationModeSchema,
+  integrationPreviewSchema,
+  type IntegrateError,
+  type IntegrateInput,
+  type IntegrateResult,
+  type IntegrationBlocker,
+  type IntegrationCommit,
+  type IntegrationInput,
+  type IntegrationMode,
+  type IntegrationPreview,
+} from '#runtimes/git/api/checkout/integration';
+export {
   MAX_STATUS_FILES,
   StatusParser,
   TooManyFilesChangedError,

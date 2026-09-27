@@ -21,6 +21,10 @@ import {
   type GitFileContentState,
   type GitLogOptions,
   type GitLogResult,
+  type IntegrateError,
+  type IntegrateInput,
+  type IntegrateResult,
+  type IntegrationPreview,
   type PullError,
   type PushError,
   type PushOptions,
@@ -31,6 +35,11 @@ import { readGitFileContent } from '#runtimes/git/node/checkout/ops/content';
 import { getChangedFiles as readChangedFiles } from '#runtimes/git/node/checkout/ops/diff';
 import { readGitBlobDownload } from '#runtimes/git/node/checkout/ops/download';
 import { computeHeadState } from '#runtimes/git/node/checkout/ops/head';
+import {
+  integrate as runIntegration,
+  previewIntegration as readIntegrationPreview,
+  type IntegrationSide,
+} from '#runtimes/git/node/checkout/ops/integrate';
 import {
   getCommit as readCommit,
   getCommitFiles as readCommitFiles,
@@ -213,6 +222,21 @@ export class GitCheckout {
     }
   }
 
+  // -- Integration ----------------------------------------------------------------
+
+  /** Previews integrating `source`'s committed HEAD into this checkout's branch. */
+  previewIntegration(source: GitCheckout): Promise<IntegrationPreview> {
+    return readIntegrationPreview(this.integrationSide(), source.integrationSide());
+  }
+
+  /** Integrates `source`'s committed HEAD into this checkout's branch (fast-forward only). */
+  integrate(
+    source: GitCheckout,
+    input: Pick<IntegrateInput, 'expectedTargetHead' | 'expectedSourceHead' | 'message'>
+  ): Promise<Result<IntegrateResult, IntegrateError>> {
+    return runIntegration(this.integrationSide(), source.integrationSide(), input);
+  }
+
   // -- Diff reads -----------------------------------------------------------------
 
   async getChangedFiles(base: DiffTarget): Promise<GitChange[]> {
@@ -282,6 +306,15 @@ export class GitCheckout {
     } catch (error) {
       return checkoutFailures.command(error);
     }
+  }
+
+  private integrationSide(): IntegrationSide {
+    return {
+      exec: this.exec,
+      gitDir: this.gitDir,
+      checkoutId: this.identity.checkoutId,
+      repositoryId: this.identity.repositoryId,
+    };
   }
 
   private async getConflictedPaths(): Promise<PortableRelativePath[] | undefined> {

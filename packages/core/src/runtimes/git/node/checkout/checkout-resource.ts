@@ -18,6 +18,8 @@ import {
   type GitCommandError,
   type GitLogOptions,
   type GitLogResult,
+  type IntegrateInput,
+  type IntegrationPreview,
 } from '#runtimes/git/api';
 import type { CheckoutIdentity } from '#runtimes/git/node/allocation/identity';
 import type { GitOperationContext } from '#runtimes/git/node/exec/operation-context';
@@ -212,6 +214,23 @@ export class CheckoutResource {
   async pull(context: GitOperationContext) {
     const result = await this.execute(() => this.commands.pull(context), true);
     this.syncChanged();
+    return result;
+  }
+
+  /** Must share this checkout's repository so both run inside one repository lane. */
+  previewIntegration(source: CheckoutResource): Promise<IntegrationPreview> {
+    this.assertActive();
+    source.assertActive();
+    return this.execute(() => this.commands.previewIntegration(source.commands));
+  }
+
+  async integrate(
+    source: CheckoutResource,
+    input: Pick<IntegrateInput, 'expectedTargetHead' | 'expectedSourceHead' | 'message'>
+  ) {
+    source.assertActive();
+    const result = await this.execute(() => this.commands.integrate(source.commands, input));
+    if (result.success && result.data.mode !== 'up-to-date') this.historyChanged(true);
     return result;
   }
 

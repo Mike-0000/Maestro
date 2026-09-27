@@ -7,6 +7,7 @@ import {
   taskConversationStats,
 } from '@core/features/conversations/api/browser/conversation-selectors';
 import {
+  canIntegrateTask,
   getTaskGitCheckoutStore,
   getTaskPrAssociationStore,
 } from '@core/features/source-control/api/browser/stores/task-source-control-selectors';
@@ -35,6 +36,7 @@ export const TaskRow = observer(function TaskRow({
   const selection = view.useSelection();
   const openRename = useOpenModal('renameTaskModal');
   const openDeleteTask = useOpenModal('deleteTaskModal');
+  const openIntegrate = useOpenModal('integrateWorktreeModal');
   const taskManager = getTaskManagerStore(task.data.projectId);
 
   const handleArchive = () => void taskManager?.archiveTask(task.data.id);
@@ -61,6 +63,10 @@ export const TaskRow = observer(function TaskRow({
     });
   };
   const isArchived = Boolean(task.data.archivedAt);
+  const handleIntegrate =
+    !isArchived && canIntegrateTask(task.data.projectId, task.data.id)
+      ? () => void openIntegrate({ projectId: task.data.projectId, taskId: task.data.id })
+      : undefined;
   const isSelected = selection.isSelected(id);
   const canPin = task.state !== 'unregistered';
   const agentAttention = taskAgentStatus(task);
@@ -80,6 +86,7 @@ export const TaskRow = observer(function TaskRow({
       onArchive={handleArchive}
       onRestore={handleRestore}
       onConvertAutomation={undefined}
+      onIntegrate={handleIntegrate}
       onDelete={handleDelete}
     >
       <div className="group flex w-full items-center gap-2">

@@ -43,6 +43,34 @@ For Chorus task submission and combining parallel task work into one local insta
 - branch publication and ref freshening run as durable background steps; a failed push surfaces
   as a "branch not pushed" task state with a manual retry
 
+## Integrating A Task Into The Main Directory
+
+"Integrate" (task context menu, and the button in the task Changes panel footer) brings a
+worktree task's committed HEAD into the branch checked out in the project's main directory
+(`repositoryWorkspaceId`). It is offered only for tasks whose workspace is not the main
+directory itself.
+
+- Host procedures: `checkout.previewIntegration` / `checkout.integrate` in the git runtime
+  (`packages/core/src/runtimes/git/node/checkout/ops/integrate.ts`); the desktop
+  `sourceControl.checkout` wrappers take only `workspaceId` and resolve the target from the
+  project, requiring both on the same host.
+- The main directory is only ever fast-forwarded (`git merge --ff-only`). A non-fast-forward
+  merge is computed off-tree with `git merge-tree --write-tree` + `git commit-tree`, so a
+  conflict never leaves the main directory mid-merge. Requires Git 2.38+; older Git surfaces a
+  `merge-unsupported` blocker.
+- `integrate` requires the previewed target and source HEADs; a moved side refuses
+  (`target_moved` / `source_moved`) instead of integrating unreviewed commits. Uncommitted task
+  work is never integrated (the modal offers "Commit all" first). Dirty main-directory files that
+  the integration would touch block it; unrelated dirty files are left alone.
+- Nothing is pushed. `chorus/main` (owned by Update Chorus) is blocked in the UI.
+- Conflicts, or a merge that fails after a clean preview, create a separate resolution task:
+  a new worktree branched from the target branch whose Claude Code PTY conversation
+  (`autoApprove: false`) is prompted to `git merge --no-ff <source sha>`, resolve, check, and
+  commit without touching the original worktree or main directory and without pushing. The user
+  reviews that task and integrates it (a fast-forward), which also makes the original task
+  up-to-date. When Claude Code is unavailable the task is created without an agent, and when task
+  creation fails the modal shows manual steps. Helpers: `source-control/browser/integrate/`.
+
 ## `.emdash.json`
 
 `.emdash.json` stores optional shareable project settings. Supported runtime keys:

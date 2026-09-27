@@ -1,5 +1,15 @@
 import { ContextMenu, toast } from '@emdash/ui/react/primitives';
-import { Archive, Copy, MessageSquare, Pencil, Pin, PinOff, RotateCcw, Trash2 } from 'lucide-react';
+import {
+  Archive,
+  Copy,
+  GitMerge,
+  MessageSquare,
+  Pencil,
+  Pin,
+  PinOff,
+  RotateCcw,
+  Trash2,
+} from 'lucide-react';
 import React from 'react';
 
 interface TaskContextMenuProps {
@@ -16,6 +26,8 @@ interface TaskContextMenuProps {
   onRestore?: () => void;
   onReconnect?: () => void;
   onConvertAutomation?: () => void;
+  /** Integrates the task's committed work into the project's main directory. */
+  onIntegrate?: () => void;
   onDelete: () => void;
 }
 
@@ -33,6 +45,7 @@ export function TaskContextMenu({
   onRestore,
   onReconnect,
   onConvertAutomation,
+  onIntegrate,
   onDelete,
 }: TaskContextMenuProps) {
   const archiveDisabledReasonId = React.useId();
@@ -100,6 +113,12 @@ export function TaskContextMenu({
           <ContextMenu.Item onClick={onRestore}>
             <RotateCcw className="size-4" />
             Restore
+          </ContextMenu.Item>
+        )}
+        {onIntegrate && (
+          <ContextMenu.Item onClick={onIntegrate}>
+            <GitMerge className="size-4" />
+            Integrate into main directory…
           </ContextMenu.Item>
         )}
         {branchName && (

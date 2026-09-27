@@ -1,5 +1,5 @@
 import { Button, Tooltip } from '@emdash/ui/react/primitives';
-import { ArrowDown, ArrowUp, GitBranch, RefreshCcw } from 'lucide-react';
+import { ArrowDown, ArrowUp, GitBranch, GitMerge, RefreshCcw } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import {
   asAvailableProject,
@@ -7,7 +7,10 @@ import {
   projectDisplayName,
 } from '@core/features/projects/api/browser/stores/project-selectors';
 import { getGitRepositoryStore } from '@core/features/source-control/api/browser/stores/source-control-selectors';
-import { getTaskGitCheckoutStore } from '@core/features/source-control/api/browser/stores/task-source-control-selectors';
+import {
+  canIntegrateTask,
+  getTaskGitCheckoutStore,
+} from '@core/features/source-control/api/browser/stores/task-source-control-selectors';
 import { useGitActions } from '@core/features/source-control/api/browser/use-git-actions';
 import { getTaskStore } from '@core/features/tasks/api/browser/task-state/task-selectors';
 import { useTaskViewContext } from '@core/features/tasks/contributions/browser/task-view-context';
@@ -31,6 +34,8 @@ export const GitStatusSection = observer(function GitStatusSection() {
   const hostActionDisabled = hostActionReason !== null;
   const repositoryStore = getGitRepositoryStore(projectId);
   const openAddRemoteModal = useOpenModal('addRemoteModal');
+  const openIntegrateModal = useOpenModal('integrateWorktreeModal');
+  const showIntegrate = canIntegrateTask(projectId, taskId);
 
   const {
     isPublished,
@@ -74,6 +79,30 @@ export const GitStatusSection = observer(function GitStatusSection() {
             </Tooltip.Content>
           </Tooltip.Root>
           <div className="flex items-center gap-1">
+            {showIntegrate && (
+              <Tooltip.Root>
+                <Tooltip.Trigger
+                  render={
+                    <Button
+                      variant="secondary"
+                      size="xs"
+                      aria-disabled={hostActionDisabled}
+                      aria-description={hostActionReason ?? undefined}
+                      onClick={() => {
+                        if (!hostActionDisabled) void openIntegrateModal({ projectId, taskId });
+                      }}
+                    >
+                      <GitMerge className="size-3" />
+                      Integrate
+                    </Button>
+                  }
+                />
+                <Tooltip.Content>
+                  {hostActionReason ??
+                    "Merge this task's commits into the branch checked out in the project's main directory"}
+                </Tooltip.Content>
+              </Tooltip.Root>
+            )}
             {isPublished && !isDetached ? (
               <>
                 <Tooltip.Root>
