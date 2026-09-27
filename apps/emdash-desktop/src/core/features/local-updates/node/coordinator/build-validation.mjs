@@ -257,9 +257,11 @@ async function runFixedCommand(command, cwd, env, logPath) {
 export async function hashTree(root) {
   // Electron's fs shim treats app.asar as a virtual directory, so reading the archive itself
   // fails with ENOENT. Hash physical package bytes, including the asar, via original-fs.
-  const physicalFs = process.versions.electron
-    ? (await import('original-fs')).promises
-    : { readFile, readdir };
+  let physicalFs = { readFile, readdir };
+  if (process.versions.electron) {
+    // oxlint-disable-next-line emdash/no-dynamic-imports -- Electron-only builtin is absent in system Node.
+    physicalFs = (await import('original-fs')).promises;
+  }
   const files = [];
   async function visit(directory) {
     for (const entry of await physicalFs.readdir(directory, { withFileTypes: true })) {
