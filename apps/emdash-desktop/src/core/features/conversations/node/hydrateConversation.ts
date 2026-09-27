@@ -3,7 +3,7 @@ import { conversationRegistryTable as conversations } from '@core/features/conve
 import type { TaskSessionManager } from '@core/features/tasks/api/node/task-session-manager';
 import type { TelemetryService } from '@core/primitives/telemetry/api/telemetry';
 import type { AppDb } from '@core/services/app-db/node/db';
-import { launchTuiConversation } from './launch-tui-conversation';
+import { launchTuiConversation, type RecordWorkStarted } from './launch-tui-conversation';
 
 export async function hydrateConversation(
   db: AppDb,
@@ -12,7 +12,8 @@ export async function hydrateConversation(
   taskId: string,
   conversationId: string,
   telemetry: Pick<TelemetryService, 'capture'>,
-  initialSize?: { cols: number; rows: number }
+  initialSize?: { cols: number; rows: number },
+  recordWorkStarted?: RecordWorkStarted
 ): Promise<void> {
   const [row] = await db
     .select()
@@ -39,5 +40,6 @@ export async function hydrateConversation(
     telemetry,
     database: db,
     taskSessions,
+    recordWorkStarted,
   });
 }

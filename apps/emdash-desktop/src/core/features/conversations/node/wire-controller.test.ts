@@ -150,6 +150,47 @@ describe('createConversationsWireController', () => {
     );
   });
 
+  it('records delivery work before the first attach sends an initial prompt queue', async () => {
+    const order: string[] = [];
+    const release = vi.fn(() => order.push('release'));
+    const recordWorkStarted = vi.fn(async () => {
+      order.push('record');
+      return release;
+    });
+    const attach = vi.fn(async () => {
+      order.push('attach');
+      return ok(undefined);
+    });
+    const queued = { ...target.acpInput, initialQueue: [{ text: 'Build the feature' }] };
+    const controller = setupController({
+      client: { acp: { attach } },
+      acpInput: queued,
+      localUpdates: { recordWorkStarted },
+    });
+
+    await expect(
+      controller.call('acp.attach', { conversationId: target.conversationId })
+    ).resolves.toEqual(ok(undefined));
+
+    expect(recordWorkStarted).toHaveBeenCalledWith(target.projectId, target.taskId);
+    expect(attach).toHaveBeenCalledWith(queued, {});
+    expect(order).toEqual(['record', 'attach', 'release']);
+  });
+
+  it('does not record delivery work when attaching without an initial prompt queue', async () => {
+    const recordWorkStarted = vi.fn(async () => () => undefined);
+    const attach = vi.fn(async () => ok(undefined));
+    const controller = setupController({
+      client: { acp: { attach } },
+      localUpdates: { recordWorkStarted },
+    });
+
+    await controller.call('acp.attach', { conversationId: target.conversationId });
+
+    expect(recordWorkStarted).not.toHaveBeenCalled();
+    expect(attach).toHaveBeenCalledWith(target.acpInput, {});
+  });
+
   it('acknowledges config mutations only after host config persistence succeeds', async () => {
     const setOption = vi.fn(async () => ok(undefined));
     const persistAcpConfigOption = vi.fn(async () => {});
@@ -476,6 +517,8 @@ function setupController(options: {
   runtimeError?: RuntimeResolveError;
   attachmentError?: { type: 'project-missing'; projectId: string };
   resolvedHosts?: HostRef[];
+  acpInput?: object;
+  localUpdates?: { recordWorkStarted(projectId: string, taskId: string): Promise<() => void> };
   hooks?: Partial<{
     persistAcpConfigOption: (
       target: TestRuntimeTarget,
@@ -511,10 +554,12 @@ function setupController(options: {
     taskSessions: { getTask: vi.fn() },
     withCompensation: async ({ action }) => action(),
     hostIsReachable: () => true,
+    localUpdates: options.localUpdates,
     resolveTarget: async () => ({
       ...target,
       host: options.host ?? target.host,
       conversationType: options.conversationType ?? target.conversationType,
+      acpInput: (options.acpInput ?? target.acpInput) as typeof target.acpInput,
     }),
     hooks,
   });

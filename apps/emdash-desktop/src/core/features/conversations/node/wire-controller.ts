@@ -129,6 +129,7 @@ export function createConversationsWireController(
     runtimes: options.runtimes,
     hostIsReachable: options.hostIsReachable,
     workspaceIdentity: options.workspaceIdentity,
+    recordWorkStarted: options.localUpdates?.recordWorkStarted,
   });
   const target = (conversationId: string) => resolveTarget(conversationId);
   const run = <T, E>(
@@ -231,9 +232,20 @@ export function createConversationsWireController(
         const runtimeTarget = await target(conversationId);
         const input = runtimeTarget.acpInput;
         if (!input) throw missingAcpInputError(runtimeTarget);
-        return withConversationRuntime(options, Promise.resolve(runtimeTarget), (client) =>
-          client.acp.attach(input, callOptions(meta))
-        );
+        // The first attach of a new session sends its initial prompt queue to the agent.
+        const releaseDispatch = input.initialQueue?.length
+          ? await options.localUpdates?.recordWorkStarted(
+              runtimeTarget.projectId,
+              runtimeTarget.taskId
+            )
+          : undefined;
+        try {
+          return await withConversationRuntime(options, Promise.resolve(runtimeTarget), (client) =>
+            client.acp.attach(input, callOptions(meta))
+          );
+        } finally {
+          releaseDispatch?.();
+        }
       },
       loadHistory: async (input, meta) => {
         const runtimeTarget = await target(input.conversationId);

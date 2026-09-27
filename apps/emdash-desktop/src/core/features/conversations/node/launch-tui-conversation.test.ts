@@ -50,6 +50,108 @@ describe('launchTuiConversation', () => {
     expect(result.outcome).toBe('started');
   });
 
+  it('records delivery work around the spawn that delivers the initial prompt', async () => {
+    const order: string[] = [];
+    const database = fakeDatabase(conversationRow({ providerSessionId: null }));
+    const ensureSession = vi.fn(async () => {
+      order.push('spawn');
+      return { outcome: 'started' as const };
+    });
+    resolveTask.mockReturnValue({ conversations: { ensureSession, stopSession: vi.fn() } });
+    const recordWorkStarted = vi.fn(async () => {
+      order.push('record');
+      return () => order.push('release');
+    });
+
+    await launchTuiConversation({
+      projectId: 'project-1',
+      taskId: 'task-1',
+      conversationId: 'conversation-1',
+      database: database as never,
+      telemetry: { capture },
+      taskSessions: { getTask: resolveTask },
+      recordWorkStarted,
+    });
+
+    expect(recordWorkStarted).toHaveBeenCalledWith('project-1', 'task-1');
+    expect(order).toEqual(['record', 'spawn', 'release']);
+  });
+
+  it('refuses to spawn with the initial prompt when delivery blocks the dispatch', async () => {
+    const database = fakeDatabase(conversationRow({ providerSessionId: null }));
+    const ensureSession = vi.fn();
+    resolveTask.mockReturnValue({ conversations: { ensureSession, stopSession: vi.fn() } });
+
+    await expect(
+      launchTuiConversation({
+        projectId: 'project-1',
+        taskId: 'task-1',
+        conversationId: 'conversation-1',
+        database: database as never,
+        telemetry: { capture },
+        taskSessions: { getTask: resolveTask },
+        recordWorkStarted: async () => {
+          throw new Error('new sessions are paused');
+        },
+      })
+    ).rejects.toThrow('new sessions are paused');
+    expect(ensureSession).not.toHaveBeenCalled();
+  });
+
+  it('releases the dispatch lease when the spawn fails', async () => {
+    const database = fakeDatabase(conversationRow({ providerSessionId: null }));
+    resolveTask.mockReturnValue({
+      conversations: {
+        ensureSession: vi.fn(async () => {
+          throw new Error('spawn failed');
+        }),
+        stopSession: vi.fn(),
+      },
+    });
+    const release = vi.fn();
+
+    await expect(
+      launchTuiConversation({
+        projectId: 'project-1',
+        taskId: 'task-1',
+        conversationId: 'conversation-1',
+        database: database as never,
+        telemetry: { capture },
+        taskSessions: { getTask: resolveTask },
+        recordWorkStarted: async () => release,
+      })
+    ).rejects.toThrow('spawn failed');
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not record delivery work for a resume or a promptless first spawn', async () => {
+    const ensureSession = vi.fn(() => Promise.resolve({ outcome: 'started' as const }));
+    resolveTask.mockReturnValue({ conversations: { ensureSession, stopSession: vi.fn() } });
+    const recordWorkStarted = vi.fn(async () => () => undefined);
+    const rows = [
+      conversationRow({ providerSessionId: 'native-session' }),
+      conversationRow({
+        providerSessionId: null,
+        config: { version: '1', type: 'pty' } as ConversationRow['config'],
+      }),
+    ];
+
+    for (const row of rows) {
+      await launchTuiConversation({
+        projectId: 'project-1',
+        taskId: 'task-1',
+        conversationId: 'conversation-1',
+        database: fakeDatabase(row) as never,
+        telemetry: { capture },
+        taskSessions: { getTask: resolveTask },
+        recordWorkStarted,
+      });
+    }
+
+    expect(ensureSession).toHaveBeenCalledTimes(2);
+    expect(recordWorkStarted).not.toHaveBeenCalled();
+  });
+
   it('resumes when the observation cache holds a provider session id', async () => {
     const row = conversationRow({ providerSessionId: 'native-session' });
     const database = fakeDatabase(row);

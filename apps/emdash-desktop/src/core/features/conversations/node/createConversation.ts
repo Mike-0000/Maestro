@@ -30,7 +30,7 @@ import type { TelemetryService } from '@core/primitives/telemetry/api/telemetry'
 import type { AppDb } from '@core/services/app-db/node/db';
 import { appDbPokes } from '@core/services/app-db/node/pokes';
 import { tasks } from '@core/services/app-db/node/schema';
-import { launchTuiConversation } from './launch-tui-conversation';
+import { launchTuiConversation, type RecordWorkStarted } from './launch-tui-conversation';
 
 type ConversationCreateDb = Pick<AppDb, 'delete' | 'insert' | 'select' | 'update'>;
 
@@ -54,6 +54,7 @@ export async function createConversation(
     runtimes: ConversationsRuntimeBroker;
     hostIsReachable: (hostRef: SerializedHostRef) => boolean;
     workspaceIdentity: ConversationWorkspaceIdentityResolver;
+    recordWorkStarted?: RecordWorkStarted;
   }
 ): Promise<Conversation> {
   const { db: database, telemetry, withCompensation, runtimes } = dependencies;
@@ -178,6 +179,7 @@ export async function createConversation(
           database,
           telemetry,
           taskSessions: dependencies.taskSessions,
+          recordWorkStarted: dependencies.recordWorkStarted,
         }),
       compensate: async () => {
         registry.untrack([row.id], new Date().toISOString());

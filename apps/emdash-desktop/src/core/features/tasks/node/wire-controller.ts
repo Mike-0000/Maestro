@@ -34,6 +34,7 @@ export function createTasksWireController(options: {
     onTaskCreated(task: Task): Promise<void>;
     onTaskRetired(projectId: string, taskId: string, reason: 'archived' | 'deleted'): Promise<void>;
     onTaskUpdated(task: Task): Promise<void>;
+    onTaskWorkspaceReady(taskId: string): Promise<void>;
     resolveTaskBase(projectId: string): Promise<string | null>;
   };
 }): TasksWireController {
@@ -42,6 +43,9 @@ export function createTasksWireController(options: {
     ? [
         options.service.on('task:created', (task) => localUpdates.onTaskCreated(task)),
         options.service.on('task:updated', (task) => localUpdates.onTaskUpdated(task)),
+        options.service.on('task:workspace-ready', (taskId) =>
+          localUpdates.onTaskWorkspaceReady(taskId)
+        ),
         options.service.on('task:archived', (taskId, projectId) =>
           localUpdates.onTaskRetired(projectId, taskId, 'archived')
         ),

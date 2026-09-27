@@ -11,6 +11,12 @@ import type { AppDb } from '@core/services/app-db/node/db';
 
 type LaunchTuiConversationDb = Pick<AppDb, 'select' | 'update'>;
 
+/**
+ * Records that coding work is about to be dispatched to a task (delivery enrollment, handoff
+ * invalidation, and install-gate checks). Resolves to a release for the dispatch lease.
+ */
+export type RecordWorkStarted = (projectId: string, taskId: string) => Promise<() => void>;
+
 export type LaunchTuiConversationInput = {
   projectId: string;
   taskId: string;
@@ -19,6 +25,7 @@ export type LaunchTuiConversationInput = {
   database: LaunchTuiConversationDb;
   telemetry: Pick<TelemetryService, 'capture'>;
   taskSessions: Pick<TaskSessionManager, 'getTask'>;
+  recordWorkStarted?: RecordWorkStarted;
 };
 
 export type LaunchTuiConversationResult = {
@@ -36,6 +43,7 @@ export async function launchTuiConversation({
   database,
   telemetry,
   taskSessions,
+  recordWorkStarted,
 }: LaunchTuiConversationInput): Promise<LaunchTuiConversationResult> {
   return launchMutex.runExclusive(conversationId, async () => {
     const [row] = await database
@@ -64,12 +72,22 @@ export async function launchTuiConversation({
     const initialPrompt =
       isFirstSpawn && row.config?.type === 'pty' ? row.config.initialPrompt : undefined;
 
-    const launched = await task.conversations.ensureSession({
-      conversation,
-      mode: isFirstSpawn ? 'start' : 'resume',
-      initialSize,
-      initialPrompt,
-    });
+    // Spawning with the initial prompt dispatches coding work just like a typed prompt does.
+    // A resume or promptless spawn is passive until the user sends input.
+    const releaseDispatch = initialPrompt?.trim()
+      ? await recordWorkStarted?.(projectId, taskId)
+      : undefined;
+    let launched: Awaited<ReturnType<typeof task.conversations.ensureSession>>;
+    try {
+      launched = await task.conversations.ensureSession({
+        conversation,
+        mode: isFirstSpawn ? 'start' : 'resume',
+        initialSize,
+        initialPrompt,
+      });
+    } finally {
+      releaseDispatch?.();
+    }
 
     if (launched.outcome !== 'attached') {
       telemetry.capture('agent_run_started', {

@@ -817,6 +817,24 @@ export function createLocalUpdateService(
     await joinTask(task.projectId, repositoryPath, task.id);
   }
 
+  /**
+   * Enrolls a task once its worktree exists. Task creation usually runs before provisioning, so
+   * the `task:created` join finds no worktree yet and this is the first point it can succeed.
+   */
+  async function onTaskWorkspaceReady(taskId: string): Promise<void> {
+    const [task] = await db
+      .select({ projectId: tasks.projectId, archivedAt: tasks.archivedAt })
+      .from(tasks)
+      .where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt)))
+      .limit(1);
+    if (!task || task.archivedAt) return;
+    const repositoryPath = await localRepository(task.projectId).catch(() => null);
+    if (!repositoryPath) return;
+    const current = await coordinator.status(repositoryPath).catch(() => null);
+    if (!current?.enabled || current.tasks.some((entry) => entry.taskId === taskId)) return;
+    await joinTask(task.projectId, repositoryPath, taskId);
+  }
+
   async function onTaskRetired(
     projectId: string,
     taskId: string,
@@ -926,6 +944,7 @@ export function createLocalUpdateService(
     onTaskCreated,
     onTaskRetired,
     onTaskUpdated,
+    onTaskWorkspaceReady,
     resolveTaskBase,
     recordWorkStarted,
     reconcile,
