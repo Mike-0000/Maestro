@@ -198,6 +198,43 @@ describe('workspace registry contract', () => {
     expect(subCreated).toMatchObject({ success: true, data: { kind: 'directory' } });
   });
 
+  it('createWorkspace promotes a directory when the path later becomes a repository', async () => {
+    const directoryPath = path.join(root, 'later-repo');
+    await fs.mkdir(directoryPath);
+    const created = await wire.client.createWorkspace({
+      workspaceId: 'ws-later',
+      path: directoryPath,
+    });
+    expect(created).toMatchObject({ success: true, data: { kind: 'directory' } });
+
+    git(directoryPath, 'init', '--initial-branch=main');
+    await fs.writeFile(path.join(directoryPath, 'README.md'), 'later\n');
+    git(directoryPath, 'add', '.');
+    git(directoryPath, 'commit', '-m', 'initial');
+
+    const replayed = await wire.client.createWorkspace({
+      workspaceId: 'ws-later',
+      path: directoryPath,
+    });
+    expect(replayed).toMatchObject({
+      success: true,
+      data: { id: 'ws-later', kind: 'repository', path: directoryPath },
+    });
+
+    const worktree = await wire.client.createWorktree({
+      workspaceId: 'ws-later-wt',
+      repositoryId: 'ws-later',
+      branch: 'feature/later',
+      baseRef: 'main',
+      path: path.join(root, 'wt-later'),
+      preservePatterns: [],
+    });
+    expect(worktree).toMatchObject({
+      success: true,
+      data: { kind: 'worktree', lastCreateOutcome: { status: 'succeeded' } },
+    });
+  });
+
   it('persists personal config and legacy imports for directory project roots', async () => {
     const directoryPath = path.join(root, 'plain-directory-config');
     await fs.mkdir(directoryPath);

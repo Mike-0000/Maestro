@@ -5,6 +5,7 @@ import { systemClock, type Clock } from '@emdash/shared/scheduling';
 import { nativePathIdentityKey } from '#primitives/path/api';
 import type { WorkspaceGitObservations } from '../../api/schemas';
 import type { RegistryGitContext } from '../git-context';
+import { inspectWorkspacePath, type PathInspector } from '../inspect-path';
 import type { DurableWorkspaceRecord } from '../persistence/record-store';
 import {
   createRemoteUrlCache,
@@ -57,6 +58,8 @@ export type RegistryScannerDeps = {
   /** The owning runtime's git context: the idle gate and the observe defaults' exec. */
   git: RegistryGitContext;
   observe?: RegistryScannerObserve;
+  /** Host-detected kind; used to promote a directory that is now a repository. */
+  inspect?: PathInspector;
   clock?: Clock;
   logger?: Logger;
 };
@@ -75,6 +78,7 @@ export class RegistryScanner {
   private readonly landing: ScanLanding;
   private readonly git: RegistryGitContext;
   private readonly observe: RegistryScannerObserve;
+  private readonly inspect: PathInspector;
   private readonly clock: Clock;
   private readonly logger: Logger;
   /**
@@ -96,6 +100,7 @@ export class RegistryScanner {
       refs: (workspacePath, previous, options) =>
         observeWorkspaceGitRefs(deps.git, workspacePath, previous, options),
     };
+    this.inspect = deps.inspect ?? inspectWorkspacePath;
     this.clock = deps.clock ?? systemClock;
     this.logger = deps.logger ?? noopLogger;
   }
@@ -378,14 +383,27 @@ export class RegistryScanner {
       await this.landing.vanished(record.id, now);
       return;
     }
+    let kind = record.kind;
+    if (record.kind === 'directory') {
+      const inspection = await this.inspect(record.path);
+      if (inspection.kind === 'repository') kind = 'repository';
+    }
     const git =
-      record.kind === 'directory'
+      kind === 'directory'
         ? null
         : await this.observe.full(record.path, undefined, {
             untrackedCache: this.untrackedCacheFor(record.id),
           });
     await this.landing.refreshConfig(record.id, record.path);
-    await this.landing.observation(record.id, { observedStatus: 'present', git }, now);
+    await this.landing.observation(
+      record.id,
+      {
+        ...(kind !== record.kind ? { kind } : {}),
+        observedStatus: 'present',
+        git,
+      },
+      now
+    );
   }
 
   /** The scan lane's serializer; see the `scanQueue` field for the design intent. */
