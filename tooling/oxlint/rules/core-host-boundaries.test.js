@@ -7,6 +7,7 @@ import test from 'node:test';
 import { isCoreHostSpecifier, isMainCoreFeatureSpecifier } from './core-host-boundaries.js';
 
 const repoRoot = path.resolve(import.meta.dirname, '../../..');
+const oxlintBin = path.join(repoRoot, 'node_modules/oxlint/bin/oxlint');
 
 test('classifies forbidden host and feature imports', () => {
   assert.equal(isCoreHostSpecifier('@main/lib/logger'), true);
@@ -143,7 +144,7 @@ test('missing coreToHost key and missing allowlist file both mean no exceptions'
 
 function runOxlint(config, file) {
   return new Promise((resolve, reject) => {
-    const child = spawn('pnpm', ['exec', 'oxlint', '--config', config, file], {
+    const child = spawn(process.execPath, [oxlintBin, '--config', config, file], {
       cwd: repoRoot,
       stdio: ['ignore', 'pipe', 'pipe'],
     });

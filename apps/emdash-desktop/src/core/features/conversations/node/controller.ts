@@ -15,6 +15,7 @@ import { getConversations } from './getConversations';
 import { getConversationsForProject } from './getConversationsForProject';
 import { getConversationsForTask } from './getConversationsForTask';
 import { hydrateConversation } from './hydrateConversation';
+import type { RecordWorkStarted } from './launch-tui-conversation';
 import { linkConversationToTask } from './link-conversation-to-task';
 import { listHostConversations } from './list-host-conversations';
 import { markConversationSeen } from './markConversationSeen';
@@ -28,6 +29,7 @@ export function createConversationOperations(dependencies: {
   runtimes: ConversationsRuntimeBroker;
   hostIsReachable: (hostRef: SerializedHostRef) => boolean;
   workspaceIdentity: ConversationWorkspaceIdentityResolver;
+  recordWorkStarted?: RecordWorkStarted;
 }) {
   const { db, telemetry, withCompensation } = dependencies;
   return {
@@ -41,6 +43,7 @@ export function createConversationOperations(dependencies: {
         runtimes: dependencies.runtimes,
         hostIsReachable: dependencies.hostIsReachable,
         workspaceIdentity: dependencies.workspaceIdentity,
+        recordWorkStarted: dependencies.recordWorkStarted,
       }),
     deleteConversation: (projectId: string, taskId: string, conversationId: string) =>
       deleteConversation(db, dependencies.runtimes, projectId, taskId, conversationId, telemetry),
@@ -57,7 +60,8 @@ export function createConversationOperations(dependencies: {
         taskId,
         conversationId,
         telemetry,
-        initialSize
+        initialSize,
+        dependencies.recordWorkStarted
       ),
     dehydrateConversation: (projectId: string, taskId: string, conversationId: string) =>
       dehydrateConversation(db, dependencies.taskSessions, projectId, taskId, conversationId),

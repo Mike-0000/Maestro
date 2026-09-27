@@ -65,6 +65,15 @@ export async function validateIntegratedCandidate({ repositoryPath, candidate, s
       CHORUS_DELIVERY_BUILD_OUTPUT: artifactRoot,
       CHORUS_BUILD_PROVENANCE_JSON: JSON.stringify(provenance),
     };
+    // Tools that shell out to a bare `pnpm` (Nx targets, electron-builder's module collector) can
+    // resolve a global npm `pnpm.cmd` that launches the quoted `node` from node_modules/.bin, where
+    // cmd.exe expands %~dp0 wrongly ("The system cannot find the path specified"). Route them
+    // through corepack, whose shim launches the node.exe next to it by absolute path.
+    const toolchainRoot = resolve(stateRoot, 'Toolchain');
+    await mkdir(toolchainRoot, { recursive: true });
+    await writeFile(join(toolchainRoot, 'pnpm.cmd'), '@corepack pnpm %*\r\n', 'utf8');
+    const pathKey = Object.keys(environment).find((key) => key.toUpperCase() === 'PATH') ?? 'PATH';
+    environment[pathKey] = `${toolchainRoot};${environment[pathKey] ?? ''}`;
     const checks = [];
     const commands = [
       ['frozen-install', 'corepack pnpm install --frozen-lockfile --ignore-scripts'],

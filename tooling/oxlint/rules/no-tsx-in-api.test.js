@@ -7,6 +7,7 @@ import test from 'node:test';
 import { DEFAULT_DESKTOP_CORE_SRC_ROOT, isTsxInApiFile } from './no-tsx-in-api.js';
 
 const repoRoot = path.resolve(import.meta.dirname, '../../..');
+const oxlintBin = path.join(repoRoot, 'node_modules/oxlint/bin/oxlint');
 
 test('classifies tsx files under feature api surfaces', () => {
   const root = DEFAULT_DESKTOP_CORE_SRC_ROOT;
@@ -86,7 +87,7 @@ test('reports tsx files in api surfaces once and respects allowlists', async () 
 
 function runOxlint(config, file) {
   return new Promise((resolve, reject) => {
-    const child = spawn('pnpm', ['exec', 'oxlint', '--config', config, file], {
+    const child = spawn(process.execPath, [oxlintBin, '--config', config, file], {
       cwd: repoRoot,
       stdio: ['ignore', 'pipe', 'pipe'],
     });

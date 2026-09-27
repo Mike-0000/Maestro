@@ -8,6 +8,7 @@ import { REQUIRED_BUILD_CHECKS, validateIntegratedCandidate } from './build-vali
 import { applyEvent, createProjectState, isCandidateEligible, requireTask } from './model.mjs';
 
 const execFile = promisify(execFileCallback);
+const LIFECYCLE_WITHDRAWALS = new Set(['archived', 'deleted']);
 
 export function createCoordinator({
   stateRoot = defaultStateRoot(),
@@ -163,6 +164,8 @@ export function createCoordinator({
         taskName: task.taskName,
         mode: task.mode,
         state: task.state,
+        withdrawnReason: task.state === 'withdrawn' ? (task.withdrawnReason ?? 'explicit') : null,
+        worktreePath: task.worktreePath,
         commit: task.ready?.commit ?? null,
         revision: task.revision,
       })),
@@ -249,6 +252,13 @@ export function createCoordinator({
         // A task created after apply begins belongs to the next project generation.
       }
       const existing = state.tasks[taskId];
+      if (existing?.state === 'withdrawn' && LIFECYCLE_WITHDRAWALS.has(existing.withdrawnReason)) {
+        // A restored task resumes where it left off; an explicit withdrawal stays withdrawn.
+        return {
+          event: { type: 'task-rejoined', taskId },
+          result: { joined: true, rejoined: true, generation: state.generation + 1 },
+        };
+      }
       if (existing) return { event: null, result: { joined: false, generation: state.generation } };
       return {
         event: {
@@ -416,12 +426,37 @@ export function createCoordinator({
   async function withdraw({ repositoryPath, taskId }) {
     const identity = await repositoryIdentity(repositoryPath);
     return record(identity, async (state) => {
-      requireTask(state, taskId);
+      const task = requireTask(state, taskId);
+      if (task.state === 'withdrawn' && task.withdrawnReason === 'explicit') {
+        return { event: null, result: { withdrawn: false, generation: state.generation } };
+      }
       return {
-        event: { type: 'task-withdrawn', taskId },
+        event: { type: 'task-withdrawn', taskId, reason: 'explicit' },
         result: { withdrawn: true, generation: state.generation + 1 },
       };
     });
+  }
+
+  /**
+   * Withdraws unfinished work when its Chorus task is archived or deleted. A task that already
+   * handed off (submitted, no-change, integrated) keeps its handoff: archiving finished work is
+   * the normal way to put it away and must not drop it from the next update.
+   */
+  async function retire({ repositoryPath, taskId, reason }) {
+    if (!LIFECYCLE_WITHDRAWALS.has(reason))
+      throw new Error('Task retirement reason must be archived or deleted.');
+    const identity = await repositoryIdentity(repositoryPath);
+    const { result } = await record(identity, async (state) => {
+      const task = state.tasks[taskId];
+      if (!task || task.state !== 'working') {
+        return { event: null, result: { withdrawn: false, generation: state.generation } };
+      }
+      return {
+        event: { type: 'task-withdrawn', taskId, reason },
+        result: { withdrawn: true, generation: state.generation + 1 },
+      };
+    });
+    return result;
   }
 
   async function prepare({ repositoryPath, policy = 'snapshot', taskIds = null }) {
@@ -1140,6 +1175,7 @@ export function createCoordinator({
     submit,
     noChange,
     withdraw,
+    retire,
     prepare,
     resumeCandidate,
     validateCandidate,

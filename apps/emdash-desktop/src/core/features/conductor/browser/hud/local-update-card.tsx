@@ -154,6 +154,8 @@ export const LocalUpdateCard = observer(function LocalUpdateCard() {
 
   if (projects.length === 0) return null;
   const candidate = status?.candidate;
+  const activeTasks = status?.tasks.filter((task) => task.state !== 'withdrawn') ?? [];
+  const withdrawnCount = (status?.tasks.length ?? 0) - activeTasks.length;
   return (
     <section
       aria-label="Local Chorus update"
@@ -199,7 +201,9 @@ export const LocalUpdateCard = observer(function LocalUpdateCard() {
         <>
           <p className="mt-2 text-xs text-foreground-muted">
             {status.enabled
-              ? `Generation ${status.generation} · ${status.tasks.length} enrolled tasks`
+              ? `Generation ${status.generation} · ${activeTasks.length} enrolled tasks${
+                  withdrawnCount > 0 ? ` · ${withdrawnCount} withdrawn` : ''
+                }`
               : 'The durable project coordinator is not enabled.'}
           </p>
           {status.targetInstallGate && (
@@ -208,9 +212,9 @@ export const LocalUpdateCard = observer(function LocalUpdateCard() {
               target. New Chorus sessions are paused until it completes.
             </p>
           )}
-          {status.tasks.length > 0 && (
+          {activeTasks.length > 0 && (
             <ul className="mt-2 flex flex-wrap gap-1.5">
-              {status.tasks.map((task) => (
+              {activeTasks.map((task) => (
                 <li
                   key={task.taskId}
                   className="rounded-full bg-background-secondary px-2 py-0.5 text-[11px]"

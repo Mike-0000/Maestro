@@ -42,6 +42,8 @@ export type DeliveryStatus = {
     taskName: string;
     mode: 'shipping' | 'research';
     state: string;
+    withdrawnReason: 'explicit' | 'archived' | 'deleted' | null;
+    worktreePath: string;
     commit: string | null;
     revision: number;
   }>;
@@ -145,6 +147,11 @@ export function createCoordinator(options?: {
     summary?: string;
   }): Promise<unknown>;
   withdraw(input: { repositoryPath: string; taskId: string }): Promise<unknown>;
+  retire(input: {
+    repositoryPath: string;
+    taskId: string;
+    reason: 'archived' | 'deleted';
+  }): Promise<{ withdrawn: boolean; generation: number }>;
   prepare(input: {
     repositoryPath: string;
     policy?: 'snapshot' | 'follow-project';

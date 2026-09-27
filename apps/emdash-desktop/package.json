@@ -164,7 +164,7 @@
       "test": {
         "executor": "nx:run-commands",
         "options": {
-          "command": "pnpm exec vitest run --project \"!fixtures\"",
+          "command": "vitest run --project \"!fixtures\"",
           "cwd": "apps/emdash-desktop"
         }
       },
@@ -175,7 +175,7 @@
         ],
         "cache": false,
         "options": {
-          "command": "pnpm exec vitest run --project migrations",
+          "command": "vitest run --project migrations",
           "cwd": "apps/emdash-desktop"
         }
       },
@@ -186,7 +186,7 @@
         ],
         "cache": false,
         "options": {
-          "command": "pnpm exec vitest run --project node src/main/gateway/workspace-server.remote.test.ts",
+          "command": "vitest run --project node src/main/gateway/workspace-server.remote.test.ts",
           "cwd": "apps/emdash-desktop",
           "env": {
             "EMDASH_TEST_REMOTE_WSS": "1"

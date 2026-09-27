@@ -10,7 +10,19 @@ coordinator per Git common directory. Its journal and snapshot live under
 ## Task lifecycle
 
 - The app enrolls existing tasks when a local project enables the coordinator, enrolls newly
-  created tasks, and reconciles enabled projects during startup.
+  created tasks once their worktree is ready (`task:workspace-ready`), and reconciles enabled
+  projects during startup.
+- Every agent dispatch records work started, which enrolls the task, invalidates its handoff, and
+  honors the install gate: typed TUI input, TUI start/resume, ACP prompts, a TUI spawn that
+  carries the conversation's initial prompt (`launchTuiConversation`), and the first ACP attach
+  that sends an initial prompt queue.
+- Archiving or deleting a task withdraws it only while it is still `working`; a task that already
+  handed off (submitted, no-change, integrated) keeps its handoff. Restoring an archived task
+  rejoins it as `working`, while an explicit `withdraw` stays withdrawn. Status reads and startup
+  reconciliation withdraw enrolled tasks whose Chorus task is archived or deleted, so a missed
+  lifecycle hook cannot leave stale `working` entries blocking follow-project. A task absent from
+  this profile's database counts as deleted only once its worktree is gone, because other Chorus
+  clones share the coordinator.
 - Starting or resuming coding invalidates the task's previous handoff before prompt dispatch.
   Passive transcript hydration does not invalidate a submission.
 - A handoff records a full commit SHA, the base captured at enrollment, a clean worktree, declared

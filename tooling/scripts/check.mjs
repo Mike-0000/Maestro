@@ -4,15 +4,14 @@
  * by hand; stops at the first failure.
  */
 import { spawnSync } from 'node:child_process';
+import { pnpmCommand } from './pnpm-command.mjs';
 
 const steps = ['format', 'lint', 'typecheck', 'test'];
 
 for (const step of steps) {
   console.log(`\ncheck: running pnpm run ${step}\n`);
-  const result = spawnSync('pnpm', ['run', step], {
-    stdio: 'inherit',
-    shell: process.platform === 'win32',
-  });
+  const pnpm = pnpmCommand(['run', step]);
+  const result = spawnSync(pnpm.command, pnpm.args, { stdio: 'inherit', shell: pnpm.shell });
   if (result.status !== 0) {
     console.error(
       `\ncheck: failed at "pnpm run ${step}".` +
