@@ -152,6 +152,27 @@ export const conductorToolSchemas = {
       .describe('stage: windows or one region to show full screen; go_to_region: the region.'),
     immersive: z.boolean().optional().describe('stage: also hide the app chrome.'),
   }),
+  delivery_status: z.object({ project: z.string().optional() }),
+  enable_delivery: z.object({ project: z.string().optional() }),
+  prepare_delivery: z.object({
+    project: z.string().optional(),
+    policy: z.enum(['snapshot', 'follow-project']),
+    tasks: z.array(z.string().min(1)).optional(),
+  }),
+  resume_delivery: z.object({ project: z.string().optional(), candidate_id: z.string().uuid() }),
+  validate_delivery: z.object({ project: z.string().optional(), candidate_id: z.string().uuid() }),
+  promote_delivery: z.object({ project: z.string().optional(), candidate_id: z.string().uuid() }),
+  push_delivery_backup: z.object({
+    project: z.string().optional(),
+    candidate_id: z.string().uuid(),
+  }),
+  schedule_delivery: z.object({
+    project: z.string().optional(),
+    candidate_id: z.string().uuid(),
+    restart: z.literal('manual'),
+  }),
+  cancel_delivery: z.object({ project: z.string().optional(), candidate_id: z.string().uuid() }),
+  rollback_delivery: z.object({ project: z.string().optional(), candidate_id: z.string().uuid() }),
 } as const;
 
 export type ConductorToolName = keyof typeof conductorToolSchemas;
@@ -198,6 +219,26 @@ const descriptions: Record<ConductorToolName, string> = {
     'Rearrange canvas windows in one undoable change: group windows into named regions (sub-canvases), move them into or out of regions, place them next to each other or in a spot, resize, line up, organize by task/project/status/provider, swap, and rename, recolor, collapse, fit, or dissolve regions. Steps run in order; large changes are previewed briefly first. Windows keep running; nothing is closed.',
   canvas_view:
     'Change what the user looks at: put windows or a region on the stage (tiled full screen, live), leave the stage, go into a sub-canvas (it fills the screen), leave it for its parent, go to the next or previous sub-canvas, show the main canvas, go back, or undo/redo the last layout change.',
+  delivery_status:
+    'Report the local Chorus delivery queue for the named project, including active tasks, the frozen candidate, validation, and whether later work made it ineligible.',
+  enable_delivery:
+    'Enable the durable local update coordinator for a local Chorus Git project and enroll its existing active tasks.',
+  prepare_delivery:
+    'Freeze and combine ready task commits in an isolated integration worktree. snapshot uses exactly the current ready set; follow-project waits for every enrolled task and includes late arrivals.',
+  resume_delivery:
+    'After conflicts are resolved and committed in the preserved candidate worktree, verify the resolution and merge the remaining selected commits. Never resolves conflicts automatically.',
+  validate_delivery:
+    'Run the fixed repository checks and Windows package build for one integrated candidate, then record the verified artifact hashes.',
+  promote_delivery:
+    'Fast-forward the selected validated candidate onto the local chorus/main branch. This changes the project source checkout only when that branch is clean and unchanged.',
+  push_delivery_backup:
+    'Push the exact promoted candidate commit to origin/main on GitHub without force. Report backup success or leave it visibly pending if GitHub rejects the push.',
+  schedule_delivery:
+    'Schedule a promoted, validated local update after explicit user confirmation. Scheduling is rejected while any agent, terminal, or remote session is active. Chorus stays open until the user quits normally; then a detached worker installs and verifies the candidate with rollback available.',
+  cancel_delivery:
+    'Cancel a prepared candidate or atomically cancel a scheduled install before the replacement worker claims it. Once file replacement begins, cancellation is refused and recovery must finish.',
+  rollback_delivery:
+    'Roll back the currently installed candidate to its exact retained previous build after explicit user confirmation. The matched pre-update Chorus profile is restored and the current profile is retained for recovery; every Chorus session must be stopped and Chorus must be quit normally.',
   stop_agent:
     "Stop an agent's session entirely (ends its process; the conversation is kept and can be resumed). Only when the user asks to stop, kill, or shut down an agent, not to interrupt its current step; the user confirms first.",
 };
@@ -226,6 +267,10 @@ export const CONFIRM_REQUIRED_TOOLS: ReadonlySet<ConductorToolName> = new Set([
   'answer_permission',
   'archive_agent',
   'stop_agent',
+  'promote_delivery',
+  'push_delivery_backup',
+  'schedule_delivery',
+  'rollback_delivery',
 ]);
 
 /** Tools with side effects that run after a short, cancellable countdown. */

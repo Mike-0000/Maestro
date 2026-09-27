@@ -1,5 +1,8 @@
 # Worktrees
 
+For Chorus task submission and combining parallel task work into one local install, see
+[`local-updates.md`](local-updates.md) and `.agents/skills/chorus-integrate/SKILL.md`.
+
 ## Main Files
 
 - `packages/core/src/runtimes/workspace-registry/` (creation pipeline, lifecycle steps, activation)

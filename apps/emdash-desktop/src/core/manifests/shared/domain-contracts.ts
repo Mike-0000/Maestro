@@ -13,6 +13,7 @@ import { integrationsContract, integrationsDomain } from '@core/features/integra
 import { issuesContract, issuesDomain } from '@core/features/issues/api';
 import { legacyPortContract, legacyPortDomain } from '@core/features/legacy-port/api';
 import { promptLibraryContract, promptLibraryDomain } from '@core/features/library/api';
+import { localUpdatesContract, localUpdatesDomain } from '@core/features/local-updates/api';
 import { machinesContract, machinesDomain } from '@core/features/machines/api';
 import { mcpContract, mcpDomain } from '@core/features/mcp/api';
 import { previewServersContract, previewServersDomain } from '@core/features/preview-servers/api';
@@ -58,6 +59,7 @@ export const desktopDomainContracts = {
   [editorDomain]: editorContract,
   [filesDomain]: filesWireContract,
   [legacyPortDomain]: legacyPortContract,
+  [localUpdatesDomain]: localUpdatesContract,
   [loggingDomain]: loggingWireContract,
   [machinesDomain]: machinesContract,
   [projectSettingsDomain]: projectSettingsContract,

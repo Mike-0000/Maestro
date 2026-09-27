@@ -9,6 +9,12 @@ export type ChorusHostServices = {
   readonly secrets: SecretStore;
   /** Directory for Chorus-owned settings files inside the app profile. */
   readonly dataDir: string;
+  /** Host-owned local install facts. Null means this process cannot replace a packaged install. */
+  readonly delivery: {
+    readonly installRoot: string | null;
+    readonly installWorkerPath: string | null;
+    readonly profileRoot: string;
+  };
   readonly globalShortcuts: {
     /** Returns false when the OS or another app already owns the accelerator. */
     register(accelerator: string, onPress: () => void): boolean;

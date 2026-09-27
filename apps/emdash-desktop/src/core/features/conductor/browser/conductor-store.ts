@@ -8,7 +8,12 @@ import type { LayoutOp, LayoutPlan } from '@core/features/canvas/api/canvas-layo
 import { isWithin } from '@core/features/canvas/api/canvas-regions';
 import { spokenProviderLabel } from '@core/features/canvas/api/provider-names';
 import { getCanvasBrowserHost } from '@core/features/canvas/contributions/browser/app-stores';
-import { getProjectManagerStore } from '@core/features/projects/api/browser/stores/project-selectors';
+import type { LocalUpdateStatus } from '@core/features/local-updates/api';
+import { getLocalUpdatesClient } from '@core/features/local-updates/api/browser/client';
+import {
+  asAvailableProject,
+  getProjectManagerStore,
+} from '@core/features/projects/api/browser/stores/project-selectors';
 import {
   getTaskManagerStore,
   getTaskStore,
@@ -1487,6 +1492,214 @@ export class ConductorStore {
       }
       case 'canvas_view':
         return this.canvasView(input as ConductorToolInput<'canvas_view'>);
+      case 'delivery_status': {
+        const projectId = resolveDeliveryProjectId(
+          (input as ConductorToolInput<'delivery_status'>).project,
+          this.focusedEntry()?.projectId
+        );
+        if (!projectId) return { content: 'I could not find that Chorus project.', isError: true };
+        const result = await (await getLocalUpdatesClient()).status({ projectId });
+        if (!result.success) return { content: result.error.message, isError: true };
+        return { content: formatDeliveryStatus(result.data) };
+      }
+      case 'enable_delivery': {
+        const projectId = resolveDeliveryProjectId(
+          (input as ConductorToolInput<'enable_delivery'>).project,
+          this.focusedEntry()?.projectId
+        );
+        if (!projectId) return { content: 'I could not find that Chorus project.', isError: true };
+        const result = await (await getLocalUpdatesClient()).enable({ projectId });
+        if (!result.success) return { content: result.error.message, isError: true };
+        return {
+          content: `The delivery coordinator is enabled. ${formatDeliveryStatus(result.data)}`,
+        };
+      }
+      case 'prepare_delivery': {
+        const preparation = input as ConductorToolInput<'prepare_delivery'>;
+        const projectId = resolveDeliveryProjectId(
+          preparation.project,
+          this.focusedEntry()?.projectId
+        );
+        if (!projectId) return { content: 'I could not find that Chorus project.', isError: true };
+        runInAction(() => (this.activity = 'Combining the ready worktrees…'));
+        const result = await (
+          await getLocalUpdatesClient()
+        ).prepare({
+          projectId,
+          policy: preparation.policy,
+          ...(preparation.tasks ? { taskIds: preparation.tasks } : {}),
+        });
+        if (!result.success) return { content: result.error.message, isError: true };
+        const status = await (await getLocalUpdatesClient()).status({ projectId });
+        if (!status.success) return { content: status.error.message, isError: true };
+        const candidate = status.data.candidate;
+        if (!candidate) return { content: 'No update candidate was created.' };
+        const included = candidate.included.map((task) => task.taskName).join(', ') || 'no tasks';
+        return {
+          content:
+            candidate.state === 'blocked'
+              ? `The combined candidate is blocked: ${candidate.error ?? status.data.lastError ?? 'merge conflict'}. Its worktree is preserved for resolution.`
+              : `Candidate ${candidate.id} is ${candidate.state}, combining ${included}. ${candidate.eligible ? 'It is current for its policy.' : 'Later work has made it ineligible.'}`,
+        };
+      }
+      case 'validate_delivery': {
+        const request = input as ConductorToolInput<'validate_delivery'>;
+        const projectId = resolveDeliveryProjectId(request.project, this.focusedEntry()?.projectId);
+        if (!projectId) return { content: 'I could not find that Chorus project.', isError: true };
+        runInAction(
+          () => (this.activity = 'Running the combined checks and Windows package build…')
+        );
+        const result = await (
+          await getLocalUpdatesClient()
+        ).validate({
+          projectId,
+          candidateId: request.candidate_id,
+        });
+        if (!result.success) return { content: result.error.message, isError: true };
+        const status = await (await getLocalUpdatesClient()).status({ projectId });
+        if (!status.success) return { content: status.error.message, isError: true };
+        const candidate = status.data.candidate;
+        return {
+          content:
+            candidate?.state === 'validated'
+              ? `Candidate ${request.candidate_id} passed the fixed checks and has a hashed Windows package. ${candidate.eligible ? 'It is eligible for scheduling.' : 'It is stale for the follow-project policy.'}`
+              : `Candidate validation did not pass. ${status.data.lastError ?? candidate?.error ?? 'Check the delivery status for details.'}`,
+          ...(candidate?.state !== 'validated' ? { isError: true } : {}),
+        };
+      }
+      case 'resume_delivery': {
+        const request = input as ConductorToolInput<'resume_delivery'>;
+        const projectId = resolveDeliveryProjectId(request.project, this.focusedEntry()?.projectId);
+        if (!projectId) return { content: 'I could not find that Chorus project.', isError: true };
+        const result = await (
+          await getLocalUpdatesClient()
+        ).resume({
+          projectId,
+          candidateId: request.candidate_id,
+        });
+        if (!result.success) return { content: result.error.message, isError: true };
+        const status = await (await getLocalUpdatesClient()).status({ projectId });
+        if (!status.success) return { content: status.error.message, isError: true };
+        return {
+          content:
+            status.data.candidate?.state === 'integrated'
+              ? `Candidate ${request.candidate_id} is integrated and ready for package validation.`
+              : `Integration remains blocked: ${status.data.candidate?.error ?? status.data.lastError ?? 'resolve the conflicts and retry.'}`,
+          ...(status.data.candidate?.state !== 'integrated' ? { isError: true } : {}),
+        };
+      }
+      case 'schedule_delivery': {
+        const request = input as ConductorToolInput<'schedule_delivery'>;
+        const projectId = resolveDeliveryProjectId(request.project, this.focusedEntry()?.projectId);
+        if (!projectId) return { content: 'I could not find that Chorus project.', isError: true };
+        if (
+          !(await this.requestPending(
+            `Schedule candidate ${request.candidate_id} for a manual install`,
+            confirmKind
+          ))
+        ) {
+          return { content: 'The user cancelled scheduling this update.' };
+        }
+        const result = await (
+          await getLocalUpdatesClient()
+        ).schedule({
+          projectId,
+          candidateId: request.candidate_id,
+          restartPolicy: request.restart,
+        });
+        if (!result.success) return { content: result.error.message, isError: true };
+        return {
+          content: `Candidate ${request.candidate_id} is ready to install. Chorus will stay open until you quit normally; new agent work is blocked while the installer waits.`,
+        };
+      }
+      case 'promote_delivery': {
+        const request = input as ConductorToolInput<'promote_delivery'>;
+        const projectId = resolveDeliveryProjectId(request.project, this.focusedEntry()?.projectId);
+        if (!projectId) return { content: 'I could not find that Chorus project.', isError: true };
+        if (
+          !(await this.requestPending(
+            `Promote candidate ${request.candidate_id} to local chorus/main`,
+            confirmKind
+          ))
+        ) {
+          return { content: 'The user cancelled local promotion.' };
+        }
+        const result = await (
+          await getLocalUpdatesClient()
+        ).promote({
+          projectId,
+          candidateId: request.candidate_id,
+        });
+        if (!result.success) return { content: result.error.message, isError: true };
+        await this.plans.refreshDeliveryReadiness();
+        return {
+          content: `Candidate ${request.candidate_id} was fast-forwarded onto local chorus/main.`,
+        };
+      }
+      case 'push_delivery_backup': {
+        const request = input as ConductorToolInput<'push_delivery_backup'>;
+        const projectId = resolveDeliveryProjectId(request.project, this.focusedEntry()?.projectId);
+        if (!projectId) return { content: 'I could not find that Chorus project.', isError: true };
+        if (
+          !(await this.requestPending(
+            `Push candidate ${request.candidate_id} to GitHub origin/main`,
+            confirmKind
+          ))
+        ) {
+          return { content: 'The user cancelled the GitHub backup push.' };
+        }
+        const result = await (
+          await getLocalUpdatesClient()
+        ).pushBackup({
+          projectId,
+          candidateId: request.candidate_id,
+        });
+        if (!result.success) return { content: result.error.message, isError: true };
+        const backup = result.data as { backedUp?: boolean; error?: string; commit?: string };
+        return backup.backedUp
+          ? {
+              content: `GitHub backup updated: origin/main now contains ${backup.commit ?? 'the promoted candidate'}.`,
+            }
+          : {
+              content:
+                backup.error ?? 'GitHub backup remains pending; origin/main was not changed.',
+              isError: true,
+            };
+      }
+      case 'cancel_delivery': {
+        const request = input as ConductorToolInput<'cancel_delivery'>;
+        const projectId = resolveDeliveryProjectId(request.project, this.focusedEntry()?.projectId);
+        if (!projectId) return { content: 'I could not find that Chorus project.', isError: true };
+        const result = await (
+          await getLocalUpdatesClient()
+        ).cancel({
+          projectId,
+          candidateId: request.candidate_id,
+        });
+        if (!result.success) return { content: result.error.message, isError: true };
+        return { content: `Candidate ${request.candidate_id} is cancelled.` };
+      }
+      case 'rollback_delivery': {
+        const request = input as ConductorToolInput<'rollback_delivery'>;
+        const projectId = resolveDeliveryProjectId(request.project, this.focusedEntry()?.projectId);
+        if (!projectId) return { content: 'I could not find that Chorus project.', isError: true };
+        if (
+          !(await this.requestPending(
+            `Roll back candidate ${request.candidate_id}, restore its exact pre-update Chorus profile, and preserve the current profile for recovery`,
+            confirmKind
+          ))
+        ) {
+          return { content: 'The user cancelled the local update rollback.' };
+        }
+        const result = await (
+          await getLocalUpdatesClient()
+        ).rollback({ projectId, candidateId: request.candidate_id, restoreProfile: true });
+        if (!result.success) return { content: result.error.message, isError: true };
+        return {
+          content:
+            'Rollback to the retained previous Chorus build is scheduled. Stop all sessions, then quit Chorus normally; the current profile will be kept in the local recovery folder.',
+        };
+      }
     }
     return { content: `Unhandled tool ${name}.`, isError: true };
   }
@@ -2160,9 +2373,72 @@ function describeTool(name: string): string {
       return 'Arranging the canvas…';
     case 'canvas_view':
       return 'Changing the view…';
+    case 'delivery_status':
+      return 'Checking the update queue…';
+    case 'enable_delivery':
+      return 'Enrolling active worktrees…';
+    case 'prepare_delivery':
+      return 'Combining ready worktrees…';
+    case 'resume_delivery':
+      return 'Continuing resolved integration…';
+    case 'validate_delivery':
+      return 'Building the combined update…';
+    case 'promote_delivery':
+      return 'Promoting the validated candidate…';
+    case 'push_delivery_backup':
+      return 'Pushing the project backup to GitHub…';
+    case 'schedule_delivery':
+      return 'Scheduling the update…';
+    case 'cancel_delivery':
+      return 'Cancelling the update…';
+    case 'rollback_delivery':
+      return 'Scheduling the local rollback…';
     default:
       return 'Working…';
   }
+}
+
+function resolveDeliveryProjectId(
+  reference: string | undefined,
+  preferredId?: string
+): string | null {
+  const available = [...getProjectManagerStore().projects.values()].filter(
+    (project) => asAvailableProject(project) && project.data?.type === 'local'
+  );
+  if (reference?.trim()) {
+    const wanted = reference.trim().toLowerCase();
+    return (
+      available.find((project) => (project.name ?? '').toLowerCase() === wanted)?.id ??
+      available.find((project) => (project.name ?? '').toLowerCase().includes(wanted))?.id ??
+      null
+    );
+  }
+  if (preferredId && available.some((project) => project.id === preferredId)) return preferredId;
+  return available[0]?.id ?? null;
+}
+
+function formatDeliveryStatus(status: LocalUpdateStatus): string {
+  if (!status.enabled) return `Local delivery is disabled for ${status.repositoryPath}.`;
+  const unfinished = status.tasks
+    .filter(
+      (task) =>
+        task.mode === 'shipping' &&
+        !['submitted', 'no-change', 'withdrawn', 'integrated'].includes(task.state)
+    )
+    .map((task) => task.taskName);
+  const working = unfinished.length
+    ? ` Waiting for ${unfinished.join(', ')} to finish or submit.`
+    : ' All enrolled shipping tasks have handed off their current work.';
+  const candidate = status.candidate
+    ? ` Candidate ${status.candidate.id} is ${status.candidate.state}, includes ${status.candidate.included.map((task) => task.taskName).join(', ') || 'no tasks'}${status.candidate.eligible ? '' : ' and is stale for its policy'}.${status.candidate.githubBackup ? ` GitHub backup is ${status.candidate.githubBackup.state}.` : ''}${status.candidate.error ? ` ${status.candidate.error}` : ''}`
+    : ' No combined candidate is prepared.';
+  const installed = status.installedCandidateId
+    ? ` Last installed candidate: ${status.installedCandidateId}.`
+    : '';
+  const target = status.targetInstallGate
+    ? ` The local install target is reserved for candidate ${status.targetInstallGate.candidateId}; new agent and terminal starts are paused.`
+    : '';
+  return `Delivery generation ${status.generation}.${working}${candidate}${installed}${target}`;
 }
 
 function spokenError(error: ConductorError): string {

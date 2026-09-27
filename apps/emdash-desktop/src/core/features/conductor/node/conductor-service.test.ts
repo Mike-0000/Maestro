@@ -76,6 +76,7 @@ function service(): ConductorService {
   const host: ChorusHostServices = {
     secrets,
     dataDir,
+    delivery: { installRoot: null, installWorkerPath: null, profileRoot: dataDir },
     globalShortcuts: { register: () => true, unregister: () => {} },
     keyboardHook: { start: () => true, stop: () => {} },
     openMicrophoneSettings: async () => {},

@@ -37,7 +37,7 @@ export async function getActiveSessionSummary(
       result.localTuiSessions += summary.tuiSessions;
       result.terminals += summary.terminals;
     } else {
-      result.remoteSessions += summary.acpSessions + summary.tuiSessions;
+      result.remoteSessions += summary.acpSessions + summary.tuiSessions + summary.terminals;
     }
   }
   return result;
@@ -76,21 +76,19 @@ async function readHostSessionSummary(
       },
       0
     ),
-    isLocalHostRef(host)
-      ? readWithDeadline(
-          `${key} terminals`,
-          async () => {
-            const snapshot = await (
-              await client
-            ).terminals.sessions
-              .state(undefined, 'list')
-              .snapshot();
-            return Object.values(snapshot.data).filter((session) => session.status === 'running')
-              .length;
-          },
-          0
-        )
-      : Promise.resolve({ value: 0, incomplete: false }),
+    readWithDeadline(
+      `${key} terminals`,
+      async () => {
+        const snapshot = await (
+          await client
+        ).terminals.sessions
+          .state(undefined, 'list')
+          .snapshot();
+        return Object.values(snapshot.data).filter((session) => session.status === 'running')
+          .length;
+      },
+      0
+    ),
   ]);
 
   return {

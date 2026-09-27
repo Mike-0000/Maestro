@@ -44,6 +44,8 @@ import {
 } from '@core/features/legacy-port/node/wire-controller';
 import type { PromptLibraryService } from '@core/features/library/node/prompt-library-service';
 import { createPromptLibraryWireController } from '@core/features/library/node/wire-controller';
+import type { LocalUpdateService } from '@core/features/local-updates/node/local-update-service';
+import { createLocalUpdatesWireController } from '@core/features/local-updates/node/wire-controller';
 import { createMachinesWireController } from '@core/features/machines/node/wire-controller';
 import { createMcpWireController } from '@core/features/mcp/node/wire-controller';
 import type { PreviewServerAccessOperations } from '@core/features/preview-servers/node/preview-server-access-service';
@@ -141,6 +143,7 @@ export type DesktopControllerContext = {
   readonly hostOperations: DesktopHostControllerOperations;
   readonly issueProviders: IssueProviderRegistry;
   readonly legacyPortOperations: LegacyPortControllerOperations;
+  readonly localUpdates: LocalUpdateService;
   readonly logger: Logger;
   readonly loggingOperations: LoggingControllerOperations;
   readonly notifications: NotificationService;
@@ -220,6 +223,12 @@ export const desktopNodeControllers = {
   legacyPort: {
     create: ({ legacyPortOperations }) => createLegacyPortWireController(legacyPortOperations),
   },
+  localUpdates: {
+    create: ({ localUpdates }) => {
+      void localUpdates.reconcile();
+      return createLocalUpdatesWireController(localUpdates);
+    },
+  },
   logging: {
     create: ({ loggingOperations }) => createLoggingWireController(loggingOperations),
   },
@@ -281,6 +290,7 @@ export const desktopNodeControllers = {
       terminalFileSources,
       gitCredentials,
       logger,
+      localUpdates,
       projects,
       runtimes,
       sessionLaunchContexts,
@@ -291,6 +301,7 @@ export const desktopNodeControllers = {
       createTerminalsWireController({
         terminalFileSources,
         db,
+        localUpdates,
         projects,
         runtimes,
         sessionLaunchContexts,
@@ -401,6 +412,7 @@ export const desktopNodeControllers = {
       sessionLaunchContexts,
       taskSessions,
       telemetry,
+      localUpdates,
       workspaceIdentity,
     }) =>
       createConversationsWireController({
@@ -417,6 +429,7 @@ export const desktopNodeControllers = {
         workspaceIdentity,
         withCompensation: compensation,
         hostIsReachable,
+        localUpdates,
       }),
   },
   previewServers: {
@@ -440,7 +453,7 @@ export const desktopNodeControllers = {
       createHostsWireController(hosts, hostAvailability, ssh.ssh),
   },
   tasks: {
-    create: ({ db, scope, taskService, taskSessions, telemetry }) => {
+    create: ({ db, localUpdates, scope, taskService, taskSessions, telemetry }) => {
       const taskList = new TaskListService({
         taskService,
         taskSessions,
@@ -453,6 +466,7 @@ export const desktopNodeControllers = {
           service: taskService,
           taskList,
           telemetry,
+          localUpdates,
         }),
         scope
       );

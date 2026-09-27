@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { app, globalShortcut, shell } from 'electron';
 import { uIOhook } from 'uiohook-napi';
 import type { ChorusHostServices } from '@core/primitives/chorus-host/api/host-services';
@@ -9,6 +9,15 @@ export function createChorusHostServices(): ChorusHostServices {
   return {
     secrets: encryptedAppSecretsStore,
     dataDir: join(app.getPath('userData'), 'chorus'),
+    delivery: {
+      installRoot:
+        app.isPackaged && process.platform === 'win32' ? dirname(process.execPath) : null,
+      installWorkerPath:
+        app.isPackaged && process.platform === 'win32'
+          ? join(process.resourcesPath, 'chorus-delivery', 'install-chorus-update.ps1')
+          : null,
+      profileRoot: app.getPath('userData'),
+    },
     globalShortcuts: {
       register: (accelerator, onPress) => globalShortcut.register(accelerator, onPress),
       unregister: (accelerator) => globalShortcut.unregister(accelerator),

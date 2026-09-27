@@ -399,6 +399,8 @@ pnpm run test
 - [Nx task orchestration and caching](agents/workflows/nx.md)
 - [Testing workflow](agents/workflows/testing.md)
 - [Worktrees workflow](agents/workflows/worktrees.md)
+- [Coordinated local Chorus updates](agents/workflows/local-updates.md)
+- [Shared Chorus integration skill](.agents/skills/chorus-integrate/SKILL.md)
 - [Remote development workflow](agents/workflows/remote-development.md)
 - [Workspace server architecture](agents/architecture/workspace-server.md)
 - [Provider integration](agents/integrations/providers.md)

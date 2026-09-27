@@ -2,6 +2,7 @@ import { providerTokenRegistry } from '@core/features/account/api/node/provider-
 import type { EmdashAccountService } from '@core/features/account/node/services/emdash-account-service';
 import { GitHubAuthServerAdapter } from '@core/features/github/node/accounts/github-auth-server-adapter';
 import { getIntegrationConnectionService } from '@core/features/integrations/node/integration-connection-service';
+import { createLocalUpdateService } from '@core/features/local-updates/node/local-update-service';
 import { provisionWorkspaceErrorToWorkspaceError } from '@core/features/workspaces/node/wire-controller';
 import type { DesktopControllerContext } from '@core/manifests/node/controllers';
 import { appOperations } from '@main/core/app/controller';
@@ -21,6 +22,7 @@ import { browserOperations } from '@main/host/browser/controller';
 import { createChorusHostServices } from '@main/host/chorus-host';
 import { createDevPerfOperations } from '@main/host/dev-perf/controller-operations';
 import { writeRendererLogEntry } from '@main/host/file-logger';
+import { getActiveSessionSummary } from '@main/host/sessions/active-session-summary';
 import { setTrayVisible } from '@main/host/tray';
 import { updateOperations } from '@main/host/updates/controller-operations';
 import { applyNativeTheme } from '@main/host/window';
@@ -57,6 +59,11 @@ export function createDesktopWireOptions(
 ): DesktopControllerOptions {
   const taskService = services.taskService;
   const github = services.github;
+  const chorus = createChorusHostServices();
+  const localUpdates = createLocalUpdateService(database.db, chorus, {
+    getActiveSessionSummary: () =>
+      getActiveSessionSummary(runtimes.broker, services.hostAttachments.attachedHosts()),
+  });
   const getDependencyManager = createDependencyManagerResolver(runtimes.clients.hostDependencies);
   return {
     terminalFileSources,
@@ -67,7 +74,8 @@ export function createDesktopWireOptions(
     },
     appSettings: database.appSettings,
     automations: services.automations,
-    chorus: createChorusHostServices(),
+    chorus,
+    localUpdates,
     browserOperations,
     sessionMcpServers: resolveBrowserControlMcpServers,
     compensation: withCompensation,

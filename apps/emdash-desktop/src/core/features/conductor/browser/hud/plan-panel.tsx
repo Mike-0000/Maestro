@@ -12,6 +12,9 @@ export const PlanPanel = observer(function PlanPanel() {
   const plan = plans.plan;
   if (!plan || plan.status === 'cancelled') return null;
   const conflicted = plans.conflicts?.pairs.filter((pair) => pair.conflicted) ?? [];
+  const awaitingIntegration = plan.subtasks.some(
+    (subtask) => subtask.state === 'awaiting-integration'
+  );
 
   return (
     <section
@@ -99,6 +102,21 @@ export const PlanPanel = observer(function PlanPanel() {
                   : `${conflicted.length} conflicting ${conflicted.length === 1 ? 'pair' : 'pairs'}.`
                 : 'Conflict radar checks branches as agents work.'}
             </span>
+            {awaitingIntegration && (
+              <button
+                type="button"
+                disabled={plans.deliveryStatusRefreshing}
+                onClick={() => void plans.refreshDeliveryReadiness()}
+                className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-foreground hover:bg-background-secondary disabled:opacity-50"
+              >
+                {plans.deliveryStatusRefreshing ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <GitMerge className="size-3.5" />
+                )}
+                Check handoffs
+              </button>
+            )}
             <button
               type="button"
               disabled={plans.checkingConflicts}
@@ -162,6 +180,7 @@ const SubtaskRow = observer(function SubtaskRow({ subtask }: { subtask: PlannedS
 const STATE_LABELS: Record<SubtaskState, string> = {
   pending: 'Ready',
   waiting: 'Waiting',
+  'awaiting-integration': 'Handoff',
   spawning: 'Starting',
   running: 'Running',
   done: 'Done',

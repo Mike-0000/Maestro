@@ -19,7 +19,8 @@ This directory is the system of record for agent-facing repo guidance. Keep topi
   - [`git-runtime.md`](architecture/git-runtime.md) — Git contract/runtime ownership, session lifecycle, and nested wire composition
   - [`path-system.md`](architecture/path-system.md) — host-aware path identity, resource URI ownership, and future migration boundaries
 - `workflows/`
-  - task-oriented procedures like testing, worktrees, remote development, and Nx task orchestration
+  - task-oriented procedures like testing, worktrees, remote development, Nx task orchestration,
+    and [`local-updates.md`](workflows/local-updates.md) for coordinated Chorus deliveries
 - `integrations/`
   - provider, MCP, and external service guidance
   - [`integration-plugins.md`](integrations/integration-plugins.md) — integration auth and credential contracts, stable account identity, and issue-plugin boundaries

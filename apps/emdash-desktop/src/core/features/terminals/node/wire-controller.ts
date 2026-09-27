@@ -49,6 +49,9 @@ import type { AppSettingsService } from '@core/services/settings/node';
 
 export type CreateTerminalsWireControllerOptions = Readonly<{
   db: AppDb;
+  localUpdates?: {
+    recordWorkStarted(projectId: string, taskId: string): Promise<() => void>;
+  };
   terminalFileSources: TerminalFileSources;
   projects: Pick<ProjectAttachmentManager, 'requireAttached'>;
   runtimes: TerminalsRuntimeBroker;
@@ -167,33 +170,41 @@ async function createTerminal(
     initialSize?: { cols: number; rows: number };
   }
 ): Promise<Result<TerminalCreateResult, TerminalControllerError>> {
-  const shell = input.shell ?? (await options.settings.get('terminal')).defaultShell;
-  const [row] = await options.db
-    .insert(terminals)
-    .values({
-      id: input.id,
-      projectId: input.projectId,
-      taskId: input.taskId,
-      name: input.name,
-      shellId: shell,
-      ssh: 0,
-      updatedAt: sql`CURRENT_TIMESTAMP`,
-    })
-    .returning();
+  const releaseDispatch = await options.localUpdates?.recordWorkStarted(
+    input.projectId,
+    input.taskId
+  );
+  try {
+    const shell = input.shell ?? (await options.settings.get('terminal')).defaultShell;
+    const [row] = await options.db
+      .insert(terminals)
+      .values({
+        id: input.id,
+        projectId: input.projectId,
+        taskId: input.taskId,
+        name: input.name,
+        shellId: shell,
+        ssh: 0,
+        updatedAt: sql`CURRENT_TIMESTAMP`,
+      })
+      .returning();
 
-  const terminal = mapTerminalRowToTerminal(row);
-  const hydrated = await startRuntimeTerminal(options, terminal, input.initialSize);
-  if (!hydrated.success) {
-    await options.db.delete(terminals).where(eq(terminals.id, input.id)).execute();
-    return hydrated;
+    const terminal = mapTerminalRowToTerminal(row);
+    const hydrated = await startRuntimeTerminal(options, terminal, input.initialSize);
+    if (!hydrated.success) {
+      await options.db.delete(terminals).where(eq(terminals.id, input.id)).execute();
+      return hydrated;
+    }
+
+    options.telemetry.capture('terminal_created', {
+      terminal_id: input.id,
+      project_id: input.projectId,
+      task_id: input.taskId,
+    });
+    return ok({ terminal, key: hydrated.data.key });
+  } finally {
+    releaseDispatch?.();
   }
-
-  options.telemetry.capture('terminal_created', {
-    terminal_id: input.id,
-    project_id: input.projectId,
-    task_id: input.taskId,
-  });
-  return ok({ terminal, key: hydrated.data.key });
 }
 
 async function deleteTerminal(

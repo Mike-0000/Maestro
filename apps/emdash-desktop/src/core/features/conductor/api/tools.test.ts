@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { CANCEL_WINDOW_TOOLS, conductorToolNames, conductorToolSchemas } from './tools';
+import {
+  CANCEL_WINDOW_TOOLS,
+  CONFIRM_REQUIRED_TOOLS,
+  conductorToolNames,
+  conductorToolSchemas,
+} from './tools';
 
 describe('conductor tools', () => {
   it('appends the app tools after the agent tools (prompt-cache order)', () => {
-    expect(conductorToolNames.slice(-9, -3)).toEqual([
+    expect(conductorToolNames.slice(-19, -13)).toEqual([
       'start_app',
       'show_app',
       'look_at_app',
@@ -11,14 +16,26 @@ describe('conductor tools', () => {
       'stop_app',
       'close_app',
     ]);
-    expect(conductorToolNames.indexOf('stop_agent')).toBe(conductorToolNames.length - 10);
+    expect(conductorToolNames.indexOf('stop_agent')).toBe(conductorToolNames.length - 20);
   });
 
   it('appends the canvas layout tools last', () => {
-    expect(conductorToolNames.slice(-3)).toEqual([
+    expect(conductorToolNames.slice(-13, -10)).toEqual([
       'describe_canvas',
       'arrange_canvas',
       'canvas_view',
+    ]);
+    expect(conductorToolNames.slice(-10)).toEqual([
+      'delivery_status',
+      'enable_delivery',
+      'prepare_delivery',
+      'resume_delivery',
+      'validate_delivery',
+      'promote_delivery',
+      'push_delivery_backup',
+      'schedule_delivery',
+      'cancel_delivery',
+      'rollback_delivery',
     ]);
     expect(
       conductorToolSchemas.arrange_canvas.safeParse({
@@ -33,6 +50,13 @@ describe('conductor tools', () => {
     expect(CANCEL_WINDOW_TOOLS.has('start_app')).toBe(true);
     expect(CANCEL_WINDOW_TOOLS.has('stop_app')).toBe(true);
     expect(CANCEL_WINDOW_TOOLS.has('look_at_app')).toBe(false);
+  });
+
+  it('requires explicit confirmation for delivery rollback', () => {
+    expect(CONFIRM_REQUIRED_TOOLS.has('rollback_delivery')).toBe(true);
+    expect(conductorToolSchemas.rollback_delivery.safeParse({ candidate_id: 'bad' }).success).toBe(
+      false
+    );
   });
 
   it('validates app tool input', () => {

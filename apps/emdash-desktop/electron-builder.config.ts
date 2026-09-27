@@ -1,3 +1,5 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { Configuration } from 'electron-builder';
 import { LOCAL_TTS_MODEL_DIR, prepareLocalTtsModel } from './scripts/prepare-local-tts-model.ts';
 import {
@@ -14,7 +16,7 @@ const config: Configuration = {
   productName: PRODUCT_NAME,
   executableName: PRODUCT_NAME,
   extraMetadata: { desktopName: `${LINUX_DESKTOP_ID}.desktop` },
-  directories: { output: 'release' },
+  directories: { output: process.env.CHORUS_DELIVERY_BUILD_OUTPUT ?? 'release' },
   artifactName: `${ARTIFACT_PREFIX}-\${arch}.\${ext}`,
   publish: [
     {
@@ -27,7 +29,20 @@ const config: Configuration = {
   files: ['out/**/*', 'node_modules/**/*', 'drizzle/**/*'],
   // The pinned, checksum-verified offline model ships with every installer; no first-run download.
   beforePack: async () => prepareLocalTtsModel(),
-  extraResources: [{ from: LOCAL_TTS_MODEL_DIR, to: 'models/kitten-mini-en-v0_8' }],
+  extraResources: [
+    { from: LOCAL_TTS_MODEL_DIR, to: 'models/kitten-mini-en-v0_8' },
+    {
+      from: '../../tooling/chorus-delivery/install-chorus-update.ps1',
+      to: 'chorus-delivery/install-chorus-update.ps1',
+    },
+  ],
+  afterPack: async ({ appOutDir }) => {
+    const provenance = process.env.CHORUS_BUILD_PROVENANCE_JSON;
+    if (!provenance) return;
+    const resourcesPath = join(appOutDir, 'resources');
+    await mkdir(resourcesPath, { recursive: true });
+    await writeFile(join(resourcesPath, 'build-provenance.json'), provenance, 'utf8');
+  },
   asarUnpack: [
     'out/main/adapters/**',
     'node_modules/better-sqlite3/**',

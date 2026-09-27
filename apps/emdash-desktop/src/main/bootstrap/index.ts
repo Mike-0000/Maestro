@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { config as dotenvConfig } from 'dotenv';
 import { app, ipcMain } from 'electron';
 import { log } from '@main/lib/logger';
@@ -148,7 +151,49 @@ async function destroyMainWindowBeforeRecovery(
 function registerBootReportChannel(): void {
   ipcMain.on('emdash:boot-usable-workspace', () => {
     recordUsableWorkspace(Date.now() - (process.getCreationTime() ?? Date.now()));
+    void recordCandidateStartupReceipt();
   });
+}
+
+async function recordCandidateStartupReceipt(): Promise<void> {
+  const nonce = process.env.CHORUS_UPDATE_LAUNCH_NONCE;
+  if (
+    !app.isPackaged ||
+    process.platform !== 'win32' ||
+    !nonce ||
+    !/^[a-f0-9-]{36}$/i.test(nonce)
+  ) {
+    return;
+  }
+  try {
+    const provenancePath = join(process.resourcesPath, 'build-provenance.json');
+    const provenance = JSON.parse(await readFile(provenancePath, 'utf8')) as {
+      buildId?: string;
+      commit?: string;
+    };
+    if (!provenance.buildId || !provenance.commit) return;
+    const localAppData = process.env.LOCALAPPDATA;
+    if (!localAppData) return;
+    const receiptRoot = join(localAppData, 'Chorus', 'Delivery', 'v1', 'startup-receipts');
+    await mkdir(receiptRoot, { recursive: true });
+    const target = join(receiptRoot, `${nonce}.json`);
+    const temporary = `${target}.${randomUUID()}.tmp`;
+    await writeFile(
+      temporary,
+      JSON.stringify({
+        nonce,
+        buildId: provenance.buildId,
+        commit: provenance.commit,
+        version: app.getVersion(),
+        processId: process.pid,
+        readyAt: new Date().toISOString(),
+      }),
+      { flag: 'wx' }
+    );
+    await rename(temporary, target);
+  } catch (error) {
+    log.warn('local updates: failed to write startup health receipt', { error });
+  }
 }
 
 async function handleBootWatchdogTrigger(trigger: BootWatchdogTrigger): Promise<void> {

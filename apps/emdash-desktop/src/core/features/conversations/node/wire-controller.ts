@@ -98,6 +98,9 @@ export type CreateConversationsWireControllerOptions = Readonly<{
   logger: Logger;
   projects: Pick<ProjectAttachmentManager, 'requireAttached'>;
   telemetry: TelemetryService;
+  localUpdates?: {
+    recordWorkStarted(projectId: string, taskId: string): Promise<() => void>;
+  };
   taskSessions: Pick<TaskSessionManager, 'getTask'>;
   withCompensation: CompensationRunner;
   hostIsReachable: (hostRef: SerializedHostRef) => boolean;
@@ -242,10 +245,20 @@ export function createConversationsWireController(
       },
       terminate: (input, meta) =>
         run(input.conversationId, (client) => client.acp.terminate(input, callOptions(meta))),
-      sendPrompt: (input, meta) =>
-        run(input.conversationId, (client) =>
-          client.acp.sendPrompt(input, { ...callOptions(meta), timeoutMs: 0 })
-        ),
+      sendPrompt: async (input, meta) => {
+        const runtimeTarget = await target(input.conversationId);
+        const releaseDispatch = await options.localUpdates?.recordWorkStarted(
+          runtimeTarget.projectId,
+          runtimeTarget.taskId
+        );
+        try {
+          return await withConversationRuntime(options, Promise.resolve(runtimeTarget), (client) =>
+            client.acp.sendPrompt(input, { ...callOptions(meta), timeoutMs: 0 })
+          );
+        } finally {
+          releaseDispatch?.();
+        }
+      },
       editQueuedPrompt: (input, meta) =>
         run(input.conversationId, (client) =>
           client.acp.editQueuedPrompt(input, callOptions(meta))
@@ -297,10 +310,34 @@ export function createConversationsWireController(
         ),
     },
     tui: {
-      start: (input, meta) =>
-        run(input.conversationId, (client) => client.tuiAgents.start(input, callOptions(meta))),
-      resume: (input, meta) =>
-        run(input.conversationId, (client) => client.tuiAgents.resume(input, callOptions(meta))),
+      start: async (input, meta) => {
+        const runtimeTarget = await target(input.conversationId);
+        const releaseDispatch = await options.localUpdates?.recordWorkStarted(
+          runtimeTarget.projectId,
+          runtimeTarget.taskId
+        );
+        try {
+          return await withConversationRuntime(options, Promise.resolve(runtimeTarget), (client) =>
+            client.tuiAgents.start(input, callOptions(meta))
+          );
+        } finally {
+          releaseDispatch?.();
+        }
+      },
+      resume: async (input, meta) => {
+        const runtimeTarget = await target(input.conversationId);
+        const releaseDispatch = await options.localUpdates?.recordWorkStarted(
+          runtimeTarget.projectId,
+          runtimeTarget.taskId
+        );
+        try {
+          return await withConversationRuntime(options, Promise.resolve(runtimeTarget), (client) =>
+            client.tuiAgents.resume(input, callOptions(meta))
+          );
+        } finally {
+          releaseDispatch?.();
+        }
+      },
       stop: (input, meta) =>
         run(input.conversationId, (client) => client.tuiAgents.stop(input, callOptions(meta))),
       delete: (input, meta) =>
@@ -309,13 +346,28 @@ export function createConversationsWireController(
         run(input.conversationId, (client) => client.tuiAgents.kill(input, callOptions(meta))),
       sendInput: async (input, meta) => {
         const runtimeTarget = await target(input.conversationId);
-        return withConversationRuntime(options, Promise.resolve(runtimeTarget), async (client) => {
-          const result = await client.tuiAgents.sendInput(input, callOptions(meta));
-          if (result.success && input.data.includes('\r')) {
-            await hooks.recordTuiInput(runtimeTarget);
-          }
-          return result;
-        });
+        let releaseDispatch: (() => void) | undefined;
+        if (input.data.includes('\r')) {
+          releaseDispatch = await options.localUpdates?.recordWorkStarted(
+            runtimeTarget.projectId,
+            runtimeTarget.taskId
+          );
+        }
+        try {
+          return await withConversationRuntime(
+            options,
+            Promise.resolve(runtimeTarget),
+            async (client) => {
+              const result = await client.tuiAgents.sendInput(input, callOptions(meta));
+              if (result.success && input.data.includes('\r')) {
+                await hooks.recordTuiInput(runtimeTarget);
+              }
+              return result;
+            }
+          );
+        } finally {
+          releaseDispatch?.();
+        }
       },
       resize: (input, meta) =>
         run(input.conversationId, (client) => client.tuiAgents.resize(input, callOptions(meta))),

@@ -9,7 +9,7 @@ import {
   liveWorkspaces,
   workspaceRegistryTable as workspaces,
 } from '@core/features/workspaces/api/node/registry';
-import type { TaskStatsData } from '@core/primitives/tasks/api';
+import type { Task, TaskStatsData } from '@core/primitives/tasks/api';
 import type { TelemetryService } from '@core/primitives/telemetry/api/telemetry';
 import type { AppDb } from '@core/services/app-db/node/db';
 import { appDbPokes, matchProject } from '@core/services/app-db/node/pokes';
@@ -30,7 +30,14 @@ export function createTasksWireController(options: {
   service: TaskService;
   taskList: TaskListOperations;
   telemetry: TelemetryService;
+  localUpdates?: {
+    onTaskCreated(task: Task): Promise<void>;
+    resolveTaskBase(projectId: string): Promise<string | null>;
+  };
 }): TasksWireController {
+  const removeTaskCreatedHook = options.localUpdates
+    ? options.service.on('task:created', (task) => options.localUpdates?.onTaskCreated(task))
+    : () => undefined;
   const taskOperations = createTaskOperations(options);
   const taskListFamily = family(
     ({ projectId }: { projectId: string }, scope) =>
@@ -148,7 +155,22 @@ export function createTasksWireController(options: {
   });
   return {
     impl: {
-      createTask: (input) => taskOperations.createTask(input),
+      createTask: async (input) => {
+        const deliveryBase = await options.localUpdates?.resolveTaskBase(input.projectId);
+        if (!deliveryBase || input.workspaceConfig.git.kind !== 'create-branch') {
+          return taskOperations.createTask(input);
+        }
+        return taskOperations.createTask({
+          ...input,
+          workspaceConfig: {
+            ...input.workspaceConfig,
+            git: {
+              ...input.workspaceConfig.git,
+              fromBranch: { type: 'local', branch: deliveryBase },
+            },
+          },
+        });
+      },
       getDeletePreflight: ({ projectId, taskIds }) =>
         taskOperations.getDeletePreflight(projectId, taskIds),
       deleteTask: ({ projectId, taskId, options }) =>
@@ -167,6 +189,7 @@ export function createTasksWireController(options: {
       },
     },
     async dispose() {
+      removeTaskCreatedHook();
       await taskListProvider.dispose();
       await taskStatsProvider.dispose();
       await taskListFamily.dispose();

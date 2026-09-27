@@ -21,6 +21,7 @@ import { getNavigation } from '@core/primitives/navigation/browser/navigation-se
 import { cn } from '@core/primitives/styling/browser/cn';
 import { getConductorStore } from '../../contributions/browser/app-stores';
 import { ConductorLogPanel } from './conductor-log-panel';
+import { LocalUpdateCard } from './local-update-card';
 import { PendingActionCard } from './pending-action-card';
 import { pendingKeyAction } from './pending-keys';
 import { PlanPanel } from './plan-panel';
@@ -82,6 +83,7 @@ export const ConductorHud = observer(function ConductorHud() {
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex flex-col items-center gap-2 px-4">
       <PlanPanel />
+      <LocalUpdateCard />
       {setupOpen && <VoiceSetupPanel onClose={() => setSetupOpen(false)} />}
       <div
         role="status"

@@ -1,5 +1,6 @@
 import { makeAutoObservable, reaction, runInAction } from 'mobx';
 import type { CanvasStore } from '@core/features/canvas/api/browser/stores/canvas-store';
+import { getLocalUpdatesClient } from '@core/features/local-updates/api/browser/client';
 import { getTaskStore } from '@core/features/tasks/api/browser/task-state/task-selectors';
 import { log } from '@core/primitives/logging/browser/logger';
 import { getConductorClient } from '../api/browser/client';
@@ -11,7 +12,14 @@ import type { InstalledProvider } from './roster';
 import { entryForConversation } from './roster';
 import { resolveProjectId, spawnAgentTask, startAgentSession } from './spawn';
 
-export type SubtaskState = 'pending' | 'waiting' | 'spawning' | 'running' | 'done' | 'failed';
+export type SubtaskState =
+  | 'pending'
+  | 'waiting'
+  | 'awaiting-integration'
+  | 'spawning'
+  | 'running'
+  | 'done'
+  | 'failed';
 
 export type PlannedSubtask = PlanSubtask & {
   state: SubtaskState;
@@ -59,16 +67,21 @@ export class PlanStore {
   checkingConflicts = false;
   private radarTimer: ReturnType<typeof setInterval> | null = null;
   private readonly disposers: (() => void)[] = [];
+  private checkingDelivery = false;
 
   constructor(
     private readonly canvas: CanvasStore,
     private readonly events: PlanEvents
   ) {
-    makeAutoObservable<PlanStore, 'canvas' | 'events' | 'radarTimer' | 'disposers'>(this, {
+    makeAutoObservable<
+      PlanStore,
+      'canvas' | 'events' | 'radarTimer' | 'disposers' | 'checkingDelivery'
+    >(this, {
       canvas: false,
       events: false,
       radarTimer: false,
       disposers: false,
+      checkingDelivery: false,
     });
     // Advance subtasks as their agents finish.
     this.disposers.push(
@@ -95,6 +108,10 @@ export class PlanStore {
 
   get runningSubtasks(): PlannedSubtask[] {
     return this.plan?.subtasks.filter((subtask) => subtask.state === 'running') ?? [];
+  }
+
+  get deliveryStatusRefreshing(): boolean {
+    return this.checkingDelivery;
   }
 
   /** One line for the conductor's context block. */
@@ -281,7 +298,15 @@ export class PlanStore {
     for (const subtask of plan.subtasks) {
       if (subtask.state !== 'running' || !subtask.conversationId) continue;
       const entry = entryForConversation(this.canvas, subtask.conversationId);
-      if (entry?.status === 'completed') subtask.state = 'done';
+      if (entry?.status !== 'completed') continue;
+      const hasDependents = plan.subtasks.some((other) => other.sequential_after === subtask.title);
+      if (hasDependents) {
+        subtask.state = 'awaiting-integration';
+        subtask.error = 'Submit and promote this task before its dependent can start.';
+        void this.refreshDeliveryReadiness();
+      } else {
+        subtask.state = 'done';
+      }
     }
     for (const subtask of plan.subtasks) {
       if (subtask.state !== 'waiting') continue;
@@ -304,6 +329,48 @@ export class PlanStore {
           : `The plan finished with ${failed} failed ${failed === 1 ? 'subtask' : 'subtasks'}.`
       );
       void this.checkConflicts();
+    }
+  }
+
+  async refreshDeliveryReadiness(): Promise<void> {
+    const plan = this.plan;
+    if (!plan || plan.status !== 'running' || this.checkingDelivery) return;
+    const waiting = plan.subtasks.filter((subtask) => subtask.state === 'awaiting-integration');
+    if (waiting.length === 0) return;
+
+    this.checkingDelivery = true;
+    try {
+      const status = await (await getLocalUpdatesClient()).status({ projectId: plan.projectId });
+      runInAction(() => {
+        if (this.plan !== plan || plan.status !== 'running') return;
+        for (const subtask of waiting) {
+          const task = subtask.taskId
+            ? status.success
+              ? status.data.tasks.find((candidate) => candidate.taskId === subtask.taskId)
+              : undefined
+            : undefined;
+          if (task?.state === 'integrated') {
+            subtask.state = 'done';
+            delete subtask.error;
+          } else {
+            const detail = status.success
+              ? task
+                ? `current delivery state: ${task.state}`
+                : 'this task is not enrolled in the project coordinator'
+              : status.error.message;
+            subtask.error = `Waiting for this task to be submitted and promoted to chorus/main (${detail}).`;
+          }
+        }
+      });
+      this.advance();
+    } catch (error) {
+      runInAction(() => {
+        for (const subtask of waiting) {
+          subtask.error = `Waiting for project delivery status: ${error instanceof Error ? error.message : String(error)}`;
+        }
+      });
+    } finally {
+      runInAction(() => (this.checkingDelivery = false));
     }
   }
 
