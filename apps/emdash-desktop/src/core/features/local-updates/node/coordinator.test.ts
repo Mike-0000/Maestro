@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
+import { REQUIRED_BUILD_CHECKS } from './coordinator/build-validation.mjs';
 import { createCoordinator } from './coordinator/coordinator.mjs';
 
 const exec = promisify(execFile);
@@ -36,7 +37,7 @@ async function createFixture() {
       await beforeValidation?.();
       return {
         integratedCommit: candidate.commit as string,
-        checks: ['frozen-install', 'workspace-check', 'workspace-build', 'windows-package'],
+        checks: [...REQUIRED_BUILD_CHECKS],
         artifactDigest: 'a'.repeat(64),
         manifestPath: join(root, 'state', 'test-build-manifest.json'),
         buildId: 'test-build',
