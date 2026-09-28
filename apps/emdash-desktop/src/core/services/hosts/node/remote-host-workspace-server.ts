@@ -10,20 +10,21 @@ import {
   type Clock,
 } from '@emdash/shared/scheduling';
 import { cell, derived, snapshot, type Readable } from '@emdash/wire/state';
+import { RemotePlatformUnsupportedError } from '@core/primitives/ssh/api/remote-platform';
 import type { HostServerState } from '../api/contract';
 import type { HostWorkspaceServer } from '../api/node/host-workspace-server';
 import type { HostStateModel } from './state-model';
 import { WorkspaceServerProtocolError } from './workspace-server/connect/protocol';
 import type { WorkspaceServerDialer } from './workspace-server/connect/wire-connection-manager';
-import { workspaceServerLayout, type WorkspaceServerLayout } from './workspace-server/layout';
+import {
+  workspaceServerLayoutForHost,
+  type WorkspaceServerLayout,
+} from './workspace-server/layout';
 import {
   WorkspaceServerDaemonError,
   type RemoteWorkspaceServerDaemon,
 } from './workspace-server/provision/daemon-control';
-import {
-  WINDOWS_SSH_UNSUPPORTED_MESSAGE,
-  type RemoteHostProbe,
-} from './workspace-server/provision/host-probe';
+import type { RemoteHostProbe } from './workspace-server/provision/host-probe';
 import {
   WorkspaceServerInstallError,
   type WorkspaceServerInstaller,
@@ -249,7 +250,12 @@ export class RemoteHostWorkspaceServer implements HostWorkspaceServer {
         this.deps.state.set(connectionId, { status: 'not-installed' });
         return;
       }
-      const latestVersion = await this.resolveLatestVersion(connectionId, signal, options);
+      const latestVersion = await this.resolveLatestVersion(
+        connectionId,
+        layout.platform,
+        signal,
+        options
+      );
       throwIfAborted(signal);
 
       try {
@@ -281,12 +287,17 @@ export class RemoteHostWorkspaceServer implements HostWorkspaceServer {
   }
 
   private async resolveLayout(signal: AbortSignal): Promise<WorkspaceServerLayout> {
-    const host = await this.deps.host.probe(signal);
-    throwIfAborted(signal);
-    if (host.platform === 'win32') {
-      throw new HostServerOperationError('unsupported-platform', WINDOWS_SSH_UNSUPPORTED_MESSAGE);
+    let host;
+    try {
+      host = await this.deps.host.probe(signal);
+    } catch (error) {
+      if (error instanceof RemotePlatformUnsupportedError) {
+        throw new HostServerOperationError('unsupported-platform', error.message);
+      }
+      throw error;
     }
-    return workspaceServerLayout(host.home);
+    throwIfAborted(signal);
+    return workspaceServerLayoutForHost(host);
   }
 
   private async resolveInstalled(
@@ -363,6 +374,7 @@ export class RemoteHostWorkspaceServer implements HostWorkspaceServer {
 
   private async resolveLatestVersion(
     connectionId: string,
+    platform: WorkspaceServerLayout['platform'],
     signal: AbortSignal,
     options: RefreshOptions
   ): Promise<string | undefined> {
@@ -376,7 +388,7 @@ export class RemoteHostWorkspaceServer implements HostWorkspaceServer {
     }
 
     try {
-      const version = await this.deps.installer.availableVersion(connectionId, signal);
+      const version = await this.deps.installer.availableVersion(connectionId, signal, platform);
       throwIfAborted(signal);
       this.latestVersion = { version, checkedAt: this.clock.now() };
       return version;

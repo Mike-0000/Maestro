@@ -20,6 +20,12 @@ const targetDefinitions = {
     arch: 'x64',
     dockerPlatform: 'linux/amd64',
   },
+  'win32-x64': {
+    id: 'win32-x64',
+    os: 'win32',
+    arch: 'x64',
+    dockerPlatform: undefined,
+  },
 } as const;
 
 export type PackageTargetId = keyof typeof targetDefinitions;
@@ -30,12 +36,14 @@ const releaseRunners: Record<PackageTargetId, string> = {
   'darwin-arm64': 'macos-latest',
   'linux-arm64': 'ubuntu-24.04-arm',
   'linux-x64': 'ubuntu-latest',
+  'win32-x64': 'windows-latest',
 };
 
 export const releaseTargets = [
   targetDefinitions['linux-x64'],
   targetDefinitions['linux-arm64'],
   targetDefinitions['darwin-arm64'],
+  targetDefinitions['win32-x64'],
 ] as const satisfies readonly PackageTarget[];
 
 const ripgrepReleaseTargets: Record<
@@ -53,6 +61,10 @@ const ripgrepReleaseTargets: Record<
   'linux-x64': {
     triple: 'x86_64-unknown-linux-musl',
     sha256: '33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c',
+  },
+  'win32-x64': {
+    triple: 'x86_64-pc-windows-msvc',
+    sha256: '71b2fef860abe467217a538ff31de02f5258807c0129f771846f87bd029aafc5',
   },
 };
 
@@ -141,8 +153,20 @@ export function parsePackageArgs(args: string[]): PackageCliOptions {
   };
 }
 
+/** Windows artifacts and upstream Windows distributions are zip files; the rest are tarballs. */
+export function isWindowsTarget(target: PackageTarget): boolean {
+  return target.os === 'win32';
+}
+
 export function nodeDistributionArchiveName(nodeVersion: string, target: PackageTarget): string {
-  return `node-v${nodeVersion}-${target.os}-${target.arch}.tar.xz`;
+  return isWindowsTarget(target)
+    ? `node-v${nodeVersion}-win-${target.arch}.zip`
+    : `node-v${nodeVersion}-${target.os}-${target.arch}.tar.xz`;
+}
+
+/** The top-level directory inside the Node distribution archive. */
+export function nodeDistributionDirectoryName(nodeVersion: string, target: PackageTarget): string {
+  return nodeDistributionArchiveName(nodeVersion, target).replace(/\.(?:tar\.xz|zip)$/, '');
 }
 
 export function nodeDistributionUrl(nodeVersion: string, target: PackageTarget): string {
@@ -157,7 +181,7 @@ export function ripgrepDistributionName(target: PackageTarget): string {
 }
 
 export function ripgrepArchiveName(target: PackageTarget): string {
-  return `${ripgrepDistributionName(target)}.tar.gz`;
+  return `${ripgrepDistributionName(target)}${isWindowsTarget(target) ? '.zip' : '.tar.gz'}`;
 }
 
 export function ripgrepDistributionUrl(target: PackageTarget): string {
@@ -170,8 +194,12 @@ export function ripgrepArchiveChecksum(target: PackageTarget): string {
   return ripgrepReleaseTargets[target.id].sha256;
 }
 
+export function artifactArchiveExtension(target: PackageTarget): '.zip' | '.tar.gz' {
+  return isWindowsTarget(target) ? '.zip' : '.tar.gz';
+}
+
 export function artifactArchiveName(version: string, target: PackageTarget): string {
-  return `${artifactRootName}-${version}-${target.os}-${target.arch}.tar.gz`;
+  return `${artifactRootName}-${version}-${target.os}-${target.arch}${artifactArchiveExtension(target)}`;
 }
 
 export function releaseBuildMatrix(): {
@@ -301,6 +329,15 @@ export EMDASH_WS_APP_VERSION=${quoteShellArgument(version)}
 export EMDASH_WS_RIPGREP_PATH="$root_dir/bin/rg"
 exec "$root_dir/node" "$root_dir/dist/index.mjs" "$@"
 `;
+}
+
+/**
+ * `bin\emdash-workspace-server.cmd` for running the server by hand on Windows. Chorus itself
+ * starts `node.exe dist\index.mjs` directly, and the server reads its version and bundled
+ * ripgrep from the artifact, so the launcher sets no environment.
+ */
+export function createWindowsLauncher(): string {
+  return ['@echo off', String.raw`"%~dp0..\node.exe" "%~dp0..\dist\index.mjs" %*`, ''].join('\r\n');
 }
 
 function quoteShellArgument(value: string): string {

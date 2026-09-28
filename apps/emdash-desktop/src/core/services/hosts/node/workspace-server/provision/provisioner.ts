@@ -7,14 +7,15 @@ import {
   throwIfAborted,
   type Clock,
 } from '@emdash/shared/scheduling';
+import { RemotePlatformUnsupportedError } from '@core/primitives/ssh/api/remote-platform';
 import type { SshWorkspaceServerTarget } from '../../../api/targets';
 import type { HostStateModel } from '../../state-model';
 import { WorkspaceServerProtocolError } from '../connect/protocol';
 import type { WorkspaceServerDialer } from '../connect/wire-connection-manager';
-import { workspaceServerLayout, type WorkspaceServerLayout } from '../layout';
+import { workspaceServerLayoutForHost, type WorkspaceServerLayout } from '../layout';
 import { sshWorkspaceServerTarget } from '../targets';
 import type { RemoteWorkspaceServerDaemon } from './daemon-control';
-import { WINDOWS_SSH_UNSUPPORTED_MESSAGE, type RemoteHostProbe } from './host-probe';
+import type { RemoteHostProbe } from './host-probe';
 import { WorkspaceServerInstallError, type WorkspaceServerInstaller } from './installer';
 
 export type WorkspaceServerProvisionErrorCode =
@@ -138,14 +139,18 @@ export class WorkspaceServerProvisioner {
       try {
         host = await this.deps.host.probe(signal);
       } catch (error) {
+        if (error instanceof RemotePlatformUnsupportedError) {
+          throw provisionError(
+            'unsupported-platform',
+            'This machine does not meet the workspace-server requirements',
+            error
+          );
+        }
         throw provisionError('connection-failed', 'Could not inspect the remote machine', error);
       }
       throwIfAborted(signal);
-      if (host.platform === 'win32') {
-        throw provisionError('unsupported-platform', WINDOWS_SSH_UNSUPPORTED_MESSAGE);
-      }
 
-      const layout = workspaceServerLayout(host.home);
+      const layout = workspaceServerLayoutForHost(host);
       const target = sshWorkspaceServerTarget(connectionId, layout);
 
       const outcome = await this.tryDial(target, signal);
@@ -206,7 +211,11 @@ export class WorkspaceServerProvisioner {
 
     let availableVersion: string;
     try {
-      availableVersion = await this.deps.installer.availableVersion(connectionId, signal);
+      availableVersion = await this.deps.installer.availableVersion(
+        connectionId,
+        signal,
+        layout.platform
+      );
     } catch (error) {
       throwIfAborted(signal);
       this.deps.logger?.warn('Could not resolve latest workspace-server dev version', {

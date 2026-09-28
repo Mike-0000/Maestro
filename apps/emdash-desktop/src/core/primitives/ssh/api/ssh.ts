@@ -1,3 +1,5 @@
+import type { RemotePlatformSummary } from './remote-platform';
+
 /**
  * SSH Connection Configuration
  * Used for storing SSH connection settings
@@ -68,6 +70,10 @@ export interface ConnectionTestResult {
   latency?: number;
   serverVersion?: string;
   debugLogs?: string[];
+  /** The remote OS and any setup problems, when SSH succeeded and the platform check answered. */
+  platform?: RemotePlatformSummary;
+  /** Why the platform check failed after SSH succeeded. */
+  platformError?: string;
 }
 
 /**

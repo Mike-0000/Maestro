@@ -61,6 +61,16 @@ export interface SshClientProxy {
     options?: { signal?: AbortSignal; timeoutMs?: number }
   ): Promise<ClientChannel>;
 
+  /**
+   * Opens an exec channel whose stdin/stdout carry a caller-owned byte stream, for remote relays
+   * such as the Windows named-pipe bridge. `command` is sent verbatim to the remote default shell,
+   * so callers must pass a shell-neutral command line. The signal only governs acquisition.
+   */
+  openExecChannel(
+    command: string,
+    options?: { signal?: AbortSignal; timeoutMs?: number }
+  ): Promise<ClientChannel>;
+
   /** Runs a structured command through the current live connection with bounded resources. */
   exec(command: Command, options?: SshExecOptions): Promise<SshExecResult>;
 

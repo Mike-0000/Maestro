@@ -4,7 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HostRuntimeConnection } from './host-runtime-connection';
 import { createFaultPeer } from './testing/connection-supervisor-fixture';
 
-const target = { kind: 'ssh' as const, sshConnectionId: 'test', socketPath: '/workspace.sock' };
+const target = {
+  kind: 'ssh' as const,
+  sshConnectionId: 'test',
+  socketPath: '/workspace.sock',
+  channel: 'streamlocal' as const,
+};
 
 describe('HostRuntimeConnection', () => {
   let scope: Scope;

@@ -213,7 +213,12 @@ export function createSupervisorDriver(
 ) {
   const scope = createScope({ label: 'host-supervisor-acceptance' });
   const host = hostRef('remote', 'acceptance-host');
-  const target = { kind: 'ssh' as const, sshConnectionId: host.id, socketPath: '/workspace.sock' };
+  const target = {
+    kind: 'ssh' as const,
+    sshConnectionId: host.id,
+    socketPath: '/workspace.sock',
+    channel: 'streamlocal' as const,
+  };
   let enabled = true;
   let sshConnected = true;
   const managed = new ManagedHostConnection({

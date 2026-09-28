@@ -9,6 +9,11 @@ independent wire session.
 Stdio mode runs the same controller over stdin/stdout. It is primarily a test and
 debugging harness because stdout is reserved for the wire protocol.
 
+On Windows the daemon listens on a randomly named pipe and writes its name into an endpoint
+record at the socket path, `start` launches it outside the SSH session's job object through WMI
+(the internal `daemonize` command), and `stop` ends the whole process tree. See
+`windows-hosts.md`.
+
 ## Process Roles
 
 The command line has two roles:

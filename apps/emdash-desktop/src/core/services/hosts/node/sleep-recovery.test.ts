@@ -29,6 +29,7 @@ describe('sleep recovery', () => {
           kind: 'ssh',
           sshConnectionId: 'acceptance-host',
           socketPath: '/workspace.sock',
+          channel: 'streamlocal',
         }),
         open: () => (deadPhysicalConnection ? new Promise(() => {}) : peer.openTransport()),
         cancel() {},

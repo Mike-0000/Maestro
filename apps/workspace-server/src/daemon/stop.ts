@@ -1,4 +1,7 @@
+import { execFile } from 'node:child_process';
+import { unlink } from 'node:fs/promises';
 import { err, ok, type Result } from '@emdash/shared';
+import { defaultDaemonEndpointMode, type DaemonEndpointMode } from './endpoint';
 import { daemonPaths, type DaemonPaths } from './paths';
 import { isProcessAlive, readPidFile, removePidFile, type ProcessSignaler } from './pid-file';
 import { probeDaemon, type DaemonHealth, type DaemonProbeError } from './probe';
@@ -24,6 +27,13 @@ export type StopDaemonOptions = {
     options?: { timeoutMs?: number }
   ) => Promise<Result<DaemonHealth, DaemonProbeError>>;
   sleep?: (ms: number) => Promise<void>;
+  platform?: NodeJS.Platform;
+  endpointMode?: DaemonEndpointMode;
+  /**
+   * Terminates the daemon process tree on Windows, where `process.kill(pid, 'SIGTERM')` ends
+   * only the daemon itself and would orphan its workers, PTYs, and agent processes.
+   */
+  terminateTree?: (pid: number) => Promise<void>;
 };
 
 export async function stopDaemon(
@@ -43,8 +53,13 @@ export async function stopDaemon(
     return ok({ status: 'not-running' as const, paths, pid: pid.data });
   }
 
+  const platform = options.platform ?? process.platform;
   try {
-    signaler(pid.data, 'SIGTERM');
+    if (platform === 'win32') {
+      await (options.terminateTree ?? taskkillTree)(pid.data);
+    } else {
+      signaler(pid.data, 'SIGTERM');
+    }
   } catch (error) {
     return err({
       type: 'signal',
@@ -56,6 +71,10 @@ export async function stopDaemon(
   if (!stopped.success) return stopped;
 
   await removePidFile(paths.pidPath);
+  if ((options.endpointMode ?? defaultDaemonEndpointMode(platform)) === 'record') {
+    // A tree kill skips the daemon's own cleanup; the record no longer names a live pipe.
+    await unlink(paths.socketPath).catch(() => {});
+  }
   return ok({ status: 'stopped' as const, paths, pid: pid.data });
 }
 
@@ -81,6 +100,21 @@ async function waitForStopped(
   }
 
   return err({ type: 'timeout', message: `Timed out stopping workspace daemon pid ${pid}` });
+}
+
+function taskkillTree(pid: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'taskkill.exe',
+      ['/PID', String(pid), '/T', '/F'],
+      { encoding: 'utf8', timeout: 10_000, windowsHide: true },
+      (error, _stdout, stderr) => {
+        if (error)
+          reject(new Error(`taskkill failed for pid ${pid}: ${stderr.trim() || error.message}`));
+        else resolve();
+      }
+    );
+  });
 }
 
 function defaultSleep(ms: number): Promise<void> {

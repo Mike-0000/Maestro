@@ -12,6 +12,7 @@ export {
 } from './availability';
 export type {
   LocalWorkspaceServerTarget,
+  SshWorkspaceServerChannel,
   SshWorkspaceServerTarget,
   WorkspaceServerTarget,
 } from './targets';

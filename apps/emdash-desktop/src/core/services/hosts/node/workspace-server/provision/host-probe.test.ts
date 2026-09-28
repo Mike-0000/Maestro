@@ -1,6 +1,7 @@
 import { deferred } from '@emdash/shared/testing';
 import { describe, expect, it, vi } from 'vitest';
 import type { SshClientProxy } from '@core/primitives/ssh/api/node/ssh-client-proxy';
+import { RemotePlatformUnsupportedError } from '@core/primitives/ssh/api/remote-platform';
 import { RemoteHostProbe } from './host-probe';
 
 describe('RemoteHostProbe', () => {
@@ -34,66 +35,78 @@ describe('RemoteHostProbe', () => {
     expect(execScript).toHaveBeenCalledTimes(2);
   });
 
-  it('classifies standard Windows hosts without running POSIX shell syntax', async () => {
+  it('classifies supported Windows hosts through Windows PowerShell', async () => {
     const exec = vi
       .fn<SshClientProxy['exec']>()
-      .mockResolvedValueOnce({ stdout: '', stderr: 'uname is not recognized', exitCode: 1 })
-      .mockResolvedValueOnce({
-        stdout: 'Microsoft Windows [Version 10.0.26100]\n',
-        stderr: '',
-        exitCode: 0,
-      });
-    const execScript = vi.fn<SshClientProxy['execScript']>();
+      .mockResolvedValue({ stdout: '', stderr: 'uname is not recognized', exitCode: 1 });
+    const execScript = vi.fn<SshClientProxy['execScript']>().mockResolvedValue({
+      stdout: [
+        'emdash-probe=1',
+        'language=FullLanguage',
+        'home=C:\\Users\\dev',
+        'arch=AMD64',
+        'os-build=26100',
+        'ps-version=5.1.26100.1',
+        'git=C:\\Program Files\\Git\\cmd\\git.exe',
+      ].join('\r\n'),
+      stderr: '',
+      exitCode: 0,
+    });
     const proxy = { exec, execScript } as Pick<
       SshClientProxy,
       'exec' | 'execScript'
     > as SshClientProxy;
     const probe = new RemoteHostProbe('ssh-1', { ensureProxy: vi.fn(async () => proxy) });
 
-    await expect(probe.probe()).resolves.toEqual({ platform: 'win32' });
-    expect(exec).toHaveBeenNthCalledWith(
-      1,
-      { command: 'uname', args: ['-s'] },
-      expect.objectContaining({ timeoutMs: 10_000 })
+    await expect(probe.probe()).resolves.toEqual({
+      platform: 'windows',
+      home: 'C:\\Users\\dev',
+      architecture: 'x64',
+    });
+    expect(execScript).toHaveBeenCalledWith(
+      expect.stringMatching(/^powershell\.exe -NoLogo -NoProfile -NonInteractive /),
+      expect.anything()
     );
-    expect(exec).toHaveBeenNthCalledWith(
-      2,
-      { command: 'cmd.exe', args: ['/d', '/s', '/c', 'ver'] },
-      expect.objectContaining({ timeoutMs: 10_000 })
-    );
+  });
+
+  it('rejects Windows hosts that fail a blocking requirement', async () => {
+    const exec = vi
+      .fn<SshClientProxy['exec']>()
+      .mockResolvedValue({ stdout: 'MINGW64_NT-10.0\n', stderr: '', exitCode: 0 });
+    const execScript = vi.fn<SshClientProxy['execScript']>().mockResolvedValue({
+      stdout: 'emdash-probe=1\nlanguage=ConstrainedLanguage\n',
+      stderr: '',
+      exitCode: 3,
+    });
+    const proxy = { exec, execScript } as Pick<
+      SshClientProxy,
+      'exec' | 'execScript'
+    > as SshClientProxy;
+    const probe = new RemoteHostProbe('ssh-1', { ensureProxy: vi.fn(async () => proxy) });
+
+    const error = await probe.probe().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(RemotePlatformUnsupportedError);
+    expect((error as RemotePlatformUnsupportedError).issues).toEqual([
+      expect.objectContaining({ code: 'constrained-language' }),
+    ]);
+  });
+
+  it('does not cache a failed classification', async () => {
+    const exec = vi
+      .fn<SshClientProxy['exec']>()
+      .mockResolvedValue({ stdout: '', stderr: 'uname: not found', exitCode: 127 });
+    const execScript = vi
+      .fn<SshClientProxy['execScript']>()
+      .mockResolvedValue({ stdout: '', stderr: 'powershell.exe: not found', exitCode: 127 });
+    const proxy = { exec, execScript } as Pick<
+      SshClientProxy,
+      'exec' | 'execScript'
+    > as SshClientProxy;
+    const probe = new RemoteHostProbe('ssh-1', { ensureProxy: vi.fn(async () => proxy) });
+
+    await expect(probe.probe()).rejects.toThrow('Could not identify the remote operating system');
+    await expect(probe.probe()).rejects.toThrow('uname: not found');
     expect(exec).toHaveBeenCalledTimes(2);
-    expect(execScript).not.toHaveBeenCalled();
-  });
-
-  it('classifies Windows POSIX compatibility shells before reading HOME', async () => {
-    const exec = vi
-      .fn<SshClientProxy['exec']>()
-      .mockResolvedValueOnce({ stdout: 'MINGW64_NT-10.0\n', stderr: '', exitCode: 0 });
-    const execScript = vi.fn<SshClientProxy['execScript']>();
-    const proxy = { exec, execScript } as Pick<
-      SshClientProxy,
-      'exec' | 'execScript'
-    > as SshClientProxy;
-    const probe = new RemoteHostProbe('ssh-1', { ensureProxy: vi.fn(async () => proxy) });
-
-    await expect(probe.probe()).resolves.toEqual({ platform: 'win32' });
-    expect(execScript).not.toHaveBeenCalled();
-  });
-
-  it('does not read HOME when the remote platform cannot be classified', async () => {
-    const exec = vi
-      .fn<SshClientProxy['exec']>()
-      .mockResolvedValueOnce({ stdout: '', stderr: 'uname: not found', exitCode: 127 })
-      .mockResolvedValueOnce({ stdout: '', stderr: 'cmd.exe: not found', exitCode: 127 });
-    const execScript = vi.fn<SshClientProxy['execScript']>();
-    const proxy = { exec, execScript } as Pick<
-      SshClientProxy,
-      'exec' | 'execScript'
-    > as SshClientProxy;
-    const probe = new RemoteHostProbe('ssh-1', { ensureProxy: vi.fn(async () => proxy) });
-
-    await expect(probe.probe()).rejects.toThrow('Remote platform probe failed: uname: not found');
-    expect(execScript).not.toHaveBeenCalled();
   });
 
   it('keeps the replacement probe cached when a dropped probe fails late', async () => {

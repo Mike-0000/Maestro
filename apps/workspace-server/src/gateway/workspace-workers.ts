@@ -46,6 +46,7 @@ import type { Logger } from '@emdash/shared/logger';
 import { createController, type ContractClient } from '@emdash/wire/rpc';
 import { createWireWorkerHost } from '@emdash/wire/worker';
 import { childProcessSpawner } from '@emdash/wire/worker/node';
+import { bundledRipgrepPath } from '../artifact';
 import { workspaceServerRuntimePaths } from '../runtime/paths';
 import { workspaceWorkerPath } from './worker-paths';
 
@@ -240,7 +241,7 @@ export async function createWorkspaceServerRuntimeHost(
       env,
       dependencies: { watcher, userEnv: userShellEnv },
       databasePath: paths.fileSearchDatabase,
-      ripgrepPath: env['EMDASH_WS_RIPGREP_PATH'],
+      ripgrepPath: env['EMDASH_WS_RIPGREP_PATH'] ?? bundledRipgrepPath(),
     })
   );
   const gitPromise = workerHost.spawn(

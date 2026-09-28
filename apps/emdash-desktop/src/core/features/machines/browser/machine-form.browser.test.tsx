@@ -5,14 +5,14 @@ import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { page, userEvent } from 'vitest/browser';
-import type { SshConfig, SshConfigHost } from '@core/primitives/ssh/api';
+import type { ConnectionTestResult, SshConfig, SshConfigHost } from '@core/primitives/ssh/api';
 
 const store = vi.hoisted(() => ({
   connections: [] as SshConfig[],
   getSshConfigHosts: vi.fn<() => Promise<SshConfigHost[]>>(),
   getSshConfigHost: vi.fn<(target: string) => Promise<SshConfigHost>>(),
   saveConnection: vi.fn(async () => ({ id: 'saved' })),
-  testConnection: vi.fn(async () => ({ success: true })),
+  testConnection: vi.fn(async (): Promise<ConnectionTestResult> => ({ success: true })),
 }));
 
 vi.mock('@core/features/machines/contributions/app-stores', () => ({
@@ -814,4 +814,50 @@ it('shows manual routing under Advanced settings and keeps the name across sourc
   await page.getByRole('button', { name: 'SSH config', exact: true }).click();
   await expect.element(name).toHaveValue('My server');
   await expect.element(page.getByRole('combobox', { name: 'Host', exact: true })).toBeVisible();
+});
+
+it('shows the detected Windows platform and what blocks it', async () => {
+  store.testConnection.mockResolvedValueOnce({
+    success: true,
+    latency: 12,
+    platform: {
+      os: 'windows',
+      description: 'Windows build 26100 (AMD64) · PowerShell 5.1.26100.1',
+      issues: [
+        { severity: 'error', code: 'constrained-language', message: 'Needs FullLanguage mode.' },
+        { severity: 'warning', code: 'git-missing', message: 'Install Git for Windows.' },
+      ],
+    },
+  });
+  await render();
+  await resolveTarget();
+  await page.getByRole('button', { name: 'Test Connection', exact: true }).click();
+  await expect
+    .element(
+      page.getByText(
+        'Windows build 26100 (AMD64) · PowerShell 5.1.26100.1 · Maestro cannot use this machine yet'
+      )
+    )
+    .toBeVisible();
+  await expect.element(page.getByText('Needs FullLanguage mode.')).toBeVisible();
+  await expect.element(page.getByText('Install Git for Windows.')).toBeVisible();
+});
+
+it('reports a platform check failure after a successful connection', async () => {
+  store.testConnection.mockResolvedValueOnce({ success: true, platformError: 'probe timed out' });
+  await render();
+  await resolveTarget();
+  await page.getByRole('button', { name: 'Test Connection', exact: true }).click();
+  await expect
+    .element(page.getByText('Could not check the remote platform: probe timed out'))
+    .toBeVisible();
+});
+
+it('explains Windows host prerequisites on request', async () => {
+  await render();
+  await expect.element(page.getByText(/Add-WindowsCapability/)).not.toBeInTheDocument();
+  await page.getByRole('button', { name: 'Connecting to a Windows machine?' }).click();
+  await expect.element(page.getByText(/Add-WindowsCapability -Online/)).toBeVisible();
+  await expect.element(page.getByText(/administrators_authorized_keys/).first()).toBeVisible();
+  await expect.element(page.getByText(/Test-NetConnection <host> -Port 22/)).toBeVisible();
 });

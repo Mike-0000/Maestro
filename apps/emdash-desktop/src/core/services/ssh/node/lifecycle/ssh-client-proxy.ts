@@ -93,6 +93,22 @@ export class SshClientProxy implements SshClientProxyContract {
     );
   }
 
+  /** Opens a caller-owned exec channel (a byte-stream relay) through the current connection. */
+  openExecChannel(
+    command: string,
+    options?: { signal?: AbortSignal; timeoutMs?: number }
+  ): Promise<ClientChannel> {
+    const { client, signal } = this.captureConnection(options?.signal);
+    return openChannel(
+      client,
+      'exec',
+      (callback) => {
+        client.exec(command, callback);
+      },
+      { ...options, signal }
+    );
+  }
+
   /** Runs a structured command through the current live connection with bounded resources. */
   exec(command: Command, options?: SshExecOptions): Promise<SshExecResult> {
     const { client, signal } = this.captureConnection(options?.signal);

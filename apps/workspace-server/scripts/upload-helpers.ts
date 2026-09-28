@@ -6,6 +6,7 @@ import {
   type ReleaseChannel,
 } from '@emdash/core/workspace-server';
 import {
+  artifactArchiveExtension,
   artifactArchiveName,
   artifactRootName,
   parsePackageTarget,
@@ -103,7 +104,7 @@ export function artifactVersionFromArchiveName(
   target: PackageTarget
 ): string | undefined {
   const prefix = `${artifactRootName}-`;
-  const suffix = `-${target.os}-${target.arch}.tar.gz`;
+  const suffix = `-${target.os}-${target.arch}${artifactArchiveExtension(target)}`;
   if (!archiveName.startsWith(prefix) || !archiveName.endsWith(suffix)) return undefined;
   const version = archiveName.slice(prefix.length, -suffix.length);
   validateReleaseVersion(version);
@@ -118,8 +119,15 @@ export function versionedArtifactObjectKey(version: string, artifactName: string
   return `${workspaceServerObjectPrefix}/${version}/${artifactName}`;
 }
 
-export function versionedInstallScriptObjectKey(version: string): string {
-  return versionedArtifactObjectKey(version, 'install.sh');
+/** Install scripts published next to each version's artifacts: POSIX and Windows. */
+export const installScriptNames = ['install.sh', 'install.ps1'] as const;
+export type InstallScriptName = (typeof installScriptNames)[number];
+
+export function versionedInstallScriptObjectKey(
+  version: string,
+  script: InstallScriptName = 'install.sh'
+): string {
+  return versionedArtifactObjectKey(version, script);
 }
 
 export function channelPointerObjectKey(channel: ReleaseChannel, major: number): string {
@@ -140,6 +148,8 @@ export function mutableReleaseObjectKeys(
 
 export function contentTypeForObjectKey(key: string): string {
   if (key.endsWith('.sh')) return 'text/x-shellscript';
+  // Served as text so browsers never offer to run it; PowerShell downloads it to a file.
+  if (key.endsWith('.ps1')) return 'text/plain; charset=utf-8';
   if (key.endsWith('.json')) return 'application/json';
   if (key.endsWith('.txt') || key.endsWith('.sha256')) return 'text/plain';
   return 'application/octet-stream';

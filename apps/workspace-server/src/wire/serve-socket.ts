@@ -5,14 +5,26 @@ import { createConnection, createServer, type Server, type Socket } from 'node:n
 import { dirname } from 'node:path';
 import type { Controller, WireTransport } from '@emdash/wire/rpc';
 import { createWireSessionHub, streamTransport } from '@emdash/wire/rpc';
+import {
+  createWorkspaceServerPipeAddress,
+  defaultDaemonEndpointMode,
+  readEndpointRecord,
+  removeEndpointRecord,
+  writeEndpointRecord,
+  type DaemonEndpointMode,
+} from '../daemon/endpoint';
 import { DEFAULT_WORKSPACE_SERVER_SOCKET_PATH } from '../daemon/paths';
 
 export type SocketServeOptions = {
   socketPath?: string;
+  endpointMode?: DaemonEndpointMode;
 };
 
 export type SocketServeHandle = {
+  /** The well-known path: the socket itself, or the endpoint record in `record` mode. */
   socketPath: string;
+  /** The address the server listens on (equal to `socketPath` in `socket` mode). */
+  listenAddress: string;
   dispose(): Promise<void>;
 };
 
@@ -21,11 +33,19 @@ export async function serveSocket(
   options: SocketServeOptions = {}
 ): Promise<SocketServeHandle> {
   const socketPath = options.socketPath ?? DEFAULT_WORKSPACE_SERVER_SOCKET_PATH;
+  const endpointMode = options.endpointMode ?? defaultDaemonEndpointMode();
   const server = createServer();
   const hub = createWireSessionHub(controller);
 
   await mkdir(dirname(socketPath), { recursive: true, mode: 0o700 });
-  await unlinkStaleSocket(socketPath);
+  let listenAddress: string;
+  if (endpointMode === 'record') {
+    await assertRecordedEndpointIdle(socketPath);
+    listenAddress = createWorkspaceServerPipeAddress();
+  } else {
+    await unlinkStaleSocket(socketPath);
+    listenAddress = socketPath;
+  }
 
   server.on('connection', (socket) => {
     socket.on('error', () => {
@@ -35,16 +55,37 @@ export async function serveSocket(
     hub.open(randomUUID(), socketTransport(socket));
   });
 
-  await listen(server, socketPath);
+  await listen(server, listenAddress);
+  if (endpointMode === 'record') {
+    try {
+      await writeEndpointRecord(socketPath, listenAddress);
+    } catch (error) {
+      await closeServer(server);
+      throw error;
+    }
+  }
 
   return {
     socketPath,
+    listenAddress,
     async dispose() {
       await hub.dispose();
       await closeServer(server);
-      await unlink(socketPath).catch(() => {});
+      if (endpointMode === 'record') {
+        await removeEndpointRecord(socketPath, listenAddress).catch(() => {});
+      } else {
+        await unlink(socketPath).catch(() => {});
+      }
     },
   };
+}
+
+async function assertRecordedEndpointIdle(recordPath: string): Promise<void> {
+  const record = await readEndpointRecord(recordPath);
+  if (record.kind !== 'found') return;
+  if (await canConnect(record.address)) {
+    throw new Error(`Workspace server is already listening at ${record.address} (${recordPath})`);
+  }
 }
 
 async function unlinkStaleSocket(socketPath: string): Promise<void> {

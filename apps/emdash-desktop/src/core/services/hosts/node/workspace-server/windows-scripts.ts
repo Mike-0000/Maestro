@@ -1,0 +1,210 @@
+import { powerShellLiteral, wrapPowerShellScript } from '@emdash/core/primitives/exec/api';
+import { WORKSPACE_SERVER_VERSION_PATTERN, type WindowsWorkspaceServerLayout } from './layout';
+
+/**
+ * Windows PowerShell 5.1 scripts that manage the workspace server over Windows OpenSSH. They run
+ * through `formatPowerShellEncodedCommand`, so no remote shell parses them; every caller value is
+ * embedded as a PowerShell single-quoted literal. Exit codes: 41 download failure (as install.sh),
+ * 44 not installed, 45 invalid `current` pointer or endpoint record, 46 incomplete installation,
+ * 47 pipe connection failure, 48 daemon not running.
+ */
+
+export const WINDOWS_NOT_INSTALLED_EXIT_CODE = 44;
+export const WINDOWS_INVALID_POINTER_EXIT_CODE = 45;
+
+/** Defines `Get-EmdashCurrentVersion`, which returns the selected version or `$null`. */
+function currentVersionFunction(layout: WindowsWorkspaceServerLayout): string {
+  return [
+    'function Get-EmdashCurrentVersion {',
+    `  $pointer = ${powerShellLiteral(layout.currentPointer)}`,
+    '  if (-not [IO.File]::Exists($pointer)) { return $null }',
+    '  $value = [IO.File]::ReadAllText($pointer).Trim()',
+    `  if ($value -cnotmatch ${powerShellLiteral(WORKSPACE_SERVER_VERSION_PATTERN.source)}) {`,
+    "    Write-EmdashError ('The workspace-server current pointer is invalid: ' + $value)",
+    `    exit ${WINDOWS_INVALID_POINTER_EXIT_CODE}`,
+    '  }',
+    '  return $value',
+    '}',
+  ].join('\n');
+}
+
+/** Prints the selected version, or nothing when the workspace server is not installed. */
+export function buildWindowsInstalledVersionScript(layout: WindowsWorkspaceServerLayout): string {
+  return wrapPowerShellScript(
+    [
+      currentVersionFunction(layout),
+      '$version = Get-EmdashCurrentVersion',
+      'if ($version) {',
+      `  $node = [IO.Path]::Combine(${powerShellLiteral(layout.versionsDirectory)}, $version, 'node.exe')`,
+      '  if ([IO.File]::Exists($node)) { [Console]::Out.Write($version) }',
+      '}',
+      'exit 0',
+    ].join('\n')
+  );
+}
+
+/**
+ * Runs `start`, `stop`, or `status` with the selected version's bundled node.exe. The launcher
+ * `.cmd` is not used: a batch file would reintroduce cmd.exe argument parsing.
+ */
+export function buildWindowsDaemonControlScript(
+  layout: WindowsWorkspaceServerLayout,
+  action: 'start' | 'stop' | 'status'
+): string {
+  return wrapPowerShellScript(
+    [
+      currentVersionFunction(layout),
+      // Decode node's UTF-8 output correctly; setting it can fail without a console, which only
+      // affects non-ASCII characters in messages.
+      'try { [Console]::OutputEncoding = New-Object Text.UTF8Encoding $false } catch { }',
+      '$version = Get-EmdashCurrentVersion',
+      'if (-not $version) {',
+      "  Write-EmdashError 'The workspace server is not installed.'",
+      `  exit ${WINDOWS_NOT_INSTALLED_EXIT_CODE}`,
+      '}',
+      `$directory = [IO.Path]::Combine(${powerShellLiteral(layout.versionsDirectory)}, $version)`,
+      "$node = [IO.Path]::Combine($directory, 'node.exe')",
+      "$entrypoint = [IO.Path]::Combine($directory, 'dist', 'index.mjs')",
+      'if (-not [IO.File]::Exists($node) -or -not [IO.File]::Exists($entrypoint)) {',
+      "  Write-EmdashError ('The workspace-server installation at ' + $directory + ' is incomplete.')",
+      '  exit 46',
+      '}',
+      `& $node $entrypoint ${powerShellLiteral(action)} '--socket' ${powerShellLiteral(layout.socketPath)}`,
+      'exit $LASTEXITCODE',
+    ].join('\n')
+  );
+}
+
+/** Written to the bridge's stderr once the named pipe is connected. */
+export const WINDOWS_PIPE_BRIDGE_READY_MARKER = 'emdash-workspace-bridge-ready';
+
+/** Pipe names the daemon writes into its endpoint record (see workspace-server daemon/endpoint). */
+const PIPE_RECORD_PATTERN = String.raw`^\\\\\.\\pipe\\(emdash-workspace-server-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$`;
+
+/**
+ * Relays the SSH channel's stdin/stdout to the daemon's named pipe. Windows OpenSSH cannot forward
+ * Unix sockets, so this replaces streamlocal forwarding: the script reads the endpoint record at
+ * the daemon's well-known path, connects to the recorded pipe, reports readiness on stderr, and
+ * copies raw bytes in both directions until either side closes. Nothing else is written to stdout.
+ */
+export function buildWindowsPipeBridgeScript(recordPath: string): string {
+  return wrapPowerShellScript(
+    [
+      `$recordPath = ${powerShellLiteral(recordPath)}`,
+      'if (-not [IO.File]::Exists($recordPath)) {',
+      "  Write-EmdashError ('The workspace server is not running (no endpoint record at ' + $recordPath + ').')",
+      '  exit 48',
+      '}',
+      `$match = [Text.RegularExpressions.Regex]::Match([IO.File]::ReadAllText($recordPath).Trim(), ${powerShellLiteral(PIPE_RECORD_PATTERN)})`,
+      'if (-not $match.Success) {',
+      "  Write-EmdashError ('The workspace-server endpoint record at ' + $recordPath + ' is invalid.')",
+      `  exit ${WINDOWS_INVALID_POINTER_EXIT_CODE}`,
+      '}',
+      "$pipe = New-Object IO.Pipes.NamedPipeClientStream('.', $match.Groups[1].Value, " +
+        '[IO.Pipes.PipeDirection]::InOut, [IO.Pipes.PipeOptions]::Asynchronous)',
+      'try {',
+      '  $pipe.Connect(5000)',
+      '} catch {',
+      "  Write-EmdashError ('Could not connect to the workspace server pipe: ' + $_.Exception.Message)",
+      '  exit 47',
+      '}',
+      '$stdin = [Console]::OpenStandardInput()',
+      '$stdout = [Console]::OpenStandardOutput()',
+      `Write-EmdashError ${powerShellLiteral(WINDOWS_PIPE_BRIDGE_READY_MARKER)}`,
+      '$upstream = $stdin.CopyToAsync($pipe)',
+      '$downstream = $pipe.CopyToAsync($stdout)',
+      '[void][Threading.Tasks.Task]::WaitAny([Threading.Tasks.Task[]]@($upstream, $downstream))',
+      '$pipe.Dispose()',
+      'exit 0',
+    ].join('\n')
+  );
+}
+
+const DOWNLOAD_CLIENT = [
+  '[Net.ServicePointManager]::SecurityProtocol = ' +
+    '[Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12',
+  '$client = New-Object Net.WebClient',
+  '$client.Encoding = [Text.Encoding]::UTF8',
+].join('\n');
+
+/** Downloads the first channel pointer that exists and prints it. */
+export function buildWindowsChannelPointerScript(pointerUrls: readonly string[]): string {
+  return wrapPowerShellScript(
+    [
+      DOWNLOAD_CLIENT,
+      `$urls = @(${pointerUrls.map(powerShellLiteral).join(', ')})`,
+      "$failure = 'no URL'",
+      'foreach ($url in $urls) {',
+      '  try {',
+      '    [Console]::Out.Write($client.DownloadString($url))',
+      '    exit 0',
+      '  } catch {',
+      "    $failure = $url + ': ' + $_.Exception.Message",
+      '  }',
+      '}',
+      "Write-EmdashError ('Could not download workspace-server metadata from ' + $failure)",
+      'exit 41',
+    ].join('\n')
+  );
+}
+
+/** Execution policy set by Group Policy refused to run the downloaded installer. */
+export const WINDOWS_EXECUTION_POLICY_EXIT_CODE = 43;
+
+/**
+ * Downloads the release's `install.ps1` to `installerPath`. Downloading and running are separate
+ * SSH commands on purpose: one command that downloads a script and runs it in memory matches the
+ * "download cradle" signature antivirus products (including Microsoft Defender) block at process
+ * creation, so the installer is only ever run from a file.
+ */
+export function buildWindowsInstallerDownloadScript(options: {
+  scriptUrl: string;
+  installerPath: string;
+}): string {
+  return wrapPowerShellScript(
+    [
+      DOWNLOAD_CLIENT,
+      `$scriptUrl = ${powerShellLiteral(options.scriptUrl)}`,
+      `$installer = ${powerShellLiteral(options.installerPath)}`,
+      'try {',
+      '  [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($installer))',
+      '  $client.DownloadFile($scriptUrl, $installer)',
+      '} catch {',
+      "  Write-EmdashError ('Could not download ' + $scriptUrl + ': ' + $_.Exception.Message)",
+      '  exit 41',
+      '}',
+      'exit 0',
+    ].join('\n')
+  );
+}
+
+/**
+ * Runs a downloaded `install.ps1` for `layout` and deletes it. The command that runs this script
+ * must bypass the process-scope execution policy (Windows clients default to Restricted); an
+ * execution policy enforced by Group Policy still wins and is reported as exit 43.
+ */
+export function buildWindowsInstallerRunScript(options: {
+  installerPath: string;
+  baseUrl: string;
+  version: string;
+  layout: WindowsWorkspaceServerLayout;
+}): string {
+  return wrapPowerShellScript(
+    [
+      `$installer = ${powerShellLiteral(options.installerPath)}`,
+      'try {',
+      `  & $installer -BaseUrl ${powerShellLiteral(options.baseUrl)} ` +
+        `-Version ${powerShellLiteral(options.version)} ` +
+        `-InstallRoot ${powerShellLiteral(options.layout.root)}`,
+      '  $code = $LASTEXITCODE',
+      '} catch [System.Management.Automation.PSSecurityException] {',
+      "  Write-EmdashError ('Group Policy sets a PowerShell execution policy that blocks the " +
+        "Maestro installer script: ' + $_.Exception.Message)",
+      `  $code = ${WINDOWS_EXECUTION_POLICY_EXIT_CODE}`,
+      '} finally {',
+      '  Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue',
+      '}',
+      'exit $code',
+    ].join('\n')
+  );
+}

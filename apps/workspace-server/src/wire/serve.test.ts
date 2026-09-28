@@ -21,7 +21,7 @@ afterEach(async () => {
 describe('serveSocket', () => {
   it('serves the wire handshake over a Unix socket', async () => {
     const handle = await serveTestSocket();
-    const connection = await connectToSocket(handle.socketPath);
+    const connection = await connectToSocket(handle.listenAddress);
 
     const result = await connection.client.initialize(initializeInput());
 
@@ -34,8 +34,8 @@ describe('serveSocket', () => {
 
   it('serves multiple concurrent clients through one controller', async () => {
     const handle = await serveTestSocket();
-    const first = await connectToSocket(handle.socketPath);
-    const second = await connectToSocket(handle.socketPath);
+    const first = await connectToSocket(handle.listenAddress);
+    const second = await connectToSocket(handle.listenAddress);
 
     await expect(first.client.health(undefined)).resolves.toMatchObject({
       status: 'ok',
@@ -56,7 +56,7 @@ describe('serveSocket', () => {
 
     const handle = await serveSocket(createTestWorkspaceWireController(), { socketPath });
     handles.push(handle);
-    const connection = await connectToSocket(handle.socketPath);
+    const connection = await connectToSocket(handle.listenAddress);
 
     await expect(connection.client.health(undefined)).resolves.toMatchObject({ status: 'ok' });
     connection.dispose();
@@ -64,7 +64,7 @@ describe('serveSocket', () => {
 
   it('unlinks the socket file on dispose', async () => {
     const handle = await serveTestSocket();
-    const socketPath = handle.socketPath;
+    const socketPath = handle.listenAddress;
 
     await handle.dispose();
     handles.splice(handles.indexOf(handle), 1);

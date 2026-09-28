@@ -3,6 +3,10 @@ import { createScope } from '@emdash/shared/concurrency';
 import { deferred } from '@emdash/shared/testing';
 import { peek } from '@emdash/wire/state';
 import { describe, expect, it, vi } from 'vitest';
+import {
+  RemotePlatformUnsupportedError,
+  type SupportedRemoteHost,
+} from '@core/primitives/ssh/api/remote-platform';
 import { RemoteHostWorkspaceServer } from './remote-host-workspace-server';
 import { HostStateModel } from './state-model';
 import { WorkspaceServerProtocolError } from './workspace-server/connect/protocol';
@@ -172,13 +176,13 @@ describe('RemoteHostWorkspaceServer', () => {
   });
 
   it.each(['refresh', 'install', 'start', 'stop', 'restart', 'update'] as const)(
-    'rejects Windows before the explicit %s operation runs POSIX work',
+    'rejects an unsupported host before the explicit %s operation runs remote work',
     async (action) => {
-      const fixture = createFixture({ platform: 'win32' });
+      const fixture = createFixture({ platform: 'unsupported' });
 
       await expect(fixture.operations[action]()).rejects.toMatchObject({
         code: 'unsupported-platform',
-        message: 'Windows SSH hosts are not supported',
+        message: 'PowerShell runs in ConstrainedLanguage mode',
       });
       expect(fixture.status('ssh-1')).toMatchObject({
         status: 'failed',
@@ -194,17 +198,43 @@ describe('RemoteHostWorkspaceServer', () => {
       await fixture.dispose();
     }
   );
+
+  it('resolves the latest version for the Windows platform on Windows hosts', async () => {
+    const fixture = createFixture({ platform: 'windows' });
+
+    await fixture.operations.refresh();
+
+    expect(fixture.installer.installedVersion).toHaveBeenCalledWith(
+      'ssh-1',
+      expect.objectContaining({ platform: 'windows' }),
+      expect.anything()
+    );
+    expect(fixture.installer.availableVersion).toHaveBeenCalledWith(
+      'ssh-1',
+      expect.anything(),
+      'windows'
+    );
+    await fixture.dispose();
+  });
 });
 
-function createFixture(options: { platform?: 'posix' | 'win32' } = {}) {
+function createFixture(options: { platform?: 'posix' | 'windows' | 'unsupported' } = {}) {
   const scope = createScope({ label: 'host-server-operations-test' });
   const state = new HostStateModel();
   const host = {
-    probe: vi.fn(async () =>
-      options.platform === 'win32'
-        ? ({ platform: 'win32' } as const)
-        : ({ platform: 'posix', home: '/home/devuser' } as const)
-    ),
+    probe: vi.fn(async (): Promise<SupportedRemoteHost> => {
+      if (options.platform === 'unsupported')
+        throw new RemotePlatformUnsupportedError([
+          {
+            severity: 'error',
+            code: 'constrained-language',
+            message: 'PowerShell runs in ConstrainedLanguage mode',
+          },
+        ]);
+      return options.platform === 'windows'
+        ? { platform: 'windows', home: 'C:\\Users\\dev', architecture: 'x64' }
+        : { platform: 'posix', home: '/home/devuser' };
+    }),
   };
   const installer = {
     installedVersion: vi.fn(async () => '1.2.3' as string | undefined),

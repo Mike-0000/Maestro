@@ -10,7 +10,7 @@ import {
 } from './config';
 import { daemonPaths } from './daemon/paths';
 import { removePidFile, writePidFile } from './daemon/pid-file';
-import { startDaemon } from './daemon/start';
+import { spawnServeProcess, startDaemon } from './daemon/start';
 import { statusDaemon } from './daemon/status';
 import { stopDaemon } from './daemon/stop';
 import { createWorkspaceServerRuntimeHost } from './gateway/workspace-workers';
@@ -42,6 +42,9 @@ async function main(): Promise<void> {
       break;
     case 'status':
       await runStatus(config.data);
+      break;
+    case 'daemonize':
+      await runDaemonize(config.data);
       break;
   }
 }
@@ -100,9 +103,17 @@ async function runStart(config: WorkspaceServerConfig): Promise<void> {
   if (config.serve.kind !== 'socket') throw new Error('start only supports socket mode');
   const result = await startDaemon({ socketPath: config.serve.path });
   if (!result.success) throw new Error(result.error.message);
+  for (const warning of result.data.warnings ?? []) {
+    process.stderr.write(`workspace-server warning: ${warning}\n`);
+  }
   process.stdout.write(
     `workspace-server daemon ${result.data.status} at ${result.data.paths.socketPath}\n`
   );
+}
+
+async function runDaemonize(config: WorkspaceServerConfig): Promise<void> {
+  if (config.serve.kind !== 'socket') throw new Error('daemonize only supports socket mode');
+  await spawnServeProcess(daemonPaths(config.serve.path), {});
 }
 
 async function runStop(config: WorkspaceServerConfig): Promise<void> {

@@ -34,6 +34,10 @@ or shell-profile code.
   runtime calls begin only after the workspace-server provisioner reports ready
 - managed installs read the desktop channel's pointer for its protocol major, then
   run the immutable versioned `install.sh` with the pointer's artifact version pinned
+- Windows OpenSSH hosts are detected by the remote platform probe and use
+  `install.ps1`, a named-pipe daemon endpoint, and an exec-channel pipe bridge
+  instead of streamlocal forwarding; see
+  [Windows remote hosts](../../apps/workspace-server/docs/windows-hosts.md)
 
 ## Rules
 

@@ -9,6 +9,7 @@ import {
   contentTypeForObjectKey,
   expectedArtifactNames,
   immutableUploadDecision,
+  installScriptNames,
   mutableReleaseObjectKeys,
   parseUploadArgs,
   parseArtifactChecksum,
@@ -25,6 +26,8 @@ describe('workspace-server R2 upload helpers', () => {
       'emdash-workspace-server-1.2.3-linux-arm64.tar.gz.sha256',
       'emdash-workspace-server-1.2.3-darwin-arm64.tar.gz',
       'emdash-workspace-server-1.2.3-darwin-arm64.tar.gz.sha256',
+      'emdash-workspace-server-1.2.3-win32-x64.zip',
+      'emdash-workspace-server-1.2.3-win32-x64.zip.sha256',
     ]);
   });
 
@@ -49,6 +52,13 @@ describe('workspace-server R2 upload helpers', () => {
         linuxArm64
       )
     ).toBeUndefined();
+    const win32X64 = parsePackageTarget('win32-x64');
+    expect(
+      artifactVersionFromArchiveName('emdash-workspace-server-1.2.3-win32-x64.zip', win32X64)
+    ).toBe('1.2.3');
+    expect(
+      artifactVersionFromArchiveName('emdash-workspace-server-1.2.3-win32-x64.tar.gz', win32X64)
+    ).toBeUndefined();
   });
 
   it('places every object under the workspace-server prefix', () => {
@@ -62,6 +72,9 @@ describe('workspace-server R2 upload helpers', () => {
       'workspace-server/1.2.3/server.tar.gz'
     );
     expect(versionedInstallScriptObjectKey('1.2.3')).toBe('workspace-server/1.2.3/install.sh');
+    expect(
+      installScriptNames.map((script) => versionedInstallScriptObjectKey('1.2.3', script))
+    ).toEqual(['workspace-server/1.2.3/install.sh', 'workspace-server/1.2.3/install.ps1']);
   });
 
   it('builds public channel pointer URLs from a bucket root', () => {
@@ -86,6 +99,12 @@ describe('workspace-server R2 upload helpers', () => {
     );
     expect(contentTypeForObjectKey('workspace-server/1.2.3/server.tar.gz')).toBe(
       'application/octet-stream'
+    );
+    expect(contentTypeForObjectKey('workspace-server/1.2.3/server.zip')).toBe(
+      'application/octet-stream'
+    );
+    expect(contentTypeForObjectKey('workspace-server/1.2.3/install.ps1')).toBe(
+      'text/plain; charset=utf-8'
     );
   });
 

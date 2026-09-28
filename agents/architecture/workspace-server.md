@@ -277,3 +277,9 @@ The desktop forwards the read-only agent hook-status procedure to the selected h
 | [`apps/emdash-desktop/src/core/services/hosts/`](../../apps/emdash-desktop/src/core/services/hosts/) | Desktop orchestration and lifecycle policy for SSH hosts |
 | [`apps/emdash-desktop/src/core/services/hosts/node/workspace-server/`](../../apps/emdash-desktop/src/core/services/hosts/node/workspace-server/) | Wire connection manager, hosted-script installer, daemon control, and provisioner |
 | [`apps/workspace-server/install.sh`](../../apps/workspace-server/install.sh) | Remote platform detection and atomic pinned-artifact installation |
+| [`apps/workspace-server/install.ps1`](../../apps/workspace-server/install.ps1) | Windows counterpart of `install.sh` (zip artifacts, `current` pointer file) |
+| [`apps/workspace-server/src/daemon/endpoint.ts`](../../apps/workspace-server/src/daemon/endpoint.ts) | Unix socket vs. Windows named-pipe endpoint record |
+| [`apps/workspace-server/src/daemon/windows-launch.ts`](../../apps/workspace-server/src/daemon/windows-launch.ts) | Launches the Windows daemon outside the SSH session's job object |
+| [`apps/emdash-desktop/src/core/primitives/ssh/api/remote-platform.ts`](../../apps/emdash-desktop/src/core/primitives/ssh/api/remote-platform.ts) | Remote OS/shell capability probe and actionable requirement issues |
+| [`apps/emdash-desktop/src/core/services/hosts/node/workspace-server/windows-scripts.ts`](../../apps/emdash-desktop/src/core/services/hosts/node/workspace-server/windows-scripts.ts) | PowerShell control scripts for Windows hosts (install, daemon, pipe bridge) |
+| [`apps/workspace-server/docs/windows-hosts.md`](../../apps/workspace-server/docs/windows-hosts.md) | Windows OpenSSH host design and limitations |

@@ -87,7 +87,7 @@ export function createHostService(options: CreateHostServiceOptions): HostServic
     baseUrl: options.installBaseUrl,
     releaseChannel: options.releaseChannel,
   });
-  const daemon = new RemoteWorkspaceServerDaemon(ssh);
+  const daemon = new RemoteWorkspaceServerDaemon(ssh, options.logger);
   const provisioner = new WorkspaceServerProvisioner({
     connectionId: id,
     scope,
