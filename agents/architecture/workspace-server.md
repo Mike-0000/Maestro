@@ -98,8 +98,9 @@ directory, including automation and file-search databases, session intents, ACP 
 other runtime state. Repository and worktree placement is desktop-owned; the server reports its
 structured home path and filesystem `PathProfile` through the files runtime and executes plans
 containing absolute paths. The profile is optional on the wire so current clients remain compatible
-with older same-major servers. Managed remote Windows hosts are rejected as unsupported before the
-POSIX home, layout, installer, or daemon paths run.
+with older same-major servers. The remote platform probe routes Windows OpenSSH hosts to the
+Windows layout, installer, and daemon paths; hosts that fail its requirements are rejected with
+actionable diagnostics before any install runs.
 
 Host dependencies are mounted under `workspaceWireContract.hostDependencies`.
 The daemon parent owns one local `HostDependencies` component backed by a JSON-file
@@ -282,4 +283,5 @@ The desktop forwards the read-only agent hook-status procedure to the selected h
 | [`apps/workspace-server/src/daemon/windows-launch.ts`](../../apps/workspace-server/src/daemon/windows-launch.ts) | Launches the Windows daemon outside the SSH session's job object |
 | [`apps/emdash-desktop/src/core/primitives/ssh/api/remote-platform.ts`](../../apps/emdash-desktop/src/core/primitives/ssh/api/remote-platform.ts) | Remote OS/shell capability probe and actionable requirement issues |
 | [`apps/emdash-desktop/src/core/services/hosts/node/workspace-server/windows-scripts.ts`](../../apps/emdash-desktop/src/core/services/hosts/node/workspace-server/windows-scripts.ts) | PowerShell control scripts for Windows hosts (install, daemon, pipe bridge) |
+| [`apps/emdash-desktop/src/core/services/hosts/node/workspace-server/provision/windows-bundle.ts`](../../apps/emdash-desktop/src/core/services/hosts/node/workspace-server/provision/windows-bundle.ts) | Loads the Windows artifact bundled with the desktop and uploads it over an exec channel |
 | [`apps/workspace-server/docs/windows-hosts.md`](../../apps/workspace-server/docs/windows-hosts.md) | Windows OpenSSH host design and limitations |

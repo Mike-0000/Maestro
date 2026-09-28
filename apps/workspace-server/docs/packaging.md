@@ -15,6 +15,15 @@ Darwin and Windows artifacts must be built on a matching host. Linux artifacts a
 Docker Buildx, so either Linux architecture can be produced from a supported Docker host. Windows
 builds archive with the `tar.exe` (bsdtar) shipped in `System32`, which writes zip files.
 
+The desktop installer also bundles the `win32-x64` artifact for Windows remote hosts. Its
+`beforePack` step (`apps/emdash-desktop/scripts/prepare-workspace-server-bundle.ts`, or
+`pnpm run workspace-server:bundle`) reuses a verified `dist-artifacts/` zip for the current
+package version or packages one, and copies it with `install.ps1` into
+`apps/emdash-desktop/.cache/workspace-server-bundle/`. On a non-Windows build host it warns and
+ships no bundle unless `MAESTRO_REQUIRE_WINDOWS_WORKSPACE_SERVER=1` makes that an error. Bump the
+package version whenever the artifact changes: hosts that already run the bundled version are not
+reinstalled.
+
 ## Build an Artifact
 
 Run the packaging command from `apps/workspace-server/` and provide one or more targets:

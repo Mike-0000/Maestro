@@ -185,15 +185,29 @@ export function buildWindowsInstallerDownloadScript(options: {
  */
 export function buildWindowsInstallerRunScript(options: {
   installerPath: string;
-  baseUrl: string;
+  source: WindowsInstallerSource;
   version: string;
   layout: WindowsWorkspaceServerLayout;
 }): string {
+  const { source } = options;
+  const cleanup = ['  Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue'];
+  let sourceArguments: string;
+  if (source.kind === 'url') {
+    sourceArguments = `-BaseUrl ${powerShellLiteral(source.baseUrl)}`;
+  } else {
+    if (!SHA256_PATTERN.test(source.sha256)) throw new Error('Invalid workspace-server checksum');
+    // install.ps1 reads `<BaseUrl>/<version>/<artifact>`; a file URI keeps that layout offline.
+    sourceArguments = `-BaseUrl ([Uri]$bundle).AbsoluteUri -Sha256 ${powerShellLiteral(source.sha256)}`;
+    cleanup.push(
+      '  Remove-Item -LiteralPath $bundle -Recurse -Force -ErrorAction SilentlyContinue'
+    );
+  }
   return wrapPowerShellScript(
     [
       `$installer = ${powerShellLiteral(options.installerPath)}`,
+      ...(source.kind === 'staged' ? [`$bundle = ${powerShellLiteral(source.directory)}`] : []),
       'try {',
-      `  & $installer -BaseUrl ${powerShellLiteral(options.baseUrl)} ` +
+      `  & $installer ${sourceArguments} ` +
         `-Version ${powerShellLiteral(options.version)} ` +
         `-InstallRoot ${powerShellLiteral(options.layout.root)}`,
       '  $code = $LASTEXITCODE',
@@ -202,9 +216,77 @@ export function buildWindowsInstallerRunScript(options: {
         "Maestro installer script: ' + $_.Exception.Message)",
       `  $code = ${WINDOWS_EXECUTION_POLICY_EXIT_CODE}`,
       '} finally {',
-      '  Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue',
+      ...cleanup,
       '}',
       'exit $code',
+    ].join('\n')
+  );
+}
+
+/**
+ * Where `install.ps1` reads the artifact: a release base URL, or a staging directory already
+ * holding `<version>/<artifact>` (uploaded by Maestro) whose checksum the desktop supplies.
+ */
+export type WindowsInstallerSource =
+  | { kind: 'url'; baseUrl: string }
+  | { kind: 'staged'; directory: string; sha256: string };
+
+const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
+
+/** Best-effort removal of staged files and directories after an abandoned install. */
+export function buildWindowsRemovePathsScript(paths: readonly string[]): string {
+  return wrapPowerShellScript(
+    [
+      ...paths.map(
+        (target) =>
+          `Remove-Item -LiteralPath ${powerShellLiteral(target)} -Recurse -Force -ErrorAction SilentlyContinue`
+      ),
+      'exit 0',
+    ].join('\n')
+  );
+}
+
+/**
+ * Receives exactly `length` bytes on stdin into `path`, verifying the SHA-256 before the file
+ * appears under its final name. Reading a fixed length avoids depending on how the remote shell
+ * forwards end-of-file; a short or corrupt upload exits 41 and leaves nothing behind.
+ */
+export function buildWindowsUploadScript(options: {
+  path: string;
+  length: number;
+  sha256: string;
+}): string {
+  if (!Number.isSafeInteger(options.length) || options.length < 0) {
+    throw new Error('Invalid upload length');
+  }
+  if (!SHA256_PATTERN.test(options.sha256)) throw new Error('Invalid upload checksum');
+  return wrapPowerShellScript(
+    [
+      `$target = ${powerShellLiteral(options.path)}`,
+      "$partial = $target + '.partial'",
+      `$remaining = [long]${options.length}`,
+      '[void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))',
+      '$source = [Console]::OpenStandardInput()',
+      '$output = [IO.File]::Create($partial)',
+      '$buffer = New-Object byte[] 65536',
+      'try {',
+      '  while ($remaining -gt 0) {',
+      '    $read = $source.Read($buffer, 0, [int][Math]::Min([long]$buffer.Length, $remaining))',
+      '    if ($read -le 0) { break }',
+      '    $output.Write($buffer, 0, $read)',
+      '    $remaining -= $read',
+      '  }',
+      '} finally {',
+      '  $output.Dispose()',
+      '}',
+      '$actual = (Get-FileHash -LiteralPath $partial -Algorithm SHA256).Hash.ToLowerInvariant()',
+      `if ($remaining -ne 0 -or $actual -cne ${powerShellLiteral(options.sha256)}) {`,
+      '  Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue',
+      "  Write-EmdashError ('Upload of ' + [IO.Path]::GetFileName($target) + ' was incomplete or corrupt')",
+      '  exit 41',
+      '}',
+      'Move-Item -LiteralPath $partial -Destination $target -Force',
+      'exit 0',
     ].join('\n')
   );
 }

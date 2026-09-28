@@ -8,7 +8,7 @@ import {
   type ReleaseChannel,
 } from '@emdash/core/workspace-server';
 import { execPowerShell } from '@core/primitives/ssh/api/node/remote-platform-probe';
-import type { SshClientProxy } from '@core/primitives/ssh/api/node/ssh-client-proxy';
+import type { SshClientProxy, SshExecResult } from '@core/primitives/ssh/api/node/ssh-client-proxy';
 import {
   validateWorkspaceServerVersion,
   type PosixWorkspaceServerLayout,
@@ -21,8 +21,11 @@ import {
   buildWindowsInstalledVersionScript,
   buildWindowsInstallerDownloadScript,
   buildWindowsInstallerRunScript,
+  buildWindowsRemovePathsScript,
   WINDOWS_INVALID_POINTER_EXIT_CODE,
+  type WindowsInstallerSource,
 } from '../windows-scripts';
+import { uploadFileToWindowsHost, type WindowsWorkspaceServerBundle } from './windows-bundle';
 
 export const DEFAULT_WORKSPACE_SERVER_INSTALL_BASE_URL =
   'https://releases.emdash.sh/workspace-server';
@@ -48,6 +51,11 @@ export type WorkspaceServerInstallerOptions = {
   ssh: WorkspaceServerSshPort;
   baseUrl?: string;
   releaseChannel?: ReleaseChannel;
+  /**
+   * The workspace server shipped with the desktop app for Windows hosts. When it resolves to a
+   * bundle, Windows hosts install that version from an upload instead of the release channel.
+   */
+  windowsBundle?: () => Promise<WindowsWorkspaceServerBundle | undefined>;
 };
 
 export type WorkspaceServerInstallOptions = {
@@ -72,15 +80,20 @@ const metadataOptions = {
 // Windows metadata commands include a cold powershell.exe start.
 const windowsMetadataTimeoutMs = 30_000;
 
+// The bundled archive is about 60 MB; allow slow links.
+const windowsUploadTimeoutMs = 20 * 60_000;
+
 export class WorkspaceServerInstaller {
   private readonly ssh: WorkspaceServerSshPort;
   private readonly baseUrl: string;
   private readonly releaseChannel: ReleaseChannel;
+  private readonly windowsBundle: () => Promise<WindowsWorkspaceServerBundle | undefined>;
 
   constructor(options: WorkspaceServerInstallerOptions) {
     this.ssh = options.ssh;
     this.baseUrl = options.baseUrl ?? DEFAULT_WORKSPACE_SERVER_INSTALL_BASE_URL;
     this.releaseChannel = options.releaseChannel ?? 'stable';
+    this.windowsBundle = options.windowsBundle ?? (async () => undefined);
   }
 
   async installedVersion(
@@ -135,13 +148,20 @@ export class WorkspaceServerInstaller {
     }
   }
 
-  /** Downloads `install.ps1` into staging, then runs it; see buildWindowsInstallerDownloadScript. */
+  /**
+   * Installs from the desktop's bundle when it carries `version`, otherwise downloads
+   * `install.ps1` into staging and runs it; see buildWindowsInstallerDownloadScript.
+   */
   private async runWindowsInstaller(
     proxy: SshClientProxy,
     version: string,
     layout: WindowsWorkspaceServerLayout,
     signal?: AbortSignal
-  ) {
+  ): Promise<SshExecResult> {
+    const bundle = await this.loadWindowsBundle();
+    if (bundle?.version === version) {
+      return await this.installWindowsBundle(proxy, bundle, layout, signal);
+    }
     const scripts = buildWindowsWorkspaceServerInstallScripts(
       this.baseUrl,
       version,
@@ -160,6 +180,74 @@ export class WorkspaceServerInstaller {
       { ...installOptions, signal },
       { bypassExecutionPolicy: true }
     );
+  }
+
+  /** Uploads the bundled archive and `install.ps1` into staging, then runs it offline. */
+  private async installWindowsBundle(
+    proxy: SshClientProxy,
+    bundle: WindowsWorkspaceServerBundle,
+    layout: WindowsWorkspaceServerLayout,
+    signal?: AbortSignal
+  ): Promise<SshExecResult> {
+    // install.ps1 would also return early, but only after the archive upload.
+    if ((await this.installedVersionFromProxy(proxy, layout, signal)) === bundle.version) {
+      return { exitCode: 0, stdout: '', stderr: '' };
+    }
+    const plan = windowsBundleInstallPlan(bundle, layout, randomUUID());
+    const upload = async (file: WindowsWorkspaceServerBundle['archive'], remotePath: string) => {
+      try {
+        return await uploadFileToWindowsHost(proxy, file, remotePath, {
+          timeoutMs: windowsUploadTimeoutMs,
+          signal,
+        });
+      } catch (error) {
+        signal?.throwIfAborted();
+        throw new WorkspaceServerInstallError(
+          'artifact-download-failed',
+          `Could not copy the workspace server to the host: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          { cause: error }
+        );
+      }
+    };
+
+    let started = false;
+    try {
+      const archive = await upload(bundle.archive, plan.archivePath);
+      if (archive.exitCode !== 0) return archive;
+      const installer = await upload(bundle.installScript, plan.installerPath);
+      if (installer.exitCode !== 0) return installer;
+      // The run script deletes the installer and the staged bundle itself.
+      started = true;
+      return await execPowerShell(
+        proxy,
+        plan.run,
+        { ...installOptions, signal },
+        { bypassExecutionPolicy: true }
+      );
+    } finally {
+      if (!started && !signal?.aborted) {
+        await execPowerShell(proxy, plan.cleanup, {
+          ...metadataOptions,
+          timeoutMs: windowsMetadataTimeoutMs,
+        }).catch(() => undefined);
+      }
+    }
+  }
+
+  private async loadWindowsBundle(): Promise<WindowsWorkspaceServerBundle | undefined> {
+    try {
+      return await this.windowsBundle();
+    } catch (error) {
+      throw new WorkspaceServerInstallError(
+        'install-failed',
+        `The workspace server bundled with Maestro is unusable: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        { cause: error }
+      );
+    }
   }
 
   private async installedVersionFromProxy(
@@ -249,6 +337,10 @@ export class WorkspaceServerInstaller {
     signal?: AbortSignal,
     platform: WorkspaceServerLayout['platform'] = 'posix'
   ): Promise<string> {
+    if (platform === 'windows') {
+      const bundle = await this.loadWindowsBundle();
+      if (bundle) return bundle.version;
+    }
     const expectedProtocolMajor = protocolMajor();
     const proxy = await this.ssh.ensureProxy(connectionId);
     const result =
@@ -376,10 +468,41 @@ export function buildWindowsWorkspaceServerInstallScripts(
     }),
     run: buildWindowsInstallerRunScript({
       installerPath,
-      baseUrl: normalizedBaseUrl,
+      source: { kind: 'url', baseUrl: normalizedBaseUrl },
       version: selectedVersion,
       layout,
     }),
+  };
+}
+
+/**
+ * Remote paths for installing `bundle`: the archive goes to `<bundle dir>/<version>/<name>` so
+ * install.ps1 finds it under a file URI base, next to a uniquely named installer copy.
+ */
+export function windowsBundleInstallPlan(
+  bundle: WindowsWorkspaceServerBundle,
+  layout: WindowsWorkspaceServerLayout,
+  installerId: string
+): { archivePath: string; installerPath: string; run: string; cleanup: string } {
+  const version = validateWorkspaceServerVersion(bundle.version);
+  if (!/^[0-9a-f-]{1,64}$/u.test(installerId)) {
+    throw new Error(`Invalid installer id '${installerId}'`);
+  }
+  const directory = path.win32.join(layout.stagingDirectory, `bundle-${installerId}`);
+  const installerPath = path.win32.join(
+    layout.stagingDirectory,
+    `install-${version}-${installerId}.ps1`
+  );
+  const source: WindowsInstallerSource = {
+    kind: 'staged',
+    directory,
+    sha256: bundle.archive.sha256,
+  };
+  return {
+    archivePath: path.win32.join(directory, version, bundle.archiveName),
+    installerPath,
+    run: buildWindowsInstallerRunScript({ installerPath, source, version, layout }),
+    cleanup: buildWindowsRemovePathsScript([directory, installerPath]),
   };
 }
 

@@ -53,7 +53,23 @@ No step needs administrator rights.
 
 ## Installation
 
-The desktop reads the channel pointer, then runs two SSH commands:
+Maestro ships the `win32-x64` artifact, its `.sha256` sidecar, and `install.ps1` inside the desktop
+app (`resources/workspace-server/`, prepared at build time by
+`apps/emdash-desktop/scripts/prepare-workspace-server-bundle.ts`). When that bundle is present,
+Windows hosts install its version and never read a release channel, so they work without a hosted
+workspace-server release:
+
+1. Skip everything if `current` already selects the bundled version.
+2. Stream the archive to `staging\bundle-<uuid>\<version>\<artifact>` and `install.ps1` to
+   `staging\install-<version>-<uuid>.ps1`. Each upload is an exec channel running an encoded
+   script that reads exactly the declared byte count from stdin and verifies the SHA-256 before
+   renaming the file into place (exit 41 otherwise). The exec channel is used instead of SFTP,
+   which administrators often disable.
+3. Run the installer with `-BaseUrl` set to the staging directory's `file:` URI and an explicit
+   `-Sha256`, then delete the installer and the staged bundle. A failed upload also cleans them up.
+
+A desktop build without the bundle (for example one packaged on a non-Windows host) falls back to
+the release channel: the desktop reads the channel pointer, then runs two SSH commands:
 
 1. Download the immutable `<version>/install.ps1` into
    `staging\install-<version>-<uuid>.ps1`.

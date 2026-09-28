@@ -23,6 +23,7 @@ import { RemoteWorkspaceServerDaemon } from './workspace-server/provision/daemon
 import { RemoteHostProbe } from './workspace-server/provision/host-probe';
 import { WorkspaceServerInstaller } from './workspace-server/provision/installer';
 import { WorkspaceServerProvisioner } from './workspace-server/provision/provisioner';
+import type { WindowsWorkspaceServerBundle } from './workspace-server/provision/windows-bundle';
 
 export type CreateHostServiceOptions = {
   scope: Scope;
@@ -33,6 +34,8 @@ export type CreateHostServiceOptions = {
   onReady(attachment: WorkspaceServerConnection): void;
   installBaseUrl?: string;
   releaseChannel?: ReleaseChannel;
+  /** Resolves the workspace server bundled for Windows hosts; see WorkspaceServerInstaller. */
+  windowsWorkspaceServerBundle?: () => Promise<WindowsWorkspaceServerBundle | undefined>;
   devAutoUpdate?: boolean;
   client?: { id: string; appVersion: string };
   logger?: {
@@ -86,6 +89,7 @@ export function createHostService(options: CreateHostServiceOptions): HostServic
     ssh,
     baseUrl: options.installBaseUrl,
     releaseChannel: options.releaseChannel,
+    windowsBundle: options.windowsWorkspaceServerBundle,
   });
   const daemon = new RemoteWorkspaceServerDaemon(ssh, options.logger);
   const provisioner = new WorkspaceServerProvisioner({

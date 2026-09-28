@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -18,6 +18,7 @@ import {
   buildWindowsInstallerDownloadScript,
   buildWindowsInstallerRunScript,
   buildWindowsPipeBridgeScript,
+  buildWindowsUploadScript,
   WINDOWS_EXECUTION_POLICY_EXIT_CODE,
   WINDOWS_PIPE_BRIDGE_READY_MARKER,
 } from './windows-scripts';
@@ -57,9 +58,32 @@ describe('Windows workspace-server scripts', () => {
           layout.stagingDirectory,
           `install-1.2.3-${randomUUID()}.ps1`
         ),
-        baseUrl: 'https://releases.example.test/workspace-server',
+        source: { kind: 'url', baseUrl: 'https://releases.example.test/workspace-server' },
         version: '1.2.3',
         layout,
+      }),
+      buildWindowsInstallerRunScript({
+        installerPath: path.win32.join(
+          layout.stagingDirectory,
+          `install-1.2.3-${randomUUID()}.ps1`
+        ),
+        source: {
+          kind: 'staged',
+          directory: path.win32.join(layout.stagingDirectory, `bundle-${randomUUID()}`),
+          sha256: 'a'.repeat(64),
+        },
+        version: '1.2.3',
+        layout,
+      }),
+      buildWindowsUploadScript({
+        path: path.win32.join(
+          layout.stagingDirectory,
+          `bundle-${randomUUID()}`,
+          '1.2.3',
+          'emdash-workspace-server-1.2.3-win32-x64.zip'
+        ),
+        length: Number.MAX_SAFE_INTEGER,
+        sha256: 'a'.repeat(64),
       }),
     ]) {
       expect(() =>
@@ -199,7 +223,7 @@ describe.runIf(process.platform === 'win32')('Windows workspace-server scripts o
     const run = (target: string) =>
       buildWindowsInstallerRunScript({
         installerPath: target,
-        baseUrl: "https://example.test/it's",
+        source: { kind: 'url', baseUrl: "https://example.test/it's" },
         version: '1.2.3',
         layout,
       });
@@ -264,6 +288,97 @@ describe.runIf(process.platform === 'win32')('Windows workspace-server scripts o
       expect(result.status).toBe(WINDOWS_EXECUTION_POLICY_EXIT_CODE);
       expect(result.stderr).toContain('execution policy');
       expect(fs.existsSync(target)).toBe(false);
+    });
+
+    it('runs a staged installer against a file URI and removes the staged bundle', () => {
+      const target = installerPath();
+      const bundle = path.win32.join(layout.stagingDirectory, `bundle-${randomUUID()}`);
+      fs.mkdirSync(path.join(bundle, '1.2.3'), { recursive: true });
+      fs.writeFileSync(
+        target,
+        [
+          'param([string]$BaseUrl, [string]$Version, [string]$Sha256, [string]$InstallRoot)',
+          "$artifact = ([Uri]($BaseUrl + '/' + $Version + '/x.zip')).LocalPath",
+          "[Console]::Out.Write(($artifact, $Sha256, $InstallRoot) -join '|')",
+          'exit 0',
+        ].join('\r\n')
+      );
+      const script = buildWindowsInstallerRunScript({
+        installerPath: target,
+        source: { kind: 'staged', directory: bundle, sha256: 'b'.repeat(64) },
+        version: '1.2.3',
+        layout,
+      });
+
+      const result = runScript(
+        script,
+        formatPowerShellEncodedCommand(script, { bypassExecutionPolicy: true })
+      );
+
+      expect(result).toMatchObject({ status: 0, stderr: '' });
+      expect(result.stdout).toBe(
+        `${path.join(bundle, '1.2.3', 'x.zip')}|${'b'.repeat(64)}|${layout.root}`
+      );
+      expect(fs.existsSync(target)).toBe(false);
+      expect(fs.existsSync(bundle)).toBe(false);
+    });
+  });
+
+  describe('upload', () => {
+    // Windows OpenSSH hands exec requests to cmd.exe by default; stdin passes through it.
+    const upload = (target: string, bytes: Buffer, declared = bytes) => {
+      const result = spawnSync(
+        'cmd.exe',
+        [
+          '/d',
+          '/c',
+          formatPowerShellEncodedCommand(
+            buildWindowsUploadScript({
+              path: target,
+              length: declared.length,
+              sha256: createHash('sha256').update(declared).digest('hex'),
+            })
+          ),
+        ],
+        { input: bytes, encoding: 'buffer', timeout: 60_000 }
+      );
+      if (result.error) throw result.error;
+      return {
+        status: result.status,
+        stderr: decodePowerShellStderr(result.stderr.toString('utf8')).trim(),
+      };
+    };
+    const binary = () => {
+      const bytes = Buffer.alloc(200_003);
+      for (let index = 0; index < bytes.length; index += 1) bytes[index] = (index * 7) % 256;
+      return bytes;
+    };
+
+    it('writes binary stdin to the target after verifying its checksum', () => {
+      const target = path.join(layout.stagingDirectory, `bundle-${randomUUID()}`, 'a b', 'x.zip');
+      const bytes = binary();
+
+      expect(upload(target, bytes)).toMatchObject({ status: 0, stderr: '' });
+      expect(fs.readFileSync(target).equals(bytes)).toBe(true);
+      expect(fs.existsSync(`${target}.partial`)).toBe(false);
+    });
+
+    it('rejects short and corrupt uploads without leaving files behind', () => {
+      const bytes = binary();
+      const short = path.join(layout.stagingDirectory, `short-${randomUUID()}.zip`);
+      const corrupt = path.join(layout.stagingDirectory, `corrupt-${randomUUID()}.zip`);
+      const tampered = Buffer.from(bytes);
+      tampered[100] = (tampered[100] ?? 0) ^ 0xff;
+
+      for (const [target, result] of [
+        [short, upload(short, bytes.subarray(0, 1_000), bytes)],
+        [corrupt, upload(corrupt, tampered, bytes)],
+      ] as const) {
+        expect(result.status).toBe(41);
+        expect(result.stderr).toContain('incomplete or corrupt');
+        expect(fs.existsSync(target)).toBe(false);
+        expect(fs.existsSync(`${target}.partial`)).toBe(false);
+      }
     });
   });
 

@@ -36,7 +36,9 @@ or shell-profile code.
   run the immutable versioned `install.sh` with the pointer's artifact version pinned
 - Windows OpenSSH hosts are detected by the remote platform probe and use
   `install.ps1`, a named-pipe daemon endpoint, and an exec-channel pipe bridge
-  instead of streamlocal forwarding; see
+  instead of streamlocal forwarding. They install the `win32-x64` artifact bundled
+  with the desktop (uploaded over SSH) instead of a release channel when the desktop
+  build includes it; see
   [Windows remote hosts](../../apps/workspace-server/docs/windows-hosts.md)
 
 ## Rules

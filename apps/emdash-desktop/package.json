@@ -41,6 +41,7 @@
     "postinstall": "node --experimental-strip-types scripts/postinstall.ts",
     "rebuild": "electron-rebuild -f --only=better-sqlite3",
     "voice:model": "node --experimental-strip-types scripts/prepare-local-tts-model.ts",
+    "workspace-server:bundle": "node --experimental-strip-types scripts/prepare-workspace-server-bundle.ts",
     "clean": "rm -rf node_modules dist",
     "reset": "pnpm run clean && pnpm install",
     "lint": "node --test ../../tooling/oxlint/rules/*.test.js ../../tooling/oxlint/scripts/*.test.mjs && oxlint .",
