@@ -78,6 +78,10 @@ type LatestVersionCacheEntry = {
 
 const serverReadyRetrySchedule = retrySchedules.sequence([100, 250, 500, 1_000, 2_000]);
 const latestVersionCacheTtlMs = 5 * 60_000;
+const operationTimeoutMs = 120_000;
+// Install and update may first copy the bundled Windows artifact (tens of MB) over SSH; the
+// installer bounds each of its steps, so this budget only has to exceed their sum.
+const installOperationTimeoutMs = 30 * 60_000;
 
 export class RemoteHostWorkspaceServer implements HostWorkspaceServer {
   readonly state: Readable<HostServerState | undefined>;
@@ -425,7 +429,14 @@ export class RemoteHostWorkspaceServer implements HostWorkspaceServer {
                   await operation(inner);
                   throwIfAborted(inner);
                 },
-                { signal, clock: this.clock, timeoutMs: 120_000 }
+                {
+                  signal,
+                  clock: this.clock,
+                  timeoutMs:
+                    action === 'install' || action === 'update'
+                      ? installOperationTimeoutMs
+                      : operationTimeoutMs,
+                }
               );
               return ok<void>();
             } catch (error) {
