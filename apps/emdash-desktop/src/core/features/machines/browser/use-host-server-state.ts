@@ -67,7 +67,9 @@ export function useHostServerState({
       if (!machineId) return;
       try {
         const client = await getHostsClient();
-        await client[action]({ connectionId: machineId });
+        // The main process bounds every server operation, and install or update can take
+        // minutes; the default Wire deadline would report a still-running operation as failed.
+        await client[action]({ connectionId: machineId }, { timeoutMs: 0 });
       } catch (error) {
         toast.error(`Failed to ${label} workspace server`, {
           description: error instanceof Error ? error.message : String(error),

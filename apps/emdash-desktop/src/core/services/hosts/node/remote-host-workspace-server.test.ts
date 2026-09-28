@@ -1,6 +1,7 @@
 import { PROTOCOL_VERSION, type WireInitializeResult } from '@emdash/core/workspace-server';
 import { createScope } from '@emdash/shared/concurrency';
-import { deferred } from '@emdash/shared/testing';
+import type { Clock } from '@emdash/shared/scheduling';
+import { createManualClock, deferred } from '@emdash/shared/testing';
 import { peek } from '@emdash/wire/state';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -199,6 +200,29 @@ describe('RemoteHostWorkspaceServer', () => {
     }
   );
 
+  it('gives install minutes to copy a bundle but keeps the short budget for other actions', async () => {
+    const clock = createManualClock();
+    const fixture = createFixture({ platform: 'windows', clock });
+    fixture.installer.install.mockImplementationOnce(async () => {
+      await clock.advanceBy(10 * 60_000);
+    });
+
+    await fixture.operations.install();
+    expect(fixture.status('ssh-1')).toMatchObject({ status: 'healthy' });
+
+    const starting = deferred<void>();
+    fixture.daemon.start.mockImplementationOnce(async () => {
+      starting.resolve();
+      await new Promise(() => {});
+    });
+    const start = fixture.operations.start();
+    const rejected = expect(start).rejects.toBeDefined();
+    await starting.promise;
+    await clock.advanceBy(120_000);
+    await rejected;
+    await fixture.dispose();
+  });
+
   it('resolves the latest version for the Windows platform on Windows hosts', async () => {
     const fixture = createFixture({ platform: 'windows' });
 
@@ -218,7 +242,9 @@ describe('RemoteHostWorkspaceServer', () => {
   });
 });
 
-function createFixture(options: { platform?: 'posix' | 'windows' | 'unsupported' } = {}) {
+function createFixture(
+  options: { platform?: 'posix' | 'windows' | 'unsupported'; clock?: Clock } = {}
+) {
   const scope = createScope({ label: 'host-server-operations-test' });
   const state = new HostStateModel();
   const host = {
@@ -261,6 +287,7 @@ function createFixture(options: { platform?: 'posix' | 'windows' | 'unsupported'
     daemon,
     wire,
     provision,
+    clock: options.clock,
   });
 
   return {
