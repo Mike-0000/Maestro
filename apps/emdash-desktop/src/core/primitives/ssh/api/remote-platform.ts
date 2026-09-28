@@ -161,7 +161,7 @@ export function evaluateRemotePlatform(info: RemotePlatformInfo): RemotePlatform
         code: 'constrained-language',
         message:
           `PowerShell runs in ${info.languageMode} mode for this account, usually because ` +
-          'AppLocker or Windows Defender Application Control enforces it. Chorus needs ' +
+          'AppLocker or Windows Defender Application Control enforces it. Maestro needs ' +
           'FullLanguage mode to set up the machine; ask an administrator to allow it for this ' +
           'account.',
       },
@@ -202,7 +202,7 @@ export function evaluateRemotePlatform(info: RemotePlatformInfo): RemotePlatform
       severity: 'error',
       code: 'unsupported-architecture',
       message:
-        `The ${info.architecture ?? 'unknown'} processor architecture is not supported; Chorus ` +
+        `The ${info.architecture ?? 'unknown'} processor architecture is not supported; Maestro ` +
         'needs 64-bit Windows (x64, or ARM64 on Windows 11).',
     });
   } else if (architecture === 'arm64') {
@@ -220,7 +220,7 @@ export function evaluateRemotePlatform(info: RemotePlatformInfo): RemotePlatform
       severity: 'warning',
       code: 'git-missing',
       message:
-        'Git was not found on the PATH that SSH sessions see. Install Git for Windows so Chorus ' +
+        'Git was not found on the PATH that SSH sessions see. Install Git for Windows so Maestro ' +
         'can clone repositories and create worktrees, then reconnect.',
     });
   }

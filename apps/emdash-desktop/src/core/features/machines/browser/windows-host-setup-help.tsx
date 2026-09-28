@@ -25,7 +25,7 @@ const CLIENT_CHECKS = [
 ].join('\n');
 
 /**
- * Explains what a Windows machine needs before Chorus can use it. Chorus never changes the remote
+ * Explains what a Windows machine needs before Maestro can use it. Maestro never changes the remote
  * machine's services, firewall, or keys, so these steps are the user's to run there.
  */
 export function WindowsHostSetupHelp({ defaultOpen = false }: { defaultOpen?: boolean }) {
@@ -36,7 +36,7 @@ export function WindowsHostSetupHelp({ defaultOpen = false }: { defaultOpen?: bo
       </div>
       <Collapsible.Panel className="grid gap-3 pt-2 text-sm">
         <p className="text-foreground-muted">
-          Chorus connects to Windows 10 1809, Windows Server 2019, or later through the built-in
+          Maestro connects to Windows 10 1809, Windows Server 2019, or later through the built-in
           OpenSSH Server. It does not install or configure SSH on the remote machine for you.
         </p>
         <Section title="1. On the Windows machine, in PowerShell as Administrator">
@@ -50,15 +50,15 @@ export function WindowsHostSetupHelp({ defaultOpen = false }: { defaultOpen?: bo
             <Code>{ADMIN_KEYS_ACL}</Code>
           </Step>
           <Step text="Install Git for Windows so SSH sessions find git.exe on the PATH." />
-          <Step text="PowerShell must run in FullLanguage mode for this account (AppLocker or WDAC can restrict it), and a Group Policy execution policy of AllSigned blocks the Chorus installer script. Workspace previews also need AllowTcpForwarding, which sshd enables by default." />
+          <Step text="PowerShell must run in FullLanguage mode for this account (AppLocker or WDAC can restrict it), and a Group Policy execution policy of AllSigned blocks the Maestro installer script. Workspace previews also need AllowTcpForwarding, which sshd enables by default." />
         </Section>
         <Section title="2. From this computer">
           <Step text="Confirm the machine is reachable and that key authentication works without a password prompt:">
             <Code>{CLIENT_CHECKS}</Code>
           </Step>
         </Section>
-        <Section title="3. In Chorus">
-          <Step text="Add the host with the same user and key, then choose Test Connection. Chorus detects Windows and lists anything missing. On first connect it installs its workspace server under %USERPROFILE%\.emdash on that machine; no administrator rights are needed." />
+        <Section title="3. In Maestro">
+          <Step text="Add the host with the same user and key, then choose Test Connection. Maestro detects Windows and lists anything missing. On first connect it installs its workspace server under %USERPROFILE%\.emdash on that machine; no administrator rights are needed." />
         </Section>
       </Collapsible.Panel>
     </Collapsible.Root>

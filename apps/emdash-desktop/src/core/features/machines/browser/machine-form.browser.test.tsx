@@ -835,7 +835,7 @@ it('shows the detected Windows platform and what blocks it', async () => {
   await expect
     .element(
       page.getByText(
-        'Windows build 26100 (AMD64) · PowerShell 5.1.26100.1 · Chorus cannot use this machine yet'
+        'Windows build 26100 (AMD64) · PowerShell 5.1.26100.1 · Maestro cannot use this machine yet'
       )
     )
     .toBeVisible();

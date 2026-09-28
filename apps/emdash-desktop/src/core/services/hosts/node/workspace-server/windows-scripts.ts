@@ -199,7 +199,7 @@ export function buildWindowsInstallerRunScript(options: {
       '  $code = $LASTEXITCODE',
       '} catch [System.Management.Automation.PSSecurityException] {',
       "  Write-EmdashError ('Group Policy sets a PowerShell execution policy that blocks the " +
-        "Chorus installer script: ' + $_.Exception.Message)",
+        "Maestro installer script: ' + $_.Exception.Message)",
       `  $code = ${WINDOWS_EXECUTION_POLICY_EXIT_CODE}`,
       '} finally {',
       '  Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue',

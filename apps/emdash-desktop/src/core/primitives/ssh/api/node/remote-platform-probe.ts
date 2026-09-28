@@ -74,7 +74,7 @@ export async function probeRemotePlatform(
   throw new RemotePlatformProbeError(
     'Could not identify the remote operating system. `uname -s` failed ' +
       `(${describeFailure(uname)}) and Windows PowerShell did not answer ` +
-      `(${describeFailure(windows)}). Chorus supports Linux and macOS hosts, and Windows 10 1809 ` +
+      `(${describeFailure(windows)}). Maestro supports Linux and macOS hosts, and Windows 10 1809 ` +
       'or Windows Server 2019 and later with OpenSSH Server.'
   );
 }

@@ -136,7 +136,7 @@ function TestFeedback({ test }: { test: Exclude<MachineTestState, { status: 'idl
   );
 }
 
-/** What the post-connect platform check found; blocking issues stop Chorus from using the host. */
+/** What the post-connect platform check found; blocking issues stop Maestro from using the host. */
 function PlatformFeedback({ result }: { result: ConnectionTestResult }) {
   const { platform, platformError } = result;
   if (platformError) {
@@ -152,7 +152,7 @@ function PlatformFeedback({ result }: { result: ConnectionTestResult }) {
     <div className="mt-1 grid gap-1">
       <p className="text-foreground-muted">
         {platform.description}
-        {blocked ? ' · Chorus cannot use this machine yet' : ''}
+        {blocked ? ' · Maestro cannot use this machine yet' : ''}
       </p>
       {platform.issues.length > 0 && (
         <ul className="grid gap-1 pl-0">
