@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { app, powerMonitor } from 'electron';
 import type { SshServiceHandle } from '@core/manifests/node/ssh-service-handle';
@@ -6,6 +7,7 @@ import type { SshService } from '@core/primitives/ssh/api';
 import type { AppDb } from '@core/services/app-db/node/db';
 import { sshConnections } from '@core/services/app-db/node/schema';
 import { createHosts, type Hosts } from '@core/services/hosts/node/hosts';
+import { windowsBundleLoader } from '@core/services/hosts/node/workspace-server/provision/windows-bundle';
 import { sshCredentialChanges } from '@core/services/ssh/node/credentials/credential-record';
 import { SshCredentialService } from '@core/services/ssh/node/credentials/ssh-credential-service';
 import { createSshService } from '@main/bootstrap/core/ssh-service-factory';
@@ -39,6 +41,7 @@ export async function bootInfrastructure(database: DatabaseBundle): Promise<Infr
     machineEvents: ssh.machines,
     installBaseUrl: hostSettings.installBaseUrl,
     releaseChannel: IS_CANARY ? 'canary' : 'stable',
+    windowsWorkspaceServerBundle: windowsBundleLoader(windowsWorkspaceServerBundleDirectory()),
     devAutoUpdate: process.env['EMDASH_WORKSPACE_SERVER_DEV_AUTO_UPDATE'] === '1',
     client: { id: clientId, appVersion: app.getVersion() },
     logger: log,
@@ -54,6 +57,13 @@ export async function bootInfrastructure(database: DatabaseBundle): Promise<Infr
   });
   void reconnectIntendedSshConnections(database.db, ssh.ssh);
   return { ssh, hosts };
+}
+
+/** Prepared by scripts/prepare-workspace-server-bundle.ts and shipped as an extra resource. */
+function windowsWorkspaceServerBundleDirectory(): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, 'workspace-server')
+    : join(app.getAppPath(), '.cache', 'workspace-server-bundle');
 }
 
 async function reconnectIntendedSshConnections(db: AppDb, ssh: SshService): Promise<void> {

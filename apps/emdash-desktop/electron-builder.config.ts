@@ -3,6 +3,10 @@ import { join } from 'node:path';
 import type { Configuration } from 'electron-builder';
 import { LOCAL_TTS_MODEL_DIR, prepareLocalTtsModel } from './scripts/prepare-local-tts-model.ts';
 import {
+  prepareWorkspaceServerBundle,
+  WORKSPACE_SERVER_BUNDLE_DIR,
+} from './scripts/prepare-workspace-server-bundle.ts';
+import {
   APP_ID,
   ARTIFACT_PREFIX,
   LINUX_DESKTOP_ID,
@@ -28,9 +32,14 @@ const config: Configuration = {
   generateUpdatesFilesForAllChannels: false,
   files: ['out/**/*', 'node_modules/**/*', 'drizzle/**/*'],
   // The pinned, checksum-verified offline model ships with every installer; no first-run download.
-  beforePack: async () => prepareLocalTtsModel(),
+  // Windows remote hosts install the bundled workspace server over SSH (no hosted release needed).
+  beforePack: async () => {
+    await prepareLocalTtsModel();
+    await prepareWorkspaceServerBundle();
+  },
   extraResources: [
     { from: LOCAL_TTS_MODEL_DIR, to: 'models/kitten-mini-en-v0_8' },
+    { from: WORKSPACE_SERVER_BUNDLE_DIR, to: 'workspace-server' },
     {
       from: '../../tooling/chorus-delivery/install-chorus-update.ps1',
       to: 'chorus-delivery/install-chorus-update.ps1',
