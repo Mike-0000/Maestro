@@ -8,15 +8,15 @@ const execFile = promisify(execFileCallback);
 
 export async function launchInstallWorker({ stateRoot, workerPath, job }) {
   if (process.platform !== 'win32')
-    throw new Error('The Chorus install worker runs only on Windows.');
+    throw new Error('The Maestro install worker runs only on Windows.');
   if (!workerPath || !job?.candidateId)
-    throw new Error('The packaged Chorus update worker is unavailable.');
+    throw new Error('The packaged Maestro update worker is unavailable.');
   const jobId = job.jobId ?? job.candidateId;
   if (
     typeof jobId !== 'string' ||
     !/^(?:[a-f0-9-]{36}|rollback-[a-f0-9-]{36}-[a-f0-9-]{36})$/.test(jobId)
   ) {
-    throw new Error('The Chorus install worker received an invalid job id.');
+    throw new Error('The Maestro install worker received an invalid job id.');
   }
   job.jobId = jobId;
   await access(workerPath);
@@ -96,7 +96,7 @@ export async function launchInstallWorker({ stateRoot, workerPath, job }) {
   } catch (error) {
     await unlink(jobPath).catch(() => undefined);
     await unlink(pendingPath).catch(() => undefined);
-    throw new Error(`Could not start the detached Chorus install worker: ${error.message}`);
+    throw new Error(`Could not start the detached Maestro install worker: ${error.message}`);
   }
   return { jobPath };
 }

@@ -52,8 +52,8 @@ finally {
   Remove-Item -LiteralPath $localConfig -Force -ErrorAction SilentlyContinue
 }
 
-# The product name decides the executable name (Chorus.exe in this fork, Emdash.exe upstream).
-$exe = @('Chorus.exe', 'Emdash.exe') |
+# Product name determines the executable name in this fork; upstream still builds Emdash.exe.
+$exe = @('Maestro.exe', 'Chorus.exe', 'Emdash.exe') |
   ForEach-Object { Join-Path $outputDir "win-unpacked/$_" } |
   Where-Object { Test-Path -LiteralPath $_ } |
   Select-Object -First 1

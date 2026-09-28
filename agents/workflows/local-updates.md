@@ -52,6 +52,15 @@ coordinator per Git common directory. Its journal and snapshot live under
    For older installed coordinators whose fixed check invokes `pnpm run check`, the candidate's
    check script recognizes Windows delivery provenance and runs this same native setup, static
    checks, and focused tests. Ordinary repository checks continue running the full suite.
+
+   During the Chorus-to-Maestro transition, Windows packages keep `Maestro.exe` as the primary
+   executable and add a `Chorus.exe` compatibility copy during packing. After the builder flips
+   Electron fuses and signs the primary executable, it refreshes the copy to identical final bytes
+   before the coordinator hashes the package. The installed Chorus coordinator and worker require
+   `Chorus.exe` to validate and start their first Maestro candidate. New validation requires both
+   names; the new worker prefers `Maestro.exe` and accepts `Chorus.exe` for older installed or
+   retained rollback builds. The install directory, app ID, delivery state, and existing profile
+   paths remain unchanged.
 4. Promotion is a separate, user-confirmed fast-forward of local `chorus/main`. It refuses a moved
    branch or dirty canonical checkout. A separate confirmed backup action pushes that exact commit
    to `origin/main` without force; a rejected push remains visibly pending.

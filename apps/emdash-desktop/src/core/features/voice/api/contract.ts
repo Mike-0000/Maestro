@@ -60,7 +60,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   geminiVoice: 'Kore',
   streaming: true,
   handsFree: false,
-  wakePhrase: 'chorus',
+  wakePhrase: 'maestro',
   onboarded: false,
 };
 

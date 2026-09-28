@@ -4,7 +4,7 @@ import { useId } from 'react';
 const BARS = [0.42, 0.72, 1, 0.62, 0.34] as const;
 
 /**
- * The Chorus mark: five rounded bars, a chord of agents and a voice meter at once. Bars breathe
+ * The Maestro mark: five rounded bars, a chord of agents and a voice meter at once. Bars breathe
  * gently unless the user prefers reduced motion.
  */
 export function ChorusMark({
@@ -32,7 +32,7 @@ export function ChorusMark({
       viewBox="0 0 32 32"
       className={className}
       role="img"
-      aria-label="Chorus"
+      aria-label="Maestro"
       xmlns="http://www.w3.org/2000/svg"
     >
       <defs>
@@ -98,7 +98,7 @@ export function ChorusWordmark({
         style={{ fontSize: height * 0.82, lineHeight: 1 }}
         className="font-semibold tracking-tight text-foreground"
       >
-        chorus
+        Maestro
       </span>
     </span>
   );

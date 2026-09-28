@@ -208,7 +208,8 @@ export function createCoordinator({
     const task = Object.values(state.tasks).find(
       (entry) => resolve(entry.worktreePath).toLocaleLowerCase() === path
     );
-    if (!task) throw new Error('This worktree is not enrolled in the Chorus delivery coordinator.');
+    if (!task)
+      throw new Error('This worktree is not enrolled in the Maestro delivery coordinator.');
     return {
       repositoryId: identity.repositoryId,
       repositoryPath: identity.repositoryPath,
@@ -247,7 +248,7 @@ export function createCoordinator({
     assertSha(baseCommit, 'task base');
     return record(identity, async (state) => {
       if (!state.enabled)
-        throw new Error('Enable the Chorus project coordinator before enrolling tasks.');
+        throw new Error('Enable the Maestro project coordinator before enrolling tasks.');
       if (state.applyingCandidateId) {
         // A task created after apply begins belongs to the next project generation.
       }
@@ -281,7 +282,7 @@ export function createCoordinator({
       const task = requireTask(state, taskId);
       if (state.applyingCandidateId) {
         throw new Error(
-          'A local Chorus update is applying; new agent work is temporarily blocked.'
+          'A local Maestro update is applying; new agent work is temporarily blocked.'
         );
       }
       if (task.mode === 'research' || task.state === 'withdrawn') {
@@ -487,7 +488,7 @@ export function createCoordinator({
         );
     }
     if (includedIds.length === 0)
-      throw new Error('There are no submitted Chorus changes to integrate.');
+      throw new Error('There are no submitted Maestro changes to integrate.');
     if (policy === 'follow-project' && taskIds) {
       const allSubmitted = Object.values(snapshot.tasks)
         .filter((task) => task.mode === 'shipping' && task.state === 'submitted')
@@ -591,7 +592,7 @@ export function createCoordinator({
       ).trim();
       if (currentMain !== base)
         throw new Error(
-          'The canonical Chorus branch moved while preparing; discard this candidate and prepare from the new base.'
+          'The canonical Maestro branch moved while preparing; discard this candidate and prepare from the new base.'
         );
       await record(identity, async (current) => ({
         event: { type: 'candidate-integrated', candidateId: id, commit },
@@ -715,7 +716,7 @@ export function createCoordinator({
     }
     const currentMain = (await git(identity.repositoryPath, ['rev-parse', initial.mainRef])).trim();
     if (currentMain !== candidate.base)
-      throw new Error('Canonical Chorus main moved; prepare a fresh candidate.');
+      throw new Error('Canonical Maestro main moved; prepare a fresh candidate.');
     const unresolved = (
       await git(candidate.worktreePath, ['diff', '--name-only', '--diff-filter=U', '-z'])
     )
@@ -771,7 +772,7 @@ export function createCoordinator({
         await git(identity.repositoryPath, ['rev-parse', initial.mainRef])
       ).trim();
       if (latestMain !== candidate.base)
-        throw new Error('Canonical Chorus main moved during conflict resolution.');
+        throw new Error('Canonical Maestro main moved during conflict resolution.');
       return await record(identity, async (state) => {
         const latest = state.candidates[candidateId];
         if (!latest || latest.state !== 'resuming')
@@ -819,7 +820,7 @@ export function createCoordinator({
 
   async function schedule({ repositoryPath, candidateId, restartPolicy }) {
     if (restartPolicy !== 'manual')
-      throw new Error('Chorus updates require an explicit manual quit and install.');
+      throw new Error('Maestro updates require an explicit manual quit and install.');
     const identity = await repositoryIdentity(repositoryPath);
     const before = await loadState(identity);
     const currentMain = (await git(identity.repositoryPath, ['rev-parse', before.mainRef])).trim();
@@ -835,7 +836,7 @@ export function createCoordinator({
       const expectedMain = candidate.state === 'promoted' ? candidate.commit : candidate.base;
       if (currentMain !== expectedMain)
         throw new Error(
-          'The canonical Chorus branch moved after candidate preparation; prepare and validate a new candidate.'
+          'The canonical Maestro branch moved after candidate preparation; prepare and validate a new candidate.'
         );
       if (!isCandidateEligible(state, candidate))
         throw new Error(
@@ -860,9 +861,9 @@ export function createCoordinator({
       if (candidate.state !== 'scheduled' || !candidate.validation) {
         throw new Error('Only a scheduled, validated candidate can begin installation.');
       }
-      if (state.applyingCandidateId) throw new Error('Another Chorus update is already applying.');
+      if (state.applyingCandidateId) throw new Error('Another Maestro update is already applying.');
       if (candidate.state !== 'scheduled' || currentMain !== candidate.commit) {
-        throw new Error('The promoted Chorus branch moved before apply.');
+        throw new Error('The promoted Maestro branch moved before apply.');
       }
       if (!isCandidateEligible(state, candidate)) {
         throw new Error('Project membership changed before apply; prepare a fresh candidate.');
@@ -905,7 +906,7 @@ export function createCoordinator({
           };
         }
         throw new Error(
-          'The canonical Chorus branch moved after candidate preparation; prepare and validate a new candidate.'
+          'The canonical Maestro branch moved after candidate preparation; prepare and validate a new candidate.'
         );
       }
       await git(identity.repositoryPath, [
@@ -922,7 +923,7 @@ export function createCoordinator({
         const pathLine = mainWorktree.split(/\r?\n/).find((line) => line.startsWith('worktree '));
         const mainWorktreePath = pathLine?.slice('worktree '.length);
         if (!mainWorktreePath)
-          throw new Error('Could not locate the canonical Chorus checkout for promotion.');
+          throw new Error('Could not locate the canonical Maestro checkout for promotion.');
         const dirt = await git(mainWorktreePath, [
           'status',
           '--porcelain',
@@ -930,7 +931,7 @@ export function createCoordinator({
         ]);
         if (dirt.trim())
           throw new Error(
-            'The canonical Chorus checkout has local changes; preserve or resolve them before promotion.'
+            'The canonical Maestro checkout has local changes; preserve or resolve them before promotion.'
           );
         await git(mainWorktreePath, ['merge', '--ff-only', candidate.commit]);
       } else {
@@ -945,7 +946,7 @@ export function createCoordinator({
         await git(identity.repositoryPath, ['rev-parse', '--verify', `${state.mainRef}^{commit}`])
       ).trim();
       if (promoted !== candidate.commit)
-        throw new Error('Canonical Chorus promotion did not reach the candidate SHA.');
+        throw new Error('Canonical Maestro promotion did not reach the candidate SHA.');
       return {
         event: { type: 'candidate-promoted', candidateId },
         result: { promoted: true, candidateId, commit: candidate.commit },

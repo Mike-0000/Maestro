@@ -172,9 +172,17 @@ function Backup-Profile([string]$ProfileRoot, [string]$StateRoot, [string]$Candi
   return $backupRoot
 }
 
+function Get-AppExecutable([string]$Root) {
+  foreach ($name in @('Maestro.exe', 'Chorus.exe')) {
+    $path = Join-Path $Root $name
+    if (Test-Path -LiteralPath $path -PathType Leaf) { return $path }
+  }
+  throw "Neither Maestro.exe nor Chorus.exe was found at $Root."
+}
+
 function Get-InstalledProcesses([string]$InstallRoot) {
   $prefix = (Get-FullPath $InstallRoot) + '\'
-  return @(Get-Process -Name 'Chorus' -ErrorAction SilentlyContinue | Where-Object {
+  return @(Get-Process -Name 'Maestro','Chorus' -ErrorAction SilentlyContinue | Where-Object {
     try { $_.Path -and $_.Path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) }
     catch { $false }
   })
@@ -239,9 +247,7 @@ function Invoke-Install([object]$Job) {
   if ($stateRoot -ne $expectedRoot) { throw 'Delivery state directory does not match the current Windows user.' }
   $installRoot = Get-FullPath (Join-Path $env:LOCALAPPDATA 'Programs\Chorus')
   if ((Get-FullPath $Job.installRoot) -ne $installRoot) { throw 'Install target is not the current user Chorus installation.' }
-  if (-not (Test-Path -LiteralPath (Join-Path $installRoot 'Chorus.exe') -PathType Leaf)) {
-    throw "The installed Chorus executable was not found at $installRoot."
-  }
+  [void](Get-AppExecutable $installRoot)
   if ($Job.candidateId -notmatch '^[a-f0-9-]{36}$' -or $Job.nonce -notmatch '^[a-f0-9-]{36}$') {
     throw 'Invalid candidate or launch identity in install job.'
   }
@@ -327,7 +333,7 @@ function Invoke-Install([object]$Job) {
     $oldNonce = $env:CHORUS_UPDATE_LAUNCH_NONCE
     try {
       $env:CHORUS_UPDATE_LAUNCH_NONCE = $Job.nonce
-      $started = Start-Process -FilePath (Join-Path $installRoot 'Chorus.exe') -WorkingDirectory $installRoot -PassThru
+      $started = Start-Process -FilePath (Get-AppExecutable $installRoot) -WorkingDirectory $installRoot -PassThru
     } finally {
       $env:CHORUS_UPDATE_LAUNCH_NONCE = $oldNonce
     }
@@ -377,9 +383,11 @@ function Invoke-Install([object]$Job) {
     }
     if ($movedOriginal -and (Test-Path -LiteralPath $backupRoot)) {
       Move-Item -LiteralPath $backupRoot -Destination $installRoot
-      $oldApp = Join-Path $installRoot 'Chorus.exe'
-      if (Test-Path -LiteralPath $oldApp -PathType Leaf) {
-        Start-Process -FilePath $oldApp -WorkingDirectory $installRoot | Out-Null
+      if (
+        (Test-Path -LiteralPath (Join-Path $installRoot 'Maestro.exe') -PathType Leaf) -or
+        (Test-Path -LiteralPath (Join-Path $installRoot 'Chorus.exe') -PathType Leaf)
+      ) {
+        Start-Process -FilePath (Get-AppExecutable $installRoot) -WorkingDirectory $installRoot | Out-Null
       }
     }
     Write-InstallJournal $Job 'rolled-back' @{ error = $failure }
@@ -408,12 +416,8 @@ function Invoke-Rollback([object]$Job) {
   if ((Get-FullPath $Job.backupRoot) -ne $backupRoot) {
     throw 'Rollback backup path does not match the retained install tree.'
   }
-  if (-not (Test-Path -LiteralPath (Join-Path $backupRoot 'Chorus.exe') -PathType Leaf)) {
-    throw 'The previous Chorus installation is no longer available.'
-  }
-  if (-not (Test-Path -LiteralPath (Join-Path $installRoot 'Chorus.exe') -PathType Leaf)) {
-    throw 'The currently installed Chorus executable is missing.'
-  }
+  [void](Get-AppExecutable $backupRoot)
+  [void](Get-AppExecutable $installRoot)
   if (-not $Job.previousBuild -or [int]$Job.previousBuild.deliveryProtocol -ne 1) {
     throw 'The previous install cannot report health; matched rollback is unavailable.'
   }
@@ -491,7 +495,7 @@ function Invoke-Rollback([object]$Job) {
     $oldNonce = $env:CHORUS_UPDATE_LAUNCH_NONCE
     try {
       $env:CHORUS_UPDATE_LAUNCH_NONCE = $Job.nonce
-      $started = Start-Process -FilePath (Join-Path $installRoot 'Chorus.exe') -WorkingDirectory $installRoot -PassThru
+      $started = Start-Process -FilePath (Get-AppExecutable $installRoot) -WorkingDirectory $installRoot -PassThru
     } finally {
       $env:CHORUS_UPDATE_LAUNCH_NONCE = $oldNonce
     }

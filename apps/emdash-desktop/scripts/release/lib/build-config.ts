@@ -8,12 +8,13 @@ export function createReleaseBuildConfig(
   // electron-builder mutates config.files while normalizing it. Each architecture
   // needs its own copy, including nested metadata and platform configuration.
   // Keep executable packaging hooks by reference; structuredClone cannot clone functions.
-  const { beforePack, afterPack, ...cloneableConfig } = baseConfig;
+  const { beforePack, afterPack, afterSign, ...cloneableConfig } = baseConfig;
   const config = structuredClone(cloneableConfig);
   return {
     ...config,
     ...(beforePack ? { beforePack } : {}),
     ...(afterPack ? { afterPack } : {}),
+    ...(afterSign ? { afterSign } : {}),
     electronVersion,
     npmRebuild: false,
     ...(versionOverride === undefined

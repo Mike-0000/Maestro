@@ -12,19 +12,24 @@ const packageFile = fileURLToPath(new URL('../../../package.json', import.meta.u
 const projectDir = dirname(packageFile);
 
 describe.each([
-  { channel: 'stable', baseConfig: stableConfig, desktopId: 'Chorus', productName: 'Chorus' },
+  { channel: 'stable', baseConfig: stableConfig, desktopId: 'Maestro', productName: 'Maestro' },
   {
     channel: 'canary',
     baseConfig: canaryConfig,
-    desktopId: 'chorus-canary',
-    productName: 'Chorus Canary',
+    desktopId: 'maestro-canary',
+    productName: 'Maestro Canary',
   },
 ])('$channel Linux desktop identity', ({ channel, baseConfig, desktopId, productName }) => {
   it.each(['local', 'release'])('matches the %s launcher on Wayland and X11', async (mode) => {
     const versionOverride =
       mode === 'release' && channel === 'canary' ? '9.9.9-canary.123' : undefined;
     // Desktop identity is independent of packaging hooks, which cannot be structured-cloned.
-    const launcherConfig = { ...baseConfig, beforePack: undefined, afterPack: undefined };
+    const launcherConfig = {
+      ...baseConfig,
+      beforePack: undefined,
+      afterPack: undefined,
+      afterSign: undefined,
+    };
     const config =
       mode === 'release'
         ? createReleaseBuildConfig(
@@ -61,6 +66,7 @@ describe('createReleaseBuildConfig', () => {
     const config = createReleaseBuildConfig(stableConfig, packageJson.devDependencies.electron);
     expect(config.beforePack).toBe(stableConfig.beforePack);
     expect(config.afterPack).toBe(stableConfig.afterPack);
+    expect(config.afterSign).toBe(stableConfig.afterSign);
     expect(config.extraMetadata).not.toBe(stableConfig.extraMetadata);
   });
 

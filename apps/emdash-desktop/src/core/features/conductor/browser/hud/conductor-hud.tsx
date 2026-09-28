@@ -104,7 +104,7 @@ export const ConductorHud = observer(function ConductorHud() {
           <ManualListenControls />
           {!showLocalUpdate && (
             <HudIconButton
-              label="Show local Chorus update"
+              label="Show local Maestro update"
               onClick={() => setShowLocalUpdate(true)}
             >
               <GitMerge className="size-4" />
@@ -288,7 +288,7 @@ const StatusLine = observer(function StatusLine() {
   return (
     <span className="px-1 text-xs whitespace-nowrap text-foreground-muted">
       {voice.settings?.handsFree ? (
-        <>Hands-free: say “{capitalize(voice.settings.wakePhrase || 'Chorus')}, …”</>
+        <>Hands-free: say “{capitalize(voice.settings.wakePhrase || 'Maestro')}, …”</>
       ) : (
         <>
           Hold <Key>Right Ctrl</Key> to talk
