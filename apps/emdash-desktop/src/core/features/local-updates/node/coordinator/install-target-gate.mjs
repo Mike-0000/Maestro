@@ -18,7 +18,7 @@ export async function readInstallTargetGate(stateRoot) {
   try {
     gate = JSON.parse(raw);
   } catch {
-    throw new Error('The Chorus install target gate is unreadable; recover it before new work.');
+    throw new Error('The Maestro install target gate is unreadable; recover it before new work.');
   }
   if (
     gate?.version !== 1 ||
@@ -29,7 +29,7 @@ export async function readInstallTargetGate(stateRoot) {
     typeof gate.commit !== 'string' ||
     typeof gate.createdAt !== 'string'
   ) {
-    throw new Error('The Chorus install target gate is invalid; recover it before new work.');
+    throw new Error('The Maestro install target gate is invalid; recover it before new work.');
   }
   return gate;
 }
@@ -80,8 +80,8 @@ export async function reserveInstallTargetGate({
     }
     throw new Error(
       existing
-        ? `Chorus install target is already reserved by candidate ${existing.candidateId}.`
-        : 'Chorus install target is being reserved; try again shortly.'
+        ? `Maestro install target is already reserved by candidate ${existing.candidateId}.`
+        : 'Maestro install target is being reserved; try again shortly.'
     );
   }
 }

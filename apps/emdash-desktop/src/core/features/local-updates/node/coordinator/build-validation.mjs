@@ -61,7 +61,7 @@ export function deliveryBootstrapCommands(environment = process.env, platform = 
 
 export async function validateIntegratedCandidate({ repositoryPath, candidate, stateRoot, git }) {
   if (process.platform !== 'win32') {
-    throw new Error('Local Chorus installation builds currently require Windows.');
+    throw new Error('Local Maestro installation builds currently require Windows.');
   }
   const buildId = randomUUID();
   const buildRoot = resolve(stateRoot, 'BuildWorktrees', candidate.id);
@@ -166,8 +166,7 @@ export async function validateIntegratedCandidate({ repositoryPath, candidate, s
       }
       checks.push({ name, success: true, output: output.slice(-4000) });
     }
-    const executablePath = join(artifactRoot, 'win-unpacked', 'Chorus.exe');
-    await access(executablePath);
+    await assertWindowsExecutables(join(artifactRoot, 'win-unpacked'));
     await assertSqliteBinding(
       join(
         artifactRoot,
@@ -219,6 +218,16 @@ export async function validateIntegratedCandidate({ repositoryPath, candidate, s
       } catch {
         // Keep the failed build worktree registered so an operator can inspect and remove it.
       }
+    }
+  }
+}
+
+async function assertWindowsExecutables(packageRoot) {
+  for (const name of ['Maestro.exe', 'Chorus.exe']) {
+    const executablePath = join(packageRoot, name);
+    const file = await stat(executablePath).catch(() => null);
+    if (!file?.isFile() || file.size === 0) {
+      throw new Error(`Windows package is missing ${name}: ${executablePath}`);
     }
   }
 }

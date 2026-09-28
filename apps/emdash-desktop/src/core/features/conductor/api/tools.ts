@@ -220,9 +220,9 @@ const descriptions: Record<ConductorToolName, string> = {
   canvas_view:
     'Change what the user looks at: put windows or a region on the stage (tiled full screen, live), leave the stage, go into a sub-canvas (it fills the screen), leave it for its parent, go to the next or previous sub-canvas, show the main canvas, go back, or undo/redo the last layout change.',
   delivery_status:
-    'Report the local Chorus delivery queue for the named project, including active tasks, the frozen candidate, validation, and whether later work made it ineligible.',
+    'Report the local Maestro delivery queue for the named project, including active tasks, the frozen candidate, validation, and whether later work made it ineligible.',
   enable_delivery:
-    'Enable the durable local update coordinator for a local Chorus Git project and enroll its existing active tasks.',
+    'Enable the durable local update coordinator for a local Maestro Git project and enroll its existing active tasks.',
   prepare_delivery:
     'Freeze and combine ready task commits in an isolated integration worktree. snapshot uses exactly the current ready set; follow-project waits for every enrolled task and includes late arrivals.',
   resume_delivery:
@@ -234,11 +234,11 @@ const descriptions: Record<ConductorToolName, string> = {
   push_delivery_backup:
     'Push the exact promoted candidate commit to origin/main on GitHub without force. Report backup success or leave it visibly pending if GitHub rejects the push.',
   schedule_delivery:
-    'Schedule a promoted, validated local update after explicit user confirmation. Scheduling is rejected while any agent, terminal, or remote session is active. Chorus stays open until the user quits normally; then a detached worker installs and verifies the candidate with rollback available.',
+    'Schedule a promoted, validated local update after explicit user confirmation. Scheduling is rejected while any agent, terminal, or remote session is active. Maestro stays open until the user quits normally; then a detached worker installs and verifies the candidate with rollback available.',
   cancel_delivery:
     'Cancel a prepared candidate or atomically cancel a scheduled install before the replacement worker claims it. Once file replacement begins, cancellation is refused and recovery must finish.',
   rollback_delivery:
-    'Roll back the currently installed candidate to its exact retained previous build after explicit user confirmation. The matched pre-update Chorus profile is restored and the current profile is retained for recovery; every Chorus session must be stopped and Chorus must be quit normally.',
+    'Roll back the currently installed candidate to its exact retained previous build after explicit user confirmation. The matched pre-update Maestro profile is restored and the current profile is retained for recovery; every Maestro session must be stopped and Maestro must be quit normally.',
   stop_agent:
     "Stop an agent's session entirely (ends its process; the conversation is kept and can be resumed). Only when the user asks to stop, kill, or shut down an agent, not to interrupt its current step; the user confirms first.",
 };

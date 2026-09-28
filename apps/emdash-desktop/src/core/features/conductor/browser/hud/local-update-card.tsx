@@ -22,7 +22,7 @@ export const LocalUpdateCard = observer(function LocalUpdateCard({
   const openConfirmation = useOpenModal('confirmActionModal');
   const projects = [...getProjectManagerStore().projects.values()].flatMap((project) => {
     if (!asAvailableProject(project) || projectData(project)?.type !== 'local') return [];
-    return [{ id: project.id, name: projectDisplayName(project) ?? 'Chorus project' }];
+    return [{ id: project.id, name: projectDisplayName(project) ?? 'Maestro project' }];
   });
   const [projectId, setProjectId] = useState<string | null>(projects[0]?.id ?? null);
   const [status, setStatus] = useState<LocalUpdateStatus | null>(null);
@@ -82,8 +82,8 @@ export const LocalUpdateCard = observer(function LocalUpdateCard({
         confirmSchedule: async (candidate) =>
           (
             await openConfirmation({
-              title: 'Schedule the local Chorus install?',
-              description: `Candidate ${candidate.id.slice(0, 8)} is promoted. No agents, terminals, or remote sessions can be active. Chorus stays open until you quit normally; the installer then replaces the app and checks that it starts. New agent work is paused while the installer waits.`,
+              title: 'Schedule the local Maestro install?',
+              description: `Candidate ${candidate.id.slice(0, 8)} is promoted. No agents, terminals, or remote sessions can be active. Maestro stays open until you quit normally; the installer then replaces the app and checks that it starts. New agent work is paused while the installer waits.`,
               confirmLabel: 'Schedule install',
             })
           ).success,
@@ -111,11 +111,11 @@ export const LocalUpdateCard = observer(function LocalUpdateCard({
           title:
             operation === 'push-backup'
               ? 'Push this candidate to GitHub origin/main?'
-              : 'Restore the retained Chorus build and its profile?',
+              : 'Restore the retained Maestro build and its profile?',
           description:
             operation === 'push-backup'
               ? 'This pushes the exact promoted commit to origin/main without force. A rejected push leaves the GitHub backup pending.'
-              : 'The installer restores the exact retained pre-update Chorus build and its matched pre-update profile. The current profile is preserved in local recovery storage. Stop every agent, terminal, and remote session; Chorus stays open until you quit normally, then the rollback starts and verifies startup.',
+              : 'The installer restores the exact retained pre-update Maestro build and its matched pre-update profile. The current profile is preserved in local recovery storage. Stop every agent, terminal, and remote session; Maestro stays open until you quit normally, then the rollback starts and verifies startup.',
           confirmLabel: operation === 'push-backup' ? 'Push backup' : 'Restore previous build',
         });
         if (!confirmation.success) return;
@@ -152,12 +152,12 @@ export const LocalUpdateCard = observer(function LocalUpdateCard({
   const withdrawnCount = (status?.tasks.length ?? 0) - activeTasks.length;
   return (
     <section
-      aria-label="Local Chorus update"
+      aria-label="Local Maestro update"
       className="pointer-events-auto w-full max-w-[560px] rounded-2xl border border-border bg-background/95 p-3 text-foreground shadow-xl backdrop-blur"
     >
       <header className="flex items-center gap-2">
         <GitMerge className="size-4 shrink-0 text-foreground-muted" />
-        <h2 className="flex-1 text-xs font-semibold">Local Chorus update</h2>
+        <h2 className="flex-1 text-xs font-semibold">Local Maestro update</h2>
         {projects.length > 1 && (
           <select
             aria-label="Delivery project"
@@ -188,8 +188,8 @@ export const LocalUpdateCard = observer(function LocalUpdateCard({
         </button>
         <button
           type="button"
-          aria-label="Hide local Chorus update"
-          title="Hide local Chorus update"
+          aria-label="Hide local Maestro update"
+          title="Hide local Maestro update"
           disabled={busy}
           onClick={onHide}
           className="rounded p-1 text-foreground-muted hover:bg-background-secondary disabled:opacity-50"
@@ -215,7 +215,7 @@ export const LocalUpdateCard = observer(function LocalUpdateCard({
           {status.targetInstallGate && (
             <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
               Candidate {status.targetInstallGate.candidateId.slice(0, 8)} owns the local install
-              target. New Chorus sessions are paused until it completes.
+              target. New Maestro sessions are paused until it completes.
             </p>
           )}
           {activeTasks.length > 0 && (
@@ -261,9 +261,9 @@ export const LocalUpdateCard = observer(function LocalUpdateCard({
                 candidate.error && (
                   <p className="mt-1 text-amber-700 dark:text-amber-300">
                     The update worker stopped before recovery was verified. New sessions remain
-                    paused; do not start agents. Close Chorus normally if it is still open, and keep
-                    the install journal and recovery folders intact while resolving the displayed
-                    error.
+                    paused; do not start agents. Close Maestro normally if it is still open, and
+                    keep the install journal and recovery folders intact while resolving the
+                    displayed error.
                   </p>
                 )}
               {candidate.state === 'validated' && (
@@ -280,7 +280,7 @@ export const LocalUpdateCard = observer(function LocalUpdateCard({
               {candidate.state === 'applying' && (
                 <div className="mt-1 flex items-center gap-2 text-amber-700 dark:text-amber-300">
                   <p className="flex-1">
-                    Install worker is waiting. Quit Chorus normally when you are ready to apply it.
+                    Install worker is waiting. Quit Maestro normally when you are ready to apply it.
                   </p>
                   <ActionButton
                     disabled={busy}
@@ -324,7 +324,7 @@ export const LocalUpdateCard = observer(function LocalUpdateCard({
               (candidate.state === 'blocked' &&
                 !candidate.error?.startsWith('Integration conflict in '))) && (
               <ActionButton disabled={busy} onClick={() => void runUpdate()}>
-                {busy ? (stage ?? 'Updating…') : 'Update Chorus'}
+                {busy ? (stage ?? 'Updating…') : 'Update Maestro'}
               </ActionButton>
             )}
             {candidate?.state === 'blocked' &&

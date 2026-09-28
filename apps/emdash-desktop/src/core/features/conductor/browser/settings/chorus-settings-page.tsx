@@ -48,7 +48,7 @@ function DiagnosticControls({ enabled }: { enabled: boolean }) {
         onClick={() => {
           if (
             !window.confirm(
-              'Permanently delete all local Chorus command logs and diagnostic traces?'
+              'Permanently delete all local Maestro command logs and diagnostic traces?'
             )
           )
             return;
@@ -102,7 +102,7 @@ const JEV_SOURCE_LABELS = {
 } as const;
 
 const HOLD_KEY_LABELS = {
-  off: 'Only in Chorus',
+  off: 'Only in Maestro',
   'right-ctrl': 'Right Ctrl',
   'right-alt': 'Right Alt',
 } as const;
@@ -310,8 +310,8 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
           label="Hold to talk anywhere"
           description={
             voiceSettings?.globalHoldKey !== 'off' && voice.status && !voice.status.globalHoldActive
-              ? 'The system keyboard hook could not start; hold-to-talk works only inside Chorus.'
-              : 'Hold this key in any app to talk to Chorus. Chorus only watches for this key; it never records what you type.'
+              ? 'The system keyboard hook could not start; hold-to-talk works only inside Maestro.'
+              : 'Hold this key in any app to talk to Maestro. Maestro only watches for this key; it never records what you type.'
           }
           control={
             <Select.Root
@@ -377,7 +377,7 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
         {voiceSettings?.handsFree && (
           <SettingsRow
             label="Wake phrase"
-            description="Say it first: “Chorus, focus Claude 1”. Leave empty to act on everything (not recommended)."
+            description="Say it first: “Maestro, focus Claude 1”. Leave empty to act on everything (not recommended)."
             control={
               <CommitInput
                 value={voiceSettings.wakePhrase}
@@ -896,7 +896,7 @@ const VoicePicker = observer(function VoicePicker() {
           ))}
         </Select.Content>
       </Select.Root>
-      <Button variant="ghost" size="xs" onClick={() => voice.speech.speak('Chorus is listening.')}>
+      <Button variant="ghost" size="xs" onClick={() => voice.speech.speak('Maestro is listening.')}>
         Test
       </Button>
     </div>
@@ -940,7 +940,7 @@ function WindowsChecks() {
           description={
             checks.git
               ? 'Agent worktrees nest deep folders (node_modules). With long paths off, checkouts fail past 260 characters. This sets git config --global core.longpaths true.'
-              : 'Install Git for Windows and restart Chorus; agents work in git worktrees.'
+              : 'Install Git for Windows and restart Maestro; agents work in git worktrees.'
           }
           control={
             checks.git ? (
@@ -996,7 +996,7 @@ function WindowsChecks() {
       />
       <SettingsRow
         label="Faster worktrees with Defender"
-        description={`Real-time scanning slows worktree creation and installs. To exclude the worktree folder, run this in an administrator PowerShell: ${defenderCommand}. Chorus never changes security settings for you.`}
+        description={`Real-time scanning slows worktree creation and installs. To exclude the worktree folder, run this in an administrator PowerShell: ${defenderCommand}. Maestro never changes security settings for you.`}
         control={
           <Button
             variant="ghost"
@@ -1019,7 +1019,7 @@ const CanvasSettings = observer(function CanvasSettings() {
     <>
       <SettingsRow
         label="Open on the canvas"
-        description="Start Chorus on the agent canvas instead of the last view you had open."
+        description="Start Maestro on the agent canvas instead of the last view you had open."
         control={
           <Switch
             checked={canvas.openOnLaunch}

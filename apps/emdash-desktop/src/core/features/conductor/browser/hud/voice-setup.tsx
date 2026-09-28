@@ -87,7 +87,7 @@ export const VoiceSetupPanel = observer(function VoiceSetupPanel({
           )}
         </Step>
 
-        <Step done={test.kind === 'done'} title="Say &ldquo;Hello Chorus&rdquo;">
+        <Step done={test.kind === 'done'} title="Say &ldquo;Hello Maestro&rdquo;">
           <div className="mt-1 flex items-center gap-2">
             <button
               type="button"

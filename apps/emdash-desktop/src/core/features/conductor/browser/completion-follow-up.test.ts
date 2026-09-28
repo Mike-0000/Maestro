@@ -200,7 +200,7 @@ describe('completion follow-ups', () => {
     await announce();
 
     const event = lastUserText(sentMessages(0));
-    expect(event).toContain('[Chorus event, not the developer speaking]');
+    expect(event).toContain('[Maestro event, not the developer speaking]');
     expect(event).toContain(NODE_APP_REPLY);
     expect(event).toContain('Local app URLs in the reply: http://localhost:3000/');
     expect(event).toContain("Finished agents' final replies");

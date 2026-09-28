@@ -264,7 +264,7 @@ export function buildContext(
 
 /** Words the speech engine should expect: spoken names, providers, tasks, projects. */
 export function vocabulary(canvas: CanvasStore): string[] {
-  const words = new Set<string>(['Chorus', 'Claude', 'Codex', 'worktree']);
+  const words = new Set<string>(['Maestro', 'Claude', 'Codex', 'worktree']);
   for (const entry of canvas.agentEntries) {
     words.add(canvas.spokenName(entry.conversationId));
     words.add(spokenProviderLabel(entry.providerId));

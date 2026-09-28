@@ -1497,7 +1497,7 @@ export class ConductorStore {
           (input as ConductorToolInput<'delivery_status'>).project,
           this.focusedEntry()?.projectId
         );
-        if (!projectId) return { content: 'I could not find that Chorus project.', isError: true };
+        if (!projectId) return { content: 'I could not find that Maestro project.', isError: true };
         const result = await (await getLocalUpdatesClient()).status({ projectId });
         if (!result.success) return { content: result.error.message, isError: true };
         return { content: formatDeliveryStatus(result.data) };
@@ -1507,7 +1507,7 @@ export class ConductorStore {
           (input as ConductorToolInput<'enable_delivery'>).project,
           this.focusedEntry()?.projectId
         );
-        if (!projectId) return { content: 'I could not find that Chorus project.', isError: true };
+        if (!projectId) return { content: 'I could not find that Maestro project.', isError: true };
         const result = await (await getLocalUpdatesClient()).enable({ projectId });
         if (!result.success) return { content: result.error.message, isError: true };
         return {
@@ -1520,7 +1520,7 @@ export class ConductorStore {
           preparation.project,
           this.focusedEntry()?.projectId
         );
-        if (!projectId) return { content: 'I could not find that Chorus project.', isError: true };
+        if (!projectId) return { content: 'I could not find that Maestro project.', isError: true };
         runInAction(() => (this.activity = 'Combining the ready worktrees…'));
         const result = await (
           await getLocalUpdatesClient()
@@ -1545,7 +1545,7 @@ export class ConductorStore {
       case 'validate_delivery': {
         const request = input as ConductorToolInput<'validate_delivery'>;
         const projectId = resolveDeliveryProjectId(request.project, this.focusedEntry()?.projectId);
-        if (!projectId) return { content: 'I could not find that Chorus project.', isError: true };
+        if (!projectId) return { content: 'I could not find that Maestro project.', isError: true };
         runInAction(
           () => (this.activity = 'Running the combined checks and Windows package build…')
         );
@@ -1570,7 +1570,7 @@ export class ConductorStore {
       case 'resume_delivery': {
         const request = input as ConductorToolInput<'resume_delivery'>;
         const projectId = resolveDeliveryProjectId(request.project, this.focusedEntry()?.projectId);
-        if (!projectId) return { content: 'I could not find that Chorus project.', isError: true };
+        if (!projectId) return { content: 'I could not find that Maestro project.', isError: true };
         const result = await (
           await getLocalUpdatesClient()
         ).resume({
@@ -1591,7 +1591,7 @@ export class ConductorStore {
       case 'schedule_delivery': {
         const request = input as ConductorToolInput<'schedule_delivery'>;
         const projectId = resolveDeliveryProjectId(request.project, this.focusedEntry()?.projectId);
-        if (!projectId) return { content: 'I could not find that Chorus project.', isError: true };
+        if (!projectId) return { content: 'I could not find that Maestro project.', isError: true };
         if (
           !(await this.requestPending(
             `Schedule candidate ${request.candidate_id} for a manual install`,
@@ -1609,13 +1609,13 @@ export class ConductorStore {
         });
         if (!result.success) return { content: result.error.message, isError: true };
         return {
-          content: `Candidate ${request.candidate_id} is ready to install. Chorus will stay open until you quit normally; new agent work is blocked while the installer waits.`,
+          content: `Candidate ${request.candidate_id} is ready to install. Maestro will stay open until you quit normally; new agent work is blocked while the installer waits.`,
         };
       }
       case 'promote_delivery': {
         const request = input as ConductorToolInput<'promote_delivery'>;
         const projectId = resolveDeliveryProjectId(request.project, this.focusedEntry()?.projectId);
-        if (!projectId) return { content: 'I could not find that Chorus project.', isError: true };
+        if (!projectId) return { content: 'I could not find that Maestro project.', isError: true };
         if (
           !(await this.requestPending(
             `Promote candidate ${request.candidate_id} to local chorus/main`,
@@ -1639,7 +1639,7 @@ export class ConductorStore {
       case 'push_delivery_backup': {
         const request = input as ConductorToolInput<'push_delivery_backup'>;
         const projectId = resolveDeliveryProjectId(request.project, this.focusedEntry()?.projectId);
-        if (!projectId) return { content: 'I could not find that Chorus project.', isError: true };
+        if (!projectId) return { content: 'I could not find that Maestro project.', isError: true };
         if (
           !(await this.requestPending(
             `Push candidate ${request.candidate_id} to GitHub origin/main`,
@@ -1669,7 +1669,7 @@ export class ConductorStore {
       case 'cancel_delivery': {
         const request = input as ConductorToolInput<'cancel_delivery'>;
         const projectId = resolveDeliveryProjectId(request.project, this.focusedEntry()?.projectId);
-        if (!projectId) return { content: 'I could not find that Chorus project.', isError: true };
+        if (!projectId) return { content: 'I could not find that Maestro project.', isError: true };
         const result = await (
           await getLocalUpdatesClient()
         ).cancel({
@@ -1682,10 +1682,10 @@ export class ConductorStore {
       case 'rollback_delivery': {
         const request = input as ConductorToolInput<'rollback_delivery'>;
         const projectId = resolveDeliveryProjectId(request.project, this.focusedEntry()?.projectId);
-        if (!projectId) return { content: 'I could not find that Chorus project.', isError: true };
+        if (!projectId) return { content: 'I could not find that Maestro project.', isError: true };
         if (
           !(await this.requestPending(
-            `Roll back candidate ${request.candidate_id}, restore its exact pre-update Chorus profile, and preserve the current profile for recovery`,
+            `Roll back candidate ${request.candidate_id}, restore its exact pre-update Maestro profile, and preserve the current profile for recovery`,
             confirmKind
           ))
         ) {
@@ -1697,7 +1697,7 @@ export class ConductorStore {
         if (!result.success) return { content: result.error.message, isError: true };
         return {
           content:
-            'Rollback to the retained previous Chorus build is scheduled. Stop all sessions, then quit Chorus normally; the current profile will be kept in the local recovery folder.',
+            'Rollback to the retained previous Maestro build is scheduled. Stop all sessions, then quit Maestro normally; the current profile will be kept in the local recovery folder.',
         };
       }
     }
