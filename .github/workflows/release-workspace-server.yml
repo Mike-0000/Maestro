@@ -128,11 +128,47 @@ jobs:
           path: |
             apps/workspace-server/dist-artifacts/*.tar.gz
             apps/workspace-server/dist-artifacts/*.tar.gz.sha256
+            apps/workspace-server/dist-artifacts/*.zip
+            apps/workspace-server/dist-artifacts/*.zip.sha256
           if-no-files-found: error
           retention-days: 7
 
-  publish:
+  verify-windows-install:
     needs: [version-guard, build]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: workspace-server-win32-x64
+          path: ${{ runner.temp }}/workspace-server-mirror/${{ needs.version-guard.outputs.version }}
+
+      - name: Install from the release mirror with install.ps1
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.version-guard.outputs.version }}
+          MIRROR: ${{ runner.temp }}/workspace-server-mirror
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'emdash-install-root'
+          $baseUrl = ([Uri](Resolve-Path $env:MIRROR).Path).AbsoluteUri
+          # Windows PowerShell 5.1 is what Chorus runs on remote Windows hosts.
+          powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+            -File apps/workspace-server/install.ps1 `
+            -BaseUrl $baseUrl -Version $env:VERSION -InstallRoot $root
+          if ($LASTEXITCODE -ne 0) { throw "install.ps1 exited with $LASTEXITCODE" }
+          $current = (Get-Content -Raw (Join-Path $root 'current')).Trim()
+          if ($current -cne $env:VERSION) { throw "current points at '$current'" }
+          $versionDirectory = Join-Path $root "versions/$env:VERSION"
+          foreach ($file in @('node.exe', 'dist/index.mjs', 'bin/rg.exe', 'manifest.json')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $versionDirectory $file) -PathType Leaf)) {
+              throw "installed workspace server is missing $file"
+            }
+          }
+
+  publish:
+    needs: [version-guard, build, verify-windows-install]
     runs-on: ubuntu-latest
     environment: release
     steps:

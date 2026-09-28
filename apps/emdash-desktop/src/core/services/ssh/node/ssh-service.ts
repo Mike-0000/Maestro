@@ -14,6 +14,8 @@ import {
   type SshConnectionControl,
   type SshConnectionLifecycle,
 } from '@core/primitives/ssh/api/node/connection-control';
+import { probeRemotePlatform } from '@core/primitives/ssh/api/node/remote-platform-probe';
+import { summarizeRemotePlatform } from '@core/primitives/ssh/api/remote-platform';
 import type { AppDb } from '@core/services/app-db/node/db';
 import {
   sshConnections as sshConnectionsTable,
@@ -80,7 +82,8 @@ export class SshService implements SshServiceContract {
     probe: async (id, signal) => {
       const proxy = this.deps.manager.getProxy(id);
       if (!proxy?.isConnected) throw new SshConnectionFailure('transport', 'SSH is disconnected');
-      const result = await proxy.execScript('true', { signal, timeoutMs: 5_000 });
+      // `exit 0` means the same in sh, cmd.exe, and PowerShell (Windows OpenSSH default shells).
+      const result = await proxy.execScript('exit 0', { signal, timeoutMs: 5_000 });
       if (result.exitCode !== 0) throw new SshConnectionFailure('transport', 'SSH probe failed');
     },
   };
@@ -149,7 +152,13 @@ export class SshService implements SshServiceContract {
         },
         { ephemeral: true }
       );
-      result = { success: true, latency: this.now() - startedAt, debugLogs };
+      const latency = this.now() - startedAt;
+      result = {
+        success: true,
+        latency,
+        debugLogs,
+        ...(await this.probeTestPlatform(connectionId)),
+      };
     } catch (error) {
       result = {
         success: false,
@@ -167,6 +176,27 @@ export class SshService implements SshServiceContract {
 
     this.deps.telemetry.capture('ssh_connection_attempted', { success: result.success });
     return result;
+  }
+
+  /**
+   * Identifies the remote OS and its setup problems for the connection test. SSH itself already
+   * worked, so a failed probe is reported alongside the successful result, not as a failure.
+   */
+  private async probeTestPlatform(
+    connectionId: string
+  ): Promise<Pick<ConnectionTestResult, 'platform' | 'platformError'>> {
+    try {
+      const proxy = this.deps.manager.getProxy(connectionId);
+      if (!proxy?.isConnected) {
+        return { platformError: 'SSH disconnected before the platform check' };
+      }
+      const info = await runWithTimeout((signal) => probeRemotePlatform(proxy, signal), {
+        timeoutMs: 45_000,
+      });
+      return { platform: summarizeRemotePlatform(info) };
+    } catch (error) {
+      return { platformError: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   /** Intentionally close a connection and stop auto-reconnect. */

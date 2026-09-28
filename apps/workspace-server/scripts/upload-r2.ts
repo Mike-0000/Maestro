@@ -22,6 +22,7 @@ import {
   contentTypeForObjectKey,
   expectedArtifactNames,
   immutableUploadDecision,
+  installScriptNames,
   mutableReleaseObjectKeys,
   parseUploadArgs,
   parseArtifactChecksum,
@@ -59,12 +60,15 @@ async function main(): Promise<void> {
     targets,
     !devUpload && options.targets === undefined
   );
-  const installScriptData = new Uint8Array(await readFile(join(appDirectory, 'install.sh')));
-  const versionedInstallScript: ValidatedArtifact = {
-    path: join(appDirectory, 'install.sh'),
-    key: versionedInstallScriptObjectKey(version),
-    sha256: sha256(installScriptData),
-  };
+  const versionedInstallScripts: ValidatedArtifact[] = [];
+  for (const script of installScriptNames) {
+    const path = join(appDirectory, script);
+    versionedInstallScripts.push({
+      path,
+      key: versionedInstallScriptObjectKey(version, script),
+      sha256: sha256(new Uint8Array(await readFile(path))),
+    });
+  }
   const pointer: ChannelPointer = {
     artifactVersion: version,
     protocolVersion: PROTOCOL_VERSION,
@@ -78,7 +82,7 @@ async function main(): Promise<void> {
     region: 'auto',
   });
 
-  for (const artifact of [...artifacts, versionedInstallScript]) {
+  for (const artifact of [...artifacts, ...versionedInstallScripts]) {
     await uploadImmutableArtifact(s3, artifact);
   }
   const publishedVersions = new Set([version]);
@@ -147,10 +151,7 @@ async function validateArtifacts(
   const expectedNameSet = new Set(expectedNames);
   const entries = await readdir(artifactsDirectory, { withFileTypes: true });
   const actualNames = entries
-    .filter(
-      (entry) =>
-        entry.isFile() && (entry.name.endsWith('.tar.gz') || entry.name.endsWith('.tar.gz.sha256'))
-    )
+    .filter((entry) => entry.isFile() && isArtifactFileName(entry.name))
     .map((entry) => entry.name)
     .sort();
   const missingNames = expectedNames.filter((name) => !actualNames.includes(name));
@@ -283,6 +284,11 @@ function sha256(data: Uint8Array): string {
 function uploadHeadersForObjectKey(key: string): Parameters<S3mini['putObject']>[4] {
   // s3mini forwards arbitrary additional headers but narrows this parameter to x-amz-* headers.
   return { 'Cache-Control': cacheControlForObjectKey(key) } as Parameters<S3mini['putObject']>[4];
+}
+
+function isArtifactFileName(name: string): boolean {
+  const archiveName = name.endsWith('.sha256') ? name.slice(0, -'.sha256'.length) : name;
+  return archiveName.endsWith('.tar.gz') || archiveName.endsWith('.zip');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

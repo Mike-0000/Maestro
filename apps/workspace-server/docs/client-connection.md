@@ -1,7 +1,9 @@
 # Workspace Server Client Connection
 
-This document describes the target desktop-to-workspace-server connection model.
-Only macOS and Linux remotes are in scope for this design.
+This document describes the target desktop-to-workspace-server connection model for macOS and
+Linux remotes. Windows OpenSSH cannot forward Unix sockets, so Windows remotes replace the
+streamlocal hop with an exec-channel named-pipe bridge; see `windows-hosts.md`. Everything above
+the byte stream (reconnecting transport, handshake, failure semantics) is shared.
 
 ## Topology
 
@@ -219,6 +221,7 @@ the production SSH transport.
 ## Related Docs
 
 - `apps/workspace-server/docs/daemon.md`
+- `apps/workspace-server/docs/windows-hosts.md`
 - `packages/wire/docs/api/serving.md`
 - `packages/wire/docs/api/transports.md`
 - `packages/wire/docs/runtime/lifecycle.md`

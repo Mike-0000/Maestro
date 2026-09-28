@@ -5,7 +5,12 @@ import { createWorkspaceServerDialer } from './wire-connection-manager';
 
 describe('bounded workspace-server dialer', () => {
   let peer: ReturnType<typeof createFaultPeer>;
-  const target = { kind: 'ssh' as const, sshConnectionId: 'host', socketPath: '/test.sock' };
+  const target = {
+    kind: 'ssh' as const,
+    sshConnectionId: 'host',
+    socketPath: '/test.sock',
+    channel: 'streamlocal' as const,
+  };
   beforeEach(() => {
     vi.useFakeTimers();
     peer = createFaultPeer();

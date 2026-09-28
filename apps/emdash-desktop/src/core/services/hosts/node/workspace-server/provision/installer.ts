@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { quoteArg } from '@emdash/core/primitives/exec/api';
 import {
@@ -6,9 +7,22 @@ import {
   protocolMajor,
   type ReleaseChannel,
 } from '@emdash/core/workspace-server';
+import { execPowerShell } from '@core/primitives/ssh/api/node/remote-platform-probe';
 import type { SshClientProxy } from '@core/primitives/ssh/api/node/ssh-client-proxy';
-import { validateWorkspaceServerVersion, type WorkspaceServerLayout } from '../layout';
+import {
+  validateWorkspaceServerVersion,
+  type PosixWorkspaceServerLayout,
+  type WindowsWorkspaceServerLayout,
+  type WorkspaceServerLayout,
+} from '../layout';
 import type { WorkspaceServerSshPort } from '../ports';
+import {
+  buildWindowsChannelPointerScript,
+  buildWindowsInstalledVersionScript,
+  buildWindowsInstallerDownloadScript,
+  buildWindowsInstallerRunScript,
+  WINDOWS_INVALID_POINTER_EXIT_CODE,
+} from '../windows-scripts';
 
 export const DEFAULT_WORKSPACE_SERVER_INSTALL_BASE_URL =
   'https://releases.emdash.sh/workspace-server';
@@ -43,6 +57,21 @@ export type WorkspaceServerInstallOptions = {
   version?: string;
 };
 
+const installOptions = {
+  timeoutMs: 5 * 60_000,
+  maxStdoutBytes: 256 * 1_024,
+  maxStderrBytes: 256 * 1_024,
+} as const;
+
+const metadataOptions = {
+  timeoutMs: 10_000,
+  maxStdoutBytes: 4_096,
+  maxStderrBytes: 4_096,
+} as const;
+
+// Windows metadata commands include a cold powershell.exe start.
+const windowsMetadataTimeoutMs = 30_000;
+
 export class WorkspaceServerInstaller {
   private readonly ssh: WorkspaceServerSshPort;
   private readonly baseUrl: string;
@@ -65,15 +94,19 @@ export class WorkspaceServerInstaller {
 
   async install(options: WorkspaceServerInstallOptions): Promise<void> {
     const selectedVersion =
-      options.version ?? (await this.availableVersion(options.connectionId, options.signal));
-    const command = buildWorkspaceServerInstallCommand(this.baseUrl, selectedVersion);
+      options.version ??
+      (await this.availableVersion(options.connectionId, options.signal, options.layout.platform));
     const proxy = await this.ssh.ensureProxy(options.connectionId);
-    const result = await proxy.execScript(command, {
-      signal: options.signal,
-      timeoutMs: 5 * 60_000,
-      maxStdoutBytes: 256 * 1_024,
-      maxStderrBytes: 256 * 1_024,
-    });
+    const result =
+      options.layout.platform === 'windows'
+        ? await this.runWindowsInstaller(proxy, selectedVersion, options.layout, options.signal)
+        : await proxy.execScript(
+            buildWorkspaceServerInstallCommand(this.baseUrl, selectedVersion),
+            {
+              ...installOptions,
+              signal: options.signal,
+            }
+          );
     if (result.exitCode !== 0) {
       const code =
         result.exitCode === 40
@@ -102,19 +135,88 @@ export class WorkspaceServerInstaller {
     }
   }
 
+  /** Downloads `install.ps1` into staging, then runs it; see buildWindowsInstallerDownloadScript. */
+  private async runWindowsInstaller(
+    proxy: SshClientProxy,
+    version: string,
+    layout: WindowsWorkspaceServerLayout,
+    signal?: AbortSignal
+  ) {
+    const scripts = buildWindowsWorkspaceServerInstallScripts(
+      this.baseUrl,
+      version,
+      layout,
+      randomUUID()
+    );
+    const download = await execPowerShell(proxy, scripts.download, {
+      ...metadataOptions,
+      timeoutMs: installOptions.timeoutMs,
+      signal,
+    });
+    if (download.exitCode !== 0) return download;
+    return await execPowerShell(
+      proxy,
+      scripts.run,
+      { ...installOptions, signal },
+      { bypassExecutionPolicy: true }
+    );
+  }
+
   private async installedVersionFromProxy(
     proxy: SshClientProxy,
     layout: WorkspaceServerLayout,
     signal?: AbortSignal
   ): Promise<string | undefined> {
+    return layout.platform === 'windows'
+      ? await this.windowsInstalledVersion(proxy, layout, signal)
+      : await this.posixInstalledVersion(proxy, layout, signal);
+  }
+
+  private async windowsInstalledVersion(
+    proxy: SshClientProxy,
+    layout: WindowsWorkspaceServerLayout,
+    signal?: AbortSignal
+  ): Promise<string | undefined> {
+    const result = await execPowerShell(proxy, buildWindowsInstalledVersionScript(layout), {
+      ...metadataOptions,
+      timeoutMs: windowsMetadataTimeoutMs,
+      signal,
+    });
+    if (result.exitCode === WINDOWS_INVALID_POINTER_EXIT_CODE) {
+      throw new WorkspaceServerInstallError(
+        'install-failed',
+        result.stderr.trim() || 'The managed workspace-server current pointer is invalid'
+      );
+    }
+    if (result.exitCode !== 0) {
+      throw new WorkspaceServerInstallError(
+        'install-failed',
+        `Could not read the installed workspace-server version: ${
+          result.stderr.trim() || `exit ${result.exitCode}`
+        }`
+      );
+    }
+    const version = result.stdout.trim();
+    if (!version) return undefined;
+    try {
+      return validateWorkspaceServerVersion(version);
+    } catch (error) {
+      throw new WorkspaceServerInstallError(
+        'install-failed',
+        `The managed workspace-server current pointer is invalid: ${version}`,
+        { cause: error }
+      );
+    }
+  }
+
+  private async posixInstalledVersion(
+    proxy: SshClientProxy,
+    layout: PosixWorkspaceServerLayout,
+    signal?: AbortSignal
+  ): Promise<string | undefined> {
     const result = await proxy.exec(
       { command: 'readlink', args: ['--', layout.currentLink] },
-      {
-        signal,
-        timeoutMs: 10_000,
-        maxStdoutBytes: 4_096,
-        maxStderrBytes: 4_096,
-      }
+      { ...metadataOptions, signal }
     );
     if (result.exitCode !== 0) return undefined;
 
@@ -138,22 +240,34 @@ export class WorkspaceServerInstaller {
     return version;
   }
 
-  async availableVersion(connectionId: string, signal?: AbortSignal): Promise<string> {
+  /**
+   * Resolves the channel's current artifact version. The pointer is downloaded on the remote
+   * machine, which is also the one that downloads the artifact.
+   */
+  async availableVersion(
+    connectionId: string,
+    signal?: AbortSignal,
+    platform: WorkspaceServerLayout['platform'] = 'posix'
+  ): Promise<string> {
     const expectedProtocolMajor = protocolMajor();
     const proxy = await this.ssh.ensureProxy(connectionId);
-    const result = await proxy.execScript(
-      buildWorkspaceServerChannelPointerCommand(
-        this.baseUrl,
-        this.releaseChannel,
-        expectedProtocolMajor
-      ),
-      {
-        signal,
-        timeoutMs: 10_000,
-        maxStdoutBytes: 4_096,
-        maxStderrBytes: 4_096,
-      }
-    );
+    const result =
+      platform === 'windows'
+        ? await execPowerShell(
+            proxy,
+            buildWindowsChannelPointerScript(
+              channelPointerUrls(this.baseUrl, this.releaseChannel, expectedProtocolMajor)
+            ),
+            { ...metadataOptions, timeoutMs: windowsMetadataTimeoutMs, signal }
+          )
+        : await proxy.execScript(
+            buildWorkspaceServerChannelPointerCommand(
+              this.baseUrl,
+              this.releaseChannel,
+              expectedProtocolMajor
+            ),
+            { ...metadataOptions, signal }
+          );
     if (result.exitCode !== 0) {
       throw new WorkspaceServerInstallError(
         'artifact-download-failed',
@@ -178,27 +292,28 @@ export class WorkspaceServerInstaller {
   }
 }
 
+/** The channel's pointer URL, followed by the stable pointer as the canary fallback. */
+export function channelPointerUrls(
+  baseUrl: string,
+  channel: ReleaseChannel,
+  expectedProtocolMajor: number
+): [string, ...string[]] {
+  const normalizedBaseUrl = ensureTrailingSlash(validateInstallBaseUrl(baseUrl));
+  const pointerUrl = (pointerChannel: ReleaseChannel) =>
+    new URL(channelPointerPath(pointerChannel, expectedProtocolMajor), normalizedBaseUrl).href;
+  return channel === 'canary'
+    ? [pointerUrl('canary'), pointerUrl('stable')]
+    : [pointerUrl(channel)];
+}
+
 export function buildWorkspaceServerChannelPointerCommand(
   baseUrl: string,
   channel: ReleaseChannel,
   expectedProtocolMajor: number
 ): string {
-  const normalizedBaseUrl = validateInstallBaseUrl(baseUrl);
-  const pointerUrl = new URL(
-    channelPointerPath(channel, expectedProtocolMajor),
-    ensureTrailingSlash(normalizedBaseUrl)
-  );
-  const quotedPointerUrl = quoteArg(pointerUrl.href, 'posix');
-  const stableFallbackUrl =
-    channel === 'canary'
-      ? quoteArg(
-          new URL(
-            channelPointerPath('stable', expectedProtocolMajor),
-            ensureTrailingSlash(normalizedBaseUrl)
-          ).href,
-          'posix'
-        )
-      : undefined;
+  const [pointerUrl, fallbackUrl] = channelPointerUrls(baseUrl, channel, expectedProtocolMajor);
+  const quotedPointerUrl = quoteArg(pointerUrl, 'posix');
+  const stableFallbackUrl = fallbackUrl === undefined ? undefined : quoteArg(fallbackUrl, 'posix');
   const curlCommand = stableFallbackUrl
     ? `curl -fsSL -- ${quotedPointerUrl} 2>/dev/null || curl -fsSL -- ${stableFallbackUrl}`
     : `curl -fsSL -- ${quotedPointerUrl}`;
@@ -232,6 +347,40 @@ if ! curl -fsSL --output "$install_script" -- ${quotedScriptUrl}; then
   exit 41
 fi
 sh "$install_script" --base-url ${quotedBaseUrl} --version ${quotedVersion}`;
+}
+
+/**
+ * The two Windows install steps: download `<base>/<version>/install.ps1` into the staging
+ * directory, then run it for `layout`. `installerId` keeps concurrent installs apart.
+ */
+export function buildWindowsWorkspaceServerInstallScripts(
+  baseUrl: string,
+  version: string,
+  layout: WindowsWorkspaceServerLayout,
+  installerId: string
+): { download: string; run: string } {
+  const normalizedBaseUrl = validateInstallBaseUrl(baseUrl);
+  const selectedVersion = validateWorkspaceServerVersion(version);
+  if (!/^[0-9a-f-]{1,64}$/u.test(installerId)) {
+    throw new Error(`Invalid installer id '${installerId}'`);
+  }
+  const installerPath = path.win32.join(
+    layout.stagingDirectory,
+    `install-${selectedVersion}-${installerId}.ps1`
+  );
+  return {
+    download: buildWindowsInstallerDownloadScript({
+      scriptUrl: new URL(`${selectedVersion}/install.ps1`, ensureTrailingSlash(normalizedBaseUrl))
+        .href,
+      installerPath,
+    }),
+    run: buildWindowsInstallerRunScript({
+      installerPath,
+      baseUrl: normalizedBaseUrl,
+      version: selectedVersion,
+      layout,
+    }),
+  };
 }
 
 function validateInstallBaseUrl(value: string): string {

@@ -5,7 +5,10 @@ import {
   createDevPackageVersion,
   createArtifactManifest,
   createLauncher,
+  createWindowsLauncher,
+  isWindowsTarget,
   nodeDistributionArchiveName,
+  nodeDistributionDirectoryName,
   nodeDistributionUrl,
   parseAdapterAssetInfos,
   parsePackageArgs,
@@ -44,7 +47,7 @@ describe('workspace-server package helpers', () => {
   });
 
   it('rejects unsupported targets and missing target values', () => {
-    expect(() => parsePackageTarget('win32-x64')).toThrow(/Unsupported target/);
+    expect(() => parsePackageTarget('win32-arm64')).toThrow(/Unsupported target/);
     expect(() => parsePackageArgs(['--target'])).toThrow(/requires a value/);
     expect(() => parsePackageArgs(['--version'])).toThrow(/requires a value/);
     expect(() => parsePackageArgs(['--wat'])).toThrow(/Unknown packaging option/);
@@ -67,9 +70,31 @@ describe('workspace-server package helpers', () => {
         'ripgrep-15.2.0-aarch64-unknown-linux-musl.tar.gz'
     );
 
-    for (const targetName of ['darwin-arm64', 'linux-arm64', 'linux-x64']) {
+    for (const targetName of ['darwin-arm64', 'linux-arm64', 'linux-x64', 'win32-x64']) {
       expect(ripgrepArchiveChecksum(parsePackageTarget(targetName))).toMatch(/^[a-f\d]{64}$/);
     }
+  });
+
+  it('builds zip-based Windows Node, ripgrep, and artifact names', () => {
+    const target = parsePackageTarget('win32-x64');
+    expect(isWindowsTarget(target)).toBe(true);
+    expect(isWindowsTarget(parsePackageTarget('linux-x64'))).toBe(false);
+    expect(nodeDistributionArchiveName('24.14.0', target)).toBe('node-v24.14.0-win-x64.zip');
+    expect(nodeDistributionDirectoryName('24.14.0', target)).toBe('node-v24.14.0-win-x64');
+    expect(nodeDistributionUrl('24.14.0', target)).toBe(
+      'https://nodejs.org/dist/v24.14.0/node-v24.14.0-win-x64.zip'
+    );
+    expect(nodeDistributionDirectoryName('24.14.0', parsePackageTarget('linux-x64'))).toBe(
+      'node-v24.14.0-linux-x64'
+    );
+    expect(ripgrepArchiveName(target)).toBe('ripgrep-15.2.0-x86_64-pc-windows-msvc.zip');
+    expect(ripgrepDistributionUrl(target)).toBe(
+      'https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/' +
+        'ripgrep-15.2.0-x86_64-pc-windows-msvc.zip'
+    );
+    expect(artifactArchiveName('0.1.0', target)).toBe(
+      'emdash-workspace-server-0.1.0-win32-x64.zip'
+    );
   });
 
   it('builds artifact metadata and archive names', () => {
@@ -120,6 +145,7 @@ describe('workspace-server package helpers', () => {
         { target: 'linux-x64', runner: 'ubuntu-latest' },
         { target: 'linux-arm64', runner: 'ubuntu-24.04-arm' },
         { target: 'darwin-arm64', runner: 'macos-latest' },
+        { target: 'win32-x64', runner: 'windows-latest' },
       ],
     });
   });
@@ -128,7 +154,7 @@ describe('workspace-server package helpers', () => {
     expect(releaseMetadataOutput('canary', '0.1.0', 42)).toBe(
       [
         'version=0.1.1-canary.42',
-        'matrix={"include":[{"target":"linux-x64","runner":"ubuntu-latest"},{"target":"linux-arm64","runner":"ubuntu-24.04-arm"},{"target":"darwin-arm64","runner":"macos-latest"}]}',
+        'matrix={"include":[{"target":"linux-x64","runner":"ubuntu-latest"},{"target":"linux-arm64","runner":"ubuntu-24.04-arm"},{"target":"darwin-arm64","runner":"macos-latest"},{"target":"win32-x64","runner":"windows-latest"}]}',
         'probeArtifact=emdash-workspace-server-0.1.1-canary.42-linux-x64.tar.gz',
         '',
       ].join('\n')
@@ -150,6 +176,12 @@ describe('workspace-server package helpers', () => {
     expect(launcher).toContain('export EMDASH_WS_RIPGREP_PATH="$root_dir/bin/rg"');
     expect(launcher).toContain('exec "$root_dir/node" "$root_dir/dist/index.mjs" "$@"');
     expect(launcher.endsWith('\n')).toBe(true);
+  });
+
+  it('generates a relocatable Windows launcher with CRLF line endings', () => {
+    expect(createWindowsLauncher()).toBe(
+      '@echo off\r\n"%~dp0..\\node.exe" "%~dp0..\\dist\\index.mjs" %*\r\n'
+    );
   });
 
   it('parses adapter assets from the built plugins manifest', () => {

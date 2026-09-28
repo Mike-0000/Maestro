@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   buildRemoteEditorUrl,
   buildRemoteSshAuthority,
+  buildRemoteSshCommand,
   buildRemoteTerminalExecArgs,
+  isWindowsRemotePath,
 } from './remoteOpenIn';
 
 describe('remoteOpenIn', () => {
@@ -65,6 +67,49 @@ describe('remoteOpenIn', () => {
         '-t',
         "cd '/tmp/with '\\''quote'\\''' && (if command -v infocmp >/dev/null 2>&1 && [ -n \"${TERM:-}\" ] && infocmp \"${TERM}\" >/dev/null 2>&1; then :; else export TERM=xterm-256color; fi) && (exec \"${SHELL:-/bin/bash}\" || exec /bin/bash || exec /bin/sh)",
       ]);
+    });
+  });
+
+  describe('Windows remote hosts', () => {
+    const windowsPath = "C:\\Users\\dev\\O'Brien repo";
+
+    it('recognizes Windows absolute paths only', () => {
+      expect(isWindowsRemotePath('C:\\repo')).toBe(true);
+      expect(isWindowsRemotePath('d:/repo')).toBe(true);
+      expect(isWindowsRemotePath('\\\\server\\share\\repo')).toBe(true);
+      expect(isWindowsRemotePath('/home/dev/C:\\x')).toBe(false);
+      expect(isWindowsRemotePath('C:repo')).toBe(false);
+      expect(isWindowsRemotePath('\\\\?\\C:\\repo')).toBe(true);
+    });
+
+    it('addresses Windows folders as /C:/... in editor URLs', () => {
+      expect(buildRemoteEditorUrl('zed', 'win', 'dev', windowsPath)).toBe(
+        "zed://ssh/dev@win/C:/Users/dev/O'Brien%20repo"
+      );
+      expect(buildRemoteEditorUrl('vscode', 'win', '', 'D:\\src\\#1')).toBe(
+        'vscode://vscode-remote/ssh-remote+win/D:/src/%231'
+      );
+    });
+
+    it('opens terminals in an encoded PowerShell session at the folder', () => {
+      const args = buildRemoteTerminalExecArgs({
+        host: 'win',
+        username: 'dev',
+        port: 22,
+        targetPath: windowsPath,
+      });
+
+      const remoteCommand = args.at(-1) ?? '';
+      expect(remoteCommand).toMatch(
+        /^powershell\.exe -NoLogo -NoExit -OutputFormat Text -EncodedCommand [A-Za-z0-9+/=]+$/
+      );
+      const encoded = remoteCommand.split(' ').at(-1) ?? '';
+      expect(Buffer.from(encoded, 'base64').toString('utf16le')).toBe(
+        "Set-Location -LiteralPath 'C:\\Users\\dev\\O''Brien repo'"
+      );
+      expect(
+        buildRemoteSshCommand({ host: 'win', username: 'dev', port: 22, targetPath: windowsPath })
+      ).toContain(remoteCommand);
     });
   });
 

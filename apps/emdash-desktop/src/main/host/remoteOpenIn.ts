@@ -1,4 +1,9 @@
-import { formatCommandLine, quoteArg } from '@emdash/core/primitives/exec/api';
+import {
+  formatCommandLine,
+  formatPowerShellEncodedCommand,
+  powerShellLiteral,
+  quoteArg,
+} from '@emdash/core/primitives/exec/api';
 
 type RemoteEditorScheme = 'vscode' | 'vscodium' | 'cursor' | 'zed';
 
@@ -15,9 +20,26 @@ export function buildRemoteSshAuthority(host: string, username: string): string 
   return `${normalizedUsername}@${normalizedHost}`;
 }
 
+/**
+ * True for Windows absolute paths (`C:\repo`, `C:/repo`, `\\server\share\repo`). Remote paths come
+ * from the remote host, so their shape identifies a Windows OpenSSH host; POSIX paths start with
+ * `/` and are never matched.
+ */
+export function isWindowsRemotePath(targetPath: string): boolean {
+  return /^[A-Za-z]:[\\/]/.test(targetPath) || /^\\\\[^\\]/.test(targetPath);
+}
+
 function encodeRemotePath(targetPath: string): string {
-  const normalizedPath = targetPath.startsWith('/') ? targetPath : `/${targetPath}`;
-  return normalizedPath.split('/').map(encodeURIComponent).join('/');
+  // VS Code-family editors and Zed address Windows remotes as `/C:/Users/dev/repo`.
+  const slashed = isWindowsRemotePath(targetPath) ? targetPath.replace(/\\/g, '/') : targetPath;
+  const normalizedPath = slashed.startsWith('/') ? slashed : `/${slashed}`;
+  return normalizedPath
+    .split('/')
+    .map((segment, index) =>
+      // Keep the drive colon readable; editors accept both forms but only this one is canonical.
+      index === 1 && /^[A-Za-z]:$/.test(segment) ? segment : encodeURIComponent(segment)
+    )
+    .join('/');
 }
 
 function splitSshAuthority(host: string, username: string): { hostName: string; user?: string } {
@@ -87,9 +109,24 @@ type RemoteTerminalExecInput = {
  * - always start in the requested directory
  * - preserve current TERM only when host supports it (fallback for missing terminfo)
  * - keep session alive even when SHELL is unset/invalid by chaining shell fallbacks
+ *
+ * Windows OpenSSH hosts get an encoded PowerShell session instead, because their default shell
+ * may be cmd.exe, PowerShell, or bash and none of them parse the POSIX payload.
  */
 export function buildRemoteTerminalShellCommand(targetPath: string): string {
+  if (isWindowsRemotePath(targetPath)) return buildWindowsRemoteTerminalCommand(targetPath);
   return `cd ${quoteArg(targetPath, 'posix')} && (if command -v infocmp >/dev/null 2>&1 && [ -n "\${TERM:-}" ] && infocmp "\${TERM}" >/dev/null 2>&1; then :; else export TERM=xterm-256color; fi) && (exec "\${SHELL:-/bin/bash}" || exec /bin/bash || exec /bin/sh)`;
+}
+
+function buildWindowsRemoteTerminalCommand(targetPath: string): string {
+  return formatPowerShellEncodedCommand(
+    `Set-Location -LiteralPath ${powerShellLiteral(targetPath)}`,
+    {
+      interactive: true,
+      noExit: true,
+      loadProfile: true,
+    }
+  );
 }
 
 /**

@@ -1,6 +1,15 @@
 import { Button } from '@emdash/ui/react/primitives';
-import { CheckCircle2, ChevronDown, ChevronUp, LoaderCircle, XCircle } from 'lucide-react';
+import {
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  LoaderCircle,
+  TriangleAlert,
+  XCircle,
+} from 'lucide-react';
 import { useState, type ReactNode } from 'react';
+import type { ConnectionTestResult } from '@core/primitives/ssh/api';
+import { cn } from '@core/primitives/styling/browser/cn';
 import type { MachineFormController, MachineTestState } from './use-machine-form';
 import type { SshConfigResolution } from './use-ssh-config-hosts';
 
@@ -117,10 +126,55 @@ function TestFeedback({ test }: { test: Exclude<MachineTestState, { status: 'idl
           </Button>
         ) : null}
       </div>
+      {result?.success && <PlatformFeedback result={result} />}
       {showDebugLogs && result?.debugLogs && (
         <pre className="bg-muted text-muted-foreground mt-2 max-h-32 overflow-y-auto rounded px-2 py-1.5 text-xs">
           {result.debugLogs.join('\n')}
         </pre>
+      )}
+    </div>
+  );
+}
+
+/** What the post-connect platform check found; blocking issues stop Chorus from using the host. */
+function PlatformFeedback({ result }: { result: ConnectionTestResult }) {
+  const { platform, platformError } = result;
+  if (platformError) {
+    return (
+      <p className="mt-1 text-foreground-warning">
+        Could not check the remote platform: {platformError}
+      </p>
+    );
+  }
+  if (!platform) return null;
+  const blocked = platform.issues.some((issue) => issue.severity === 'error');
+  return (
+    <div className="mt-1 grid gap-1">
+      <p className="text-foreground-muted">
+        {platform.description}
+        {blocked ? ' · Chorus cannot use this machine yet' : ''}
+      </p>
+      {platform.issues.length > 0 && (
+        <ul className="grid gap-1 pl-0">
+          {platform.issues.map((issue) => (
+            <li
+              key={issue.code}
+              className={cn(
+                'flex list-none items-start gap-1.5',
+                issue.severity === 'error'
+                  ? 'text-foreground-destructive'
+                  : 'text-foreground-warning'
+              )}
+            >
+              {issue.severity === 'error' ? (
+                <XCircle className="mt-0.5 size-3.5 shrink-0" />
+              ) : (
+                <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+              )}
+              <span>{issue.message}</span>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

@@ -3,6 +3,7 @@ import { workspaceWireContract } from '@emdash/core/workspace-server';
 import { err, ok, type Result } from '@emdash/shared';
 import { runWithTimeout } from '@emdash/shared/scheduling';
 import { client as createClient, connect, streamTransport } from '@emdash/wire/rpc';
+import { resolveDaemonConnectAddress, type DaemonEndpointMode } from './endpoint';
 
 export type DaemonHealth = Awaited<
   ReturnType<ReturnType<typeof createClient<typeof workspaceWireContract>>['health']>
@@ -15,12 +16,16 @@ export type DaemonProbeError = {
 
 export async function probeDaemon(
   socketPath: string,
-  options: { timeoutMs?: number } = {}
+  options: { timeoutMs?: number; endpointMode?: DaemonEndpointMode } = {}
 ): Promise<Result<DaemonHealth, DaemonProbeError>> {
   const timeoutMs = options.timeoutMs ?? 1_000;
   let socket: Socket | undefined;
   try {
-    socket = await connectToSocket(socketPath, timeoutMs);
+    const address = await resolveDaemonConnectAddress(socketPath, options.endpointMode);
+    if (address.kind === 'unavailable') {
+      return err({ type: 'not-running', message: address.message });
+    }
+    socket = await connectToSocket(address.address, timeoutMs);
     const transport = streamTransport(socket, socket);
     const wireClient = createClient(workspaceWireContract, connect(transport));
     const health = await runWithTimeout((signal) => wireClient.health(undefined, { signal }), {
@@ -74,7 +79,7 @@ function isConnectionError(error: unknown): boolean {
   return (
     error instanceof Error &&
     'code' in error &&
-    ['ENOENT', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT'].includes(
+    ['ENOENT', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE'].includes(
       String((error as NodeJS.ErrnoException).code)
     )
   );

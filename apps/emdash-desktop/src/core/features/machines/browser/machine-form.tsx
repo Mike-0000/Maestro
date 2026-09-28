@@ -7,6 +7,7 @@ import { MachineFormFeedback } from './machine-form-actions';
 import { MachineHostPicker } from './machine-host-picker';
 import { MachineManualFields, MachineManualRouting } from './machine-manual-fields';
 import type { MachineFormController } from './use-machine-form';
+import { WindowsHostSetupHelp } from './windows-host-setup-help';
 
 export function MachineFormFields({
   controller,
@@ -135,6 +136,7 @@ export function MachineFormFields({
         </fieldset>
       </form>
       <MachineFormFeedback {...feedback} />
+      <WindowsHostSetupHelp />
     </Tooltip.Provider>
   );
 }

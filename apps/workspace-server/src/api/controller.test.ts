@@ -3,7 +3,7 @@ import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
-import { parseAbsolute } from '@emdash/core/primitives/path/api';
+import { parseNativeAbsolute } from '@emdash/core/primitives/path/api';
 import type { TerminalShellResolver } from '@emdash/core/primitives/terminal-shell/api';
 import type { AcpApiContract } from '@emdash/core/runtimes/acp/api';
 import { filesContract } from '@emdash/core/runtimes/files/api';
@@ -162,9 +162,9 @@ describe('runtime domain forwarding', () => {
 
   it('forwards Git and Files procedures, live models, and binary streams', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'emdash-workspace-server-domains-'));
-    const root = parseAbsolute(directory);
-    const textPath = parseAbsolute(join(directory, 'remote.txt'));
-    const binaryPath = parseAbsolute(join(directory, 'remote.bin'));
+    const root = parseNativeAbsolute(directory);
+    const textPath = parseNativeAbsolute(join(directory, 'remote.txt'));
+    const binaryPath = parseNativeAbsolute(join(directory, 'remote.bin'));
     if (!root.success || !textPath.success || !binaryPath.success) {
       throw new Error('expected test paths to parse');
     }

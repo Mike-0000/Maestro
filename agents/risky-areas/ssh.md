@@ -40,3 +40,12 @@
   unverified legacy passphrase as absent and silently delete it during a name-only edit.
 - Expand user-relative SSH key paths with the OS home-directory helper, not HOME alone;
   Windows environments may provide USERPROFILE without HOME.
+- Commands for Windows OpenSSH hosts must go through `formatPowerShellEncodedCommand`
+  (`packages/core/src/primitives/exec/api/windows-invocation.ts`): the remote default shell may be
+  `cmd.exe`, so POSIX quoting is wrong there. Embed values only with `powerShellLiteral`, never by
+  concatenating command text, and decode stderr with `decodePowerShellStderr`.
+- Never pipe a downloaded script into `Invoke-Expression` on Windows hosts; antivirus blocks
+  download cradles. Download to a file under the install root, then run it with `-File`.
+- Do not assume a POSIX remote because the connection succeeded; branch on the probed platform
+  (`probeRemotePlatform`) and keep Linux/macOS paths unchanged. See
+  `apps/workspace-server/docs/windows-hosts.md`.

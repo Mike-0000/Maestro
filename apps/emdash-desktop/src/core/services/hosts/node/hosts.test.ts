@@ -344,6 +344,7 @@ function createFixture() {
     kind: 'ssh',
     sshConnectionId: 'ssh-1',
     socketPath: '/test.sock',
+    channel: 'streamlocal',
   });
   ports.open.mockImplementation(() => peer.openTransport());
   let connected = false;

@@ -9,6 +9,7 @@ export function sshWorkspaceServerTarget(
     kind: 'ssh',
     sshConnectionId,
     socketPath: layout.socketPath,
+    channel: layout.platform === 'windows' ? 'windows-pipe-bridge' : 'streamlocal',
   };
 }
 
@@ -17,6 +18,6 @@ export function workspaceServerTargetKey(target: WorkspaceServerTarget): string 
     case 'local-socket':
       return `${target.kind}\0${target.socketPath}`;
     case 'ssh':
-      return `${target.kind}\0${target.sshConnectionId}\0${target.socketPath}`;
+      return `${target.kind}\0${target.sshConnectionId}\0${target.channel}\0${target.socketPath}`;
   }
 }

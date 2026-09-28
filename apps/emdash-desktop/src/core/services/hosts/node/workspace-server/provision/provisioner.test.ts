@@ -3,6 +3,10 @@ import { createScope } from '@emdash/shared/concurrency';
 import { deferred } from '@emdash/shared/testing';
 import { snapshot } from '@emdash/wire/state';
 import { describe, expect, it, vi } from 'vitest';
+import {
+  RemotePlatformUnsupportedError,
+  type SupportedRemoteHost,
+} from '@core/primitives/ssh/api/remote-platform';
 import { HostStateModel } from '../../state-model';
 import { WorkspaceServerProtocolError } from '../connect/protocol';
 import { WorkspaceServerInstallError } from './installer';
@@ -18,6 +22,7 @@ describe('WorkspaceServerProvisioner', () => {
       kind: 'ssh',
       sshConnectionId: 'ssh-1',
       socketPath: '/home/devuser/.emdash/workspace-server/run/workspace.sock',
+      channel: 'streamlocal',
     });
     await expect(second).resolves.toEqual(await first);
     expect(first).toBe(second);
@@ -105,7 +110,8 @@ describe('WorkspaceServerProvisioner', () => {
 
     expect(fixture.installer.availableVersion).toHaveBeenCalledWith(
       'ssh-1',
-      expect.any(AbortSignal)
+      expect.any(AbortSignal),
+      'posix'
     );
     expect(fixture.installer.install).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -178,12 +184,30 @@ describe('WorkspaceServerProvisioner', () => {
     await fixture.dispose();
   });
 
-  it('rejects Windows before dialing or starting POSIX provisioning', async () => {
-    const fixture = createProvisionerFixture({ platform: 'win32' });
+  it('provisions Windows hosts through the named-pipe bridge layout', async () => {
+    const fixture = createProvisionerFixture({ platform: 'windows' });
+
+    await expect(fixture.provisioner.ensure()).resolves.toEqual({
+      kind: 'ssh',
+      sshConnectionId: 'ssh-1',
+      socketPath: 'C:\\Users\\dev\\.emdash\\workspace-server\\run\\workspace.sock',
+      channel: 'windows-pipe-bridge',
+    });
+    expect(fixture.dialOnce).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: 'windows-pipe-bridge' }),
+      expect.anything()
+    );
+    await fixture.dispose();
+  });
+
+  it('rejects an unsupported host before dialing or provisioning', async () => {
+    const fixture = createProvisionerFixture({ platform: 'unsupported' });
 
     await expect(fixture.provisioner.ensure()).rejects.toMatchObject({
       code: 'unsupported-platform',
-      message: 'Windows SSH hosts are not supported',
+      message:
+        'This machine does not meet the workspace-server requirements: ' +
+        'PowerShell runs in ConstrainedLanguage mode',
     });
     expect(fixture.status('ssh-1')).toMatchObject({
       status: 'failed',
@@ -266,17 +290,27 @@ function createProvisionerFixture(
     blockDial?: boolean;
     blockHostProbe?: boolean;
     devAutoUpdate?: boolean;
-    platform?: 'posix' | 'win32';
+    platform?: 'posix' | 'windows' | 'unsupported';
   } = {}
 ) {
   const scope = createScope({ label: 'workspace-server-provisioner-test' });
   const model = new HostStateModel();
-  const hostProbe = vi.fn((signal?: AbortSignal) => {
+  const hostProbe = vi.fn((signal?: AbortSignal): Promise<SupportedRemoteHost> => {
     if (!options.blockHostProbe) {
+      if (options.platform === 'unsupported')
+        return Promise.reject(
+          new RemotePlatformUnsupportedError([
+            {
+              severity: 'error',
+              code: 'constrained-language',
+              message: 'PowerShell runs in ConstrainedLanguage mode',
+            },
+          ])
+        );
       return Promise.resolve(
-        options.platform === 'win32'
-          ? ({ platform: 'win32' } as const)
-          : ({ platform: 'posix', home: '/home/devuser' } as const)
+        options.platform === 'windows'
+          ? { platform: 'windows', home: 'C:\\Users\\dev', architecture: 'x64' }
+          : { platform: 'posix', home: '/home/devuser' }
       );
     }
     return new Promise<never>((_resolve, reject) => {

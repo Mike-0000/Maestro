@@ -9,9 +9,11 @@ monorepo installed.
 - `linux-x64`
 - `linux-arm64`
 - `darwin-arm64`
+- `win32-x64` (`.zip`; see `windows-hosts.md`)
 
-Darwin artifacts must be built on a matching Darwin host. Linux artifacts are built with Docker
-Buildx, so either Linux architecture can be produced from a supported Docker host.
+Darwin and Windows artifacts must be built on a matching host. Linux artifacts are built with
+Docker Buildx, so either Linux architecture can be produced from a supported Docker host. Windows
+builds archive with the `tar.exe` (bsdtar) shipped in `System32`, which writes zip files.
 
 ## Build an Artifact
 
@@ -31,7 +33,9 @@ pnpm run package --target linux-x64 --verify
 
 Darwin verification extracts the archive into a temporary directory and runs the daemon's
 `start`, `status`, and `stop` commands with an isolated socket. Linux verification runs the same
-sequence in `debian:bookworm-slim`, where no host Node.js installation is available.
+sequence in `debian:bookworm-slim`, where no host Node.js installation is available. Windows
+verification runs `bin\rg.exe` and then `node.exe dist\index.mjs start|status|stop`, the way the
+desktop starts it on a Windows host.
 
 The packaging process:
 
@@ -64,12 +68,15 @@ workspace-server/
     canary/protocol-7.json
   <version>/
     install.sh
+    install.ps1
     emdash-workspace-server-<version>-linux-x64.tar.gz
     emdash-workspace-server-<version>-linux-x64.tar.gz.sha256
     emdash-workspace-server-<version>-linux-arm64.tar.gz
     emdash-workspace-server-<version>-linux-arm64.tar.gz.sha256
     emdash-workspace-server-<version>-darwin-arm64.tar.gz
     emdash-workspace-server-<version>-darwin-arm64.tar.gz.sha256
+    emdash-workspace-server-<version>-win32-x64.zip
+    emdash-workspace-server-<version>-win32-x64.zip.sha256
 ```
 
 The release workflow has `stable` and `canary` channels. Stable uses the version from
@@ -77,8 +84,9 @@ The release workflow has `stable` and `canary` channels. Stable uses the version
 workflow run number: package version `0.1.0` becomes `0.1.1-canary.<run>`. Every run builds and
 publishes its own immutable artifacts; releases are not promoted between channels.
 
-Both channels build and smoke-verify all three targets, test `install.sh` against a local
-`file://` mirror, and move only their own protocol-major pointer after every immutable object is
+Both channels build and smoke-verify all four targets, test `install.sh` (Linux container) and
+`install.ps1` (`verify-windows-install` job, Windows PowerShell 5.1) against local `file://`
+mirrors, and move only their own protocol-major pointer after every immutable object is
 available. Existing versioned objects may only be skipped when their contents have the same
 SHA-256; the uploader refuses to replace different contents. Channel pointers are the only mutable
 release objects. Installation scripts exist only under immutable version directories, require
@@ -110,6 +118,16 @@ explicitly:
 version=<version>
 curl -fsSL "https://releases.emdash.sh/workspace-server/$version/install.sh" |
   sh -s -- --version "$version"
+```
+
+On Windows, download `install.ps1` to a file first (antivirus blocks piping it into
+`Invoke-Expression`), then run it:
+
+```powershell
+$version = '<version>'
+Invoke-WebRequest -UseBasicParsing -OutFile install.ps1 `
+  "https://releases.emdash.sh/workspace-server/$version/install.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Version $version
 ```
 
 The workflow fails before building if the version's Linux x64 archive already exists at
@@ -174,6 +192,10 @@ version as `EMDASH_WS_APP_VERSION`, selects the bundled `bin/rg` through
 `EMDASH_WS_RIPGREP_PATH`, and executes `dist/index.mjs` with the bundled Node runtime. The archive
 may therefore be extracted to any directory. Source development runs do not set the ripgrep
 override and continue to resolve `rg` from `PATH`.
+
+Windows artifacts contain `node.exe`, `bin\rg.exe`, and a `bin\emdash-workspace-server.cmd`
+launcher for manual use. The desktop runs `node.exe dist\index.mjs` directly; the server then
+reads its version from `manifest.json` and finds `bin\rg.exe` beside itself.
 
 `manifest.json` records the package name and version, workspace-server protocol version, target OS
 and architecture, and bundled Node and ripgrep versions.

@@ -54,9 +54,24 @@ function createService(options: {
   });
 }
 
-async function startServer() {
+type ExecReply = { stdout?: string; stderr?: string; exitCode: number };
+
+async function startServer(options: { exec?: (command: string) => ExecReply } = {}) {
   const server = new Server({ hostKeys: [hostKey] });
   server.on('connection', (client) => {
+    client.on('ready', () => {
+      client.on('session', (acceptSession) => {
+        const session = acceptSession();
+        session.on('exec', (acceptExec, _reject, info) => {
+          const channel = acceptExec();
+          const reply = options.exec?.(info.command) ?? { stderr: 'not supported', exitCode: 127 };
+          if (reply.stdout) channel.write(reply.stdout);
+          if (reply.stderr) channel.stderr.write(reply.stderr);
+          channel.exit(reply.exitCode);
+          channel.end();
+        });
+      });
+    });
     client.on('authentication', (context) => {
       if (
         context.method === 'password' &&
@@ -312,6 +327,74 @@ describe('SshService.testConnection', () => {
     expect(dropConnection).toHaveBeenCalledWith('temporary-check');
     expect(capture).toHaveBeenCalledWith('ssh_connection_attempted', { success: true });
     expect(manager.getAllConnectionStates()).toEqual({});
+  });
+
+  it('reports the remote platform of a Windows OpenSSH host', async () => {
+    const commands: string[] = [];
+    const { server, port } = await startServer({
+      exec: (command) => {
+        commands.push(command);
+        if (command.startsWith('uname')) {
+          return { stderr: "'uname' is not recognized", exitCode: 1 };
+        }
+        return {
+          stdout: [
+            'emdash-probe=1',
+            'language=FullLanguage',
+            'home=C:\\Users\\alice',
+            'arch=AMD64',
+            'os-build=26100',
+            'ps-version=5.1.26100.1',
+            '',
+          ].join('\r\n'),
+          exitCode: 0,
+        };
+      },
+    });
+    servers.push(server);
+    const service = createService({
+      manager: new SshConnectionManager(),
+      resolve: async () => ({
+        config: { host: '127.0.0.1', port, username: 'alice', password: 'secret' },
+        cleanup: () => {},
+        debugLogs: [],
+      }),
+    });
+
+    const result = await service.testConnection(baseConfig);
+
+    expect(result).toMatchObject({
+      success: true,
+      platform: {
+        os: 'windows',
+        description: 'Windows build 26100 (AMD64) · PowerShell 5.1.26100.1',
+        issues: [{ severity: 'warning', code: 'git-missing' }],
+      },
+    });
+    expect(result.platformError).toBeUndefined();
+    expect(commands[0]).toBe('uname -s');
+    expect(commands[1]).toMatch(/^powershell\.exe -NoLogo -NoProfile -NonInteractive /);
+  });
+
+  it('keeps a successful test when the platform cannot be identified', async () => {
+    const { server, port } = await startServer({
+      exec: () => ({ stderr: 'command not found', exitCode: 127 }),
+    });
+    servers.push(server);
+    const service = createService({
+      manager: new SshConnectionManager(),
+      resolve: async () => ({
+        config: { host: '127.0.0.1', port, username: 'alice', password: 'secret' },
+        cleanup: () => {},
+        debugLogs: [],
+      }),
+    });
+
+    const result = await service.testConnection(baseConfig);
+
+    expect(result.success).toBe(true);
+    expect(result.platform).toBeUndefined();
+    expect(result.platformError).toContain('Could not identify the remote operating system');
   });
 
   it('defaults readyTimeout to 10 seconds and captures ssh2 debug output', async () => {

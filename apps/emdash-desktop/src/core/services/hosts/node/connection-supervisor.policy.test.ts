@@ -40,6 +40,7 @@ describe('Host supervisor lifecycle policy', () => {
         kind: 'ssh' as const,
         sshConnectionId: 'acceptance-host',
         socketPath: '/workspace.sock',
+        channel: 'streamlocal' as const,
       };
       const prepared = deferred<typeof target>();
       driver = createSupervisorDriver(peer, {

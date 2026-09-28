@@ -24,7 +24,10 @@ import {
   createDevPackageVersion,
   createArtifactManifest,
   createLauncher,
+  createWindowsLauncher,
+  isWindowsTarget,
   nodeDistributionArchiveName,
+  nodeDistributionDirectoryName,
   nodeDistributionUrl,
   parseAdapterAssetInfos,
   parsePackageArgs,
@@ -92,20 +95,20 @@ async function main(): Promise<void> {
 
   process.stdout.write('Building workspace-server package dependencies...\n');
   for (const packageName of ['@emdash/shared', '@emdash/wire', '@emdash/core']) {
-    await runCommand('pnpm', ['--filter', packageName, 'run', 'build'], {
+    await runPnpm(['--filter', packageName, 'run', 'build'], {
       cwd: repositoryDirectory,
     });
   }
   const protocolVersion = await readProtocolVersion();
 
   process.stdout.write('Building plugin adapter assets...\n');
-  await runCommand('pnpm', ['--filter', '@emdash/plugins', 'run', 'build'], {
+  await runPnpm(['--filter', '@emdash/plugins', 'run', 'build'], {
     cwd: repositoryDirectory,
   });
   const adapterAssets = await readBuiltAdapterAssets();
 
   process.stdout.write('Building platform-independent workspace-server bundles...\n');
-  await runCommand('pnpm', ['run', 'build'], { cwd: appDirectory });
+  await runPnpm(['run', 'build'], { cwd: appDirectory });
   const bundleNames = await inspectBundles();
 
   await mkdir(artifactsDirectory, { recursive: true });
@@ -149,9 +152,13 @@ async function packageTarget(options: {
       extractRipgrepDistribution(target, temporaryDirectory),
     ]);
     const runtimeNodeModules =
-      target.os === 'darwin'
-        ? await installDarwinRuntimeDependencies(nodeDistributionDirectory, temporaryDirectory)
-        : await buildLinuxRuntimeDependencies(nodeVersion, target, temporaryDirectory);
+      target.os === 'linux'
+        ? await buildLinuxRuntimeDependencies(nodeVersion, target, temporaryDirectory)
+        : await installHostRuntimeDependencies(
+            target,
+            nodeDistributionDirectory,
+            temporaryDirectory
+          );
     const artifactDirectory = await assembleArtifact({
       target,
       packageMetadata,
@@ -169,10 +176,17 @@ async function packageTarget(options: {
       artifactArchiveName(packageMetadata.version, target)
     );
 
-    await runCommand('tar', ['-czf', archivePath, artifactRootName], {
-      cwd: dirname(artifactDirectory),
-      env: { ...process.env, COPYFILE_DISABLE: '1' },
-    });
+    // install.ps1 extracts with .NET's ZipFile, so Windows artifacts are zip files.
+    await runCommand(
+      archiveTool(),
+      isWindowsTarget(target)
+        ? ['--format', 'zip', '-cf', archivePath, artifactRootName]
+        : ['-czf', archivePath, artifactRootName],
+      {
+        cwd: dirname(artifactDirectory),
+        env: { ...process.env, COPYFILE_DISABLE: '1' },
+      }
+    );
     const archiveChecksum = await sha256File(archivePath);
     await writeFile(
       `${archivePath}.sha256`,
@@ -290,7 +304,7 @@ async function validateBuiltAdapterDirectory(
 
 function validateTargetHosts(targets: PackageTarget[]): void {
   for (const target of targets) {
-    if (target.os === 'darwin' && (process.platform !== 'darwin' || process.arch !== target.arch)) {
+    if (target.os !== 'linux' && (process.platform !== target.os || process.arch !== target.arch)) {
       throw new Error(
         `${target.id} native dependencies must be packaged on a ${target.id} host; ` +
           `current host is ${process.platform}-${process.arch}`
@@ -385,14 +399,20 @@ async function extractNodeDistribution(
   const archivePath = await ensureNodeDistributionArchive(nodeVersion, target);
   const extractionDirectory = join(temporaryDirectory, 'node-distribution');
   await mkdir(extractionDirectory, { recursive: true });
-  await runCommand('tar', ['-xJf', archivePath, '-C', extractionDirectory]);
+  await runCommand(archiveTool(), [
+    isWindowsTarget(target) ? '-xf' : '-xJf',
+    archivePath,
+    '-C',
+    extractionDirectory,
+  ]);
 
   const distributionDirectory = join(
     extractionDirectory,
-    nodeDistributionArchiveName(nodeVersion, target).replace(/\.tar\.xz$/, '')
+    nodeDistributionDirectoryName(nodeVersion, target)
   );
-  if (!(await pathExists(join(distributionDirectory, 'bin/node')))) {
-    throw new Error(`Node distribution did not contain bin/node: ${archivePath}`);
+  const nodeBinary = nodeDistributionBinary(target);
+  if (!(await pathExists(join(distributionDirectory, nodeBinary)))) {
+    throw new Error(`Node distribution did not contain ${nodeBinary}: ${archivePath}`);
   }
   return distributionDirectory;
 }
@@ -443,10 +463,15 @@ async function extractRipgrepDistribution(
   const archivePath = await ensureRipgrepArchive(target);
   const extractionDirectory = join(temporaryDirectory, 'ripgrep-distribution');
   await mkdir(extractionDirectory, { recursive: true });
-  await runCommand('tar', ['-xzf', archivePath, '-C', extractionDirectory]);
+  await runCommand(archiveTool(), [
+    isWindowsTarget(target) ? '-xf' : '-xzf',
+    archivePath,
+    '-C',
+    extractionDirectory,
+  ]);
 
   const distributionDirectory = join(extractionDirectory, ripgrepDistributionName(target));
-  for (const requiredPath of ['rg', 'COPYING', 'LICENSE-MIT', 'UNLICENSE']) {
+  for (const requiredPath of [ripgrepBinaryName(target), 'COPYING', 'LICENSE-MIT', 'UNLICENSE']) {
     if (!(await pathExists(join(distributionDirectory, requiredPath)))) {
       throw new Error(`ripgrep distribution did not contain ${requiredPath}: ${archivePath}`);
     }
@@ -522,15 +547,22 @@ async function sha256File(path: string): Promise<string> {
   return hash.digest('hex');
 }
 
-async function installDarwinRuntimeDependencies(
+/** Installs the native runtime dependencies with the target's own Node on a matching host. */
+async function installHostRuntimeDependencies(
+  target: PackageTarget,
   nodeDistributionDirectory: string,
   temporaryDirectory: string
 ): Promise<string> {
-  const stagingDirectory = join(temporaryDirectory, 'darwin-runtime-deps');
-  const nodeBinDirectory = join(nodeDistributionDirectory, 'bin');
-  const nodePath = join(nodeBinDirectory, 'node');
-  const npmPath = join(nodeDistributionDirectory, 'lib/node_modules/npm/bin/npm-cli.js');
+  const stagingDirectory = join(temporaryDirectory, `${target.os}-runtime-deps`);
+  const windows = isWindowsTarget(target);
+  const nodePath = join(nodeDistributionDirectory, nodeDistributionBinary(target));
+  const nodeBinDirectory = dirname(nodePath);
+  const npmPath = join(
+    nodeDistributionDirectory,
+    windows ? 'node_modules/npm/bin/npm-cli.js' : 'lib/node_modules/npm/bin/npm-cli.js'
+  );
   const existingPath = process.env['PATH'];
+  const pathSeparator = windows ? ';' : ':';
 
   await mkdir(stagingDirectory, { recursive: true });
   await copyFile(
@@ -544,7 +576,10 @@ async function installDarwinRuntimeDependencies(
       cwd: stagingDirectory,
       env: {
         ...process.env,
-        PATH: existingPath === undefined ? nodeBinDirectory : `${nodeBinDirectory}:${existingPath}`,
+        PATH:
+          existingPath === undefined
+            ? nodeBinDirectory
+            : `${nodeBinDirectory}${pathSeparator}${existingPath}`,
         npm_config_update_notifier: 'false',
       },
     }
@@ -614,16 +649,20 @@ async function assembleArtifact(options: {
   const binDirectory = join(artifactDirectory, 'bin');
   const distDirectory = join(artifactDirectory, 'dist');
   const ripgrepLicenseDirectory = join(artifactDirectory, 'licenses', 'ripgrep');
-  const launcherPath = join(binDirectory, 'emdash-workspace-server');
-  const nodePath = join(artifactDirectory, 'node');
-  const ripgrepPath = join(binDirectory, 'rg');
+  const windows = isWindowsTarget(target);
+  const launcherPath = join(
+    binDirectory,
+    windows ? 'emdash-workspace-server.cmd' : 'emdash-workspace-server'
+  );
+  const nodePath = join(artifactDirectory, windows ? 'node.exe' : 'node');
+  const ripgrepPath = join(binDirectory, ripgrepBinaryName(target));
 
   await mkdir(binDirectory, { recursive: true });
   await mkdir(distDirectory, { recursive: true });
   await mkdir(ripgrepLicenseDirectory, { recursive: true });
-  await copyFile(join(nodeDistributionDirectory, 'bin/node'), nodePath);
+  await copyFile(join(nodeDistributionDirectory, nodeDistributionBinary(target)), nodePath);
   await chmod(nodePath, 0o755);
-  await copyFile(join(ripgrepDistributionDirectory, 'rg'), ripgrepPath);
+  await copyFile(join(ripgrepDistributionDirectory, ripgrepBinaryName(target)), ripgrepPath);
   await chmod(ripgrepPath, 0o755);
   for (const licenseFile of ['COPYING', 'LICENSE-MIT', 'UNLICENSE']) {
     await copyFile(
@@ -645,7 +684,10 @@ async function assembleArtifact(options: {
   );
   await validateBuiltAdapterDirectory(join(distDirectory, 'adapters'), adapterAssets);
 
-  await writeFile(launcherPath, createLauncher(packageMetadata.version));
+  await writeFile(
+    launcherPath,
+    windows ? createWindowsLauncher() : createLauncher(packageMetadata.version)
+  );
   await chmod(launcherPath, 0o755);
   await writeFile(
     join(artifactDirectory, 'manifest.json'),
@@ -668,10 +710,17 @@ async function assembleArtifact(options: {
 async function verifyArtifact(archivePath: string, target: PackageTarget): Promise<void> {
   const extractionDirectory = await mkdtemp(join(tmpdir(), `emdash-ws-verify-${target.id}-`));
   try {
-    await runCommand('tar', ['-xzf', archivePath, '-C', extractionDirectory]);
+    await runCommand(archiveTool(), [
+      isWindowsTarget(target) ? '-xf' : '-xzf',
+      archivePath,
+      '-C',
+      extractionDirectory,
+    ]);
     const extractedArtifact = join(extractionDirectory, artifactRootName);
     if (target.os === 'linux') {
       await verifyLinuxArtifact(extractedArtifact, target);
+    } else if (isWindowsTarget(target)) {
+      await verifyWindowsArtifact(extractedArtifact);
     } else {
       await verifyLocalArtifact(extractedArtifact);
     }
@@ -705,6 +754,35 @@ async function verifyLocalArtifact(extractedArtifact: string): Promise<void> {
     await runCommand(launcherPath, ['stop', ...lifecycleArgs], { stdio: 'ignore' }).catch(
       () => undefined
     );
+    await rm(runtimeDirectory, { recursive: true, force: true });
+  }
+}
+
+/** Runs the artifact the way Chorus does on Windows: node.exe with dist\index.mjs directly. */
+async function verifyWindowsArtifact(extractedArtifact: string): Promise<void> {
+  const runtimeDirectory = await mkdtemp(join(tmpdir(), 'emdash-ws-smoke-'));
+  const nodePath = join(extractedArtifact, 'node.exe');
+  const entrypoint = join(extractedArtifact, 'dist', 'index.mjs');
+  const ripgrepPath = join(extractedArtifact, 'bin', 'rg.exe');
+  const socketPath = join(runtimeDirectory, 'run', 'workspace.sock');
+  const searchDirectory = join(runtimeDirectory, 'search');
+  const lifecycle = (action: string) => [entrypoint, action, '--socket', socketPath];
+
+  try {
+    await mkdir(searchDirectory, { recursive: true });
+    await writeFile(join(searchDirectory, 'needle.txt'), 'bundled-ripgrep-smoke\n', 'utf8');
+    await runCommand(ripgrepPath, ['--version']);
+    await runCommand(ripgrepPath, [
+      '--fixed-strings',
+      '--quiet',
+      'bundled-ripgrep-smoke',
+      searchDirectory,
+    ]);
+    await runCommand(nodePath, lifecycle('start'));
+    await runCommand(nodePath, lifecycle('status'));
+    await runCommand(nodePath, lifecycle('stop'));
+  } finally {
+    await runCommand(nodePath, lifecycle('stop'), { stdio: 'ignore' }).catch(() => undefined);
     await rm(runtimeDirectory, { recursive: true, force: true });
   }
 }
@@ -746,6 +824,36 @@ trap cleanup EXIT INT TERM
     '-c',
     smokeScript,
   ]);
+}
+
+/**
+ * pnpm is a `.cmd` shim on Windows, which Node only spawns through a shell. `pnpm run package`
+ * exposes pnpm's JavaScript entry as npm_execpath, so run that with Node instead.
+ */
+async function runPnpm(args: string[], options: { cwd?: string } = {}): Promise<void> {
+  const entry = process.env['npm_execpath'];
+  if (process.platform === 'win32' && entry !== undefined && /\.[cm]?js$/.test(entry)) {
+    await runCommand(process.execPath, [entry, ...args], options);
+    return;
+  }
+  await runCommand('pnpm', args, options);
+}
+
+function nodeDistributionBinary(target: PackageTarget): string {
+  return isWindowsTarget(target) ? 'node.exe' : 'bin/node';
+}
+
+function ripgrepBinaryName(target: PackageTarget): string {
+  return isWindowsTarget(target) ? 'rg.exe' : 'rg';
+}
+
+/**
+ * Windows packaging uses the bsdtar that ships with Windows, which reads and writes zip files; a
+ * GNU tar earlier on PATH (Git for Windows) cannot.
+ */
+function archiveTool(): string {
+  if (process.platform !== 'win32') return 'tar';
+  return join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32', 'tar.exe');
 }
 
 async function runCommand(
@@ -846,6 +954,7 @@ Targets:
   linux-x64
   linux-arm64
   darwin-arm64
+  win32-x64
 `);
 }
 

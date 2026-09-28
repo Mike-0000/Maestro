@@ -1,10 +1,15 @@
 import { type Result } from '@emdash/shared';
 import { formatConfigError, parseConfig, type ConfigError } from '@emdash/shared/config';
 import { z } from 'zod';
+import { readArtifactVersion } from './artifact';
 
 const WORKSPACE_SERVER_ENV_PREFIX = 'EMDASH_WS_';
 const DEFAULT_ENV_FILES = ['.env'];
-const workspaceServerCommands = ['serve', 'start', 'stop', 'status'] as const;
+/**
+ * `daemonize` is internal: on Windows, `start` launches it outside the SSH session's job object
+ * and it spawns the detached `serve` process with output redirected to the daemon log.
+ */
+const workspaceServerCommands = ['serve', 'start', 'stop', 'status', 'daemonize'] as const;
 
 export type WorkspaceServerCommand = (typeof workspaceServerCommands)[number];
 
@@ -42,7 +47,8 @@ export type WorkspaceServerConfigError = ConfigError;
 export function loadWorkspaceServerConfig(
   argv = process.argv.slice(2),
   env: NodeJS.ProcessEnv = process.env,
-  envFiles: readonly string[] = DEFAULT_ENV_FILES
+  envFiles: readonly string[] = DEFAULT_ENV_FILES,
+  artifactVersion: string | undefined = readArtifactVersion()
 ): Result<WorkspaceServerConfig, WorkspaceServerConfigError> {
   const command = parseCommand(argv);
   if (!command.success) return command;
@@ -56,7 +62,7 @@ export function loadWorkspaceServerConfig(
     defaults: {
       command: command.data.command,
       mode: command.data.command === 'serve' ? undefined : 'socket',
-      appVersion: nonEmpty(env['npm_package_version']),
+      appVersion: nonEmpty(env['npm_package_version']) ?? artifactVersion,
     },
     args: {
       options: {
