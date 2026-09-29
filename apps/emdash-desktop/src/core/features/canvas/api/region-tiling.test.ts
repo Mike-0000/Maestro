@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { browsersToSuspend, resolveTileDetail } from './canvas-model';
+import { browsersToSuspend } from './canvas-model';
 import type { LayoutState, RegionState } from './canvas-regions';
 import {
   adjacentRegion,
   cameraLeftRegion,
   frameViewport,
-  outsideLiveBudget,
   peerRegions,
   planTiling,
   promotedTiles,
@@ -128,32 +127,6 @@ describe('cameraLeftRegion', () => {
 });
 
 describe('render promotion', () => {
-  const base = { visible: true, focusRank: 7, liveBudget: 4, hasSession: true };
-
-  it('renders every window of the focused sub-canvas live at any readable zoom', () => {
-    expect(resolveTileDetail({ ...base, zoom: 1, promoted: true })).toBe('live');
-    expect(resolveTileDetail({ ...base, zoom: 0.6, promoted: true })).toBe('live');
-  });
-
-  it('keeps windows outside it on the budgeted, zoom-1-only rule', () => {
-    expect(resolveTileDetail({ ...base, zoom: 1 })).toBe('preview');
-    expect(resolveTileDetail({ ...base, zoom: 0.6, focusRank: 0 })).toBe('preview');
-    expect(resolveTileDetail({ ...base, zoom: 1, focusRank: 0 })).toBe('live');
-  });
-
-  it('still shows glyphs far out and previews without a session', () => {
-    expect(resolveTileDetail({ ...base, zoom: 0.2, promoted: true })).toBe('glyph');
-    expect(resolveTileDetail({ ...base, zoom: 1, promoted: true, hasSession: false })).toBe(
-      'preview'
-    );
-  });
-
-  it('shrinks the outside budget by what the focused sub-canvas uses', () => {
-    expect(outsideLiveBudget(4, 0)).toBe(4);
-    expect(outsideLiveBudget(4, 3)).toBe(1);
-    expect(outsideLiveBudget(4, 6)).toBe(0);
-  });
-
   it('never suspends a pinned browser and demotes it once unpinned', () => {
     const alive = ['browser:a', 'browser:b', 'browser:c'];
     const lastUsed = new Map([

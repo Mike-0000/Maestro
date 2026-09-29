@@ -11,17 +11,9 @@ import {
 import { taskViewDef } from '@core/features/tasks/contributions/views';
 import { getNavigation } from '@core/primitives/navigation/browser/navigation-selectors';
 import { cn } from '@core/primitives/styling/browser/cn';
-import {
-  DEFAULT_LIVE_TILE_BUDGET,
-  detailZoomForBand,
-  MIN_TILE_SIZE,
-  resolveTileDetail,
-  zoomBand,
-} from '../../api/canvas-model';
-import { outsideLiveBudget } from '../../api/region-tiling';
+import { MIN_TILE_SIZE, zoomBand } from '../../api/canvas-model';
 import { getCanvasStore } from '../../contributions/browser/app-stores';
-import { AgentAcpLive, AgentAcpPreview } from './agent-acp';
-import { AgentPreview } from './agent-preview';
+import { AgentAcpLive } from './agent-acp';
 import { AgentTerminal, TerminalPlaceholder } from './agent-terminal';
 import { statusPresentation } from './status-presentation';
 
@@ -42,18 +34,8 @@ export const AgentTileNode = observer(function AgentTileNode({ data, selected }:
 
   if (!entry) return null;
 
-  // Windows of the sub-canvas the user is in render fully; the rest of the board shares what is
-  // left of the usual live budget, by their own focus order.
-  const promoted = store.isPromoted(tileId);
-  const detail = resolveTileDetail({
-    zoom: detailZoomForBand(band),
-    // onlyRenderVisibleElements unmounts off-screen nodes; a mounted tile is visible.
-    visible: true,
-    focusRank: store.outsideFocusRank(tileId),
-    liveBudget: outsideLiveBudget(DEFAULT_LIVE_TILE_BUDGET, store.promotedTileIds.length),
-    hasSession: store.shouldAttach(entry),
-    promoted,
-  });
+  // Every tile on the board renders its agent live (terminal or chat) at any zoom; pointer input
+  // reaches the terminal only at zoom 1.
   const focused = store.focusedTileId === tileId;
   const attention = needsAttention(entry);
   // A staged agent is mounted on the stage; mounting its terminal here too would fight over it.
@@ -90,21 +72,15 @@ export const AgentTileNode = observer(function AgentTileNode({ data, selected }:
         )}
         {staged ? (
           <TerminalPlaceholder label="On the stage" />
-        ) : detail === 'glyph' ? (
-          <AgentGlyph entry={entry} />
         ) : !store.shouldAttach(entry) ? (
           <ResumePrompt entry={entry} />
         ) : entry.type === 'acp' ? (
-          detail === 'live' ? (
-            <AgentAcpLive
-              entry={entry}
-              interactive={band === 'interactive'}
-              onActivate={() => store.requestFocus(tileId)}
-            />
-          ) : (
-            <AgentAcpPreview entry={entry} onActivate={() => store.requestFocus(tileId)} />
-          )
-        ) : detail === 'live' ? (
+          <AgentAcpLive
+            entry={entry}
+            interactive={band === 'interactive'}
+            onActivate={() => store.requestFocus(tileId)}
+          />
+        ) : (
           <AgentTerminal
             entry={entry}
             hydrate={!entry.sessionActive && store.startRequested.has(entry.conversationId)}
@@ -113,8 +89,6 @@ export const AgentTileNode = observer(function AgentTileNode({ data, selected }:
             onActivate={() => store.requestFocus(tileId)}
             onReleaseFocus={() => store.reframe()}
           />
-        ) : (
-          <AgentPreview entry={entry} onActivate={() => store.requestFocus(tileId)} />
         )}
       </div>
     </div>
@@ -240,18 +214,6 @@ function TileIconButton({
     </button>
   );
 }
-
-const AgentGlyph = observer(function AgentGlyph({ entry }: { entry: AgentTileEntry }) {
-  const presentation = statusPresentation(entry);
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 bg-background-secondary">
-      <span className={cn('rounded-2xl px-6 py-3 text-4xl font-semibold', presentation.className)}>
-        {presentation.label}
-      </span>
-      <span className="max-w-[90%] truncate text-2xl text-foreground-muted">{entry.taskName}</span>
-    </div>
-  );
-});
 
 const ResumePrompt = observer(function ResumePrompt({ entry }: { entry: AgentTileEntry }) {
   const store = getCanvasStore();

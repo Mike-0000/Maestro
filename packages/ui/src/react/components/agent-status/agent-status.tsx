@@ -38,6 +38,9 @@ const DOT_POINTS = [
   [18, 18],
 ] as const;
 
+/** Dot radius in the 24-unit design grid the dot positions are expressed in. */
+const DOT_RADIUS = 1.85;
+
 function toCssLength(size: string | number) {
   return typeof size === 'number' ? `${size}px` : size;
 }
@@ -85,12 +88,22 @@ function AgentStatus({
 function AgentStatusGlyph({ status }: { status: ActiveAgentStatusKind }) {
   switch (status) {
     case 'working':
+      // HTML dots, not SVG circles: opacity/transform animations on HTML elements run on the
+      // compositor, while animating SVG children restyles, relayouts and repaints the page on
+      // the main thread every display frame for as long as any agent is working.
       return (
-        <svg className={cx(styles.icon, styles.workingIcon)} viewBox="0 0 24 24" aria-hidden="true">
+        <span className={cx(styles.icon, styles.workingIcon, styles.dotGrid)} aria-hidden="true">
           {DOT_POINTS.map(([cx, cy], index) => (
-            <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r="1.85" className={styles.dot[index]} />
+            <span
+              key={`${cx}-${cy}`}
+              className={styles.dot[index]}
+              style={{
+                left: `${((cx - DOT_RADIUS) / 24) * 100}%`,
+                top: `${((cy - DOT_RADIUS) / 24) * 100}%`,
+              }}
+            />
           ))}
-        </svg>
+        </span>
       );
 
     case 'awaiting-input':

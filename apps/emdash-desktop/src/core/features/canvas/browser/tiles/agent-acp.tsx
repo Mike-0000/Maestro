@@ -59,32 +59,3 @@ export const AgentAcpLive = observer(function AgentAcpLive({
     </div>
   );
 });
-
-/**
- * ACP overview: does not bootstrap chat-ui or connect xterm. If a chat store is
- * already retained (task view open), show a short count; otherwise status copy.
- */
-export const AgentAcpPreview = observer(function AgentAcpPreview({
-  entry,
-  onActivate,
-}: {
-  entry: AgentTileEntry;
-  onActivate: () => void;
-}) {
-  const existing = getAcpChatResourceManager(entry.taskId, entry.projectId).get(
-    entry.conversationId
-  );
-  const excerpt = existing && !existing.isEmpty ? `${existing.messageCount} messages` : null;
-
-  return (
-    <button
-      type="button"
-      onClick={onActivate}
-      className="group relative flex h-full w-full cursor-zoom-in flex-col justify-end overflow-hidden bg-(--em-surface) p-3 text-left"
-    >
-      <span className="self-center pb-[40%] text-xs text-foreground-muted">
-        {excerpt ?? (entry.sessionActive ? 'Structured chat is running…' : 'Agent is not running')}
-      </span>
-    </button>
-  );
-});

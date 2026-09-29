@@ -1,5 +1,6 @@
 import type { WorkspaceRecord } from '@emdash/core/runtimes/workspace-registry/api';
 import { err, ok, type Result } from '@emdash/shared';
+import { stableStringify } from '@emdash/shared/util';
 import { and, eq, inArray, isNull, type SQL } from 'drizzle-orm';
 import {
   tombstoneAttemptEpoch,
@@ -282,6 +283,19 @@ export class WorkspaceRegistry {
       .run().changes;
   }
 
+  /**
+   * Re-stamps rows whose latest observation matched what they already hold, so a
+   * snapshot delivery that changed nothing costs one statement instead of a write per row.
+   */
+  stampObserved(ids: readonly string[], observedAt: number, tx?: DrizzleTx): number {
+    if (ids.length === 0) return 0;
+    return this.source(tx)
+      .update(workspaces)
+      .set({ observedAt, updatedAt: this.now() })
+      .where(and(inArray(workspaces.id, [...ids]), liveWorkspaces()))
+      .run().changes;
+  }
+
   updateConfig(id: string, config: WorkspaceInsert['config'], tx?: DrizzleTx): number {
     return this.source(tx)
       .update(workspaces)
@@ -422,7 +436,7 @@ export class WorkspaceRegistry {
   }
 }
 
-function compareWorkspaceRows(left: WorkspaceRow, right: WorkspaceRow): number {
+export function compareWorkspaceRows(left: WorkspaceRow, right: WorkspaceRow): number {
   return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
 }
 
@@ -456,6 +470,54 @@ export function workspaceObservationFromRecord(
     sshConnectionId: host.sshConnectionId,
   };
 }
+
+/**
+ * True when `refresh(row.id, observation)` would write nothing but a newer `observedAt`.
+ * JSON observations compare by value, so key order and absent-vs-undefined fields do not
+ * count as changes.
+ */
+export function observationMatchesRow(
+  row: WorkspaceRow,
+  observation: WorkspaceObservation
+): boolean {
+  if (row.observedAt === null && observation.observedAt !== undefined) return false;
+  if (observation.path !== undefined) {
+    // An identical spelling is always kept, so only a different one needs path parsing.
+    if (observation.path !== row.path) {
+      const path =
+        observation.path !== null && row.path !== null
+          ? stableWorkspacePathDisplay(row.path, observation.path)
+          : observation.path;
+      if (path !== row.path) return false;
+    }
+  }
+  for (const key of OBSERVED_SCALARS) {
+    if (observation[key] !== undefined && observation[key] !== row[key]) return false;
+  }
+  for (const key of OBSERVED_JSON) {
+    const value = observation[key];
+    if (value !== undefined && stableStringify(value) !== stableStringify(row[key])) return false;
+  }
+  return true;
+}
+
+const OBSERVED_SCALARS = [
+  'observedStatus',
+  'kind',
+  'parentId',
+  'origin',
+  'location',
+  'sshConnectionId',
+  'lastActivatedAt',
+] as const satisfies readonly (keyof WorkspaceObservation & keyof WorkspaceRow)[];
+
+const OBSERVED_JSON = [
+  'observedGit',
+  'lastCreateOutcome',
+  'lastRemovalAttempt',
+  'scriptOutcomes',
+  'runtimeOverlay',
+] as const satisfies readonly (keyof WorkspaceObservation & keyof WorkspaceRow)[];
 
 function sameWorkspaceHost(
   row: Pick<WorkspaceRow, 'location' | 'sshConnectionId'>,

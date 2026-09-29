@@ -238,7 +238,10 @@ const PtyPaneInner = forwardRef<{ focus: () => void }, Props>(
       [pty, readOnly, attachments, workspaceId]
     );
 
-    const theme: SessionTheme = { override: themeOverride, paddingBottom };
+    const theme = useMemo<SessionTheme>(
+      () => ({ override: themeOverride, paddingBottom }),
+      [themeOverride, paddingBottom]
+    );
 
     const handleSystemPaste = useCallback<PasteFromClipboardHandler>(
       ({ focus, sendInput }) => {

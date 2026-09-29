@@ -2,6 +2,7 @@ import type { WorkspaceRecord } from '@emdash/core/runtimes/workspace-registry/a
 import { openFixture } from '@tooling/utils/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createWorkspaceRegistry } from '@core/features/workspaces/api/node/registry';
+import { appDbPokes } from '@core/services/app-db/node/pokes';
 import {
   applyWorkspaceRegistrySnapshot,
   WorkspaceIdentityConflictError,
@@ -243,6 +244,66 @@ describe('applyWorkspaceRegistrySnapshot', () => {
       records: { 'wt-1': hostRecord({ id: 'wt-1', runtime: null }) },
     });
     expect(registry.getLive('wt-1')).toMatchObject({ runtimeOverlay: null });
+  });
+
+  it('skips writes and wakeups for an unchanged redelivery until its stamp ages', async () => {
+    const registry = createWorkspaceRegistry(fixture.db);
+    let pokes = 0;
+    const unsubscribe = appDbPokes.workspaces.subscription().subscribe(() => {
+      pokes += 1;
+    });
+    try {
+      const records = { 'wt-1': hostRecord({ id: 'wt-1' }) };
+      await applyWorkspaceRegistrySnapshot({
+        db: fixture.db,
+        host: LOCAL_HOST,
+        records,
+        observedAt: 1_000,
+      });
+      expect(pokes).toBe(1);
+
+      // Same observations with the JSON keys in another order: nothing changed.
+      const { git, ...rest } = records['wt-1'];
+      const reordered = { ...rest, git: git && Object.fromEntries(Object.entries(git).reverse()) };
+      const result = await applyWorkspaceRegistrySnapshot({
+        db: fixture.db,
+        host: LOCAL_HOST,
+        records: { 'wt-1': reordered as WorkspaceRecord },
+        observedAt: 2_000,
+      });
+      expect(result).toMatchObject({ adopted: 0, refreshed: 1 });
+      expect(pokes).toBe(1);
+      expect(registry.getLive('wt-1')?.observedAt).toBe(1_000);
+
+      // Once the stamp is 30 s old, an unchanged delivery refreshes it and wakes readers.
+      await applyWorkspaceRegistrySnapshot({
+        db: fixture.db,
+        host: LOCAL_HOST,
+        records,
+        observedAt: 31_000,
+      });
+      expect(pokes).toBe(2);
+      expect(registry.getLive('wt-1')?.observedAt).toBe(31_000);
+
+      await applyWorkspaceRegistrySnapshot({
+        db: fixture.db,
+        host: LOCAL_HOST,
+        records: {
+          'wt-1': hostRecord({
+            id: 'wt-1',
+            git: { ...records['wt-1'].git!, diffStats: { added: 13, deleted: 3 } },
+          }),
+        },
+        observedAt: 32_000,
+      });
+      expect(pokes).toBe(3);
+      expect(registry.getLive('wt-1')).toMatchObject({
+        observedAt: 32_000,
+        observedGit: { diffStats: { added: 13, deleted: 3 } },
+      });
+    } finally {
+      unsubscribe();
+    }
   });
 
   it('carries removal attempts and script outcomes into the mirror observation columns', async () => {

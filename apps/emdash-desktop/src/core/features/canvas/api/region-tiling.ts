@@ -251,22 +251,13 @@ export function frameViewport(
 // ── Render promotion ─────────────────────────────────────────────────────────
 
 /**
- * Cap on windows promoted to live rendering at once. Each live terminal holds a WebGL context and
- * Chromium keeps about 16; past the cap the most recently focused windows win.
+ * Cap on windows promoted at once. Promotion keeps a focused region's app browsers mounted; agent
+ * tiles are always live and do not use it.
  */
 export const PROMOTED_LIVE_CAP = 12;
 
 /**
- * Live budget left for windows outside the focused region: the focused region's windows are live
- * on their own allowance, and the rest of the board shares what remains of the usual budget, so
- * entering a region never raises the total above max(budget, promoted).
- */
-export function outsideLiveBudget(budget: number, promotedCount: number): number {
-  return Math.max(0, budget - promotedCount);
-}
-
-/**
- * The windows of a focused region that render fully: every shown window anywhere under it (not
+ * The windows of a focused region that stay promoted: every shown window anywhere under it (not
  * hidden, not inside a folded child), most recently focused first, up to `cap`.
  */
 export function promotedTiles(

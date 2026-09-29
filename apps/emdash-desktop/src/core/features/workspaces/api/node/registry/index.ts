@@ -1,7 +1,9 @@
 export {
+  compareWorkspaceRows,
   createWorkspaceRegistry,
   isAnnotatedWorkspace,
   liveWorkspaces,
+  observationMatchesRow,
   WorkspaceRegistry,
   workspaceObservationFromRecord,
   workspaceRegistryTable,
