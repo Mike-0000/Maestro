@@ -8,6 +8,7 @@ import type {
   SshConnectionManagerEvent,
 } from '@core/primitives/ssh/api/node/ssh-connection-manager';
 import type { SshConnectResult } from '../connect/resolve-ssh-connect-config';
+import { LocalShellClient } from '../local/local-shell-client';
 import { SshClientProxy } from './ssh-client-proxy';
 
 export class SshAuthError extends SshConnectionFailure {
@@ -176,7 +177,10 @@ export class SshConnectionManager extends EventEmitter implements SshConnectionM
       resolved.cleanup();
       throw new SshConnectionError('SSH connection was disconnected before connecting');
     }
-    const client = this.deps.createClient?.() ?? new ssh2.Client();
+    const client =
+      resolved.transport === 'local'
+        ? new LocalShellClient().asSshClient()
+        : (this.deps.createClient?.() ?? new ssh2.Client());
     entry.client = client;
     let cleaned = false;
     const cleanup = () => {

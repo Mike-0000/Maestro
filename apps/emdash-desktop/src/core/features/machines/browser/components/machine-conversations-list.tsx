@@ -8,13 +8,25 @@ import {
 } from '@emdash/ui/react/patterns';
 import { Button, DropdownMenu, Spinner, toast } from '@emdash/ui/react/primitives';
 import { useQueryClient } from '@tanstack/react-query';
-import { EllipsisIcon, Link2Icon, MessageSquareIcon, Trash2Icon, WifiOffIcon } from 'lucide-react';
+import {
+  EllipsisIcon,
+  Link2Icon,
+  MessageSquareIcon,
+  PlayIcon,
+  Trash2Icon,
+  WifiOffIcon,
+} from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useMemo, useState } from 'react';
+import { getTaskManagerStore } from '@core/features/tasks/api/browser/task-state/task-selectors';
+import { taskViewDef } from '@core/features/tasks/contributions/views';
+import { getTaskComposition } from '@core/features/workbench/api/browser/task-composition-selectors';
 import { useWorkspaceGroups } from '@core/features/workspaces/api/browser/use-workspace-groups';
 import { useOpenModal } from '@core/manifests/browser/modal-api';
 import { useSearchFocusHotkeys } from '@core/primitives/keybindings/browser';
+import { useNavigate } from '@core/primitives/navigation/browser/navigation-hooks';
 import { cn } from '@core/primitives/styling/browser/cn';
+import { resolveMachineConversationContinue } from '../machine-conversation-continue';
 import {
   joinMachineConversationRows,
   type MachineConversationItem,
@@ -87,6 +99,7 @@ export function MachineConversationsList({
   const openLinkModal = useOpenModal('linkConversationModal');
   const openConfirm = useOpenModal('confirmActionModal');
   const searchRef = useSearchFocusHotkeys();
+  const { navigate } = useNavigate();
   const [busyId, setBusyId] = useState<string | null>(null);
 
   // Dangling-path detection is a client presentation over workspace observations
@@ -156,6 +169,61 @@ export function MachineConversationsList({
     }
   };
 
+  /**
+   * Opens the conversation in a task on this client, so a session started on the machine (or
+   * from another client of it) continues here: its linked task, else the workspace's latest open
+   * task, else a new task on that workspace.
+   */
+  const continueConversation = async (item: MachineConversationItem) => {
+    const { conversation } = item;
+    const target = resolveMachineConversationContinue(conversation, workspaceGroups);
+    if (target.kind === 'unavailable') {
+      toast.error('Could not continue conversation', { description: target.reason });
+      return;
+    }
+    setBusyId(conversation.id);
+    try {
+      let taskId: string;
+      if (target.kind === 'create') {
+        const taskManager = getTaskManagerStore(target.projectId);
+        if (!taskManager) throw new Error('The project for this workspace is not open.');
+        taskId = crypto.randomUUID();
+        await taskManager.createTask({
+          id: taskId,
+          projectId: target.projectId,
+          taskConfig: { version: '1', name: conversation.title || 'Continued conversation' },
+          workspaceConfig: {
+            version: '2',
+            git: { kind: 'none' },
+            workspace: { kind: 'repository-instance', workspaceId: target.workspaceId },
+          },
+        });
+      } else {
+        taskId = target.taskId;
+      }
+      if (target.kind === 'create' || target.link) {
+        await linkMachineConversation({
+          conversationId: conversation.id,
+          projectId: target.projectId,
+          taskId,
+        });
+        await refresh();
+      }
+      getTaskComposition(target.projectId, taskId)?.paneLayout.open(
+        'conversation',
+        { conversationId: conversation.id },
+        { preview: false }
+      );
+      navigate(taskViewDef({ projectId: target.projectId, taskId }));
+    } catch (error) {
+      toast.error('Could not continue conversation', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const deleteConversation = async (item: MachineConversationItem) => {
     const outcome = await openConfirm({
       title: 'Delete conversation?',
@@ -187,6 +255,7 @@ export function MachineConversationsList({
         <ConversationActionsCell
           item={item}
           busy={busyId === item.conversation.id}
+          onContinue={() => void continueConversation(item)}
           onLink={() => void linkConversation(item)}
           onDelete={() => void deleteConversation(item)}
         />
@@ -199,6 +268,9 @@ export function MachineConversationsList({
       <CollectionView
         view={view}
         columns={columns}
+        onItemClick={(item) => {
+          if (busyId === null && !item.pendingRemoval) void continueConversation(item);
+        }}
         toolbar={
           <ConversationsToolbar
             view={view}
@@ -304,42 +376,52 @@ function ConversationStatusCell({ item }: { item: MachineConversationItem }) {
 function ConversationActionsCell({
   item,
   busy,
+  onContinue,
   onLink,
   onDelete,
 }: {
   item: MachineConversationItem;
   busy: boolean;
+  onContinue: () => void;
   onLink: () => void;
   onDelete: () => void;
 }) {
   return (
-    <DropdownMenu.Root>
-      <DropdownMenu.Trigger
-        render={
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            icon
-            aria-label={`Actions for ${item.conversation.title || 'conversation'}`}
-            disabled={busy || item.pendingRemoval}
-          />
-        }
-      >
-        {busy ? <Spinner size="sm" /> : <EllipsisIcon className="size-3.5" />}
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Content align="end">
-        <DropdownMenu.Item onClick={onLink}>
-          <Link2Icon />
-          {item.linked ? 'Link to another task…' : 'Link to a task…'}
-        </DropdownMenu.Item>
-        <DropdownMenu.Separator />
-        <DropdownMenu.Item variant="destructive" onClick={onDelete}>
-          <Trash2Icon />
-          Delete…
-        </DropdownMenu.Item>
-      </DropdownMenu.Content>
-    </DropdownMenu.Root>
+    // The menu is an explicit control: its clicks (portaled items included) must not reach the
+    // row, whose click continues the conversation.
+    <div onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              icon
+              aria-label={`Actions for ${item.conversation.title || 'conversation'}`}
+              disabled={busy || item.pendingRemoval}
+            />
+          }
+        >
+          {busy ? <Spinner size="sm" /> : <EllipsisIcon className="size-3.5" />}
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Content align="end">
+          <DropdownMenu.Item onClick={onContinue}>
+            <PlayIcon />
+            Continue here
+          </DropdownMenu.Item>
+          <DropdownMenu.Item onClick={onLink}>
+            <Link2Icon />
+            {item.linked ? 'Link to another task…' : 'Link to a task…'}
+          </DropdownMenu.Item>
+          <DropdownMenu.Separator />
+          <DropdownMenu.Item variant="destructive" onClick={onDelete}>
+            <Trash2Icon />
+            Delete…
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Root>
+    </div>
   );
 }
 

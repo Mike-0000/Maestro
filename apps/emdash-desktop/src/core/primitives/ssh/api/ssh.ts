@@ -22,6 +22,12 @@ export interface SshConfig {
    * Stored in connection metadata; absent means false.
    */
   syncLocalSettings?: boolean;
+  /**
+   * 'local' is this computer's shared Host: the desktop runs its workspace server directly, without
+   * SSH, so conversations started here or from other computers over SSH appear in one place.
+   * Stored in connection metadata; absent means SSH.
+   */
+  transport?: 'local';
 }
 
 /**

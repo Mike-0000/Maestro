@@ -12,6 +12,7 @@ const STATUS_TEXT: Record<MachineStatusKind, string> = {
 };
 
 function machineEndpoint(machine: SshConfig): string {
+  if (machine.transport === 'local') return 'This computer, shared without SSH';
   const host = machine.sshConfigAlias?.trim() || machine.host;
   const target = machine.username ? `${machine.username}@${host}` : host;
   return machine.port !== 22 ? `${target}:${machine.port}` : target;

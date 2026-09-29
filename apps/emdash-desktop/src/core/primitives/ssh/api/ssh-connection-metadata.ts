@@ -96,6 +96,20 @@ const v4Schema = v3Schema.extend({
 });
 
 // ---------------------------------------------------------------------------
+// v5 schema — adds transport ('local' marks this computer's shared Host)
+// ---------------------------------------------------------------------------
+
+const v5Schema = v4Schema.extend({
+  version: z.literal('5').optional(),
+  /**
+   * 'local' runs this Host on the machine the desktop itself runs on, without SSH, so the app
+   * shares one workspace server (and its conversations) with SSH clients of this computer.
+   * Absent means SSH.
+   */
+  transport: z.literal('local').optional(),
+});
+
+// ---------------------------------------------------------------------------
 // Versioned schema
 // ---------------------------------------------------------------------------
 
@@ -110,6 +124,7 @@ const v4Schema = v3Schema.extend({
  * v2: migrates dependencySelections to InstallOverride | null (override-only)
  * v3: adds { kind: 'pinned', realpath } to installOverrideSchema (pass-through)
  * v4: adds syncLocalSettings (absent = false; pass-through)
+ * v5: adds transport (absent = SSH; pass-through)
  */
 export const sshConnectionMetadata = defineVersionedSchema()
   .unversioned(v0Schema)
@@ -144,6 +159,11 @@ export const sshConnectionMetadata = defineVersionedSchema()
     // Pass-through: syncLocalSettings stays unset (false) for existing hosts.
     ...prev,
     version: '4' as const,
+  }))
+  .version('5', v5Schema, (prev) => ({
+    // Pass-through: every existing machine is an SSH machine.
+    ...prev,
+    version: '5' as const,
   }))
   .build();
 
@@ -263,5 +283,6 @@ export function sshConfigFromRow(row: SshConnectionConfigRow): SshConfig {
     forwardAgent: metadata.forwardAgent,
     proxyJump: metadata.proxyJump,
     syncLocalSettings: metadata.syncLocalSettings,
+    ...(metadata.transport ? { transport: metadata.transport } : {}),
   };
 }
