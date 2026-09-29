@@ -56,14 +56,28 @@ export const workingIcon = style({
   },
 });
 
+export const dotGrid = style({
+  '@layer': {
+    recipes: {
+      position: 'relative',
+    },
+  },
+});
+
+// Dot diameter as a share of the 24-unit design grid (radius 1.85).
+const DOT_SIZE = `${(3.7 / 24) * 100}%`;
+
 export const dot = Array.from({ length: DOT_COUNT }, (_, index) =>
   style({
     '@layer': {
       recipes: {
-        fill: 'currentColor',
+        position: 'absolute',
+        width: DOT_SIZE,
+        height: DOT_SIZE,
+        borderRadius: '50%',
+        backgroundColor: 'currentColor',
         opacity: 0.28,
         transform: 'scale(0.72)',
-        transformBox: 'fill-box',
         transformOrigin: 'center',
         animationName: dotShimmer,
         animationDuration: `${PERIOD_MS}ms`,

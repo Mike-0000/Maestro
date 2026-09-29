@@ -68,6 +68,24 @@ export function buildTheme(theme?: SessionTheme): ITerminalOptions['theme'] {
   return readXtermCssVars();
 }
 
+function shallowEqualRecords(a: object | undefined, b: object | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const aRecord = a as Record<string, unknown>;
+  const bRecord = b as Record<string, unknown>;
+  const aKeys = Object.keys(aRecord);
+  if (aKeys.length !== Object.keys(bRecord).length) return false;
+  return aKeys.every((key) => Object.is(aRecord[key], bRecord[key]));
+}
+
+function sessionThemesEqual(a: SessionTheme | undefined, b: SessionTheme | undefined): boolean {
+  if (a === b) return true;
+  return (
+    a?.paddingBottom === b?.paddingBottom &&
+    shallowEqualRecords(a?.override ?? undefined, b?.override ?? undefined)
+  );
+}
+
 // ── FrontendPty ───────────────────────────────────────────────────────────────
 
 /**
@@ -185,22 +203,36 @@ export class FrontendPty {
     FrontendPty.bySession.set(this.sessionId, this);
   }
 
+  /**
+   * Applies a per-mount theme. Callers pass a fresh object on every React render, so an
+   * unchanged theme must be a no-op: each `options.theme` assignment makes xterm repaint every
+   * row and (DOM renderer) rewrite its stylesheet, which re-renders multiplied into jank.
+   */
   setTheme(theme?: SessionTheme): void {
+    if (sessionThemesEqual(this.theme, theme)) return;
     this.theme = theme;
-    this.terminal.options.theme = buildTheme(theme);
+    this.applyTerminalTheme(buildTheme(theme));
     this.applyElementTheme(theme);
   }
 
+  /** Re-resolves CSS theme variables (app theme changed) and repaints only if colors changed. */
   refreshTheme(): void {
-    this.terminal.options.theme = buildTheme(this.theme);
+    this.applyTerminalTheme(buildTheme(this.theme));
     this.applyElementTheme(this.theme);
+  }
+
+  private applyTerminalTheme(next: ITerminalOptions['theme']): void {
+    if (shallowEqualRecords(this.terminal.options.theme, next)) return;
+    this.terminal.options.theme = next;
   }
 
   private applyElementTheme(theme?: SessionTheme): void {
     const element = this.terminal.element;
     if (!element) return;
-    element.style.paddingBottom = `${theme?.paddingBottom ?? TERMINAL_PADDING_PX}px`;
-    element.style.backgroundColor = theme?.override?.background ?? 'var(--xterm-bg)';
+    const paddingBottom = `${theme?.paddingBottom ?? TERMINAL_PADDING_PX}px`;
+    if (element.style.paddingBottom !== paddingBottom) element.style.paddingBottom = paddingBottom;
+    const background = theme?.override?.background ?? 'var(--xterm-bg)';
+    if (element.style.backgroundColor !== background) element.style.backgroundColor = background;
   }
 
   clear(): void {

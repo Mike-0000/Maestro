@@ -373,7 +373,6 @@ export class CanvasStore {
       focusedRegionId: computed,
       promotedTileIds: computed({ equals: comparer.structural }),
       promotedSet: computed,
-      outsideFocusOrder: computed,
       setScopeFramedZoom: action,
       requestFrame: action,
       reframe: action,
@@ -791,8 +790,8 @@ export class CanvasStore {
   }
 
   /**
-   * Windows of the focused region that render fully (live terminal or chat, mounted browser) for
-   * as long as the region is focused, most recently focused first up to the live cap.
+   * Windows of the focused region whose app browsers stay mounted for as long as the region is
+   * focused, most recently focused first up to the cap.
    */
   get promotedTileIds(): string[] {
     return promotedTiles(
@@ -806,24 +805,6 @@ export class CanvasStore {
 
   get promotedSet(): ReadonlySet<string> {
     return new Set(this.promotedTileIds);
-  }
-
-  isPromoted(tileId: string): boolean {
-    return this.promotedSet.has(tileId);
-  }
-
-  /** Focus order of windows outside the focused region; they share what is left of the budget. */
-  get outsideFocusOrder(): string[] {
-    const promoted = this.promotedSet;
-    return promoted.size === 0
-      ? this.focusOrder
-      : this.focusOrder.filter((id) => !promoted.has(id));
-  }
-
-  /** Focus rank among windows outside the focused region. */
-  outsideFocusRank(tileId: string): number {
-    const index = this.outsideFocusOrder.indexOf(tileId);
-    return index === -1 ? Number.MAX_SAFE_INTEGER : index;
   }
 
   // ── Layout ─────────────────────────────────────────────────────────────────

@@ -226,13 +226,14 @@ export class ConversationManagerStore implements Disposable {
     runInAction(() => {
       this._hasObservedTuiSessions = true;
       this.lastTuiList = list;
-      this.activeTuiSessionIds.clear();
+      const active = new Set<string>();
       for (const [conversationId, session] of Object.entries(list)) {
         if (!this.conversations.has(conversationId)) continue;
         if (session.status === 'starting' || session.status === 'running') {
-          this.activeTuiSessionIds.add(conversationId);
+          active.add(conversationId);
         }
       }
+      reconcileSet(this.activeTuiSessionIds, active);
     });
   }
 
@@ -240,13 +241,14 @@ export class ConversationManagerStore implements Disposable {
     runInAction(() => {
       this._hasObservedAcpSessions = true;
       this.lastAcpList = list;
-      this.activeAcpSessionIds.clear();
+      const active = new Set<string>();
       for (const [conversationId, session] of Object.entries(list)) {
         if (!this.conversations.has(conversationId)) continue;
         if (session.lifecycle !== 'closed') {
-          this.activeAcpSessionIds.add(conversationId);
+          active.add(conversationId);
         }
       }
+      reconcileSet(this.activeAcpSessionIds, active);
     });
   }
 
@@ -689,4 +691,16 @@ export class ConversationStore {
   dispose() {
     // Session is managed by ConversationManagerStore.sessions — nothing to do here.
   }
+}
+
+/**
+ * Brings an observable set to `next` without touching unchanged members. Session lists republish on
+ * every activity tick (e.g. each keystroke's `lastInputAt`); clearing and refilling would notify
+ * every observer — canvas tiles, panels, terminals — even though membership rarely changes.
+ */
+function reconcileSet(target: Set<string>, next: ReadonlySet<string>): void {
+  for (const id of [...target]) {
+    if (!next.has(id)) target.delete(id);
+  }
+  for (const id of next) target.add(id);
 }

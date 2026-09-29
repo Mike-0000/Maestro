@@ -37,56 +37,14 @@ export function isInteractiveZoom(zoom: number): boolean {
   return Math.abs(zoom - 1) <= INTERACTIVE_ZOOM_TOLERANCE;
 }
 
-/** Below this zoom a tile renders only its header glyph. */
+/** Below this zoom a tile's header switches to its large, readable-from-afar form. */
 export const GLYPH_ZOOM_THRESHOLD = 0.35;
-
-/**
- * Cap on simultaneously mounted live tiles (xterm or ACP chat) on the canvas.
- * Overview zoom uses preview; live is only at interactive zoom (~1.0).
- */
-export const DEFAULT_LIVE_TILE_BUDGET = 4;
 
 export type ZoomBand = 'glyph' | 'scaled' | 'interactive';
 
 export function zoomBand(zoom: number): ZoomBand {
   if (zoom < GLYPH_ZOOM_THRESHOLD) return 'glyph';
   return isInteractiveZoom(zoom) ? 'interactive' : 'scaled';
-}
-
-/**
- * Stable zoom stand-in for LOD so pan/zoom does not re-render every tile per frame.
- * Scaled zoom must not collapse to 1 — that would keep live xterms under CSS scale.
- */
-export function detailZoomForBand(band: ZoomBand): number {
-  if (band === 'glyph') return 0;
-  if (band === 'interactive') return 1;
-  return (GLYPH_ZOOM_THRESHOLD + 1) / 2;
-}
-
-export type TileDetail = 'live' | 'preview' | 'glyph';
-
-export type TileDetailInput = {
-  zoom: number;
-  /** Whether the tile intersects the viewport. */
-  visible: boolean;
-  /** 0-based rank among visible tiles by recency of focus (0 = most recent). */
-  focusRank: number;
-  liveBudget: number;
-  /** Whether a terminal session exists to render live. */
-  hasSession: boolean;
-  /**
-   * The tile belongs to the sub-canvas the user is in: it renders live at any readable zoom (with
-   * pointer input only at zoom 1) instead of competing for the live budget.
-   */
-  promoted?: boolean;
-};
-
-export function resolveTileDetail(input: TileDetailInput): TileDetail {
-  if (input.zoom < GLYPH_ZOOM_THRESHOLD) return 'glyph';
-  if (!input.visible || !input.hasSession) return 'preview';
-  if (input.promoted) return 'live';
-  if (!isInteractiveZoom(input.zoom)) return 'preview';
-  return input.focusRank < input.liveBudget ? 'live' : 'preview';
 }
 
 // ── App browsers ─────────────────────────────────────────────────────────────
