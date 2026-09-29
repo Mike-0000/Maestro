@@ -152,7 +152,7 @@ describe('Hosts production supervisor ownership', () => {
     ports.install.mockImplementationOnce(async () => gate.promise);
     const pending = fixture.host().server.install();
     const rejection = expect(pending).rejects.toThrow('timed out');
-    await vi.advanceTimersByTimeAsync(120_001);
+    await vi.advanceTimersByTimeAsync(30 * 60_000 + 1);
     await rejection;
     expect(peek(fixture.service.availability('ssh-1'))).toMatchObject({
       kind: 'unavailable',
