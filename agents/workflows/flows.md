@@ -138,6 +138,14 @@ running (doctor reports it). See
 
 - Local packaging without signing identities still produces installable
   artifacts; mac builds are unsigned/un-notarized and Gatekeeper will warn.
+- Windows builds sign themselves on machines prepared once with
+  `apps/emdash-desktop/scripts/setup-windows-local-signing.ps1`: it creates a
+  code-signing-only certificate with a non-exportable key, trusts it on that
+  machine (one silent or UAC elevation), and records its thumbprint in
+  `%LOCALAPPDATA%\Chorus\Signing\windows-signing.json`. `electron-builder.config.ts`
+  reads that file (or `CHORUS_WIN_SIGN_CERT_SHA1`; `off` disables it), so local
+  packaging and delivery builds are signed. Other machines still see an unknown
+  publisher; remove the identity with `-Uninstall`.
 - Linux packaging keeps `extraMetadata.desktopName` aligned with the installed
   `.desktop` filename via `linux.syncDesktopName`. The desktop IDs are `Emdash`
   (stable) and `emdash-canary` (canary); preserve them across upgrades for dock pins.

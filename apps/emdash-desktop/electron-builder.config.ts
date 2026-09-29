@@ -6,6 +6,7 @@ import {
   prepareWorkspaceServerBundle,
   WORKSPACE_SERVER_BUNDLE_DIR,
 } from './scripts/prepare-workspace-server-bundle.ts';
+import { resolveWindowsSigntoolOptions } from './scripts/windows-signing.ts';
 import {
   APP_ID,
   ARTIFACT_PREFIX,
@@ -121,7 +122,9 @@ const config: Configuration = {
       { target: 'nsis', arch: ['x64'] },
       { target: 'msi', arch: ['x64'] },
     ],
-    // Chorus has no signing identity yet (see docs/chorus/PLAN.md §5.4); builds are unsigned.
+    // Signed only on machines set up by scripts/setup-windows-local-signing.ps1 (a locally
+    // trusted certificate); otherwise unsigned until release signing lands (docs/chorus/PLAN.md §5.4).
+    signtoolOptions: resolveWindowsSigntoolOptions(),
   },
   msi: {
     oneClick: false,
