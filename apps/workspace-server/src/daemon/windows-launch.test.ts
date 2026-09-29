@@ -37,7 +37,28 @@ describe('createOutsideSessionLauncher', () => {
       EMDASH_WS_LAUNCH_COMMAND_LINE:
         '"C:\\Users\\O\'Brien Dev\\node.exe" C:\\ws\\dist\\index.mjs daemonize --socket C:\\run\\workspace.sock',
       EMDASH_WS_LAUNCH_DIRECTORY: "C:\\Users\\O'Brien Dev",
+      EMDASH_WS_LAUNCH_SELF: calls[0]?.encoded,
     });
+  });
+
+  it('surfaces why an elevated caller could not start a de-elevated daemon', async () => {
+    const launcher = createOutsideSessionLauncher(async () => ({
+      exitCode: 0,
+      stdout: '0 4242\r\nW The workspace server was started elevated: runas failed\r\n',
+      stderr: '',
+    }));
+
+    expect(await launcher(['node.exe'], { cwd: 'C:\\', env: {} })).toEqual({
+      success: true,
+      data: { pid: 4242, warnings: ['The workspace server was started elevated: runas failed'] },
+    });
+  });
+
+  it('keeps the de-elevation hop free of caller-controlled PowerShell', () => {
+    // runas receives one command line: a system path plus the script's own base64 encoding.
+    expect(LAUNCH_OUTSIDE_SESSION_SCRIPT).toContain("& runas.exe '/trustlevel:0x20000'");
+    expect(LAUNCH_OUTSIDE_SESSION_SCRIPT).toContain("-notmatch '^[A-Za-z0-9+/=]+$'");
+    expect(LAUNCH_OUTSIDE_SESSION_SCRIPT).not.toMatch(/Invoke-Expression|iex /u);
   });
 
   it('names Win32_Process.Create failures', async () => {
