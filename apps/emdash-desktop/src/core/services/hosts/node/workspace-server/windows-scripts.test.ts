@@ -91,6 +91,22 @@ describe('Windows workspace-server scripts', () => {
       ).not.toThrow();
     }
   });
+
+  it('reads SSH stdin through the raw handle, which Windows OpenSSH exec channels require', () => {
+    // [Console]::OpenStandardInput() never returns data or EOF under Windows OpenSSH.
+    const layout = windowsWorkspaceServerLayout('C:\\Users\\alice');
+    for (const script of [
+      buildWindowsPipeBridgeScript(layout.socketPath),
+      buildWindowsUploadScript({
+        path: path.win32.join(layout.stagingDirectory, 'bundle.zip'),
+        length: 1,
+        sha256: 'a'.repeat(64),
+      }),
+    ]) {
+      expect(script).toContain('Open-EmdashStandardStream -10 Read');
+      expect(script).not.toContain('OpenStandardInput');
+    }
+  });
 });
 
 type RunResult = { status: number | null; stdout: string; stderr: string };

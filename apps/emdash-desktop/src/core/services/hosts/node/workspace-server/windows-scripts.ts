@@ -12,6 +12,24 @@ import { WORKSPACE_SERVER_VERSION_PATTERN, type WindowsWorkspaceServerLayout } f
 export const WINDOWS_NOT_INSTALLED_EXIT_CODE = 44;
 export const WINDOWS_INVALID_POINTER_EXIT_CODE = 45;
 
+/**
+ * Defines `Open-EmdashStandardStream`, an unbuffered FileStream over a raw standard handle
+ * (-10 stdin, -11 stdout). Under Windows OpenSSH, `[Console]::OpenStandardInput()` never returns
+ * data or end-of-file, while a FileStream over the same handle does. PowerShell cannot P/Invoke
+ * without compiling, so this calls the .NET Framework's own `GetStdHandle` binding.
+ */
+const STANDARD_STREAM_FUNCTION = [
+  'function Open-EmdashStandardStream([int]$id, [IO.FileAccess]$access) {',
+  "  $native = [object].Assembly.GetType('Microsoft.Win32.Win32Native')",
+  '  $getStdHandle = $null',
+  "  if ($native) { $getStdHandle = $native.GetMethod('GetStdHandle', [Reflection.BindingFlags]'NonPublic,Static') }",
+  "  if (-not $getStdHandle) { throw 'This PowerShell cannot open its standard streams.' }",
+  '  $handle = New-Object Microsoft.Win32.SafeHandles.SafeFileHandle($getStdHandle.Invoke($null, @($id)), $false)',
+  '  # A buffer size of 1 disables buffering, so bridged bytes are never held back.',
+  '  return New-Object IO.FileStream($handle, $access, 1, $false)',
+  '}',
+].join('\n');
+
 /** Defines `Get-EmdashCurrentVersion`, which returns the selected version or `$null`. */
 function currentVersionFunction(layout: WindowsWorkspaceServerLayout): string {
   return [
@@ -108,8 +126,9 @@ export function buildWindowsPipeBridgeScript(recordPath: string): string {
       "  Write-EmdashError ('Could not connect to the workspace server pipe: ' + $_.Exception.Message)",
       '  exit 47',
       '}',
-      '$stdin = [Console]::OpenStandardInput()',
-      '$stdout = [Console]::OpenStandardOutput()',
+      STANDARD_STREAM_FUNCTION,
+      '$stdin = Open-EmdashStandardStream -10 Read',
+      '$stdout = Open-EmdashStandardStream -11 Write',
       `Write-EmdashError ${powerShellLiteral(WINDOWS_PIPE_BRIDGE_READY_MARKER)}`,
       '$upstream = $stdin.CopyToAsync($pipe)',
       '$downstream = $pipe.CopyToAsync($stdout)',
@@ -266,7 +285,8 @@ export function buildWindowsUploadScript(options: {
       "$partial = $target + '.partial'",
       `$remaining = [long]${options.length}`,
       '[void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))',
-      '$source = [Console]::OpenStandardInput()',
+      STANDARD_STREAM_FUNCTION,
+      '$source = Open-EmdashStandardStream -10 Read',
       '$output = [IO.File]::Create($partial)',
       '$buffer = New-Object byte[] 65536',
       'try {',
