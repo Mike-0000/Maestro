@@ -134,6 +134,11 @@ export const machinesContract = defineContract({
    * desktop-side). Deliberately separate from saveMachine so toggling never
    * drops the pinned host connection.
    */
+  /** Adds (or returns) this computer's shared Host, which runs without SSH. */
+  addThisComputer: procedure({
+    input: voidInput,
+    output: z.custom<SshConfig>(),
+  }),
   setSyncLocalSettings: procedure({
     input: z.object({ id: z.string(), enabled: z.boolean() }),
     output: z.custom<SshConfig>(),

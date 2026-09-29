@@ -469,6 +469,35 @@ describe('MachinesService', () => {
     expect(machines.find((machine) => machine.id === 'ssh-1')?.syncLocalSettings).toBe(true);
   });
 
+  it('adds this computer once, as a local-transport machine with no SSH settings to edit', async () => {
+    await insertSshConnection(fixture.db);
+
+    const added = await service.addThisComputer();
+    expect(added).toMatchObject({ transport: 'local', host: 'localhost', authType: 'agent' });
+    expect(added.name).toMatch(/\(this computer\)$/u);
+    expect(await service.addThisComputer()).toEqual(added);
+
+    await service.setSyncLocalSettings(added.id, true);
+    const machines = await service.getMachines();
+    expect(machines.find((machine) => machine.id === added.id)).toMatchObject({
+      transport: 'local',
+      syncLocalSettings: true,
+    });
+    expect(machines).toHaveLength(2);
+
+    await expect(
+      service.saveMachine({
+        id: added.id,
+        name: added.name,
+        host: 'example.org',
+        port: 22,
+        username: 'jona',
+        authType: 'agent',
+        useAgent: true,
+      })
+    ).rejects.toThrow('no SSH settings to edit');
+  });
+
   it('does not delete credentials when a project still uses the machine', async () => {
     await insertSshConnection(fixture.db);
     await insertRemoteWorkspace(fixture.db);

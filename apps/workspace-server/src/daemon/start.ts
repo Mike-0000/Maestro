@@ -120,6 +120,7 @@ async function launchServeProcess(
     { cwd: process.cwd(), env: options.env ?? process.env }
   );
   if (launched.success) {
+    warnings.push(...(launched.data.warnings ?? []));
     return { pid: launched.data.pid, unref: () => {} };
   }
   warnings.push(

@@ -28,19 +28,22 @@ export function MachineConnectionRow({
   const preparing = availability?.kind === 'preparing';
   const ready = availability?.kind === 'ready';
   const retry = availability?.kind === 'unavailable' && availability.issue !== undefined;
+  const local = machine.transport === 'local';
 
   return (
     <SettingsRow
       label={
         <span className="flex items-center gap-2">
-          SSH Connection
+          {local ? 'Connection' : 'SSH Connection'}
           <MachineBadge state={state} />
         </span>
       }
       description={
         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span>
-            {machine.host} · {machine.username} · {authLabel(machine)}
+            {local
+              ? `This computer, without SSH · ${machine.username} · shared with SSH clients of this computer`
+              : `${machine.host} · ${machine.username} · ${authLabel(machine)}`}
           </span>
         </span>
       }
@@ -57,9 +60,11 @@ export function MachineConnectionRow({
               Disconnect
             </Button>
           ) : null}
-          <Button type="button" variant="secondary" size="xs" icon onClick={onEdit}>
-            <Cog />
-          </Button>
+          {local ? null : (
+            <Button type="button" variant="secondary" size="xs" icon onClick={onEdit}>
+              <Cog />
+            </Button>
+          )}
         </span>
       }
     />

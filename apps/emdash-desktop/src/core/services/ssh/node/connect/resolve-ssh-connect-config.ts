@@ -24,6 +24,8 @@ export interface SshConnectResult {
   config: ConnectConfig;
   cleanup: () => void;
   debugLogs: string[];
+  /** 'local' runs the connection on this machine without SSH; see LocalShellClient. */
+  transport?: 'local';
 }
 
 export type PersistedConnectInput = { kind: 'persisted'; row: SshConnectionRow };
@@ -83,6 +85,14 @@ export async function resolveSshConnectConfig(
 ): Promise<SshConnectResult> {
   const deps = { ...defaultDeps(), ...depsOverride };
   const base = baseConfigForInput(input);
+  if (base.transport === 'local') {
+    return {
+      config: { readyTimeout: 20_000 },
+      cleanup: () => {},
+      debugLogs: [],
+      transport: 'local',
+    };
+  }
   const alias = base.sshConfigAlias;
   const resolved = alias ? await deps.resolveSshConfig(alias) : undefined;
   const shouldResolveHostForAgent = !alias && base.authType === 'agent';

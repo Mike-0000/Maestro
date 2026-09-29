@@ -1,6 +1,6 @@
 import { CollectionToolbar, CollectionView, PageLayout } from '@emdash/ui/react/patterns';
-import { Button } from '@emdash/ui/react/primitives';
-import { PlusIcon, ServerIcon } from 'lucide-react';
+import { Button, toast } from '@emdash/ui/react/primitives';
+import { MonitorIcon, PlusIcon, ServerIcon } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useState } from 'react';
 import { getMachinesStore } from '@core/features/machines/contributions/app-stores';
@@ -31,6 +31,19 @@ export const MachinesSettingsPage = observer(function MachinesSettingsPage({
   const openCreateModal = () => {
     void openMachineModal({ dismissControl: 'close' });
   };
+  const hasThisComputer = machinesStore.connections.some(
+    (machine) => machine.transport === 'local'
+  );
+  const addThisComputer = async () => {
+    try {
+      const machine = await machinesStore.addThisComputer();
+      openDetail(machine.id);
+    } catch (error) {
+      toast.error('Failed to add this computer', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
 
   return (
     <div className="flex min-h-0 flex-col gap-8">
@@ -44,7 +57,13 @@ export const MachinesSettingsPage = observer(function MachinesSettingsPage({
           view={view}
           renderRow={(machine) => <MachineListRow machine={machine} />}
           layout="grouped"
-          toolbar={<MachinesToolbar view={view} onAdd={openCreateModal} />}
+          toolbar={
+            <MachinesToolbar
+              view={view}
+              onAdd={openCreateModal}
+              onAddThisComputer={hasThisComputer ? undefined : () => void addThisComputer()}
+            />
+          }
           onItemClick={(machine) => openDetail(machine.id)}
           emptySlot={<MachinesEmptyState hasMachines={machinesStore.connections.length > 0} />}
         />
@@ -56,9 +75,12 @@ export const MachinesSettingsPage = observer(function MachinesSettingsPage({
 const MachinesToolbar = observer(function MachinesToolbar({
   view,
   onAdd,
+  onAddThisComputer,
 }: {
   view: MachinesListViewModel;
   onAdd: () => void;
+  /** Absent once this computer is already a machine. */
+  onAddThisComputer?: () => void;
 }) {
   const search = view.useSearch();
   return (
@@ -70,6 +92,17 @@ const MachinesToolbar = observer(function MachinesToolbar({
       />
       <CollectionToolbar.Spacer />
       <CollectionToolbar.Group>
+        {onAddThisComputer ? (
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={onAddThisComputer}
+            title="Run conversations on this computer's workspace server, shared with computers that connect to it over SSH"
+          >
+            <MonitorIcon />
+            Add this computer
+          </Button>
+        ) : null}
         <Button type="button" variant="primary" onClick={onAdd}>
           <PlusIcon />
           Add machine

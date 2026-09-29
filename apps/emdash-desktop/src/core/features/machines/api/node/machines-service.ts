@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { hostname, userInfo } from 'node:os';
 import { and, eq, isNull, ne } from 'drizzle-orm';
 import {
   createConversationRegistry,
@@ -148,6 +149,9 @@ export class MachinesService implements Hookable<MachinesServiceHooks> {
     const { password: _password, passphrase: _passphrase, ...dbConfig } = config;
 
     const before = captureMachineSave(this.deps.db, connectionId);
+    if (before.connection?.metadata?.transport === 'local') {
+      throw new Error('This computer connects without SSH, so it has no SSH settings to edit.');
+    }
     const existingMetadata: SshConnectionMetadata = before.connection?.metadata ?? {};
 
     const metadataUpdate: SshConnectionMetadata = {};
@@ -228,6 +232,37 @@ export class MachinesService implements Hookable<MachinesServiceHooks> {
     };
   }
 
+  /**
+   * Adds this computer as a Host that runs its workspace server directly, without SSH, or returns
+   * the one already added. SSH clients of this computer reach the same workspace server, so their
+   * conversations show up here and can be continued from here, and the other way around.
+   */
+  async addThisComputer(): Promise<SshConfig> {
+    const rows = await this.deps.db.select().from(sshConnectionsTable);
+    const existing = rows.find((row) => row.metadata?.transport === 'local');
+    if (existing) return sshConfigFromRow(existing);
+
+    const names = new Set(rows.map((row) => row.name));
+    const baseName = `${hostname() || 'This computer'} (this computer)`;
+    let name = baseName;
+    for (let suffix = 2; names.has(name); suffix += 1) name = `${baseName} ${suffix}`;
+
+    const row = {
+      id: this.createId(),
+      name,
+      host: 'localhost',
+      port: 0,
+      username: userInfo().username,
+      authType: 'agent',
+      privateKeyPath: null,
+      useAgent: 0,
+      metadata: { version: '5', transport: 'local' } satisfies SshConnectionMetadata,
+    } satisfies SshConnectionInsert;
+    await this.deps.db.insert(sshConnectionsTable).values(row);
+    this.hooks.callHookBackground('machine:mutated', { type: 'saved', connectionId: row.id });
+    return sshConfigFromRow(row);
+  }
+
   async setSyncLocalSettings(id: string, enabled: boolean): Promise<SshConfig> {
     const [row] = await this.deps.db
       .select()
@@ -237,7 +272,7 @@ export class MachinesService implements Hookable<MachinesServiceHooks> {
 
     const metadata: SshConnectionMetadata = {
       ...(row.metadata ?? {}),
-      version: '4',
+      version: '5',
       syncLocalSettings: enabled,
     };
     await this.deps.db

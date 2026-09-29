@@ -21,7 +21,7 @@ describe('sshConnectionMetadata versioned schema', () => {
     expect(result.data.version).toBe(sshConnectionMetadata.currentVersion);
   });
 
-  it('upgrades v3 data to v4 preserving dependency selections', () => {
+  it('upgrades v3 data to the latest version preserving dependency selections', () => {
     const result = sshConnectionMetadata.safeParse({
       version: '3',
       sshConfigAlias: 'my-host',
@@ -32,7 +32,7 @@ describe('sshConnectionMetadata versioned schema', () => {
     });
     expect(result.status).toBe('ok');
     if (result.status !== 'ok') return;
-    expect(result.data.version).toBe('4');
+    expect(result.data.version).toBe('5');
     expect(result.data.dependencySelections).toEqual({
       claude: { kind: 'pinned', realpath: '/usr/local/bin/claude' },
       codex: null,
@@ -40,9 +40,31 @@ describe('sshConnectionMetadata versioned schema', () => {
     expect(result.data.syncLocalSettings).toBeUndefined();
   });
 
-  it('round-trips a v4 object with syncLocalSettings through serialize/parseJson', () => {
-    const value = sshConnectionMetadata.schema.parse({
+  it('upgrades v4 machines to v5 as SSH machines', () => {
+    const result = sshConnectionMetadata.safeParse({
       version: '4',
+      sshConfigAlias: 'my-host',
+      syncLocalSettings: true,
+    });
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok') return;
+    expect(result.data).toEqual({
+      version: '5',
+      sshConfigAlias: 'my-host',
+      syncLocalSettings: true,
+    });
+    expect(result.data.transport).toBeUndefined();
+  });
+
+  it('round-trips a local machine through serialize/parseJson', () => {
+    const value = sshConnectionMetadata.schema.parse({ version: '5', transport: 'local' });
+    const roundTripped = sshConnectionMetadata.parseJson(sshConnectionMetadata.serialize(value));
+    expect(roundTripped).toEqual({ version: '5', transport: 'local' });
+  });
+
+  it('round-trips an object with syncLocalSettings through serialize/parseJson', () => {
+    const value = sshConnectionMetadata.schema.parse({
+      version: '5',
       sshConfigAlias: 'my-host',
       syncLocalSettings: true,
     });
