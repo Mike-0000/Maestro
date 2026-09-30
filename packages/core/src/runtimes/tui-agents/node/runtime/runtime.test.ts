@@ -818,6 +818,71 @@ describe('TuiAgentsRuntime', () => {
     expectNoSessionResidue('conversation-1', leakContainers(runtime));
   });
 
+  it('spawns at a size the viewer requested before the process existed', async () => {
+    const { runtime, spawner } = createRuntime();
+
+    expect(runtime.resize('conversation-1', 94, 41)).toEqual(
+      expect.objectContaining({ success: false })
+    );
+    await runtime.startSession(startInput({ cols: 120, rows: 30 }));
+
+    expect(spawner.specs[0]).toMatchObject({ cols: 94, rows: 41 });
+    expect(spawner.processes[0]!.resizes).toEqual([]);
+    expect(
+      peek(runtime.sessionsLiveModel.get(undefined)!.states.list)['conversation-1']
+    ).toMatchObject({ status: 'running', cols: 94, rows: 41 });
+    await runtime.dispose();
+  });
+
+  it('replays a viewer resize that raced the spawn onto the new process', async () => {
+    const { runtime, spawner, agentHost } = createRuntime();
+    let releaseCommand!: () => void;
+    const commandGate = new Promise<void>((resolve) => {
+      releaseCommand = resolve;
+    });
+    vi.mocked(agentHost.buildPromptCommand).mockImplementationOnce(async () => {
+      await commandGate;
+      return ok({ command: 'agent', args: ['run'], env: {} });
+    });
+
+    const started = runtime.startSession(startInput({ cols: 120, rows: 30 }));
+    await vi.waitFor(() => expect(agentHost.buildPromptCommand).toHaveBeenCalled());
+    runtime.resize('conversation-1', 88, 36);
+    releaseCommand();
+    await started;
+
+    expect(spawner.specs[0]).toMatchObject({ cols: 120, rows: 30 });
+    expect(spawner.processes[0]!.resizes).toEqual([{ cols: 88, rows: 36 }]);
+    await runtime.dispose();
+  });
+
+  it('respawns after an unexpected exit at the latest viewer size', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const { runtime, spawner } = createRuntime();
+    try {
+      await runtime.startSession(startInput({ cols: 120, rows: 30 }));
+      runtime.resize('conversation-1', 101, 27);
+      spawner.processes[0]!.emitExit({ exitCode: 1, signal: null });
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(spawner.specs).toHaveLength(2);
+      expect(spawner.specs[1]).toMatchObject({ cols: 101, rows: 27 });
+    } finally {
+      await runtime.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('forgets a requested size when the session is deleted', async () => {
+    const { runtime } = createRuntime();
+    await runtime.startSession(startInput());
+    runtime.resize('conversation-1', 90, 20);
+
+    await runtime.deleteSession('conversation-1');
+
+    expectNoSessionResidue('conversation-1', leakContainers(runtime));
+  });
+
   it('aborts reconcile without suspending intents when the tmux listing fails', async () => {
     const intents = createMemorySessionIntentStore();
     await intents.saveActive({
@@ -951,6 +1016,7 @@ type RuntimeInternals = {
   configs: Map<string, unknown>;
   generations: Map<string, unknown>;
   unexpectedRespawns: Map<string, unknown>;
+  requestedSizes: Map<string, unknown>;
   registry: { get(key: string): unknown };
 };
 
@@ -963,6 +1029,7 @@ function leakContainers(runtime: TuiAgentsRuntime): LeakCheckContainer[] {
     mapContainer('configs', internals.configs),
     mapContainer('generations', internals.generations),
     mapContainer('unexpectedRespawns', internals.unexpectedRespawns),
+    mapContainer('requestedSizes', internals.requestedSizes),
     { name: 'ptyRegistry', has: (key) => internals.registry.get(key) !== undefined },
     {
       name: 'sessionsList',

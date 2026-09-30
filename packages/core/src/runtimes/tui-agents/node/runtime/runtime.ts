@@ -105,6 +105,14 @@ export class TuiAgentsRuntime {
   private readonly unexpectedRespawns = new Map<string, number>();
   private readonly promptSpills = new Map<string, PromptSpillResult>();
   /**
+   * Latest grid size a viewer asked for, recorded even while no process is running. The
+   * renderer attaches to the output log and sends its first resize before the spawn lands, so
+   * dropping it would leave the agent drawing at the launch guess while xterm shows another
+   * width — every redraw then wraps into garbled, overlapping rows until something resizes
+   * again. Spawns and respawns start at this size and a resize raced by the spawn is replayed.
+   */
+  private readonly requestedSizes = new Map<string, { cols: number; rows: number }>();
+  /**
    * The session's tmux side can outlive the pty client; output inside tmux is
    * invisible to the activity tracker, so `busy` keeps such sessions alive for
    * the same window the idle policy grants tracker output.
@@ -222,6 +230,12 @@ export class TuiAgentsRuntime {
             // Keep the source identity while clients observe it. A replacement
             // process must publish to those same subscriptions.
             if (!log?.subscribers) this.logs.delete(key);
+          },
+        },
+        {
+          name: 'requested-size',
+          run: (key) => {
+            this.requestedSizes.delete(key);
           },
         },
         {
@@ -411,6 +425,7 @@ export class TuiAgentsRuntime {
   }
 
   resize(conversationId: string, cols: number, rows: number): Result<void, TuiInputError> {
+    this.requestedSizes.set(conversationId, { cols, rows });
     const active = this.sessions.get(conversationId);
     if (!active?.pty) return err({ type: 'not-found', conversationId });
     active.pty.resize(cols, rows);
@@ -460,6 +475,7 @@ export class TuiAgentsRuntime {
     this.sessions.clear();
     this.logs.clear();
     this.configs.clear();
+    this.requestedSizes.clear();
   }
 
   private async spawnInto(
@@ -483,14 +499,15 @@ export class TuiAgentsRuntime {
     const startedAt = this.clock.now();
     session.config = config;
     session.provider = provider;
+    const spawnSize = this.sizeFor(config.input);
     this.syncSessionState({
       conversationId: config.input.conversationId,
       providerId: config.input.providerId,
       cwd: config.input.cwd,
       sessionId: config.input.sessionId,
       status: 'starting',
-      cols: config.input.cols,
-      rows: config.input.rows,
+      cols: spawnSize.cols,
+      rows: spawnSize.rows,
       resume: resumeState,
       startedAt,
     });
@@ -560,8 +577,8 @@ export class TuiAgentsRuntime {
           invocation: spawnSpec.invocation,
           cwd: config.input.cwd,
           env,
-          cols: config.input.cols,
-          rows: config.input.rows,
+          cols: spawnSize.cols,
+          rows: spawnSize.rows,
         },
         {
           output: session.output,
@@ -617,8 +634,7 @@ export class TuiAgentsRuntime {
               ),
               status: pty.exited ? 'exited' : 'running',
               pid: pty.getPid(),
-              cols: config.input.cols,
-              rows: config.input.rows,
+              ...this.sizeFor(config.input),
               resume: isResuming ? { requested: true, outcome: 'resumed' } : resumeState,
               startedAt,
               exit: pty.exitStatus
@@ -640,6 +656,11 @@ export class TuiAgentsRuntime {
     }
 
     session.pty = pty;
+    // A viewer resize that landed while the process was being created was only recorded.
+    const currentSize = this.sizeFor(config.input);
+    if (currentSize.cols !== spawnSize.cols || currentSize.rows !== spawnSize.rows) {
+      pty.resize(currentSize.cols, currentSize.rows);
+    }
     // Lifecycle report (spec §7.4): a resume spawn is optimistically 'loaded' (the CLI owns
     // replay; early exit triggers the fresh-fallback respawn below, which reports
     // 'replaced-by-new'); a fresh-fallback respawn means history was not restored; a plain
@@ -670,8 +691,7 @@ export class TuiAgentsRuntime {
       sessionId: this.currentProviderSessionId(config.input.conversationId, config.input.sessionId),
       status: 'running',
       pid: pty.getPid(),
-      cols: config.input.cols,
-      rows: config.input.rows,
+      ...currentSize,
       resume: isResuming ? { requested: true, outcome: 'resumed' } : resumeState,
       startedAt,
     });
@@ -928,6 +948,11 @@ export class TuiAgentsRuntime {
         ? { exitCode: info.exitCode, signal: info.signal ?? undefined }
         : undefined;
     });
+  }
+
+  /** The size a (re)spawn should use: the latest viewer request, else the launch guess. */
+  private sizeFor(input: TuiAgentStartInput): { cols: number; rows: number } {
+    return this.requestedSizes.get(input.conversationId) ?? { cols: input.cols, rows: input.rows };
   }
 
   private updateSessionSize(conversationId: string, cols: number, rows: number): void {
