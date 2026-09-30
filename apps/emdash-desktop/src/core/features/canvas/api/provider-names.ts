@@ -19,7 +19,9 @@ const SPOKEN_PROVIDER_LABELS: Record<string, string> = {
   kimi: 'Kimi',
   kiro: 'Kiro',
   mistral: 'Mistral',
+  'oh-my-pi': 'Oh My Pi',
   opencode: 'OpenCode',
+  pi: 'Pi',
   qwen: 'Qwen',
 };
 

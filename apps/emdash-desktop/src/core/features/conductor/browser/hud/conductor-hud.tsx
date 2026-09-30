@@ -2,10 +2,10 @@ import {
   AlertTriangle,
   GitMerge,
   History,
-  Keyboard,
   Loader2,
   Mic,
   MicOff,
+  PlusCircle,
   SendHorizontal,
   Settings2,
   Undo2,
@@ -14,13 +14,18 @@ import {
   X,
 } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { getCanvasStore } from '@core/features/canvas/contributions/browser/app-stores';
 import { settingsViewDef } from '@core/features/settings/contributions/views';
 import { getVoiceStore } from '@core/features/voice/contributions/browser/app-stores';
 import { getNavigation } from '@core/primitives/navigation/browser/navigation-selectors';
 import { useLocalStorage } from '@core/primitives/react-hooks/browser/useLocalStorage';
 import { cn } from '@core/primitives/styling/browser/cn';
+import {
+  suggestAgents,
+  type AgentSuggestion,
+  type SuggestableProvider,
+} from '../../api/agent-suggestions';
 import { getConductorStore } from '../../contributions/browser/app-stores';
 import { ConductorLogPanel } from './conductor-log-panel';
 import { LocalUpdateCard } from './local-update-card';
@@ -35,12 +40,12 @@ const REPLY_VISIBLE_MS = 10_000;
 /**
  * The always-available conductor surface: mic state and level, what was heard, what the
  * conductor is doing, cancellable pending actions, replies, errors, the active plan, and a typed
- * command box for when talking is not an option.
+ * command box on the left for when talking is not an option. Typing an agent's name there (or the
+ * start of it) offers to open that agent on the canvas.
  */
 export const ConductorHud = observer(function ConductorHud() {
   const voice = getVoiceStore();
   const conductor = getConductorStore();
-  const [typing, setTyping] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const [setupOpen, setSetupOpen] = useState(false);
   const [showLocalUpdate, setShowLocalUpdate] = useLocalStorage('chorus:show-local-update', true);
@@ -80,7 +85,6 @@ export const ConductorHud = observer(function ConductorHud() {
     conductor.pending !== null ||
     (replyVisible && conductor.reply !== '') ||
     error !== null ||
-    typing ||
     showLog;
 
   return (
@@ -89,16 +93,15 @@ export const ConductorHud = observer(function ConductorHud() {
       {showLocalUpdate && <LocalUpdateCard onHide={() => setShowLocalUpdate(false)} />}
       {setupOpen && <VoiceSetupPanel onClose={() => setSetupOpen(false)} />}
       <div
-        role="status"
-        aria-live="polite"
         className={cn(
-          'pointer-events-auto flex w-full flex-col gap-2 rounded-2xl border border-border bg-background/95 shadow-xl backdrop-blur transition-[max-width] duration-200',
-          expanded ? 'max-w-[560px] p-3' : 'max-w-fit p-1.5'
+          'pointer-events-auto flex w-full max-w-[880px] flex-col gap-2 rounded-2xl border border-border bg-background/95 shadow-xl backdrop-blur',
+          expanded ? 'p-3' : 'p-1.5'
         )}
       >
         <div className="flex items-center gap-2">
+          <CommandBox />
           <MicButton />
-          <div className="min-w-0 flex-1 text-sm">
+          <div role="status" aria-live="polite" className="min-w-0 flex-1 overflow-hidden text-sm">
             <StatusLine />
           </div>
           <ManualListenControls />
@@ -131,13 +134,6 @@ export const ConductorHud = observer(function ConductorHud() {
             onClick={() => setShowLog((open) => !open)}
           >
             <History className="size-4" />
-          </HudIconButton>
-          <HudIconButton
-            label="Type a command"
-            active={typing}
-            onClick={() => setTyping((open) => !open)}
-          >
-            <Keyboard className="size-4" />
           </HudIconButton>
           <HudIconButton
             label="Voice and conductor settings"
@@ -175,8 +171,6 @@ export const ConductorHud = observer(function ConductorHud() {
             enabled={conductor.settings?.diagnosticHistory ?? false}
           />
         )}
-
-        {typing && <CommandInput onClose={() => setTyping(false)} />}
       </div>
     </div>
   );
@@ -360,39 +354,123 @@ const ErrorCard = observer(function ErrorCard() {
   );
 });
 
-function CommandInput({ onClose }: { onClose: () => void }) {
+/**
+ * The typed side of the conductor: free text goes to the conductor like speech, and an agent name
+ * (or its start, or an abbreviation like "omp") offers to open that agent on the canvas. Arrow
+ * keys move through the offers, Enter picks one, and Esc drops them so Enter sends the text.
+ */
+const CommandBox = observer(function CommandBox() {
   const conductor = getConductorStore();
+  const [text, setText] = useState('');
+  const [providers, setProviders] = useState<SuggestableProvider[]>([]);
+  const [highlighted, setHighlighted] = useState(0);
+  const [dismissed, setDismissed] = useState(false);
+  const [focused, setFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => inputRef.current?.focus(), []);
+
+  // Installed agents are cached for a minute; focusing the box picks up newly installed ones.
+  const loadProviders = () => {
+    void conductor.suggestableProviders().then(setProviders, () => {});
+  };
+  useEffect(() => {
+    void conductor.suggestableProviders().then(setProviders, () => {});
+  }, [conductor]);
+
+  const suggestions = useMemo(() => suggestAgents(text, providers), [text, providers]);
+  const open = focused && !dismissed && suggestions.length > 0;
+  const active = Math.min(highlighted, suggestions.length - 1);
+
+  const reset = () => {
+    setText('');
+    setHighlighted(0);
+    setDismissed(false);
+  };
+  const pick = (suggestion: AgentSuggestion) => {
+    reset();
+    void conductor.openAgent(suggestion.providerId);
+  };
+
   return (
     <form
-      className="flex items-center gap-2"
+      className="relative min-w-[200px] flex-[1.2]"
       onSubmit={(event) => {
         event.preventDefault();
-        const input = inputRef.current;
-        if (!input?.value.trim()) return;
-        void conductor.handleUtterance(input.value, 'typed');
-        input.value = '';
+        const chosen = open ? suggestions[active] : undefined;
+        if (chosen) return pick(chosen);
+        if (!text.trim()) return;
+        void conductor.handleUtterance(text, 'typed');
+        reset();
       }}
     >
+      {open && (
+        <ul
+          id="conductor-agent-suggestions"
+          role="listbox"
+          aria-label="Open an agent"
+          className="absolute inset-x-0 bottom-full mb-2 overflow-hidden rounded-xl border border-border bg-background py-1 shadow-xl"
+        >
+          {suggestions.map((suggestion, index) => (
+            <li
+              key={suggestion.providerId}
+              id={`conductor-agent-suggestion-${suggestion.providerId}`}
+              role="option"
+              aria-selected={index === active}
+              // Keep focus in the input so the list does not close before the click lands.
+              onMouseDown={(event) => event.preventDefault()}
+              onMouseEnter={() => setHighlighted(index)}
+              onClick={() => pick(suggestion)}
+              className={cn(
+                'flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm text-foreground',
+                index === active && 'bg-background-secondary'
+              )}
+            >
+              <PlusCircle className="size-3.5 shrink-0 text-foreground-muted" />
+              <span className="min-w-0 flex-1 truncate">{suggestion.label}</span>
+              {index === active && <Key>Enter</Key>}
+            </li>
+          ))}
+        </ul>
+      )}
       <input
         ref={inputRef}
+        value={text}
+        role="combobox"
         aria-label="Command"
-        placeholder='Try "tell Atlas to run the tests", "close Bravo", or "help"'
-        className="h-8 min-w-0 flex-1 rounded-md border border-border bg-background px-2.5 text-sm text-foreground outline-none placeholder:text-foreground-muted focus:border-blue-500"
+        aria-expanded={open}
+        aria-controls="conductor-agent-suggestions"
+        aria-autocomplete="list"
+        aria-activedescendant={
+          open ? `conductor-agent-suggestion-${suggestions[active]?.providerId}` : undefined
+        }
+        placeholder='Type a command or an agent, e.g. "Claude"'
+        className="h-8 w-full rounded-md border border-border bg-background px-2.5 text-sm text-foreground outline-none placeholder:text-foreground-muted focus:border-blue-500"
+        onChange={(event) => {
+          setText(event.target.value);
+          setHighlighted(0);
+          setDismissed(false);
+        }}
+        onFocus={() => {
+          setFocused(true);
+          loadProviders();
+        }}
+        onBlur={() => setFocused(false)}
         onKeyDown={(event) => {
-          if (event.key === 'Escape') onClose();
+          if (event.key === 'ArrowDown' && open) {
+            event.preventDefault();
+            setHighlighted((active + 1) % suggestions.length);
+          } else if (event.key === 'ArrowUp' && open) {
+            event.preventDefault();
+            setHighlighted((active - 1 + suggestions.length) % suggestions.length);
+          } else if (event.key === 'Escape') {
+            if (open) setDismissed(true);
+            else if (text) reset();
+            else inputRef.current?.blur();
+          }
         }}
       />
-      <button
-        type="submit"
-        className="h-8 rounded-md bg-foreground px-3 text-xs font-medium text-background hover:opacity-90"
-      >
-        Send
-      </button>
     </form>
   );
-}
+});
 
 function HudIconButton({
   label,
