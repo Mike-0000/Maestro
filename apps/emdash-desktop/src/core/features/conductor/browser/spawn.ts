@@ -4,6 +4,8 @@ import { conversationRegistry } from '@core/features/conversations/api/browser/s
 import {
   asAvailableProject,
   getProjectManagerStore,
+  getProjectStore,
+  projectData,
 } from '@core/features/projects/api/browser/stores/project-selectors';
 import {
   getAppSettingValueSnapshot,
@@ -19,6 +21,7 @@ import {
   type AgentMetadata,
 } from '@core/primitives/agents/api';
 import { resolveTaskBranchName, type CreateTaskParams } from '@core/primitives/tasks/api';
+import { buildSpawnWorkspaceConfig } from '../api/spawn-workspace';
 
 export type SpawnRequest = {
   projectId: string;
@@ -29,6 +32,8 @@ export type SpawnRequest = {
   conversationId?: string;
   /** Agent window title; defaults to the first roster name. */
   title?: string;
+  /** Give the agent its own branch and worktree instead of the project directory. */
+  worktree?: boolean;
 };
 
 export type SpawnResult = { taskId: string; conversationId: string; promptDeferred: boolean };
@@ -78,30 +83,35 @@ export function resolveProjectId(
 }
 
 /**
- * Creates a task in a fresh worktree with one agent conversation, exactly like the create-task
- * modal: branch from the default branch, publish only when a push remote exists.
+ * Creates a task with one agent conversation, exactly like the create-task modal. By default the
+ * task uses the project directory itself; with `worktree` it gets a fresh worktree on a new branch
+ * from the default branch, published only when a push remote exists.
  */
 export async function spawnAgentTask(request: SpawnRequest): Promise<SpawnResult> {
   const taskManager = getTaskManagerStore(request.projectId);
   if (!taskManager) throw new Error('That project is not open.');
   const repository = getGitRepositoryStore(request.projectId);
-  const fromBranch = repository?.defaultBranchRef;
-  if (!fromBranch)
-    throw new Error('The project has no default branch yet (commit something first).');
+
+  if (request.worktree) await prefetchAppSettingsKey('project').catch(() => {});
+  const workspaceConfig = buildSpawnWorkspaceConfig(request.worktree, {
+    repositoryWorkspaceId: projectData(getProjectStore(request.projectId))?.repositoryWorkspaceId,
+    fromBranch: repository?.defaultBranchRef,
+    pushBranch: repository?.pushRemote != null,
+    branchName: () => {
+      const projectSettings = getAppSettingValueSnapshot('project');
+      return resolveTaskBranchName({
+        rawBranch: slugify(request.taskName),
+        branchPrefix: projectSettings?.branchPrefix ?? '',
+        suffix: Math.random().toString(36).slice(2, 7),
+        appendRandomSuffix: projectSettings?.appendRandomBranchSuffix ?? true,
+      });
+    },
+  });
 
   const metadata = await agentMetadata();
   const agent = metadata.find((candidate) => candidate.id === request.providerId);
   if (!agent) throw new Error(`Unknown agent provider "${request.providerId}".`);
   const canDeliverPrompt = agentSupportsInitialPromptDelivery(agent.capabilities);
-
-  await prefetchAppSettingsKey('project').catch(() => {});
-  const projectSettings = getAppSettingValueSnapshot('project');
-  const branchName = resolveTaskBranchName({
-    rawBranch: slugify(request.taskName),
-    branchPrefix: projectSettings?.branchPrefix ?? '',
-    suffix: Math.random().toString(36).slice(2, 7),
-    appendRandomSuffix: projectSettings?.appendRandomBranchSuffix ?? true,
-  });
 
   const taskId = crypto.randomUUID();
   const conversationId = request.conversationId ?? crypto.randomUUID();
@@ -121,16 +131,7 @@ export async function spawnAgentTask(request: SpawnRequest): Promise<SpawnResult
         ...(prompt && canDeliverPrompt ? { initialPrompt: prompt } : {}),
       },
     },
-    workspaceConfig: {
-      version: '2',
-      git: {
-        kind: 'create-branch',
-        branchName,
-        fromBranch,
-        pushBranch: repository?.pushRemote != null,
-      },
-      workspace: { kind: 'new-worktree' },
-    },
+    workspaceConfig,
   };
   await taskManager.createTask(params);
   return { taskId, conversationId, promptDeferred: Boolean(prompt) && !canDeliverPrompt };
@@ -142,7 +143,7 @@ const START_TIMEOUT_MS = 90_000;
 /**
  * Starts an agent's terminal session without opening its task view: provisions the task workspace
  * when it is asleep, waits for it and the conversation to load, then hydrates the conversation
- * (which launches or resumes the CLI in the worktree). Resolves false if it never becomes ready.
+ * (which launches or resumes the CLI in the task's workspace). Resolves false if it never becomes ready.
  */
 export async function startAgentSession(
   projectId: string,

@@ -437,8 +437,8 @@ export class ConductorStore {
   }
 
   /**
-   * Opens a fresh agent of `providerId` on the canvas, the way spawn_agent does: a new task in
-   * its own worktree, focused on the canvas once it appears. Picking the suggestion is the
+   * Opens a fresh agent of `providerId` on the canvas, the way spawn_agent does by default: a new
+   * task in the project directory, focused on the canvas once it appears. Picking the suggestion is the
    * confirmation, so there is no cancel window.
    */
   async openAgent(providerId: string): Promise<void> {
@@ -451,7 +451,7 @@ export class ConductorStore {
       return;
     }
     runInAction(() => (this.error = null));
-    this.setReply(`Creating a worktree for ${label}…`, null, interactionId);
+    this.setReply(`Creating a task for ${label}…`, null, interactionId);
     const conversationId = crypto.randomUUID();
     const name = this.canvas.claimSpokenName(conversationId);
     let result: SpawnResult;
@@ -1399,11 +1399,12 @@ export class ConductorStore {
         const projectId = resolveProjectId(spawn.project, this.focusedEntry()?.projectId);
         if (!projectId) return { content: 'No project is open.', isError: true };
         const prompt = withVerbatimRequest(spawn.prompt, this.lastUtterance);
-        const label = `Start ${spawn.provider} on “${truncate(spawn.task_name, 60)}” · ${describePrompt(prompt)}`;
+        const worktree = spawn.worktree === true;
+        const label = `Start ${spawn.provider}${worktree ? ' in a new worktree' : ''} on “${truncate(spawn.task_name, 60)}” · ${describePrompt(prompt)}`;
         if (!(await this.requestPending(label, confirmKind))) {
           return { content: 'The user cancelled the new agent.' };
         }
-        runInAction(() => (this.activity = 'Creating a worktree…'));
+        runInAction(() => (this.activity = worktree ? 'Creating a worktree…' : 'Creating a task…'));
         const conversationId = crypto.randomUUID();
         const name = this.canvas.claimSpokenName(conversationId);
         const result = await spawnAgentTask({
@@ -1413,6 +1414,7 @@ export class ConductorStore {
           prompt,
           conversationId,
           title: name,
+          worktree,
         }).catch((error: unknown) => {
           this.canvas.releaseSpokenName(conversationId);
           throw error;
@@ -1460,7 +1462,7 @@ export class ConductorStore {
             )
           );
         return {
-          content: `Created task "${spawn.task_name}" in a new worktree with a prompt of ${deliveryNote(spawn.prompt, prompt)}; the agent is starting. It will appear on the canvas as ${name}.`,
+          content: `Created task "${spawn.task_name}" ${worktree ? 'in a new worktree' : 'in the project directory'} with a prompt of ${deliveryNote(spawn.prompt, prompt)}; the agent is starting. It will appear on the canvas as ${name}.`,
         };
       }
       case 'propose_plan': {
