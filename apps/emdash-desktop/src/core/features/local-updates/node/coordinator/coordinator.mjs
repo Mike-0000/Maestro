@@ -1,6 +1,6 @@
 import { execFile as execFileCallback } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir } from 'node:fs/promises';
+import { lstat, mkdir } from 'node:fs/promises';
 import { dirname, isAbsolute, join as joinPath, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { promisify } from 'node:util';
@@ -924,16 +924,12 @@ export function createCoordinator({
         const mainWorktreePath = pathLine?.slice('worktree '.length);
         if (!mainWorktreePath)
           throw new Error('Could not locate the canonical Maestro checkout for promotion.');
-        const dirt = await git(mainWorktreePath, [
-          'status',
-          '--porcelain',
-          '--untracked-files=all',
-        ]);
-        if (dirt.trim())
-          throw new Error(
-            'The canonical Maestro checkout has local changes; preserve or resolve them before promotion.'
-          );
-        await git(mainWorktreePath, ['merge', '--ff-only', candidate.commit]);
+        await fastForwardCheckout({
+          checkoutPath: mainWorktreePath,
+          mainRef: state.mainRef,
+          from: currentMain,
+          to: candidate.commit,
+        });
       } else {
         await git(identity.repositoryPath, [
           'update-ref',
@@ -952,6 +948,109 @@ export function createCoordinator({
         result: { promoted: true, candidateId, commit: candidate.commit },
       };
     });
+  }
+
+  /**
+   * Fast-forwards the checked-out canonical branch without disturbing uncommitted work in it.
+   * Agents may edit the project directory directly, so a dirty checkout is normal. Every path the
+   * promotion changes must still hold its old content (the file is updated) or already hold the
+   * promoted content (only the index catches up). Any other local edit to a changed path refuses
+   * the promotion before anything moves; unrelated local edits are never touched.
+   */
+  async function fastForwardCheckout({ checkoutPath, mainRef, from, to }) {
+    const changed = (
+      await git(checkoutPath, ['diff', '--name-only', '-z', '--no-renames', from, to, '--'])
+    )
+      .split('\0')
+      .filter(Boolean);
+    const [before, after, staged] = await Promise.all([
+      treeBlobs(checkoutPath, ['ls-tree', '-r', '-z', '--full-tree', from]),
+      treeBlobs(checkoutPath, ['ls-tree', '-r', '-z', '--full-tree', to]),
+      treeBlobs(checkoutPath, ['ls-files', '-s', '-z']),
+    ]);
+    const local = await workingBlobs(checkoutPath, changed);
+    const update = [];
+    const conflicts = [];
+    for (const path of changed) {
+      const old = before.get(path) ?? null;
+      const next = after.get(path) ?? null;
+      const index = staged.get(path) ?? null;
+      const file = local.get(path);
+      if ((index !== old && index !== next) || file === undefined) conflicts.push(path);
+      else if (file === next) continue;
+      else if (file === old) update.push(path);
+      else conflicts.push(path);
+    }
+    if (conflicts.length) {
+      const listed = conflicts.slice(0, 10).join(', ');
+      const more = conflicts.length > 10 ? ` and ${conflicts.length - 10} more` : '';
+      throw new Error(
+        `The canonical Maestro checkout has local edits to ${listed}${more} that promotion would overwrite; commit, finish, or discard them first.`
+      );
+    }
+    await git(checkoutPath, ['update-ref', mainRef, to, from]);
+    const updating = new Set(update);
+    for (const chunk of chunks(update)) {
+      await git(checkoutPath, [
+        '--literal-pathspecs',
+        'restore',
+        `--source=${to}`,
+        '--staged',
+        '--worktree',
+        '--',
+        ...chunk,
+      ]);
+    }
+    for (const chunk of chunks(changed.filter((path) => !updating.has(path)))) {
+      await git(checkoutPath, [
+        '--literal-pathspecs',
+        'restore',
+        `--source=${to}`,
+        '--staged',
+        '--',
+        ...chunk,
+      ]);
+    }
+  }
+
+  /** Maps each path to its blob id from `ls-tree -r -z` or `ls-files -s -z` output. */
+  async function treeBlobs(cwd, args) {
+    const blobs = new Map();
+    for (const entry of (await git(cwd, args)).split('\0')) {
+      const tab = entry.indexOf('\t');
+      if (tab === -1) continue;
+      const fields = entry.slice(0, tab).split(' ');
+      const blob = args[0] === 'ls-files' ? fields[1] : fields[2];
+      if (args[0] === 'ls-files' && fields[2] !== '0') {
+        blobs.set(entry.slice(tab + 1), 'unmerged');
+      } else {
+        blobs.set(entry.slice(tab + 1), blob);
+      }
+    }
+    return blobs;
+  }
+
+  /**
+   * Blob ids of the working-tree files, with the checkout's clean filters applied. Missing files
+   * map to null; anything that is not a regular file maps to undefined (never safe to replace).
+   */
+  async function workingBlobs(cwd, paths) {
+    const blobs = new Map();
+    const files = [];
+    for (const path of paths) {
+      const stats = await lstat(joinPath(cwd, path)).catch((error) => {
+        if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return null;
+        throw error;
+      });
+      if (!stats) blobs.set(path, null);
+      else if (stats.isFile()) files.push(path);
+      else blobs.set(path, undefined);
+    }
+    for (const chunk of chunks(files)) {
+      const hashes = (await git(cwd, ['hash-object', '--', ...chunk])).trim().split(/\r?\n/);
+      chunk.forEach((path, index) => blobs.set(path, hashes[index]));
+    }
+    return blobs;
   }
 
   async function pushBackup({ repositoryPath, candidateId }) {
@@ -1219,6 +1318,15 @@ function hasBusyCandidate(state, exceptCandidateId = null) {
       candidateId !== exceptCandidateId &&
       ['preparing', 'resuming', 'validating'].includes(candidate.state)
   );
+}
+
+/** Splits path lists so each Git command line stays well under the Windows length limit. */
+function chunks(paths, size = 100) {
+  const result = [];
+  for (let index = 0; index < paths.length; index += size) {
+    result.push(paths.slice(index, index + size));
+  }
+  return result;
 }
 
 export function topological(tasks) {

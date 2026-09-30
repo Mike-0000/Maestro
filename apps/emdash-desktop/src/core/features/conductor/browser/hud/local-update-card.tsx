@@ -75,7 +75,7 @@ export const LocalUpdateCard = observer(function LocalUpdateCard({
           (
             await openConfirmation({
               title: 'Promote changes to local chorus/main?',
-              description: `Validated candidate ${candidate.id.slice(0, 8)} includes ${candidate.included.map((task) => task.taskName).join(', ')}. This fast-forwards local chorus/main if its checkout is clean and unchanged.`,
+              description: `Validated candidate ${candidate.id.slice(0, 8)} includes ${candidate.included.map((task) => task.taskName).join(', ')}. This fast-forwards local chorus/main, keeping unrelated local edits in its checkout.`,
               confirmLabel: 'Promote locally',
             })
           ).success,
