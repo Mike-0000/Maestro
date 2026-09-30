@@ -5,10 +5,17 @@ import type { UpdateInfo } from 'electron-updater';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { updatesContract } from '@core/features/updates/api/contract';
 import { createUpdatesWireController } from '@core/features/updates/node/wire-controller';
+import { signUpdateManifest, UPDATE_SIGNATURE_FIELD } from './update-manifest-signature';
 import { UpdateService } from './update-service';
 import { formatUpdaterError } from './utils';
 
 const mocks = vi.hoisted(() => ({ getUpdater: vi.fn() }));
+const signing = await vi.hoisted(async () => {
+  const { createPublicKey, generateKeyPairSync } = await import('node:crypto');
+  const { privateKey } = generateKeyPairSync('ed25519');
+  const spki = createPublicKey(privateKey).export({ format: 'der', type: 'spki' });
+  return { privateKey, publicKey: spki.toString('base64') };
+});
 vi.mock('electron-updater', () => ({
   default: {
     get autoUpdater() {
@@ -17,10 +24,11 @@ vi.mock('electron-updater', () => ({
   },
 }));
 vi.mock('@main/core/app/utils', () => ({ resolveAppVersion: async () => '1.2.5' }));
-// Chorus ships with updates disabled (UPDATES_ENABLED); these tests cover the updater itself.
+// Updates stay disabled until a feed and signing key are configured; these tests enable them.
 vi.mock('@core/primitives/app-identity/api/app-identity', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   UPDATES_ENABLED: true,
+  UPDATE_SIGNING_PUBLIC_KEYS: [signing.publicKey],
 }));
 vi.mock('@main/lib/logger', () => ({
   log: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -35,6 +43,7 @@ const updater = Object.assign(new EventEmitter(), {
   }),
   downloadUpdate: vi.fn<() => Promise<string[]>>(),
   quitAndInstall: vi.fn(),
+  isUpdateSupported: (_info: UpdateInfo): boolean | Promise<boolean> => true,
 });
 let service: UpdateService;
 let transfer: ReturnType<typeof deferred<string[]>>;
@@ -45,9 +54,10 @@ beforeEach(async () => {
   updater.removeAllListeners();
   vi.clearAllMocks();
   mocks.getUpdater.mockReturnValue(updater);
+  updater.isUpdateSupported = () => true;
   transfer = deferred<string[]>();
   updater.downloadUpdate.mockImplementation(() => transfer.promise);
-  service = new UpdateService();
+  service = new UpdateService(() => true);
   await service.initialize();
   await service.checkForUpdates();
 });
@@ -134,5 +144,42 @@ describe('desktop update lifecycle', () => {
     updater.emit('update-downloaded', info);
     transfer.resolve([]);
     expect(service.getState().error).toBeUndefined();
+  });
+});
+
+describe('update manifest trust', () => {
+  const release = {
+    version: '1.2.7-maestro.202609291530',
+    files: [
+      { url: 'releases/1.2.7-maestro.202609291530/maestro-x64.exe', sha512: 'c2hh', size: 1 },
+    ],
+    path: 'releases/1.2.7-maestro.202609291530/maestro-x64.exe',
+    sha512: 'c2hh',
+    releaseDate: '2026-09-29T15:30:00.000Z',
+  } as UpdateInfo;
+
+  it('lets electron-updater act only on manifests signed by a trusted key', async () => {
+    const signed = {
+      ...release,
+      [UPDATE_SIGNATURE_FIELD]: signUpdateManifest(
+        release as unknown as Record<string, unknown>,
+        signing.privateKey
+      ),
+    };
+    await expect(updater.isUpdateSupported(signed)).resolves.toBe(true);
+    await expect(updater.isUpdateSupported(release)).rejects.toThrow(/not signed/);
+    await expect(
+      updater.isUpdateSupported({ ...signed, sha512: 'ZXZpbA==' } as UpdateInfo)
+    ).rejects.toThrow(/does not match/);
+  });
+});
+
+describe('packages without a feed', () => {
+  it('stays inactive when the package has no app-update.yml', async () => {
+    const unpacked = new UpdateService(() => false);
+    await unpacked.initialize();
+    expect(unpacked.isActive).toBe(false);
+    await expect(unpacked.checkForUpdates()).resolves.toBeNull();
+    unpacked.dispose();
   });
 });
