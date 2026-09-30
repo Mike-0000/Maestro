@@ -236,7 +236,7 @@ const descriptions: Record<ConductorToolName, string> = {
   validate_delivery:
     'Run the fixed repository checks and Windows package build for one integrated candidate, then record the verified artifact hashes.',
   promote_delivery:
-    'Fast-forward the selected validated candidate onto the local chorus/main branch. This changes the project source checkout only when that branch is clean and unchanged.',
+    'Fast-forward the selected validated candidate onto the local chorus/main branch. It updates the project checkout without touching unrelated local edits, and refuses if local edits conflict.',
   push_delivery_backup:
     'Push the exact promoted candidate commit to origin/main on GitHub without force. Report backup success or leave it visibly pending if GitHub rejects the push.',
   schedule_delivery:

@@ -76,6 +76,26 @@ async function createFixture() {
   };
 }
 
+async function validatedCandidate(fixture: Awaited<ReturnType<typeof createFixture>>) {
+  const commit = await git(fixture.worktreePath, ['rev-parse', 'HEAD']);
+  await fixture.coordinator.submit({
+    repositoryPath: fixture.repositoryPath,
+    taskId: 'task-a',
+    commit,
+    base: fixture.base,
+    summary: 'Ready change',
+  });
+  const candidate = await fixture.coordinator.prepare({
+    repositoryPath: fixture.repositoryPath,
+    policy: 'snapshot',
+  });
+  await fixture.coordinator.validateCandidate({
+    repositoryPath: fixture.repositoryPath,
+    candidateId: candidate.id,
+  });
+  return candidate;
+}
+
 afterEach(async () => {
   await Promise.all(
     temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true }))
@@ -478,6 +498,53 @@ describe('persistent Chorus delivery coordinator', () => {
     ).resolves.toMatchObject({ result: { scheduled: true } });
   });
 
+  it('promotes over unrelated and already-matching edits in the canonical checkout', async () => {
+    const fixture = await createFixture();
+    await git(fixture.repositoryPath, ['config', 'core.autocrlf', 'false']);
+    await writeFile(join(fixture.worktreePath, 'feature.txt'), 'ready\n');
+    await writeFile(join(fixture.worktreePath, 'README.md'), 'updated\n');
+    await git(fixture.worktreePath, ['add', 'feature.txt', 'README.md']);
+    await git(fixture.worktreePath, ['commit', '-m', 'ready change']);
+    const candidate = await validatedCandidate(fixture);
+    // A project-directory agent already holds the pushed content; another is mid-edit elsewhere.
+    await writeFile(join(fixture.repositoryPath, 'feature.txt'), 'ready\n');
+    await writeFile(join(fixture.repositoryPath, 'notes.txt'), 'unrelated work\n');
+
+    await expect(
+      fixture.coordinator.promote({
+        repositoryPath: fixture.repositoryPath,
+        candidateId: candidate.id,
+      })
+    ).resolves.toMatchObject({ result: { promoted: true, commit: candidate.commit } });
+
+    expect(await git(fixture.repositoryPath, ['rev-parse', 'HEAD'])).toBe(candidate.commit);
+    expect(await readFile(join(fixture.repositoryPath, 'README.md'), 'utf8')).toBe('updated\n');
+    expect(await readFile(join(fixture.repositoryPath, 'notes.txt'), 'utf8')).toBe(
+      'unrelated work\n'
+    );
+    expect(await git(fixture.repositoryPath, ['status', '--porcelain'])).toBe('?? notes.txt');
+  });
+
+  it('refuses promotion when a changed path has diverging local edits', async () => {
+    const fixture = await createFixture();
+    await writeFile(join(fixture.worktreePath, 'README.md'), 'updated\n');
+    await git(fixture.worktreePath, ['commit', '-am', 'ready change']);
+    const candidate = await validatedCandidate(fixture);
+    await writeFile(join(fixture.repositoryPath, 'README.md'), 'someone else\n');
+
+    await expect(
+      fixture.coordinator.promote({
+        repositoryPath: fixture.repositoryPath,
+        candidateId: candidate.id,
+      })
+    ).rejects.toThrow('local edits to README.md');
+
+    expect(await git(fixture.repositoryPath, ['rev-parse', 'HEAD'])).toBe(fixture.base);
+    expect(await readFile(join(fixture.repositoryPath, 'README.md'), 'utf8')).toBe(
+      'someone else\n'
+    );
+  });
+
   it('serializes integration work and supports idempotent scheduling and pre-replacement cancel', async () => {
     const fixture = await createFixture();
     await writeFile(join(fixture.worktreePath, 'feature.txt'), 'ready\n');
@@ -646,37 +713,5 @@ describe('persistent Chorus delivery coordinator', () => {
       installedCandidateId: null,
       candidate: { state: 'rolled-back', rollbackHealth: { commit: previousBuild.commit } },
     });
-  });
-
-  it('refuses promotion when the canonical worktree contains user changes', async () => {
-    const fixture = await createFixture();
-    await writeFile(join(fixture.worktreePath, 'feature.txt'), 'ready\n');
-    await git(fixture.worktreePath, ['add', 'feature.txt']);
-    await git(fixture.worktreePath, ['commit', '-m', 'ready change']);
-    const commit = await git(fixture.worktreePath, ['rev-parse', 'HEAD']);
-    await fixture.coordinator.submit({
-      repositoryPath: fixture.repositoryPath,
-      taskId: 'task-a',
-      commit,
-      base: fixture.base,
-      summary: 'Ready change',
-    });
-    const candidate = await fixture.coordinator.prepare({ repositoryPath: fixture.repositoryPath });
-    await fixture.coordinator.validateCandidate({
-      repositoryPath: fixture.repositoryPath,
-      candidateId: candidate.id,
-    });
-    await writeFile(join(fixture.repositoryPath, 'local-note.txt'), 'keep this file\n');
-
-    await expect(
-      fixture.coordinator.promote({
-        repositoryPath: fixture.repositoryPath,
-        candidateId: candidate.id,
-      })
-    ).rejects.toThrow('local changes');
-    expect(await git(fixture.repositoryPath, ['rev-parse', 'refs/heads/main'])).toBe(fixture.base);
-    expect(await readFile(join(fixture.repositoryPath, 'local-note.txt'), 'utf8')).toBe(
-      'keep this file\n'
-    );
   });
 });
