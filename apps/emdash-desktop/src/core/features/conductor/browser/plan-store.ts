@@ -266,6 +266,8 @@ export class PlanStore {
         prompt,
         conversationId,
         title: this.canvas.claimSpokenName(conversationId),
+        // Parallel subtasks need isolation: the conflict radar compares their branches.
+        worktree: true,
       }).catch((error: unknown) => {
         this.canvas.releaseSpokenName(conversationId);
         throw error;
