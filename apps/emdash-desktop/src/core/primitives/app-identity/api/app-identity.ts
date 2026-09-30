@@ -20,8 +20,11 @@ export const R2_BASE_URL = 'https://releases.chorus.invalid';
 // read-only SAS query only for a private container. Each key is an Ed25519 public key (SPKI DER,
 // base64) from `pnpm run updates:keygen`; the app installs only manifests signed by one of them.
 // Updates stay off until both are set.
-export const UPDATE_FEED_URL: string | null = null;
-export const UPDATE_SIGNING_PUBLIC_KEYS: readonly string[] = [];
+export const UPDATE_FEED_URL: string | null =
+  'https://stmaestroupdd5313e.blob.core.windows.net/maestro';
+export const UPDATE_SIGNING_PUBLIC_KEYS: readonly string[] = [
+  'MCowBQYDK2VwAyEAatYv/vhpWohqiMXBPPOFz2oYjDRJayvj1ZbJhgxLZNM=', // key id de5cb049b44e0171
+];
 export const UPDATES_ENABLED =
   !isCanary && UPDATE_FEED_URL !== null && UPDATE_SIGNING_PUBLIC_KEYS.length > 0;
 export const IS_CANARY = isCanary;
