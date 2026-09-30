@@ -24,6 +24,7 @@ import {
   type CompletionReport,
 } from '@core/primitives/agents/api/completion-report';
 import { log } from '@core/primitives/logging/browser/logger';
+import { type SuggestableProvider } from '../api/agent-suggestions';
 import { announcementText, attentionPhrase } from '../api/announcements';
 import { getConductorClient } from '../api/browser/client';
 import { resolveCanvasRef } from '../api/canvas-refs';
@@ -101,7 +102,13 @@ import {
   reportFromEntry,
   vocabulary,
 } from './roster';
-import { resolveProjectId, spawnAgentTask, startAgentSession } from './spawn';
+import {
+  agentMetadata,
+  resolveProjectId,
+  spawnAgentTask,
+  startAgentSession,
+  type SpawnResult,
+} from './spawn';
 
 /** What the conductor needs from the voice slice (kept structural to avoid a slice dependency). */
 export interface ConductorVoicePort {
@@ -415,6 +422,71 @@ export class ConductorStore {
     } finally {
       this.finishTurn();
     }
+  }
+
+  /** Installed agent providers the typed command box can offer, with their short labels. */
+  async suggestableProviders(): Promise<SuggestableProvider[]> {
+    const installed = await installedProviders();
+    // Detection failing is "unknown", not "none": offer every provider, as spawn_agent allows.
+    const providers = installed.length > 0 ? installed : await agentMetadata().catch(() => []);
+    return providers.map((provider) => ({
+      id: provider.id,
+      name: provider.name,
+      label: spokenProviderLabel(provider.id),
+    }));
+  }
+
+  /**
+   * Opens a fresh agent of `providerId` on the canvas, the way spawn_agent does: a new task in
+   * its own worktree, focused on the canvas once it appears. Picking the suggestion is the
+   * confirmation, so there is no cancel window.
+   */
+  async openAgent(providerId: string): Promise<void> {
+    const interactionId = crypto.randomUUID();
+    const label = spokenProviderLabel(providerId);
+    this.trace('capture', `open ${label} agent`, { source: 'typed' }, interactionId);
+    const projectId = resolveProjectId(undefined, this.focusedEntry()?.projectId);
+    if (!projectId) {
+      runInAction(() => (this.error = { kind: 'other', message: 'No project is open.' }));
+      return;
+    }
+    runInAction(() => (this.error = null));
+    this.setReply(`Creating a worktree for ${label}…`, null, interactionId);
+    const conversationId = crypto.randomUUID();
+    const name = this.canvas.claimSpokenName(conversationId);
+    let result: SpawnResult;
+    try {
+      result = await spawnAgentTask({
+        projectId,
+        providerId,
+        taskName: `${label} agent`,
+        prompt: '',
+        conversationId,
+        title: name,
+      });
+    } catch (error) {
+      this.canvas.releaseSpokenName(conversationId);
+      this.setReply('', null, interactionId);
+      runInAction(() => (this.error = { kind: 'other', message: errorMessage(error) }));
+      return;
+    }
+    this.disposers.push(focusSpawnedAgent(this.canvas, result.conversationId));
+    this.trace(
+      'action-result',
+      undefined,
+      { tool: 'spawn_agent', status: 'scheduled' },
+      interactionId
+    );
+    this.setReply(`Opening ${label} on the canvas as ${name}.`, null, interactionId);
+    const started = await startAgentSession(projectId, result.taskId, result.conversationId).catch(
+      () => false
+    );
+    this.trace(
+      'action-result',
+      undefined,
+      { tool: 'spawn_agent', status: started ? 'session-started' : 'failed-to-start' },
+      interactionId
+    );
   }
 
   /** Returns to idle and runs the utterance that arrived meanwhile, if any. */
