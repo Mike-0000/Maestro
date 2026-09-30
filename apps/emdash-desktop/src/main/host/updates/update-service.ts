@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Disposable } from '@emdash/shared/concurrency';
 import _electronUpdater, {
   type ProgressInfo,
@@ -8,10 +10,12 @@ import { updateEvents } from '@core/features/updates/node';
 import {
   IS_CANARY,
   UPDATE_CHANNEL,
+  UPDATE_SIGNING_PUBLIC_KEYS,
   UPDATES_ENABLED,
 } from '@core/primitives/app-identity/api/app-identity';
 import { resolveAppVersion } from '@main/core/app/utils';
 import { log } from '@main/lib/logger';
+import { verifyUpdateManifest } from './update-manifest-signature';
 import { formatUpdaterError, getUpdaterErrorDetails, sanitizeUpdaterLogArgs } from './utils';
 
 let autoUpdater: typeof _electronUpdater.autoUpdater | undefined;
@@ -63,7 +67,15 @@ export class UpdateService implements Disposable {
   private installRestartGuardTimer?: NodeJS.Timeout;
   private notificationPublisher?: UpdateNotificationPublisher;
 
-  constructor() {
+  /**
+   * electron-builder writes resources/app-update.yml only for installer targets. Unpacked builds
+   * (such as local /push installs) have no feed and are updated by their own delivery flow.
+   */
+  constructor(
+    private readonly hasUpdateFeed: () => boolean = () =>
+      typeof process.resourcesPath === 'string' &&
+      existsSync(join(process.resourcesPath, 'app-update.yml'))
+  ) {
     this.updateState = {
       status: 'idle',
       currentVersion: 'unknown',
@@ -77,6 +89,10 @@ export class UpdateService implements Disposable {
     this.updateState.currentVersion = await resolveAppVersion();
 
     if (import.meta.env.DEV || !UPDATES_ENABLED) return;
+    if (!this.hasUpdateFeed()) {
+      log.info('Auto-update disabled: this package has no update feed');
+      return;
+    }
 
     this.setupAutoUpdater();
     this.setupEventListeners();
@@ -102,6 +118,17 @@ export class UpdateService implements Disposable {
     autoUpdater.allowPrerelease = ALLOW_PRERELEASE;
     autoUpdater.allowDowngrade = ALLOW_DOWNGRADE;
     autoUpdater.requestHeaders = { 'Cache-Control': 'no-cache' };
+    autoUpdater.disableWebInstaller = true;
+
+    // Trust a manifest only when it is signed by a key built into this app. electron-updater asks
+    // this before it records an update as available, so an unsigned or altered manifest can never
+    // be downloaded or installed; the thrown error surfaces through the updater's error event.
+    // Every download (full or differential) is then checked against the signed SHA-512.
+    const isUpdateSupported = autoUpdater.isUpdateSupported;
+    autoUpdater.isUpdateSupported = async (info: UpdateInfo) => {
+      verifyUpdateManifest(info as unknown as Record<string, unknown>, UPDATE_SIGNING_PUBLIC_KEYS);
+      return isUpdateSupported(info);
+    };
 
     const updaterLogger: UpdaterLogger = {
       info: (...args: unknown[]) => log.debug('[autoUpdater]', ...sanitizeUpdaterLogArgs(args)),
@@ -353,20 +380,7 @@ export class UpdateService implements Disposable {
         }
       }
 
-      const version = this.updateState.availableVersion;
-      if (!version) return null;
-
-      const response = await fetch(
-        `https://api.github.com/repos/generalaction/emdash/releases/tags/v${version}`
-      );
-
-      if (response.ok) {
-        const data = (await response.json()) as { body?: string };
-        const notes = data.body || 'No release notes available';
-        this.updateState.releaseNotes = notes;
-        return notes;
-      }
-
+      // Maestro notes come only from the signed manifest; upstream emdash releases do not apply.
       return null;
     } catch (error) {
       log.error('Failed to fetch release notes:', error);

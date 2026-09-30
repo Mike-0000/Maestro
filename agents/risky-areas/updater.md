@@ -46,6 +46,23 @@ Regression coverage lives in `src/main/host/updates/update-service.test.ts`,
 `src/main/host/updates/utils.test.ts`, `src/renderer/tests/update-flow.test.ts`, and the shared card's
 tests and Storybook states.
 
+## Maestro Azure Feed (this fork)
+
+This fork's installed builds update from a signed static feed in Azure Blob, not from the upstream
+GitHub/R2 pipeline below. Full design, setup, and publishing steps: `docs/chorus/auto-update.md`.
+
+- `UPDATE_FEED_URL` and `UPDATE_SIGNING_PUBLIC_KEYS` in `app-identity.ts` gate `UPDATES_ENABLED`;
+  the stable electron-builder config writes the feed into `app-update.yml`.
+- `update-service.ts` wraps `autoUpdater.isUpdateSupported` with
+  `verifyUpdateManifest` (`update-manifest-signature.ts`): unsigned, untrusted, or altered
+  manifests are rejected before electron-updater records an available update. Do not remove or
+  bypass this hook, and keep `allowDowngrade` false.
+- `win.verifyUpdateCodeSignature: false` is deliberate: locally signed builds are not trusted on
+  other machines, so the Ed25519 manifest signature replaces the Authenticode publisher check.
+- `scripts/release/build-maestro-update.ts`, `publish-maestro-update.ts` (dry run unless
+  `--publish`), and `maestro-update-keygen.ts` own the release flow. Release folders are
+  create-only; the live manifest is written last.
+
 ## Update Feed / Publishing Strategy
 
 The stable release pipeline publishes to **GitHub Releases** (primary feed) and **Cloudflare R2**

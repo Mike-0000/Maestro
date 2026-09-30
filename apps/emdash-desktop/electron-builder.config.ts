@@ -14,6 +14,7 @@ import {
   PRODUCT_NAME,
   R2_BASE_URL,
   UPDATE_CHANNEL,
+  UPDATE_FEED_URL,
 } from './src/core/primitives/app-identity/api/app-identity.ts';
 
 const config: Configuration = {
@@ -26,7 +27,9 @@ const config: Configuration = {
   publish: [
     {
       provider: 'generic',
-      url: R2_BASE_URL,
+      // Written into resources/app-update.yml; the app enables its updater only when
+      // UPDATE_FEED_URL and a signing key are configured in app-identity.ts.
+      url: UPDATE_FEED_URL ?? R2_BASE_URL,
       channel: UPDATE_CHANNEL,
     },
   ],
@@ -125,6 +128,11 @@ const config: Configuration = {
     // Signed only on machines set up by scripts/setup-windows-local-signing.ps1 (a locally
     // trusted certificate); otherwise unsigned until release signing lands (docs/chorus/PLAN.md §5.4).
     signtoolOptions: resolveWindowsSigntoolOptions(),
+    // Keep publisherName out of app-update.yml. Local builds are signed with a certificate only this
+    // machine trusts, so electron-updater's Authenticode check would reject every update on other
+    // machines. Update authenticity comes from the Ed25519-signed manifest the app verifies instead
+    // (src/main/host/updates/update-manifest-signature.ts).
+    verifyUpdateCodeSignature: false,
   },
   msi: {
     oneClick: false,
