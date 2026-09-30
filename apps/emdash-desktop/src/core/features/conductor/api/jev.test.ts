@@ -2,103 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   interpretPermissionRisk,
   interpretPlanReview,
-  interpretRouting,
   interpretSubtaskSizes,
   interpretUrgency,
   parallelPairs,
   planReviewQuestions,
-  routingQuestions,
-  type JevAnswers,
 } from './jev';
 import type { PlanSubtask } from './plan';
-import type { RosterAgent } from './resolver';
-
-const roster: RosterAgent[] = [
-  { id: 'a', name: 'Claude 1', providerLabel: 'Claude', taskName: 'auth' },
-  { id: 'b', name: 'Codex 1', providerLabel: 'Codex', taskName: 'tests' },
-];
-
-function choice(value: string, confidence: number) {
-  return {
-    type: 'choice' as const,
-    choice: value,
-    probabilities: { [value]: confidence },
-    confidence,
-  };
-}
-
-describe('routingQuestions', () => {
-  it('offers every roster agent plus a none option', () => {
-    const questions = routingQuestions(roster);
-    const target = questions.target;
-    expect(target?.type).toBe('choice');
-    if (target?.type === 'choice') {
-      expect(Object.keys(target.criteria)).toEqual(['Claude 1', 'Codex 1', '(none)']);
-    }
-  });
-});
-
-describe('interpretRouting', () => {
-  it('executes a confident focus on a confident agent', () => {
-    const answers: JevAnswers = {
-      intent: choice('focus', 0.95),
-      target: choice('Codex 1', 0.9),
-      decompose: { type: 'noul', noul: 0.02 },
-    };
-    expect(interpretRouting(answers, 0.8)).toEqual({
-      kind: 'direct',
-      intent: 'focus',
-      agent: 'Codex 1',
-      confidence: 0.9,
-    });
-  });
-
-  it('needs no agent for overview and next', () => {
-    const answers: JevAnswers = {
-      intent: choice('overview', 0.92),
-      target: choice('(none)', 0.9),
-      decompose: { type: 'noul', noul: 0 },
-    };
-    expect(interpretRouting(answers, 0.8)).toMatchObject({ kind: 'direct', intent: 'overview' });
-  });
-
-  it('defers to Claude when unsure about the agent', () => {
-    const answers: JevAnswers = {
-      intent: choice('status', 0.95),
-      target: choice('Claude 1', 0.55),
-      decompose: { type: 'noul', noul: 0.1 },
-    };
-    expect(interpretRouting(answers, 0.8)).toEqual({ kind: 'model', mode: 'command' });
-  });
-
-  it('never executes messages or new work; picks plan mode for broad goals', () => {
-    const answers: JevAnswers = {
-      intent: choice('new_work', 0.99),
-      target: choice('(none)', 0.9),
-      decompose: { type: 'noul', noul: 0.87 },
-    };
-    expect(interpretRouting(answers, 0.8)).toEqual({ kind: 'model', mode: 'plan' });
-  });
-
-  it('executes a confident close but leaves other window management to Claude', () => {
-    const close: JevAnswers = {
-      intent: choice('close', 0.93),
-      target: choice('Codex 1', 0.9),
-      decompose: { type: 'noul', noul: 0 },
-    };
-    expect(interpretRouting(close, 0.8)).toMatchObject({
-      kind: 'direct',
-      intent: 'close',
-      agent: 'Codex 1',
-    });
-    const manage: JevAnswers = { ...close, intent: choice('manage', 0.97) };
-    expect(interpretRouting(manage, 0.8)).toEqual({ kind: 'model', mode: 'command' });
-  });
-
-  it('falls back safely on missing answers', () => {
-    expect(interpretRouting({}, 0.8)).toEqual({ kind: 'model', mode: 'command' });
-  });
-});
 
 describe('risk and urgency', () => {
   it('maps the risk score to a level', () => {

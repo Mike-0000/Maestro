@@ -5,7 +5,8 @@ import { openDemoProject } from './open-project.mjs';
 /**
  * Jev routing end to end with a mock System One endpoint. Run with
  * TYPESAFE_API_KEY=test TYPESAFE_BASE_URL=http://127.0.0.1:18179 so no real key is used.
- * An utterance the grammar cannot parse is routed by Jev to "focus Codex 1" without Claude.
+ * An utterance the grammar cannot parse is routed by Jev to "focus Codex 1" without Claude: the
+ * mock answers the router fan-out (addressee, intent, target, joint action) and nothing else.
  */
 const PORT = 18179;
 
@@ -28,25 +29,39 @@ export default async function jevRouting({ app, page, shot, log }) {
         questions: Object.keys(body.questions),
       });
       const targets = Object.keys(body.questions.target?.criteria ?? {});
+      const target = targets.find((name) => name.startsWith('Codex')) ?? '(not about an agent)';
+      const choice = (pick, confidence = 0.93) => ({
+        type: 'choice',
+        choice: pick,
+        probabilities: { [pick]: confidence },
+        confidence,
+      });
+      // A confident "focus Codex N" reading: the slots and the joint catalog agree.
+      const routing = {
+        addressee: choice('command_for_chorus'),
+        stt_artifact: { type: 'noul', noul: 0.01 },
+        answers_question: { type: 'noul', noul: 0.02 },
+        correction_slot: choice('none'),
+        intent: choice('focus'),
+        target: choice(target, 0.91),
+        agent_count: {
+          type: 'score',
+          score: 0,
+          probabilities: { 0: 0.97, 1: 0.03 },
+          confidence: 0.95,
+        },
+        action: choice(`focus · ${target}`, 0.88),
+      };
+      const answers = Object.fromEntries(
+        Object.keys(body.questions)
+          .filter((id) => id in routing)
+          .map((id) => [id, routing[id]])
+      );
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(
         JSON.stringify({
           model: 'jev-mock',
-          answers: {
-            intent: {
-              type: 'choice',
-              choice: 'focus',
-              probabilities: { focus: 0.96 },
-              confidence: 0.93,
-            },
-            target: {
-              type: 'choice',
-              choice: targets.find((name) => name.startsWith('Codex')) ?? '(none)',
-              probabilities: {},
-              confidence: 0.91,
-            },
-            decompose: { type: 'noul', noul: 0.03 },
-          },
+          answers,
           usage: { input_tokens: 200, output_tokens: 10 },
         })
       );

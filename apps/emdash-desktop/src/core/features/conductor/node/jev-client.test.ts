@@ -2,7 +2,7 @@ import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { secret } from '@emdash/shared';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { routingQuestions } from '../api/jev';
+import { urgencyQuestions } from '../api/jev';
 import { evaluateWithJev, JevRequestError } from './jev-client';
 
 let server: Server;
@@ -52,11 +52,10 @@ beforeEach(() => {
 });
 
 const key = secret('ts-test-key', 'typesafe');
-const roster = [{ id: 'a', name: 'Claude 1', providerLabel: 'Claude', taskName: 'auth' }];
 
 describe('evaluateWithJev', () => {
   it('posts state and typed questions to /v1/systemone with a bearer key', async () => {
-    const questions = routingQuestions(roster);
+    const questions = urgencyQuestions();
     const result = await evaluateWithJev(key, { utterance: 'focus clod one' }, questions, {
       baseUrl,
     });
@@ -76,7 +75,7 @@ describe('evaluateWithJev', () => {
       ...(reply as object),
       usage: { input_tokens: 300, output_tokens: 20, cost: 0.00002 },
     };
-    const result = await evaluateWithJev(key, 'state', routingQuestions(roster), {
+    const result = await evaluateWithJev(key, 'state', urgencyQuestions(), {
       via: 'openrouter',
       baseUrl,
     });

@@ -54,7 +54,7 @@ Verified in source; the plan builds on these and changes them only where stated.
 | Task frames | Derived, not persisted: one frame per task around its agents' bounds; dragging the header moves the task's tiles. | `browser/tiles/task-frame.tsx`, `CanvasStore.taskFrames` |
 | Level of detail | Live xterm only at zoom 1 ± 0.02 (xterm mis-targets pointers under CSS scale); preview otherwise; glyph below 0.35; live budget 6. | `canvas-model.ts` (`isInteractiveZoom`, `resolveTileDetail`) |
 | Camera | `viewportCommand` (`focus` a tile at zoom 1, or `fit` a set) consumed by the board. | `CanvasStore.requestFocus/requestFit` |
-| Voice pipeline | Transcript → `parseCommand` grammar → Jev routing (`DIRECT_INTENTS`) → Claude tool loop (max 8 iterations). | `conductor/api/grammar.ts`, `api/jev.ts`, `browser/conductor-store.ts` |
+| Voice pipeline | Transcript → `parseCommand` grammar → Jev fan-out router (`api/jev-router/`) → Claude tool loop (max 8 iterations). | `conductor/api/grammar.ts`, `api/jev-router/`, `browser/conductor-store.ts` |
 | Addressing | `resolveAgent`: exact → provider → task → edit distance → phonetic key; visible before hidden; deictics mean the focused tile; ambiguity returns candidates, never a guess. | `conductor/api/resolver.ts` |
 | Safety | `requestPending(label, 'countdown' \| 'confirm')`: 1.5 s cancel window or explicit confirm (30 s). `CONFIRM_REQUIRED_TOOLS`, `CANCEL_WINDOW_TOOLS`. Enter confirms only outside text/terminal targets and after a 400 ms grace. | `conductor-store.ts`, `api/tools.ts`, `hud/pending-keys.ts` |
 | Close/reopen | "Close" hides a window (agent keeps running); "reopen"/"undo" restores the last closed batch (`lastClosed`). | `conductor-store.ts`, `api/window-targets.ts` |

@@ -289,4 +289,10 @@ export const CANCEL_WINDOW_TOOLS: ReadonlySet<ConductorToolName> = new Set([
 ]);
 
 /** A tool's result for the model: text, plus screenshots for app tools. */
-export type ToolOutcome = { content: string; isError?: boolean; images?: BrowserImage[] };
+export type ToolOutcome = {
+  content: string;
+  isError?: boolean;
+  images?: BrowserImage[];
+  /** The user cancelled the action in its cancel window or confirmation. */
+  cancelled?: boolean;
+};

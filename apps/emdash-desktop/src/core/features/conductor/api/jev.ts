@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import type { PlanSubtask } from './plan';
-import type { RosterAgent } from './resolver';
 
 /**
  * Jev (TypeSafe AI's "System One" model) makes the conductor's fast, typed decisions: routing an
@@ -16,12 +15,12 @@ export const JEV_MODEL = 'jev-latest';
 /** The same model through OpenRouter (alias that tracks the newest Jev release). */
 export const JEV_OPENROUTER_MODEL = '~typesafe/jev-latest';
 
-type Rubric = string | Record<string, unknown> | unknown[];
+export type JevRubric = string | Record<string, unknown> | unknown[];
 
 export type JevQuestion =
-  | { type: 'noul'; instructions: Rubric; criteria?: { true?: Rubric; false?: Rubric } }
-  | { type: 'choice'; instructions: Rubric; criteria: Record<string, Rubric | null> }
-  | { type: 'score'; instructions: Rubric; criteria: Rubric[] };
+  | { type: 'noul'; instructions: JevRubric; criteria?: { true?: JevRubric; false?: JevRubric } }
+  | { type: 'choice'; instructions: JevRubric; criteria: Record<string, JevRubric | null> }
+  | { type: 'score'; instructions: JevRubric; criteria: JevRubric[] };
 
 export type JevQuestions = Record<string, JevQuestion>;
 
@@ -56,112 +55,19 @@ export const jevResponseSchema = z.object({
 export const JEV_MAX_CHOICE_OPTIONS = 255;
 export const JEV_MAX_SCORE_LEVELS = 10;
 
-function choiceOf(answers: JevAnswers, id: string) {
+export function choiceOf(answers: JevAnswers, id: string) {
   const answer = answers[id];
   return answer?.type === 'choice' ? answer : null;
 }
 
-function noulOf(answers: JevAnswers, id: string): number | null {
+export function noulOf(answers: JevAnswers, id: string): number | null {
   const answer = answers[id];
   return answer?.type === 'noul' ? answer.noul : null;
 }
 
-function scoreOf(answers: JevAnswers, id: string) {
+export function scoreOf(answers: JevAnswers, id: string) {
   const answer = answers[id];
   return answer?.type === 'score' ? answer : null;
-}
-
-// ── Utterance routing ─────────────────────────────────────────────────────────
-
-/** Intents Jev may execute directly; everything else needs Claude to write text or plan. */
-export const DIRECT_INTENTS = [
-  'focus',
-  'status',
-  'interrupt',
-  'close',
-  'overview',
-  'next',
-] as const;
-export type DirectIntent = (typeof DIRECT_INTENTS)[number];
-
-const INTENT_CRITERIA: Record<string, string> = {
-  focus: 'Show, open, zoom to, or switch to one specific agent',
-  status: 'Ask what one specific agent is doing, whether it is done, or what it asked',
-  interrupt:
-    'Interrupt or cancel the step one specific agent is working on right now (not closing its window)',
-  close: 'Close, hide, or dismiss one specific agent window; the agent keeps running',
-  overview: 'Show every agent / zoom out to see the whole board',
-  next: 'Go to whichever agent is waiting for the user',
-  manage:
-    'Reopen a closed window, end or kill an agent session, archive or delete an agent, or allow or deny its permission prompt',
-  message: 'Give an agent an instruction, answer, or follow-up to type into it',
-  new_work: 'Start new work: a new agent, a feature, a plan, or splitting a goal across agents',
-  other: 'Anything else: questions about the project, conflicts, notes, settings, or unclear',
-};
-
-const NO_AGENT = '(none)';
-
-export function routingQuestions(roster: readonly RosterAgent[]): JevQuestions {
-  const agents: Record<string, string> = {};
-  for (const agent of roster.slice(0, JEV_MAX_CHOICE_OPTIONS - 1)) {
-    agents[agent.name] = `${agent.providerLabel} agent working on "${agent.taskName}"`;
-  }
-  agents[NO_AGENT] = 'The request is not about one specific agent, or none of these match';
-  return {
-    intent: {
-      type: 'choice',
-      instructions:
-        'The `utterance` is a speech transcript from a developer controlling coding agents. What does the developer want?',
-      criteria: INTENT_CRITERIA,
-    },
-    target: {
-      type: 'choice',
-      instructions:
-        'Which agent is the `utterance` about? Transcripts mishear names ("clod" is Claude, "codecs" is Codex). "This one" or "it" means the `focused` agent.',
-      criteria: agents,
-    },
-    decompose: {
-      type: 'noul',
-      instructions:
-        'Is the `utterance` a broad goal that should be split across several agents working in parallel?',
-    },
-  };
-}
-
-export function routingState(utterance: string, focused: string | null) {
-  return { utterance, focused: focused ?? NO_AGENT };
-}
-
-export type RoutingDecision =
-  | { kind: 'direct'; intent: DirectIntent; agent: string | null; confidence: number }
-  | { kind: 'model'; mode: 'command' | 'plan' };
-
-/**
- * Acts only when Jev is confident about both the intent and (when one is needed) the agent.
- * Anything else goes to Claude, with plan mode when Jev thinks the goal needs decomposition.
- */
-export function interpretRouting(answers: JevAnswers, threshold: number): RoutingDecision {
-  const intent = choiceOf(answers, 'intent');
-  const target = choiceOf(answers, 'target');
-  const decompose = noulOf(answers, 'decompose') ?? 0;
-  const mode = decompose >= 0.5 ? 'plan' : 'command';
-  if (!intent || !(DIRECT_INTENTS as readonly string[]).includes(intent.choice)) {
-    return { kind: 'model', mode };
-  }
-  const direct = intent.choice as DirectIntent;
-  const needsAgent = direct !== 'overview' && direct !== 'next';
-  if (intent.confidence < threshold) return { kind: 'model', mode };
-  if (!needsAgent)
-    return { kind: 'direct', intent: direct, agent: null, confidence: intent.confidence };
-  if (!target || target.choice === NO_AGENT || target.confidence < threshold) {
-    return { kind: 'model', mode };
-  }
-  return {
-    kind: 'direct',
-    intent: direct,
-    agent: target.choice,
-    confidence: Math.min(intent.confidence, target.confidence),
-  };
 }
 
 // ── Permission risk ───────────────────────────────────────────────────────────

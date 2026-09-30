@@ -649,7 +649,7 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
         />
         <SettingsRow
           label="Jev confidence to act"
-          description="Jev acts on its own only above this confidence; below it, Claude decides."
+          description="Jev acts on its own only above this confidence; below it, Claude decides. Showing windows needs 0.1 less; sending messages and starting agents needs 0.05 more."
           control={
             <CommitInput
               value={String(conductorSettings?.jevConfidence ?? 0.8)}
@@ -661,6 +661,19 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
                   void conductor.updateSettings({ jevConfidence });
                 }
               }}
+            />
+          }
+        />
+        <SettingsRow
+          label="Fast verbatim routing"
+          description="When Jev is confident, it sends your own words to an agent or starts a new agent itself (after the usual cancel window) instead of Claude rewriting your request. Off: Claude writes every message and starts every agent."
+          control={
+            <Switch
+              checked={conductorSettings?.jevVerbatimRouting ?? true}
+              disabled={!conductorSettings || conductorSettings.jevEnabled === false}
+              onCheckedChange={(jevVerbatimRouting) =>
+                void conductor.updateSettings({ jevVerbatimRouting })
+              }
             />
           }
         />
@@ -679,7 +692,7 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
         />
         <SettingsRow
           label="Report what finished agents said"
-          description="When an agent finishes, the conductor reads its final reply to tell you what it did (say, the URL of the app it started) and to do follow-ups you asked for, such as opening that app. Off: a short fixed announcement."
+          description="When an agent finishes, the conductor reads its final reply to tell you what it did (say, the URL of the app it started) and to do follow-ups you asked for, such as opening that app. With Jev, clear results are read out in the agent's own words and progress notes with nothing new stay on screen; Claude only handles the rest. Off: a short fixed announcement."
           control={
             <Switch
               checked={conductorSettings?.completionFollowUp ?? true}
