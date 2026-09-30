@@ -1,0 +1,33 @@
+{"roster": [{"id": "c1", "name": "Claude 1", "providerLabel": "Claude Code", "taskName": "auth-refactor"}, {"id": "c2", "name": "Claude 2", "providerLabel": "Claude Code", "taskName": "settings-page"}, {"id": "x1", "name": "Codex 1", "providerLabel": "Codex", "taskName": "api-tests"}, {"id": "m1", "name": "Maple", "providerLabel": "Codex", "taskName": "login-redirect"}, {"id": "m2", "name": "Maple 2", "providerLabel": "Pi", "taskName": "dark-mode"}, {"id": "t1", "name": "Tango", "providerLabel": "Claude Code", "taskName": "db-migration", "hidden": true}], "projects": [{"id": "p1", "name": "Chorus"}, {"id": "p2", "name": "Website"}], "providers": [{"id": "claude", "label": "Claude Code"}, {"id": "codex", "label": "Codex"}, {"id": "pi", "label": "Pi"}]}
+{"utterance": "can you bring up the codecs agent for me", "focused": "c1", "expect": {"kind": "act", "verb": "focus", "agent": "x1"}, "tag": "focus-misheard"}
+{"utterance": "show me Claude too", "focused": null, "expect": {"kind": "act", "verb": "focus", "agent": "c2"}, "tag": "focus-misheard"}
+{"utterance": "what's the codex one up to", "focused": null, "expect": {"kind": "act", "verb": "status", "agent": "x1"}, "tag": "status"}
+{"utterance": "is the dark mode one done yet", "focused": null, "expect": {"kind": "act", "verb": "status", "agent": "m2"}, "tag": "status-by-task"}
+{"utterance": "bring the database migration window back", "focused": null, "expect": {"kind": "act", "verb": "reopen", "agent": "t1"}, "tag": "reopen-hidden"}
+{"utterance": "zoom out so I can see everybody", "focused": null, "expect": {"kind": "act", "verb": "overview"}, "tag": "overview"}
+{"utterance": "who needs me right now", "focused": null, "expect": {"kind": "act", "verb": "next"}, "tag": "next"}
+{"utterance": "open maple", "focused": null, "expect": {"kind": "clarify"}, "tag": "confusable"}
+{"utterance": "tell Codex 1 to rerun the integration tests with the verbose flag", "focused": null, "expect": {"kind": "act", "verb": "send", "agent": "x1", "text": "rerun the integration tests with the verbose flag"}, "tag": "send-verbatim"}
+{"utterance": "ask Claude 2 whether the toggle persists after a reload", "focused": null, "expect": {"kind": "act", "verb": "send", "agent": "c2", "text": "whether the toggle persists after a reload"}, "tag": "send-verbatim"}
+{"utterance": "send Codex 1 this: use the staging database, not production. Also can you focus it after?", "focused": null, "expect": {"kind": "act", "verb": "send", "agent": "x1", "text": "use the staging database, not production."}, "tag": "send-trailing-meta"}
+{"utterance": "write Claude 1 a detailed prompt about the session expiry bug", "focused": null, "expect": {"kind": "llm"}, "tag": "send-composed"}
+{"utterance": "give Codex 1 a better prompt, the last one was too thin", "focused": null, "expect": {"kind": "llm"}, "tag": "send-composed"}
+{"utterance": "start a codex agent in the website project to fix the broken footer links", "focused": "c1", "expect": {"kind": "act", "verb": "spawn", "provider": "codex", "project": "p2", "text": "fix the broken footer links"}, "tag": "spawn-brief"}
+{"utterance": "spin up a new clod agent, I'll give it a prompt in a second", "focused": "x1", "expect": {"kind": "act", "verb": "spawn", "provider": "claude", "project": "p1", "text": ""}, "tag": "spawn-blank"}
+{"utterance": "open a new pie agent in chorus", "focused": null, "expect": {"kind": "act", "verb": "spawn", "provider": "pi", "project": "p1", "text": ""}, "tag": "spawn-blank-misheard"}
+{"utterance": "split the auth rewrite across three agents", "focused": null, "expect": {"kind": "llm", "mode": "plan"}, "tag": "plan"}
+{"utterance": "spin up two codex agents, one for the api and one for the docs", "focused": null, "expect": {"kind": "llm", "mode": "plan"}, "tag": "plan"}
+{"utterance": "kill Codex 1", "focused": null, "expect": {"kind": "llm"}, "tag": "destructive"}
+{"utterance": "archive the old dark mode agent", "focused": null, "expect": {"kind": "llm"}, "tag": "destructive"}
+{"utterance": "yeah let it run that", "focused": "c1", "expect": {"kind": "llm"}, "tag": "permission"}
+{"utterance": "close all the finished ones", "focused": null, "expect": {"kind": "llm"}, "tag": "close-many-guarded"}
+{"utterance": "merge Claude 1's work into main", "focused": null, "expect": {"kind": "llm"}, "tag": "delivery"}
+{"utterance": "what do you think about using Postgres here", "focused": null, "expect": {"kind": "llm"}, "tag": "conversation"}
+{"utterance": "why is the login test flaky", "focused": null, "expect": {"kind": "llm"}, "tag": "project-question"}
+{"utterance": "I'm sorry, but I can't hear any audio in this recording.", "focused": null, "expect": {"kind": "artifact"}, "tag": "stt-artifact"}
+{"utterance": "Thank you for watching!", "focused": null, "expect": {"kind": "artifact"}, "tag": "stt-artifact"}
+{"utterance": "no, send that to Claude 2 instead", "focused": null, "context": {"lastSent": {"conversationId": "x1", "name": "Codex 1", "text": "Rerun the integration tests with the verbose flag."}}, "expect": {"kind": "act", "verb": "send", "agent": "c2", "text": "rerun the integration tests with the verbose flag"}, "tag": "correction-target"}
+{"utterance": "actually I meant in the website project", "focused": null, "context": {"lastSpawned": {"conversationId": "new1", "name": "Harbor", "providerId": "codex", "providerLabel": "Codex", "projectName": "Chorus", "prompt": "Fix the broken footer links.", "taskName": "Fix the broken footer links", "worktree": false}}, "expect": {"kind": "act", "verb": "spawn", "provider": "codex", "project": "p2", "text": "fix the broken footer links"}, "tag": "correction-project"}
+{"utterance": "the website one", "focused": null, "context": {"reply": "Which project should the Codex agent work on?"}, "expect": {"kind": "llm"}, "tag": "answers-question"}
+{"utterance": "open it", "focused": null, "context": {"lastSpawned": {"conversationId": "x1", "name": "Codex 1", "providerId": "codex", "providerLabel": "Codex", "projectName": "Chorus", "prompt": "", "taskName": "api-tests", "worktree": false}}, "expect": {"kind": "act", "verb": "focus", "agent": "x1"}, "tag": "anaphora"}
+{"utterance": "put the Claude agents in a row on the left", "focused": null, "expect": {"kind": "llm"}, "tag": "layout"}

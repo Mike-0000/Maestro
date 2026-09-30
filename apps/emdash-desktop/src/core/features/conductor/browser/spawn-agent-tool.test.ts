@@ -33,7 +33,7 @@ vi.mock('@core/features/tasks/api/browser/task-state/task-selectors', () => ({
   getTaskStore: vi.fn(),
 }));
 vi.mock('@core/features/projects/api/browser/stores/project-selectors', () => ({
-  getProjectManagerStore: vi.fn(),
+  getProjectManagerStore: vi.fn(() => ({ projects: new Map([['proj', { name: 'Chorus' }]]) })),
 }));
 vi.mock('@core/primitives/logging/browser/logger', () => ({
   log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
@@ -90,6 +90,7 @@ describe('spawn_agent routing', () => {
       expect.objectContaining({ projectId: 'proj', providerId: 'claude', worktree: false })
     );
     expect(outcome.content).toContain('in the project directory');
+    expect(requestPending.mock.calls[0]![0]).toMatch(/^Start Claude in Chorus on “Fix login”/);
     expect(requestPending.mock.calls[0]![0]).not.toContain('worktree');
   });
 

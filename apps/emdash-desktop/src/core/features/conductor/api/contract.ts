@@ -46,6 +46,11 @@ export const conductorSettingsSchema = z.object({
   jevSource: z.enum(['auto', 'openrouter', 'typesafe']),
   /** Minimum Jev confidence before the conductor acts on a decision without Claude. */
   jevConfidence: z.number().min(0.5).max(0.99),
+  /**
+   * Fast verbatim routing: when Jev is confident, it sends the developer's own words to an agent
+   * or starts an agent directly (behind the usual cancel window) instead of Claude rewriting them.
+   */
+  jevVerbatimRouting: z.boolean(),
   /** Local diagnostic traces are disabled until the user explicitly opts in. */
   diagnosticHistory: z.boolean(),
   diagnosticDays: z.number().int().min(1).max(30),
@@ -66,6 +71,7 @@ export const DEFAULT_CONDUCTOR_SETTINGS: ConductorSettings = {
   jevEnabled: true,
   jevSource: 'auto',
   jevConfidence: 0.8,
+  jevVerbatimRouting: true,
   diagnosticHistory: false,
   diagnosticDays: 7,
 };
@@ -147,6 +153,8 @@ export const traceEventSchema = z.object({
     'action-result',
     'reply',
     'speech',
+    /** One Jev evaluation: its purpose, answers, latency, decision, or why it was skipped. */
+    'jev',
   ]),
   /** Bounded, redacted text. Raw audio and model messages are never stored. */
   text: z.string().max(4000).optional(),

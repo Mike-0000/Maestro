@@ -271,18 +271,90 @@ Chorus uploads the recording instead.
 
 ## Jev (fast decisions)
 
-With an OpenRouter or TypeSafe API key, the conductor uses Jev, a fast decision model (~50 ms, typed answers
-with calibrated confidence), for:
+With an OpenRouter or TypeSafe API key, the conductor uses Jev, a fast decision model (~50 ms, typed
+answers with calibrated confidence). Each decision is one request that asks many typed questions
+at once.
 
-- **Routing:** commands the built-in grammar misses ("can you bring up the codex agent") are
-  classified; confident navigation runs without calling Claude, and Jev decides whether a goal
-  needs planning.
+### Routing
+
+Commands the built-in grammar misses ("can you bring up the codecs agent", "tell Maple 2 to rerun
+the tests with the verbose flag") go to Jev's router before Claude. One request (about 20–60
+questions answered in parallel) reads:
+
+- **Who it is for:** a command, an answer to Chorus's last question, a correction of the last
+  action, talk with Chorus, cancel, or a speech-to-text artifact.
+- **Each slot of the action:** the intent (focus, status, interrupt, close, reopen, send, start
+  an agent, plan, and non-direct ones such as kill, archive, delivery, and layout), the target
+  agent, the project, the provider, and how many new agents.
+- **One joint pick** from up to 255 fully bound actions ("send_verbatim · Maple 2", "spawn ·
+  Codex in Chorus"). Chorus acts only when this pick matches the one composed from the separate
+  slots, so every request checks itself.
+- **The message span:** where your own words for the agent begin and end, plus a per-sentence
+  check that drops sentences meant for Chorus ("and focus it after").
+
+Short conversation memory (last agent started, messaged, and reported; the last reply) lets
+"it", "that agent", "the same project", and corrections resolve without Claude. For example,
+"no, send that to Tango" re-sends the last message, and "I meant in Website" restarts the last
+agent in the Website project.
+
+What happens next:
+
+| Reading | Result |
+| --- | --- |
+| Confident navigation (focus, status, reopen, overview, next) | Runs directly |
+| Confident close or interrupt | Runs behind the usual cancel window |
+| Confident send or start, with **Fast verbatim routing** on | Your words go to the agent unchanged, behind the countdown |
+| Two similar live names split the vote ("Maple" or "Maple 2") | Chorus asks "Maple or Maple 2?"; answer "the first" or the name |
+| Speech-to-text artifact ("I'm sorry, I can't hear any audio") | Dropped: "I didn't catch that." |
+| Anything else | Claude handles it, with Jev's reading as hints; plan mode only when Jev expects several agents |
+
+Thresholds come from **Jev confidence to act** (default 0.8): navigation acts at 0.1 below it,
+close and interrupt at it, and sends and starts at 0.05 above it. Kill, archive, permission
+answers, closing many windows, delivery, and composed messages ("write Delta a better prompt")
+always go to Claude. Jev also refuses to act when more than 15% of its intent probability is on a
+destructive action.
+
+**Fast verbatim routing** (settings, on by default) is the switch for direct sends and starts.
+Turn it off to send those through Claude.
+
+### Completion reports
+
+When agents finish, Jev reads their final reports before Claude does, in one request per batch:
+
+- Progress notes with nothing new, and repeats of the last report, stay on the HUD.
+- A clear result or question is spoken as the agent's own sentence ("Maple asks: Should I also
+  update the docs?").
+- Only reports that need interpretation get a Claude follow-up: terminal output, low confidence,
+  or a follow-up you asked for ("open it when it's done").
+
+This is part of **Completion follow-up**.
+
+### Triage and plan review
+
 - **Triage:** when an agent starts waiting, Jev rates how urgently it needs you (the "next" order)
   and how risky its permission request is (shown on the tile and in the confirmation).
 - **Plan review:** plans whose parallel subtasks would likely edit the same code, or whose prompts
-  are vague, go back to Claude to fix; subtasks get a size and the plan a rough token estimate.
+  are vague, go back to Claude to fix. Subtasks get a size and the plan a rough token estimate.
 
-Jev only acts above the confidence you set (default 0.8); below it, Claude decides.
+### Diagnostics
+
+With diagnostic history on, every Jev evaluation is traced as a `jev` event. The event records the
+purpose (`route`, `completion`, `triage`, `permission-risk`, `plan-review`), latency, cost, the
+decision and its reason, and a compact form of each answer. The following summarizes fallback
+reasons and lists the most uncertain decisions (good eval candidates):
+
+```bash
+node apps/emdash-desktop/tooling/chorus/jev-mine.mjs
+```
+
+The router's eval set is `docs/chorus/evals/jev-router.jsonl`. To run it against the live API,
+set `JEV_LIVE_EVAL=1` and `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY`, then run:
+
+```bash
+pnpm exec vitest run --project node src/core/features/conductor/node/jev-router-live-eval.test.ts
+```
+
+The eval fails on any wrong action and reports how many expected actions ran directly.
 
 ## OpenRouter
 

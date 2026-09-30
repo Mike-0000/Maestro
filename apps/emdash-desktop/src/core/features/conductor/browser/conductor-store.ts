@@ -51,17 +51,23 @@ import { pruneScreenshots, trimHistory } from '../api/history';
 import {
   interpretPermissionRisk,
   interpretPlanReview,
-  interpretRouting,
   interpretSubtaskSizes,
   interpretUrgency,
   permissionRiskQuestions,
   planReviewQuestions,
   planReviewState,
-  routingQuestions,
-  routingState,
   urgencyQuestions,
   type SubtaskSize,
 } from '../api/jev';
+import {
+  completionGateRequest,
+  interpretCompletionGate,
+  type CompletionCandidate,
+  type CompletionVerdict,
+} from '../api/jev-router/completion';
+import { ConversationContext } from '../api/jev-router/context';
+import { thresholdsFrom, type RouterAction } from '../api/jev-router/policy';
+import { answersDetail, layoutBypass, looksLikeSttArtifact } from '../api/jev-router/trace';
 import { deliveryNote, describePrompt, withVerbatimRequest } from '../api/prompt-fidelity';
 import { resolveAgent, type RosterAgent } from '../api/resolver';
 import { conductorUserMessage } from '../api/system-prompt';
@@ -89,7 +95,8 @@ import {
 import { ConductorAppTools, type AppTask } from './app-tools';
 import { deliverPromptWhenReady } from './deferred-prompt';
 import { focusSpawnedAgent } from './focus-spawned-agent';
-import { jevDecide } from './jev';
+import { jevDecide, type JevOutcome } from './jev';
+import { routeUtterance, routerInput } from './jev-router';
 import { PlanStore } from './plan-store';
 import {
   buildCanvasRefContext,
@@ -163,6 +170,22 @@ const READ_AGENT_MAX_CHARS = 6_000;
 const FOLLOW_UP_MAX_ITERATIONS = 3;
 /** A completion with the same reply inside this window is the same completion, reported twice. */
 const DUPLICATE_COMPLETION_MS = 5 * 60_000;
+/** How long a clarifying question ("Maple or Maple 2?") waits for its answer. */
+const CLARIFY_TTL_MS = 60_000;
+/** Previous reports kept per agent, so the completion gate can tell a repeat from news. */
+const PREVIOUS_REPORTS = 50;
+const DIDNT_CATCH = "I didn't catch that.";
+
+type Clarification = {
+  readonly choices: readonly { agent: RosterAgent; action: RouterAction }[];
+  readonly at: number;
+};
+
+/** Options for running a tool outside the model loop. */
+type ToolRunOptions = {
+  /** The text is already the developer's own words: do not attach the verbatim request again. */
+  readonly verbatim?: boolean;
+};
 
 /**
  * The conductor turns utterances into actions on agents. A deterministic grammar handles common
@@ -203,6 +226,12 @@ export class ConductorStore {
   private lastClosed: string[] = [];
   private readonly disposers: (() => void)[] = [];
   private appToolsInstance: ConductorAppTools | null = null;
+  /** Who "it", "that agent", and "the same task" refer to, for Jev's routing. */
+  private readonly context = new ConversationContext();
+  /** A clarifying question the next utterance may answer. */
+  private clarification: Clarification | null = null;
+  /** Each agent's last announced report, for the completion gate's "anything new?". */
+  private readonly previousReports = new Map<string, string>();
 
   constructor(
     private readonly canvas: CanvasStore,
@@ -229,6 +258,9 @@ export class ConductorStore {
       | 'lastClosed'
       | 'disposers'
       | 'appToolsInstance'
+      | 'context'
+      | 'clarification'
+      | 'previousReports'
     >(this, {
       plans: false,
       canvas: false,
@@ -249,6 +281,9 @@ export class ConductorStore {
       lastClosed: false,
       disposers: false,
       appToolsInstance: false,
+      context: false,
+      clarification: false,
+      previousReports: false,
     });
   }
 
@@ -414,12 +449,16 @@ export class ConductorStore {
     this.lastUtterance = text;
     this.error = null;
     const startedAt = performance.now();
+    const clarification = this.takeClarification();
     try {
+      if (clarification && (await this.answerClarification(clarification, text, source, startedAt)))
+        return;
       if (command && (await this.runGrammar(command, source, startedAt))) return;
       const routed = await this.routeWithJev(text, source, startedAt);
       if (routed.handled) return;
-      await this.runModel(text, source, startedAt, routed.mode);
+      await this.runModel(text, source, startedAt, routed.mode, routed.hints);
     } finally {
+      this.context.noteUtterance(text);
       this.finishTurn();
     }
   }
@@ -726,6 +765,18 @@ export class ConductorStore {
         tool: action.tool,
         input: JSON.stringify(action.input).slice(0, 2000),
       });
+    const addressed = 'agent' in command ? command.agent : null;
+    if (addressed) {
+      if (command.kind === 'send' && actions.length > 0) {
+        this.context.noteSend({
+          conversationId: addressed.id,
+          name: addressed.name,
+          text: command.text,
+        });
+      } else {
+        this.context.noteAddressed({ conversationId: addressed.id, name: addressed.name });
+      }
+    }
     this.setReply(reply, speak ? source : null);
     this.log({ route, actions, reply, startedAt });
     return true;
@@ -1068,51 +1119,233 @@ export class ConductorStore {
   // ── Jev routing ────────────────────────────────────────────────────────────
 
   /**
-   * Asks Jev what an utterance the grammar missed wants. Navigation-style intents it is confident
-   * about run immediately (no Claude call); everything else goes to Claude, in plan mode when Jev
-   * judges the goal needs splitting across agents.
+   * Routes an utterance the grammar missed through Jev's fan-out router: one request that binds
+   * the whole action (verb, agent, project, provider, and the message in the developer's own
+   * words) and checks it against itself. Confident actions run directly, behind the same cancel
+   * windows as everywhere else; a split between two similar agent names gets a short question;
+   * transcription artifacts are dropped; everything else goes to Claude with Jev's reading as
+   * hints and plan mode only when Jev expects several agents.
    */
   private async routeWithJev(
     text: string,
     source: UtteranceSource,
     startedAt: number
-  ): Promise<{ handled: boolean; mode?: ConductorMode }> {
-    if (!this.status?.jevReady) return { handled: false };
-    // Layout talk the grammar missed needs the model's canvas tools, not Jev's agent intents.
-    if (LAYOUT_CUES.test(text)) return { handled: false };
+  ): Promise<{ handled: boolean; mode?: ConductorMode; hints?: string }> {
+    if (source === 'voice' && looksLikeSttArtifact(text)) {
+      this.trace('jev', undefined, { purpose: 'route', status: 'skipped', reason: 'stt-artifact' });
+      this.dropArtifact(source, startedAt);
+      return { handled: true };
+    }
+    if (!this.status?.jevReady) {
+      this.trace('jev', undefined, {
+        purpose: 'route',
+        status: 'skipped',
+        reason: this.status?.settings.jevEnabled === false ? 'disabled' : 'not-ready',
+      });
+      return { handled: false };
+    }
+    // Short layout talk the grammar missed needs the model's canvas tools, not Jev's actions.
+    if (layoutBypass(text, LAYOUT_CUES.test(text))) {
+      this.trace('jev', undefined, { purpose: 'route', status: 'skipped', reason: 'layout-cue' });
+      return { handled: false };
+    }
     runInAction(() => {
       this.phase = 'thinking';
       this.activity = 'Routing…';
     });
-    const roster = buildRoster(this.canvas);
-    const focusedId = focusedConversationId(this.canvas);
-    const focusedName = focusedId ? this.canvas.spokenName(focusedId) : null;
-    // Visible agents first: Jev sees a bounded number of choices.
-    const ordered = [...roster].sort(
-      (a, b) => Number(a.hidden ?? false) - Number(b.hidden ?? false)
-    );
-    const decision = await jevDecide(routingState(text, focusedName), routingQuestions(ordered));
-    if (!decision) return { handled: false };
-    const routing = interpretRouting(
-      decision.answers,
-      this.settings?.jevConfidence ?? DEFAULT_CONDUCTOR_SETTINGS.jevConfidence
-    );
-    if (routing.kind === 'model') {
-      this.trace('route', undefined, { route: 'jev-fallback', mode: routing.mode ?? 'command' });
-      return { handled: false, mode: routing.mode };
-    }
+    const settings = this.settings ?? DEFAULT_CONDUCTOR_SETTINGS;
+    const input = await routerInput(this.canvas, text, this.context.snapshot());
+    const routed = await routeUtterance(input, {
+      thresholds: thresholdsFrom(settings.jevConfidence),
+      verbatim: settings.jevVerbatimRouting,
+      planCue: chooseMode(text) === 'plan',
+    });
+    this.trace('jev', undefined, routed.detail);
+    if (!routed.ok) return { handled: false };
 
-    const agent = routing.agent
-      ? roster.find((candidate) => candidate.name === routing.agent)
-      : undefined;
-    let command: GrammarCommand | null = null;
-    if (routing.intent === 'overview') command = { kind: 'overview' };
-    else if (routing.intent === 'next') command = { kind: 'next' };
-    else if (agent && routing.intent === 'close') command = { kind: 'close', agent };
-    else if (agent) command = { kind: routing.intent, agent };
-    if (!command) return { handled: false };
-    const handled = await this.runGrammar(command, source, startedAt, 'jev');
-    return { handled };
+    const decision = routed.decision;
+    switch (decision.kind) {
+      case 'artifact':
+        this.dropArtifact(source, startedAt);
+        return { handled: true };
+      case 'llm':
+        this.trace('route', undefined, {
+          route: 'jev-fallback',
+          mode: decision.mode,
+          reason: decision.reason,
+        });
+        return { handled: false, mode: decision.mode, hints: decision.hints || undefined };
+      case 'clarify': {
+        this.lastRoute = 'jev';
+        this.clarification = { choices: decision.choices, at: Date.now() };
+        this.trace('route', undefined, {
+          route: 'jev',
+          intent: 'clarify',
+          input: decision.choices.map((choice) => choice.agent.name).join(' | '),
+        });
+        this.setReply(decision.question, source);
+        this.log({ route: 'jev', actions: [], reply: decision.question, startedAt });
+        return { handled: true };
+      }
+      case 'act':
+        return { handled: await this.runJevAction(decision.action, source, startedAt) };
+    }
+  }
+
+  /** A transcription artifact ("I'm sorry, I can't hear any audio"): say so, run nothing. */
+  private dropArtifact(source: UtteranceSource, startedAt: number): void {
+    this.lastRoute = 'jev';
+    this.trace('ignored', undefined, { reason: 'stt-artifact' });
+    this.setReply(DIDNT_CATCH, source);
+    this.log({ route: 'jev', actions: [], reply: DIDNT_CATCH, startedAt });
+  }
+
+  private takeClarification(): Clarification | null {
+    const clarification = this.clarification;
+    this.clarification = null;
+    return clarification && Date.now() - clarification.at <= CLARIFY_TTL_MS ? clarification : null;
+  }
+
+  /** "Maple 2" (or "the second one") after "Maple or Maple 2?" runs the held action. */
+  private async answerClarification(
+    clarification: Clarification,
+    text: string,
+    source: UtteranceSource,
+    startedAt: number
+  ): Promise<boolean> {
+    const ordinal = /\b(first|second)\b/i.exec(text)?.[1]?.toLowerCase();
+    const choices = clarification.choices;
+    let choice = ordinal ? choices[ordinal === 'first' ? 0 : 1] : undefined;
+    if (!choice) {
+      const resolution = resolveAgent(
+        text.replace(/^(?:i meant|i mean|um+|uh+)[\s,]+/i, ''),
+        choices.map((option) => option.agent),
+        null
+      );
+      if (resolution.kind === 'match') {
+        choice = choices.find((option) => option.agent.id === resolution.agent.id);
+      }
+    }
+    if (!choice) return false;
+    this.trace('confirmation', text, { status: 'clarified', agent: choice.agent.name });
+    return this.runJevAction(choice.action, source, startedAt);
+  }
+
+  /**
+   * Runs an action Jev bound. Navigation reuses the grammar's commands; sends and spawns run the
+   * same tool code Claude's calls do (permission-prompt block, cancel window, delivery), with the
+   * developer's words passed through as they are.
+   */
+  private async runJevAction(
+    action: RouterAction,
+    source: UtteranceSource,
+    startedAt: number
+  ): Promise<boolean> {
+    const grammar = (command: GrammarCommand) => this.runGrammar(command, source, startedAt, 'jev');
+    switch (action.verb) {
+      case 'overview':
+      case 'next':
+        return grammar({ kind: action.verb });
+      case 'close_many':
+        return grammar({ kind: 'closeMany', scope: action.scope });
+      case 'reopen_all':
+        return grammar({ kind: 'reopen', target: 'all' });
+      case 'reopen':
+        return grammar({ kind: 'reopen', target: action.agent });
+      case 'close':
+      case 'focus':
+      case 'status':
+      case 'interrupt':
+        return grammar({ kind: action.verb, agent: action.agent });
+      case 'send':
+      case 'spawn':
+        await this.runJevWrite(action, source, startedAt);
+        return true;
+    }
+  }
+
+  private async runJevWrite(
+    action: Extract<RouterAction, { verb: 'send' | 'spawn' }>,
+    source: UtteranceSource,
+    startedAt: number
+  ): Promise<void> {
+    this.lastRoute = 'jev';
+    this.phase = 'acting';
+    let record: ActionRecord;
+    let reply: string;
+    if (action.verb === 'send') {
+      const input: ConductorToolInput<'send_to_agent'> = {
+        agent: action.agent.name,
+        text: action.text,
+        submit: action.submit,
+      };
+      this.trace('route', undefined, {
+        route: 'jev',
+        intent: action.rebind ? 'resend' : 'send',
+        input: JSON.stringify(input).slice(0, 2000),
+      });
+      this.activity = describeTool('send_to_agent');
+      const outcome = await this.executeTool('send_to_agent', input, { verbatim: true });
+      record = { tool: 'send_to_agent', input, outcome: truncate(outcome.content, 300) };
+      reply = outcome.cancelled
+        ? 'Cancelled.'
+        : outcome.isError
+          ? outcome.content
+          : action.rebind
+            ? `Sent it to ${action.agent.name} instead.`
+            : `Sent to ${action.agent.name}.`;
+    } else {
+      const input: ConductorToolInput<'spawn_agent'> = {
+        ...(action.project ? { project: action.project.name } : {}),
+        provider: action.provider.id,
+        task_name: action.taskName.slice(0, 80),
+        prompt: action.prompt,
+        ...(action.worktree ? { worktree: true } : {}),
+      };
+      this.trace('route', undefined, {
+        route: 'jev',
+        intent: action.rebind ? 'respawn' : action.prompt ? 'spawn' : 'spawn-blank',
+        input: JSON.stringify({ ...input, prompt: truncate(input.prompt, 300) }).slice(0, 2000),
+      });
+      this.activity = describeTool('spawn_agent');
+      const outcome = await this.executeTool('spawn_agent', input, { verbatim: true });
+      record = { tool: 'spawn_agent', input, outcome: truncate(outcome.content, 300) };
+      const where = action.project ? ` in ${action.project.name}` : '';
+      const name = this.context.snapshot().lastSpawned?.name;
+      const blank = action.prompt ? '' : ', with no task yet';
+      reply = outcome.cancelled
+        ? 'Cancelled.'
+        : outcome.isError
+          ? outcome.content
+          : `Starting ${action.provider.label}${where}${name ? ` as ${name}` : ''}${blank}.`;
+    }
+    this.trace('action-result', record.outcome, {
+      tool: record.tool,
+      input: JSON.stringify(record.input).slice(0, 2000),
+    });
+    this.setReply(reply, source);
+    this.log({ route: 'jev', actions: [record], reply, startedAt });
+  }
+
+  /** Records a Jev evaluation outside routing (triage, plan review, completions). */
+  private traceJev(
+    purpose: string,
+    outcome: JevOutcome,
+    extra: NonNullable<TraceEvent['detail']>,
+    id = this.interactionId
+  ): void {
+    const detail: NonNullable<TraceEvent['detail']> = outcome.ok
+      ? {
+          purpose,
+          status: 'answered',
+          ms: outcome.decision.latencyMs,
+          via: outcome.decision.via,
+          ...(outcome.decision.costUsd !== undefined ? { costUsd: outcome.decision.costUsd } : {}),
+          ...extra,
+          ...answersDetail(outcome.decision.answers),
+        }
+      : { purpose, status: 'failed', reason: outcome.reason, ...extra };
+    this.trace('jev', undefined, detail, id);
   }
 
   // ── Jev triage ─────────────────────────────────────────────────────────────
@@ -1127,13 +1360,24 @@ export class ConductorStore {
     if (!terminal.trim()) return;
     const permission =
       entry.status === 'awaiting-input' && entry.notificationType === 'permission_prompt';
-    const decision = await jevDecide(
+    const outcome = await jevDecide(
       { agent: this.nameOf(entry), task: entry.taskName, terminal: terminal.slice(-6_000) },
       { ...urgencyQuestions(), ...(permission ? permissionRiskQuestions() : {}) }
     );
-    if (!decision) return;
-    const urgency = interpretUrgency(decision.answers);
-    const risk = permission ? interpretPermissionRisk(decision.answers) : null;
+    const urgency = outcome.ok ? interpretUrgency(outcome.decision.answers) : null;
+    const risk =
+      outcome.ok && permission ? interpretPermissionRisk(outcome.decision.answers) : null;
+    this.traceJev(
+      permission ? 'permission-risk' : 'triage',
+      outcome,
+      {
+        agent: this.nameOf(entry),
+        urgency: urgency === null ? null : Math.round(urgency * 100) / 100,
+        risk: risk?.level ?? null,
+      },
+      crypto.randomUUID()
+    );
+    if (!outcome.ok) return;
     this.canvas.setInsight(entry.conversationId, {
       ...(urgency !== null ? { urgency } : {}),
       ...(risk ? { riskLevel: risk.level } : {}),
@@ -1146,7 +1390,8 @@ export class ConductorStore {
     text: string,
     source: UtteranceSource,
     startedAt: number,
-    modeHint?: ConductorMode
+    modeHint?: ConductorMode,
+    hints?: string
   ): Promise<void> {
     this.lastRoute = 'llm';
     this.trace('route', undefined, { route: 'llm', mode: modeHint ?? chooseMode(text) });
@@ -1168,6 +1413,7 @@ export class ConductorStore {
     const providers = await installedProviders();
     const planLine = this.plans.contextLine;
     const extra = planLine ? [planLine] : [];
+    if (hints) extra.push(hints);
     if (mode === 'plan') {
       runInAction(() => (this.activity = 'Reading the project…'));
       const pack = await this.projectContextPack();
@@ -1288,7 +1534,11 @@ export class ConductorStore {
     return { reply, completed, tokens };
   }
 
-  private async executeTool(name: string, rawInput: unknown): Promise<ToolOutcome> {
+  private async executeTool(
+    name: string,
+    rawInput: unknown,
+    options: ToolRunOptions = {}
+  ): Promise<ToolOutcome> {
     if (!isToolName(name)) return { content: `Unknown tool ${name}.`, isError: true };
     // A completion follow-up acts on agent output, which never authorizes anything by itself.
     if (this.followUpActive && !isFollowUpTool(name)) {
@@ -1299,7 +1549,19 @@ export class ConductorStore {
       return { content: `Invalid input: ${parsed.error.message}`, isError: true };
     }
     try {
-      return await this.runTool(name, parsed.data as ConductorToolInput<typeof name>);
+      const input = parsed.data as ConductorToolInput<typeof name>;
+      const outcome = await this.runTool(name, input, options);
+      const agent = (input as { agent?: unknown }).agent;
+      if (!outcome.isError && !outcome.cancelled && typeof agent === 'string') {
+        const entry = this.resolveEntry(agent);
+        if ('entry' in entry) {
+          this.context.noteAddressed({
+            conversationId: entry.entry.conversationId,
+            name: this.nameOf(entry.entry),
+          });
+        }
+      }
+      return outcome;
     } catch (error) {
       log.warn('conductor: tool failed', { error, tool: name });
       return { content: errorMessage(error), isError: true };
@@ -1308,7 +1570,8 @@ export class ConductorStore {
 
   private async runTool<Name extends ConductorToolName>(
     name: Name,
-    input: ConductorToolInput<Name>
+    input: ConductorToolInput<Name>,
+    options: ToolRunOptions = {}
   ): Promise<ToolOutcome> {
     const confirmKind = CONFIRM_REQUIRED_TOOLS.has(name)
       ? 'confirm'
@@ -1353,14 +1616,19 @@ export class ConductorStore {
         const blocked = this.permissionBlock(entry.entry);
         if (blocked) return { content: blocked, isError: true };
         const target = this.nameOf(entry.entry);
-        const message = withVerbatimRequest(text, this.lastUtterance);
+        const message = options.verbatim ? text : withVerbatimRequest(text, this.lastUtterance);
         if (
           !(await this.requestPending(`Send to ${target}: “${truncate(text, 90)}”`, confirmKind))
         ) {
-          return { content: 'The user cancelled this before it was sent.' };
+          return { content: 'The user cancelled this before it was sent.', cancelled: true };
         }
         const wasRunning = this.isRunning(entry.entry);
         await this.deliver(entry.entry, message, submit ?? true);
+        this.context.noteSend({
+          conversationId: entry.entry.conversationId,
+          name: target,
+          text: message,
+        });
         const delivered = deliveryNote(text, message);
         return {
           content: wasRunning
@@ -1376,7 +1644,7 @@ export class ConductorStore {
           return { content: `${target} isn't running, so there is nothing to interrupt.` };
         }
         if (!(await this.requestPending(`Interrupt ${target}`, confirmKind))) {
-          return { content: 'The user cancelled the interrupt.' };
+          return { content: 'The user cancelled the interrupt.', cancelled: true };
         }
         await interruptAgent(entry.entry);
         return { content: `Interrupted ${target}.` };
@@ -1398,11 +1666,15 @@ export class ConductorStore {
         }
         const projectId = resolveProjectId(spawn.project, this.focusedEntry()?.projectId);
         if (!projectId) return { content: 'No project is open.', isError: true };
-        const prompt = withVerbatimRequest(spawn.prompt, this.lastUtterance);
+        const prompt = options.verbatim
+          ? spawn.prompt
+          : withVerbatimRequest(spawn.prompt, this.lastUtterance);
         const worktree = spawn.worktree === true;
-        const label = `Start ${spawn.provider}${worktree ? ' in a new worktree' : ''} on “${truncate(spawn.task_name, 60)}” · ${describePrompt(prompt)}`;
+        const projectName = getProjectManagerStore().projects.get(projectId)?.name ?? null;
+        const where = `${projectName ? ` in ${projectName}` : ''}${worktree ? ' in a new worktree' : ''}`;
+        const label = `Start ${spokenProviderLabel(spawn.provider)}${where} on “${truncate(spawn.task_name, 60)}” · ${describePrompt(prompt)}`;
         if (!(await this.requestPending(label, confirmKind))) {
-          return { content: 'The user cancelled the new agent.' };
+          return { content: 'The user cancelled the new agent.', cancelled: true };
         }
         runInAction(() => (this.activity = worktree ? 'Creating a worktree…' : 'Creating a task…'));
         const conversationId = crypto.randomUUID();
@@ -1420,6 +1692,16 @@ export class ConductorStore {
           throw error;
         });
         this.disposers.push(focusSpawnedAgent(this.canvas, result.conversationId));
+        this.context.noteSpawn({
+          conversationId: result.conversationId,
+          name,
+          providerId: spawn.provider,
+          providerLabel: spokenProviderLabel(spawn.provider),
+          projectName,
+          prompt,
+          taskName: spawn.task_name,
+          worktree,
+        });
         const interactionId = this.interactionId;
         this.trace('action-result', undefined, { tool: 'spawn_agent', status: 'scheduled' });
         void startAgentSession(projectId, result.taskId, result.conversationId)
@@ -1471,13 +1753,22 @@ export class ConductorStore {
         let sizes: (SubtaskSize | null)[] = [];
         if (this.status?.jevReady && plan.subtasks.length > 1) {
           runInAction(() => (this.activity = 'Reviewing the plan…'));
-          const decision = await jevDecide(
+          const outcome = await jevDecide(
             planReviewState(plan.goal, plan.subtasks),
             planReviewQuestions(plan.subtasks)
           );
-          const review = decision ? interpretPlanReview(decision.answers, plan.subtasks) : null;
+          const review = outcome.ok
+            ? interpretPlanReview(outcome.decision.answers, plan.subtasks)
+            : null;
+          this.traceJev('plan-review', outcome, {
+            subtasks: plan.subtasks.length,
+            verdict: review ? (review.ok ? 'ok' : 'rejected') : null,
+            ...(review && !review.ok ? { reason: review.reason.slice(0, 500) } : {}),
+          });
           if (review && !review.ok) return { content: review.reason, isError: true };
-          if (decision) sizes = interpretSubtaskSizes(decision.answers, plan.subtasks.length);
+          if (outcome.ok) {
+            sizes = interpretSubtaskSizes(outcome.decision.answers, plan.subtasks.length);
+          }
         }
         const providers = await installedProviders();
         const proposal = this.plans.propose(plan, {
@@ -2013,15 +2304,113 @@ export class ConductorStore {
       }
       fresh.push(entry);
     }
-    const followUp = this.canFollowUp()
-      ? fresh.filter((entry) => reports.has(entry.conversationId))
-      : [];
+    for (const entry of fresh) {
+      if (reports.has(entry.conversationId)) {
+        this.context.noteReported({
+          conversationId: entry.conversationId,
+          name: this.nameOf(entry),
+        });
+      }
+    }
+    const reported = fresh.filter((entry) => reports.has(entry.conversationId));
+    const gated = this.canGateCompletions() ? await this.gateCompletions(reported, reports) : null;
+    const spoken = gated?.spoken ?? [];
+    const narrate = gated ? gated.llm : reported;
+    const followUp = this.canFollowUp() ? narrate : [];
+    const handled = new Set([...(gated?.handled ?? []), ...followUp]);
     const text = this.fixedAnnouncement(
-      fresh.filter((entry) => !followUp.includes(entry)),
+      fresh.filter((entry) => !handled.has(entry)),
       reports
     );
-    if (text) this.voice.announce(text);
+    const announcement = [...spoken, text].filter(Boolean).join(' ');
+    if (announcement) this.notify(announcement, gated?.interactionId);
     if (followUp.length > 0) await this.followUpCompletions(followUp, reports);
+  }
+
+  private canGateCompletions(): boolean {
+    return (
+      Boolean(this.status?.jevReady) &&
+      (this.settings?.completionFollowUp ?? DEFAULT_CONDUCTOR_SETTINGS.completionFollowUp) &&
+      !this.pending
+    );
+  }
+
+  /**
+   * Jev reads finished agents' reports before Claude does: progress pings with nothing new stay on
+   * the HUD, clear results and questions are spoken as the agent's own sentence, and only the rest
+   * go on to a Claude follow-up. Returns null when Jev could not answer (everything falls back).
+   */
+  private async gateCompletions(
+    entries: readonly AgentTileEntry[],
+    reports: ReadonlyMap<string, CompletionReport>
+  ): Promise<{
+    spoken: string[];
+    handled: AgentTileEntry[];
+    llm: AgentTileEntry[];
+    interactionId: string;
+  } | null> {
+    if (entries.length === 0) return null;
+    const batch = entries.slice(0, 5);
+    const candidates: CompletionCandidate[] = batch.flatMap((entry) => {
+      const report = reports.get(entry.conversationId);
+      return report
+        ? [
+            {
+              name: this.nameOf(entry),
+              task: entry.taskName,
+              report,
+              previous: this.previousReports.get(entry.conversationId) ?? null,
+            },
+          ]
+        : [];
+    });
+    for (const entry of batch) {
+      const report = reports.get(entry.conversationId);
+      if (!report) continue;
+      this.previousReports.delete(entry.conversationId);
+      this.previousReports.set(entry.conversationId, report.text);
+    }
+    while (this.previousReports.size > PREVIOUS_REPORTS) {
+      const oldest = this.previousReports.keys().next().value;
+      if (oldest === undefined) break;
+      this.previousReports.delete(oldest);
+    }
+    const interactionId = crypto.randomUUID();
+    const gate = completionGateRequest(candidates, this.context.snapshot().recentUtterances);
+    const outcome = await jevDecide(gate.state, gate.questions);
+    const verdicts: CompletionVerdict[] = outcome.ok
+      ? interpretCompletionGate(outcome.decision.answers, gate, candidates)
+      : [];
+    this.traceJev(
+      'completion',
+      outcome,
+      {
+        agents: candidates.map((candidate) => candidate.name).join(', '),
+        verdicts: verdicts.map((verdict) => `${verdict.kind}:${verdict.reason}`).join(', '),
+      },
+      interactionId
+    );
+    if (!outcome.ok) return null;
+    const spoken: string[] = [];
+    const handled: AgentTileEntry[] = [];
+    const llm: AgentTileEntry[] = [...entries.slice(batch.length)];
+    batch.forEach((entry, index) => {
+      const verdict = verdicts[index];
+      if (!verdict || verdict.kind === 'llm') {
+        llm.push(entry);
+        return;
+      }
+      handled.push(entry);
+      if (verdict.kind === 'speak') spoken.push(verdict.text);
+      else {
+        this.trace('reply', verdict.hud, { surface: 'hud', source: 'silent' }, interactionId);
+        runInAction(() => {
+          this.reply = verdict.hud;
+          this.replyAt = Date.now();
+        });
+      }
+    });
+    return { spoken, handled, llm, interactionId };
   }
 
   /** The fixed announcement sentence for a batch (also the follow-up's fallback). */
@@ -2134,7 +2523,7 @@ export class ConductorStore {
     } finally {
       this.followUpActive = false;
       const spoken = reply || fallback;
-      if (spoken) this.notify(spoken);
+      if (spoken) this.notify(spoken, this.interactionId);
       this.log({
         route: 'llm',
         actions,
@@ -2147,11 +2536,13 @@ export class ConductorStore {
     }
   }
 
-  private notify(text: string): void {
+  private notify(text: string, interactionId?: string | null): void {
     runInAction(() => {
       this.reply = text;
       this.replyAt = Date.now();
     });
+    this.context.noteReply(text);
+    if (interactionId) this.trace('reply', text, { surface: 'announce' }, interactionId);
     this.voice.announce(text);
   }
 
@@ -2178,6 +2569,8 @@ export class ConductorStore {
 
   clearHistory(): void {
     this.history = [];
+    this.context.clear();
+    this.clarification = null;
     this.reply = '';
     this.error = null;
   }
@@ -2342,6 +2735,7 @@ export class ConductorStore {
       this.replyAt = Date.now();
     });
     if (text) this.trace('reply', text, { surface: 'hud', source: source ?? 'silent' }, id);
+    if (text) this.context.noteReply(text);
     if (text && source === 'voice') this.voice.say(text, id ?? undefined);
   }
 
