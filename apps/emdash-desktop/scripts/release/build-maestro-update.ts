@@ -1,6 +1,6 @@
 // Builds a Windows NSIS installer and its update manifest for the Maestro auto-update feed.
 // Nothing is uploaded; run publish-maestro-update.ts afterwards. See docs/chorus/auto-update.md.
-import { readFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { Arch, Platform, build as electronBuild } from 'electron-builder';
@@ -14,10 +14,10 @@ import { createReleaseBuildConfig } from './lib/build-config.ts';
 import { exec } from './lib/exec.ts';
 import { fail, info, step } from './lib/log.ts';
 import {
-  MAESTRO_UPDATE_OUTPUT,
   manifestFileName,
   maestroReleaseVersion,
   parseManifest,
+  updateBuildsRoot,
 } from './lib/maestro-update.ts';
 
 const { values } = parseArgs({
@@ -49,6 +49,10 @@ const commit = exec('git rev-parse HEAD', { cwd: workspaceRoot });
 const packageVersion = (JSON.parse(readFileSync('package.json', 'utf8')) as { version: string })
   .version;
 const version = maestroReleaseVersion(packageVersion, new Date());
+const buildsRoot = updateBuildsRoot();
+if (!buildsRoot) fail('LOCALAPPDATA is not set');
+const outputDir = join(buildsRoot, version);
+if (existsSync(outputDir)) fail(`${outputDir} already exists; wait a minute and build again`);
 info(`Version ${version} from commit ${commit}${status ? ' (with uncommitted changes)' : ''}`);
 
 if (!values['skip-workspace-build']) {
@@ -62,14 +66,13 @@ step('Rebuilding native modules for Electron');
 exec('pnpm exec electron-rebuild -f --only=better-sqlite3', { echo: true });
 
 step('Packaging the Windows installer');
-rmSync(MAESTRO_UPDATE_OUTPUT, { recursive: true, force: true });
 const electronVersion = exec(`node -p "require('electron/package.json').version"`);
 const config = createReleaseBuildConfig(stableConfig, electronVersion, version);
 await electronBuild({
   targets: Platform.WINDOWS.createTarget(['nsis'], Arch.x64),
   config: {
     ...config,
-    directories: { ...config.directories, output: MAESTRO_UPDATE_OUTPUT },
+    directories: { ...config.directories, output: outputDir },
     releaseInfo: {
       releaseName: `Maestro ${version}`,
       releaseNotes: values.notes ?? `Built from commit ${commit.slice(0, 12)}.`,
@@ -78,7 +81,7 @@ await electronBuild({
   publish: 'never',
 });
 
-const manifestPath = join(MAESTRO_UPDATE_OUTPUT, manifestFileName(UPDATE_CHANNEL));
+const manifestPath = join(outputDir, manifestFileName(UPDATE_CHANNEL));
 const manifest = parseManifest(readFileSync(manifestPath, 'utf8'));
 if (manifest.version !== version) {
   fail(`${manifestPath} has version ${String(manifest.version)}, expected ${version}`);

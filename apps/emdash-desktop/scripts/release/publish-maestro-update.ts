@@ -23,8 +23,8 @@ import {
   defaultSigningKeyFile,
   feedBlobUrl,
   IMMUTABLE_CACHE_CONTROL,
+  latestUpdateBuild,
   loadSigningKey,
-  MAESTRO_UPDATE_OUTPUT,
   MANIFEST_CACHE_CONTROL,
   manifestFileName,
   parseFeedUrl,
@@ -33,6 +33,7 @@ import {
   releaseBlobPath,
   signManifest,
   trustedKeyIdFor,
+  updateBuildsRoot,
   UPLOAD_SAS_ENV,
 } from './lib/maestro-update.ts';
 
@@ -40,7 +41,7 @@ const { values } = parseArgs({
   // `pnpm run <script> -- --flag` forwards the separator itself.
   args: process.argv.slice(2).filter((arg, index) => index > 0 || arg !== '--'),
   options: {
-    dir: { type: 'string', default: MAESTRO_UPDATE_OUTPUT },
+    dir: { type: 'string' },
     publish: { type: 'boolean', default: false },
     restore: { type: 'string' },
   },
@@ -119,7 +120,10 @@ async function restore(version: string): Promise<void> {
 }
 
 async function publish(): Promise<void> {
-  const dir = values.dir ?? MAESTRO_UPDATE_OUTPUT;
+  const buildsRoot = updateBuildsRoot();
+  const dir = values.dir ?? (buildsRoot ? latestUpdateBuild(buildsRoot, channelFile) : null);
+  if (!dir) fail('No build found; run `pnpm run updates:build` or pass --dir <build folder>');
+  info(`Release folder: ${dir}`);
   const keyFile = defaultSigningKeyFile();
   if (!keyFile || !existsSync(keyFile)) {
     fail(

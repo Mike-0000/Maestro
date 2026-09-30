@@ -1,4 +1,7 @@
 import { createPublicKey, generateKeyPairSync } from 'node:crypto';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   exportUpdateSigningPublicKey,
@@ -7,6 +10,7 @@ import {
 import {
   compareSemver,
   feedBlobUrl,
+  latestUpdateBuild,
   maestroReleaseVersion,
   parseManifest,
   relocateManifest,
@@ -89,5 +93,19 @@ describe('release manifests', () => {
     expect(verifyUpdateManifest(parseManifest(text), trusted).files[0]?.url).toBe(
       `releases/${VERSION}/maestro-x64.exe`
     );
+  });
+});
+
+describe('update builds', () => {
+  it('picks the newest build folder that holds a manifest', () => {
+    const root = mkdtempSync(join(tmpdir(), 'maestro-builds-'));
+    expect(latestUpdateBuild(join(root, 'missing'), 'v1-stable.yml')).toBeNull();
+    for (const version of ['1.2.6-maestro.202609291530', '1.2.6-maestro.202609301200']) {
+      mkdirSync(join(root, version));
+      writeFileSync(join(root, version, 'v1-stable.yml'), '');
+    }
+    mkdirSync(join(root, '1.2.7-maestro.202610010000')); // interrupted build: no manifest
+    mkdirSync(join(root, 'notes'));
+    expect(latestUpdateBuild(root, 'v1-stable.yml')).toBe(join(root, '1.2.6-maestro.202609301200'));
   });
 });

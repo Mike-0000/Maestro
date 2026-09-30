@@ -1,6 +1,6 @@
 import { createPrivateKey, createPublicKey } from 'node:crypto';
 import type { KeyObject } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, win32 } from 'node:path';
 import { parse, stringify } from 'yaml';
 import {
@@ -15,8 +15,6 @@ import {
 export const SIGNING_KEY_ENV = 'MAESTRO_UPDATE_SIGNING_KEY_FILE';
 /** Container-scoped SAS token (create + write; no delete needed) used only for uploads. */
 export const UPLOAD_SAS_ENV = 'MAESTRO_AZURE_UPLOAD_SAS';
-/** Local build output of build-maestro-update.ts, relative to the app directory. */
-export const MAESTRO_UPDATE_OUTPUT = 'release/maestro-update';
 /** Blob folder holding each release's immutable files. */
 export const RELEASES_PREFIX = 'releases';
 export const IMMUTABLE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
@@ -30,6 +28,29 @@ export function defaultSigningKeyFile(environment: Environment = process.env): s
   return environment.LOCALAPPDATA
     ? win32.join(environment.LOCALAPPDATA, 'Chorus', 'UpdateSigning', 'maestro-update-signing.pem')
     : null;
+}
+
+/**
+ * Parent of the per-version build folders written by build-maestro-update.ts. It lives outside the
+ * checkout: on Windows, packaging under apps/emdash-desktop/release/ fails with EPERM when
+ * electron-builder renames its freshly extracted Electron folder.
+ */
+export function updateBuildsRoot(environment: Environment = process.env): string | null {
+  return environment.LOCALAPPDATA
+    ? win32.join(environment.LOCALAPPDATA, 'Chorus', 'UpdateBuilds')
+    : null;
+}
+
+/** The highest-versioned build folder under `root` that holds a manifest, if any. */
+export function latestUpdateBuild(root: string, manifestName: string): string | null {
+  if (!existsSync(root)) return null;
+  const versions = readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && SEMVER.test(entry.name))
+    .filter((entry) => existsSync(win32.join(root, entry.name, manifestName)))
+    .map((entry) => entry.name)
+    .sort(compareSemver);
+  const latest = versions.at(-1);
+  return latest ? win32.join(root, latest) : null;
 }
 
 export function loadSigningKey(file: string): KeyObject {

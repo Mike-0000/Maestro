@@ -93,12 +93,15 @@ access policy, then publish a build with a new SAS.
 Build from a clean checkout of the validated `chorus/main`, from `apps/emdash-desktop`:
 
 ```powershell
-pnpm run updates:build --notes "What changed"      # builds release/maestro-update (no upload)
+pnpm run updates:build --notes "What changed"      # builds the installer (no upload)
 pnpm run updates:publish                           # dry run: verify, sign, print the upload plan
 $env:MAESTRO_AZURE_UPLOAD_SAS = '<container SAS with r,c,w>'
 pnpm run updates:publish --publish                 # upload, then verify the feed as a client
 ```
 
+- Builds go to `%LOCALAPPDATA%\Chorus\UpdateBuilds\<version>`, outside the checkout (packaging
+  under `apps/emdash-desktop/release/` fails with `EPERM` on Windows). `updates:publish` uses the
+  newest one unless given `--dir`.
 - The version is `<package version>-maestro.<UTC yyyymmddHHMM>`, for example
   `1.2.6-maestro.202609291530`. Each publish therefore sorts after the previous one, and an
   upstream version bump still sorts higher.
