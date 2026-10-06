@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { HOLD_DELAY_MS, HoldToTalkMachine, type HoldOutput } from './hold-to-talk';
+import {
+  DOUBLE_TAP_MS,
+  HOLD_DELAY_MS,
+  HoldToTalkMachine,
+  LATCH_MAX_MS,
+  type HoldOutput,
+} from './hold-to-talk';
 
 function setup() {
   vi.useFakeTimers();
@@ -48,6 +54,68 @@ describe('HoldToTalkMachine', () => {
     machine.otherDown(true);
     vi.advanceTimersByTime(HOLD_DELAY_MS);
     expect(outputs).toEqual([{ type: 'start', intent: 'dictation' }]);
+    vi.useRealTimers();
+  });
+
+  function tap(machine: HoldToTalkMachine) {
+    machine.talkDown(false);
+    vi.advanceTimersByTime(40);
+    machine.talkUp();
+  }
+
+  it('latches on a double tap and stops on the next tap without holding', () => {
+    const { machine, outputs } = setup();
+    tap(machine);
+    vi.advanceTimersByTime(100);
+    machine.talkDown(false);
+    machine.talkDown(false); // auto-repeat
+    expect(outputs).toEqual([{ type: 'start', intent: 'command' }]);
+    machine.talkUp();
+    machine.otherDown(false); // typing while latched does not cancel
+    vi.advanceTimersByTime(30_000);
+    expect(outputs).toEqual([{ type: 'start', intent: 'command' }]);
+
+    machine.talkDown(false);
+    expect(outputs).toEqual([{ type: 'start', intent: 'command' }, { type: 'stop' }]);
+    machine.talkUp();
+    vi.advanceTimersByTime(DOUBLE_TAP_MS * 2);
+    expect(outputs).toHaveLength(2);
+  });
+
+  it('still holds to talk after a latched utterance ended', () => {
+    const { machine, outputs } = setup();
+    tap(machine);
+    tap(machine);
+    tap(machine);
+    outputs.length = 0;
+    vi.advanceTimersByTime(DOUBLE_TAP_MS);
+    machine.talkDown(false);
+    vi.advanceTimersByTime(HOLD_DELAY_MS);
+    machine.talkUp();
+    expect(outputs).toEqual([{ type: 'start', intent: 'command' }, { type: 'stop' }]);
+  });
+
+  it('does not latch when the taps are too far apart or a key is typed between them', () => {
+    const { machine, outputs } = setup();
+    tap(machine);
+    vi.advanceTimersByTime(DOUBLE_TAP_MS + 1);
+    tap(machine);
+    vi.advanceTimersByTime(DOUBLE_TAP_MS + 1);
+    tap(machine);
+    machine.otherDown(false);
+    tap(machine);
+    vi.advanceTimersByTime(DOUBLE_TAP_MS + 1);
+    expect(outputs).toEqual([]);
+  });
+
+  it('dictates when Shift is pressed between the taps and stops a forgotten latch', () => {
+    const { machine, outputs } = setup();
+    tap(machine);
+    machine.otherDown(true);
+    tap(machine);
+    expect(outputs).toEqual([{ type: 'start', intent: 'dictation' }]);
+    vi.advanceTimersByTime(LATCH_MAX_MS);
+    expect(outputs).toEqual([{ type: 'start', intent: 'dictation' }, { type: 'stop' }]);
     vi.useRealTimers();
   });
 });
