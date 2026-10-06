@@ -36,11 +36,30 @@ export async function probeDaemon(
     return ok(health);
   } catch (error) {
     socket?.destroy();
+    const message = error instanceof Error ? error.message : String(error);
     return err({
       type: isConnectionError(error) ? 'not-running' : 'unhealthy',
-      message: error instanceof Error ? error.message : String(error),
+      message: isAccessDeniedError(error) ? `${ACCESS_DENIED_HINT} (${message})` : message,
     });
   }
+}
+
+/**
+ * A Windows daemon that was started elevated listens on a pipe only Administrators may open, so a
+ * non-elevated client of the same user is refused. It is running, and must not be started again.
+ */
+const ACCESS_DENIED_HINT =
+  'The workspace server is already running with administrator rights, so this app is not ' +
+  'allowed to connect to it. Stop it from an administrator terminal or restart the computer, ' +
+  'then connect again';
+
+function isAccessDeniedError(error: unknown): boolean {
+  return (
+    process.platform === 'win32' &&
+    error instanceof Error &&
+    'code' in error &&
+    ['EPERM', 'EACCES'].includes(String((error as NodeJS.ErrnoException).code))
+  );
 }
 
 function connectToSocket(socketPath: string, timeoutMs: number): Promise<Socket> {

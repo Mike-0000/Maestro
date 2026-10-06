@@ -92,6 +92,51 @@ function mementoHandle(initial: WorkbenchSidebarState): MementoHandle<WorkbenchS
   };
 }
 
+describe('SidebarStore host conversations', () => {
+  const conversation = (id: string) => ({
+    id,
+    title: id,
+    provider: 'claude',
+    workspacePath: 'C:\\Github\\chorus',
+    workspaceId: 'workspace-1',
+    lastActivityAt: '2026-10-01T00:00:00.000Z',
+  });
+
+  it('lists a machine’s unlinked conversations under their project, after its tasks', () => {
+    const store = new SidebarStore(
+      projectManagerWithTasks([
+        { id: 'project-1', createdAt: '2026-01-02T00:00:00.000Z', taskIds: ['task-1'] },
+        { id: 'project-2', createdAt: '2026-01-01T00:00:00.000Z', taskIds: [] },
+      ])
+    );
+    store.expandAllProjects();
+    store.setHostConversations('machine-1', new Map([['project-1', [conversation('remote-1')]]]));
+
+    expect(store.sidebarRows).toEqual([
+      { kind: 'project', projectId: 'project-1' },
+      { kind: 'task', projectId: 'project-1', taskId: 'task-1' },
+      { kind: 'host-conversation', projectId: 'project-1', conversationId: 'remote-1' },
+      { kind: 'project', projectId: 'project-2' },
+    ]);
+    expect(store.visibleTaskEntries).toEqual([{ projectId: 'project-1', taskId: 'task-1' }]);
+    expect(store.hostConversation('project-1', 'remote-1')?.title).toBe('remote-1');
+
+    store.setHostConversations('machine-1', undefined);
+    expect(store.sidebarRows.some((row) => row.kind === 'host-conversation')).toBe(false);
+  });
+
+  it('hides them while the project is collapsed', () => {
+    const store = new SidebarStore(
+      projectManagerWithTasks([
+        { id: 'project-1', createdAt: '2026-01-01T00:00:00.000Z', taskIds: [] },
+      ])
+    );
+    store.setHostConversations('machine-1', new Map([['project-1', [conversation('remote-1')]]]));
+
+    expect(store.sidebarRows).toEqual([{ kind: 'project', projectId: 'project-1' }]);
+  });
+});
+
 describe('SidebarStore project ordering', () => {
   it('keeps a restored collapsed project collapsed during initial task hydration', () => {
     const tasks = observable.map<string, ReturnType<typeof task>>();

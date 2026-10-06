@@ -31,7 +31,8 @@ export type ProjectWorkspacesWireController = {
 /**
  * Mirror-served workspace groups as a live model (planning ticket 09): the registry
  * sync pokes `appDbPokes.workspaces` on every applied snapshot, so the family
- * re-queries the mirror and streams updates — the renderer never polls.
+ * re-queries the mirror and streams updates — the renderer never polls. Conversation pokes
+ * keep each group's unlinked host conversations current the same way.
  */
 export function createProjectWorkspacesWireController(
   dependencies: ProjectWorkspaceOperationDependencies
@@ -47,6 +48,7 @@ export function createProjectWorkspacesWireController(
           appDbPokes.workspaces.subscription(() => true),
           appDbPokes.tasks.subscription(() => true),
           appDbPokes.projects.subscription(() => true),
+          appDbPokes.conversations.subscription(() => true),
         ],
         scope,
       }),

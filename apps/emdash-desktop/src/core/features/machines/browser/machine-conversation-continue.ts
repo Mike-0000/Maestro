@@ -1,6 +1,7 @@
 import type { HostConversationRow } from '@core/primitives/conversations/api';
 import {
   projectWorkspaceOpenInTaskDisabledReason,
+  sameHostPath,
   type HostWorkspaceGroup,
   type ProjectWorkspaceRow,
 } from '@core/primitives/workspaces/api';
@@ -77,21 +78,4 @@ function latestOpenTask(row: ProjectWorkspaceRow) {
 function activity(task: { lastInteractedAt?: string; updatedAt: string }): number {
   const parsed = Date.parse(task.lastInteractedAt ?? task.updatedAt);
   return Number.isNaN(parsed) ? 0 : parsed;
-}
-
-/**
- * Host paths can reach the client with either separator and, on Windows hosts, any drive-letter
- * or case spelling; compare them the way the host's filesystem would.
- */
-export function sameHostPath(a: string, b: string): boolean {
-  return normalizeHostPath(a) === normalizeHostPath(b);
-}
-
-function normalizeHostPath(path: string): string {
-  const windows = /^[a-z]:[\\/]/iu.test(path) || path.startsWith('\\\\');
-  let normalized = windows ? path.replace(/\\/gu, '/') : path;
-  while (normalized.length > 1 && normalized.endsWith('/') && !/^[a-z]:\/$/iu.test(normalized)) {
-    normalized = normalized.slice(0, -1);
-  }
-  return windows ? normalized.toLowerCase() : normalized;
 }

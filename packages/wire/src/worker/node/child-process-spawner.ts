@@ -1,4 +1,4 @@
-import { fork, type ChildProcess } from 'node:child_process';
+import { fork, type ChildProcess, type ForkOptions } from 'node:child_process';
 import type { Unsubscribe } from '@emdash/shared';
 import type { Scope } from '@emdash/shared/concurrency';
 import { recordSpawn } from '@emdash/shared/perf';
@@ -15,14 +15,20 @@ export function childProcessSpawner(): WorkerProcessSpawner {
 
 function spawnChildProcess(spec: WorkerProcessSpec): WorkerProcess {
   recordSpawn('worker', spec.entry);
-  const child = fork(spec.entry, [...(spec.args ?? [])], {
+  // `fork` passes its options on to `spawn`, which honours `windowsHide`; the fork typings
+  // just do not list it.
+  const options: ForkOptions & { windowsHide: boolean } = {
     cwd: spec.cwd,
     env: { ...process.env, ...spec.env },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    // A host without a console (a detached daemon) would otherwise give every worker its own
+    // visible console window on Windows. Processes the worker starts share its hidden console.
+    windowsHide: true,
     // Structured-clone (V8) serialization preserves `undefined` values, typed
     // arrays, and Dates across the IPC channel, matching Wire payload semantics.
     serialization: 'advanced',
-  });
+  };
+  const child = fork(spec.entry, [...(spec.args ?? [])], options);
 
   return {
     get pid() {
