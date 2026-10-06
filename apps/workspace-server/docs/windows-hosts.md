@@ -93,6 +93,26 @@ to launch the internal `daemonize` command, which spawns the detached `serve` pr
 sent to the daemon log (`apps/workspace-server/src/daemon/windows-launch.ts`). The launch script is
 constant; the command line reaches it only through environment variables.
 
+WMI alone leaves the daemon restricted. `sshd` enforces the redirection-guard mitigation, every
+process started from the session inherits it (through WMI and `runas` too), and a guarded process
+cannot follow a junction made by a non-administrator: "The path cannot be traversed because it
+contains an untrusted mount point". pnpm's `node_modules` and many agent CLI installs use such
+junctions. An administrator's SSH logon is also elevated, so its daemon's named pipe would be closed
+to the same user's non-elevated desktop app. The launch script therefore asks Task Scheduler to do
+the WMI create from a one-shot task that it registers, runs, and deletes:
+
+1. With the user's interactive token when they are signed in at the computer: not elevated and
+   unguarded, so agents behave as they do locally.
+2. Otherwise with a background (S4U) token: unguarded, but elevated for administrators, so a
+   local non-elevated app cannot open the pipe. A warning says so.
+3. If Task Scheduler cannot be used, from the SSH session as before (through
+   `runas /trustlevel:0x20000` for an elevated caller), with a warning about junctions.
+
+A task receives nothing from its creator, so the script leaves the command line, directory, and
+environment in a request file under `%LOCALAPPDATA%\emdash-ws-launch`. The task claims the file by
+renaming it, deletes it, and reports through a result file. A running daemon is never replaced by
+a new install: stop it (or restart the computer) to pick up a launcher change.
+
 Node listens on named pipes, not Unix sockets, on Windows. The daemon listens on
 `\\.\pipe\emdash-workspace-server-<uuid>` and writes that name into the endpoint record at the
 well-known socket path (`apps/workspace-server/src/daemon/endpoint.ts`). The random name prevents
@@ -132,6 +152,12 @@ under Windows PowerShell 5.1 before `publish` may run.
 - Long paths beyond `MAX_PATH` depend on the machine's `LongPathsEnabled` policy and Git's
   `core.longpaths`.
 - The daemon launch needs WMI (`Win32_Process.Create`) to be available to the user.
+- A daemon started with the interactive token belongs to that sign-in session and stops when the
+  user signs out; the next connection starts a new one. A console window may flash on the desktop
+  when it starts.
+- A standard user who is not signed in cannot use the background task (it needs the "Log on as a
+  batch job" right), so their daemon runs from the SSH session and cannot follow junctions they
+  created.
 - `AllSigned` execution policy and ConstrainedLanguage mode block setup; Chorus reports them but
   cannot work around them.
 - The workspace connection needs only SSH exec channels. Workspace preview port forwarding still

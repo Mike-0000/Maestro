@@ -5,6 +5,57 @@ import {
 } from '@emdash/core/primitives/exec/api';
 import { err, ok, type Result } from '@emdash/shared';
 
+/** Creates the process through WMI and returns `<return value> <pid>`. Shared by both scripts. */
+const CREATE_PROCESS_FUNCTION = [
+  'function Invoke-EmdashCreate($commandLine, $directory, [string[]]$variables) {',
+  '  $startupClass = Get-CimClass -ClassName Win32_ProcessStartup',
+  '  $startup = New-CimInstance -CimClass $startupClass -ClientOnly -Property @{',
+  '    ShowWindow = [uint16]0',
+  '    EnvironmentVariables = $variables',
+  '  }',
+  '  $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{',
+  '    CommandLine = $commandLine',
+  '    CurrentDirectory = $directory',
+  '    ProcessStartupInformation = $startup',
+  '  }',
+  "  return ('{0} {1}' -f [int]$result.ReturnValue, [int]$result.ProcessId)",
+  '}',
+];
+
+/** Where launch requests wait for the scheduled task that carries them out. */
+const REQUEST_DIRECTORY =
+  "Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'emdash-ws-launch'";
+
+/**
+ * Runs inside the one-shot scheduled task. A task receives no environment or arguments from the
+ * caller, so it claims the request file the caller left (renaming it first, so a request is
+ * launched once), creates the process, and reports through a result file renamed into place.
+ * Requests older than two minutes are leftovers of a caller that died and are discarded.
+ */
+export const LAUNCH_TASK_SCRIPT = [
+  "$ErrorActionPreference = 'Stop'",
+  "$ProgressPreference = 'SilentlyContinue'",
+  ...CREATE_PROCESS_FUNCTION,
+  `$directory = ${REQUEST_DIRECTORY}`,
+  "foreach ($spec in @(Get-ChildItem -LiteralPath $directory -Filter '*.spec' -File)) {",
+  '  if ($spec.LastWriteTimeUtc -lt [DateTime]::UtcNow.AddMinutes(-2)) {',
+  '    Remove-Item -LiteralPath $spec.FullName -Force -ErrorAction SilentlyContinue',
+  '    continue',
+  '  }',
+  "  $claimed = $spec.FullName + '.claimed'",
+  '  try { Move-Item -LiteralPath $spec.FullName -Destination $claimed } catch { continue }',
+  "  $resultPath = [IO.Path]::ChangeExtension($spec.FullName, '.result')",
+  '  try {',
+  '    $request = [IO.File]::ReadAllText($claimed) | ConvertFrom-Json',
+  '    $variables = [string[]]$request.variables',
+  '    $line = Invoke-EmdashCreate $request.commandLine $request.directory $variables',
+  "  } catch { $line = 'E ' + $_.Exception.Message }",
+  '  Remove-Item -LiteralPath $claimed -Force -ErrorAction SilentlyContinue',
+  "  [IO.File]::WriteAllText($resultPath + '.tmp', $line)",
+  "  Move-Item -LiteralPath ($resultPath + '.tmp') -Destination $resultPath -Force",
+  '}',
+].join('\n');
+
 /**
  * Windows OpenSSH runs each session's processes inside a job object that is closed with the
  * session, and Node's `detached` spawn does not break away from it. A daemon started directly from
@@ -12,43 +63,96 @@ import { err, ok, type Result } from '@emdash/shared';
  * create the process makes the WMI provider host its parent, outside the session's job, while it
  * still runs as the connecting user.
  *
- * An SSH logon of an administrator is elevated, and a daemon it starts would create its named pipe
- * with an Administrators-only DACL that the same user's non-elevated desktop app cannot open. When
- * the caller is elevated, the script re-runs itself through `runas /trustlevel:0x20000` (a Basic
- * User SAFER token: same user, Administrators deny-only), so both can reach the daemon's pipe.
- * That hop is asynchronous, so the de-elevated copy reports through a result file. If it fails, the
- * daemon is created elevated as before and a `W ` line explains why.
+ * That is not enough on its own. `sshd` enforces the redirection-guard mitigation, every process
+ * started from the session inherits it (through WMI and `runas` too), and a guarded process cannot
+ * follow a junction that a non-administrator created: "The path cannot be traversed because it
+ * contains an untrusted mount point". pnpm's `node_modules` and many agent CLI installs use such
+ * junctions, so a guarded daemon cannot run agents or builds that work locally. An administrator's
+ * SSH logon is also elevated, and its daemon would create a named pipe with an Administrators-only
+ * DACL that the same user's non-elevated desktop app cannot open.
  *
- * The script is constant. The command line, working directory, and the script's own encoding reach
- * it through environment variables, so no caller-controlled text is ever parsed as PowerShell.
+ * So the script first asks Task Scheduler, which is outside the SSH session, to do the WMI create
+ * from a one-shot task: with the user's interactive token when they are signed in (not elevated,
+ * unguarded), otherwise with a background S4U token (unguarded, but elevated for administrators).
+ * If neither works it falls back to the guarded launch and a `W ` line says so: through
+ * `runas /trustlevel:0x20000` (a Basic User SAFER token: same user, Administrators deny-only) when
+ * the caller is elevated, so a local app can still reach the pipe, or directly otherwise.
+ *
+ * Both scripts are constant. The command line, working directory, environment, and the scripts'
+ * own encodings reach them through environment variables or the request file, so no
+ * caller-controlled text is ever parsed as PowerShell.
  */
 export const LAUNCH_OUTSIDE_SESSION_SCRIPT = [
   "$ErrorActionPreference = 'Stop'",
   "$ProgressPreference = 'SilentlyContinue'",
-  'function Invoke-EmdashLaunch {',
-  "  $variables = New-Object 'System.Collections.Generic.List[string]'",
-  '  foreach ($entry in [Environment]::GetEnvironmentVariables().GetEnumerator()) {',
-  '    $name = [string]$entry.Key',
-  "    if ($name.StartsWith('=') -or $name.StartsWith('EMDASH_WS_LAUNCH_')) { continue }",
-  "    $variables.Add($name + '=' + [string]$entry.Value)",
+  ...CREATE_PROCESS_FUNCTION,
+  // Leaves a request for the task, runs the task, and returns its result line. Throws when the
+  // task never picked the request up (for example the user is not signed in).
+  'function Invoke-EmdashTaskLaunch($request, $logonType, $powershell) {',
+  `  $directory = ${REQUEST_DIRECTORY}`,
+  '  New-Item -ItemType Directory -Force -Path $directory | Out-Null',
+  "  $id = [guid]::NewGuid().ToString('N')",
+  "  $specPath = Join-Path $directory ($id + '.spec')",
+  "  $resultPath = Join-Path $directory ($id + '.result')",
+  "  $taskName = 'emdash-ws-launch-' + $id",
+  "  $flags = '-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand '",
+  '  try {',
+  "    [IO.File]::WriteAllText($specPath + '.tmp', ($request | ConvertTo-Json -Compress))",
+  "    Move-Item -LiteralPath ($specPath + '.tmp') -Destination $specPath -Force",
+  '    $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name',
+  '    $argument = $flags + $env:EMDASH_WS_LAUNCH_TASK',
+  '    $action = New-ScheduledTaskAction -Execute $powershell -Argument $argument',
+  '    $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType $logonType -RunLevel Limited',
+  '    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries',
+  '    $task = New-ScheduledTask -Action $action -Principal $principal -Settings $settings',
+  '    Register-ScheduledTask -TaskName $taskName -InputObject $task -Force | Out-Null',
+  '    Start-ScheduledTask -TaskName $taskName',
+  '    $deadline = [DateTime]::UtcNow.AddSeconds(8)',
+  '    while (-not (Test-Path -LiteralPath $resultPath) -and [DateTime]::UtcNow -lt $deadline) {',
+  '      Start-Sleep -Milliseconds 100',
+  '    }',
+  '    if (-not (Test-Path -LiteralPath $resultPath)) {',
+  // Withdraw the request. If it is already gone the task claimed it, so the launch is under way
+  // and must be waited for: starting another one would run two daemons.
+  '      $withdrawn = $true',
+  '      try {',
+  "        Move-Item -LiteralPath $specPath -Destination ($specPath + '.withdrawn')",
+  '      } catch { $withdrawn = $false }',
+  "      if ($withdrawn) { throw 'the task did not start' }",
+  '      $deadline = [DateTime]::UtcNow.AddSeconds(25)',
+  '      while (-not (Test-Path -LiteralPath $resultPath) -and [DateTime]::UtcNow -lt $deadline) {',
+  '        Start-Sleep -Milliseconds 100',
+  '      }',
+  "      if (-not (Test-Path -LiteralPath $resultPath)) { return 'E the task did not report back' }",
+  '    }',
+  '    return [IO.File]::ReadAllText($resultPath).Trim()',
+  '  } finally {',
+  '    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue',
+  "    foreach ($suffix in @('.spec', '.spec.tmp', '.spec.withdrawn', '.spec.claimed', '.result')) {",
+  '      $leftover = Join-Path $directory ($id + $suffix)',
+  '      Remove-Item -LiteralPath $leftover -Force -ErrorAction SilentlyContinue',
+  '    }',
   '  }',
-  '  $startupClass = Get-CimClass -ClassName Win32_ProcessStartup',
-  '  $startup = New-CimInstance -CimClass $startupClass -ClientOnly -Property @{',
-  '    ShowWindow = [uint16]0',
-  '    EnvironmentVariables = $variables.ToArray()',
-  '  }',
-  '  $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{',
-  '    CommandLine = $env:EMDASH_WS_LAUNCH_COMMAND_LINE',
-  '    CurrentDirectory = $env:EMDASH_WS_LAUNCH_DIRECTORY',
-  '    ProcessStartupInformation = $startup',
-  '  }',
-  "  return ('{0} {1}' -f [int]$result.ReturnValue, [int]$result.ProcessId)",
+  '}',
+  "$variables = New-Object 'System.Collections.Generic.List[string]'",
+  'foreach ($entry in [Environment]::GetEnvironmentVariables().GetEnumerator()) {',
+  '  $name = [string]$entry.Key',
+  "  if ($name.StartsWith('=') -or $name.StartsWith('EMDASH_WS_LAUNCH_')) { continue }",
+  "  $variables.Add($name + '=' + [string]$entry.Value)",
+  '}',
+  '$request = [pscustomobject]@{',
+  '  commandLine = $env:EMDASH_WS_LAUNCH_COMMAND_LINE',
+  '  directory = $env:EMDASH_WS_LAUNCH_DIRECTORY',
+  '  variables = $variables.ToArray()',
+  '}',
+  'function Invoke-EmdashDirectLaunch {',
+  '  return Invoke-EmdashCreate $request.commandLine $request.directory $request.variables',
   '}',
   // The de-elevated copy: report through the result file, renamed into place so the elevated
   // copy never reads a partial write.
   '$resultPath = $env:EMDASH_WS_LAUNCH_RESULT',
   'if ($resultPath) {',
-  "  try { $line = Invoke-EmdashLaunch } catch { $line = 'E ' + $_.Exception.Message }",
+  "  try { $line = Invoke-EmdashDirectLaunch } catch { $line = 'E ' + $_.Exception.Message }",
   "  [IO.File]::WriteAllText($resultPath + '.tmp', $line)",
   "  Move-Item -LiteralPath ($resultPath + '.tmp') -Destination $resultPath -Force",
   '  exit 0',
@@ -56,15 +160,42 @@ export const LAUNCH_OUTSIDE_SESSION_SCRIPT = [
   '$principal = New-Object Security.Principal.WindowsPrincipal(',
   '  [Security.Principal.WindowsIdentity]::GetCurrent()',
   ')',
-  'if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {',
-  '  [Console]::Out.Write((Invoke-EmdashLaunch))',
+  '$elevated = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)',
+  "$powershell = Join-Path ([Environment]::SystemDirectory) 'WindowsPowerShell\\v1.0\\powershell.exe'",
+  "$encodedPattern = '^[A-Za-z0-9+/=]+$'",
+  '$taskFailures = @()',
+  'if ($env:EMDASH_WS_LAUNCH_TASK -notmatch $encodedPattern) {',
+  "  $taskFailures += 'the task command could not be formed'",
+  '} else {',
+  "  foreach ($logonType in @('Interactive', 'S4U')) {",
+  '    try {',
+  '      $line = Invoke-EmdashTaskLaunch $request $logonType $powershell',
+  "      if ($line -match '^0 [1-9][0-9]*$') {",
+  '        [Console]::Out.Write($line)',
+  "        if ($logonType -eq 'S4U' -and $elevated) {",
+  "          $note = 'W The workspace server was started elevated because this user is not signed '",
+  "          $note += 'in at the computer, so a non-elevated app on this computer cannot connect '",
+  "          $note += 'to it.'",
+  '          [Console]::Out.Write([Environment]::NewLine + $note)',
+  '        }',
+  '        exit 0',
+  '      }',
+  "      $taskFailures += $logonType + ' task reported: ' + $line",
+  "    } catch { $taskFailures += $logonType + ' task: ' + $_.Exception.Message }",
+  '  }',
+  '}',
+  "$guardNote = 'W The workspace server could not be started through Task Scheduler ('",
+  "$guardNote += ($taskFailures -join '; ') + '). It was started from the SSH session instead, '",
+  "$guardNote += 'where Windows blocks folder links (junctions) made by non-administrators, so '",
+  "$guardNote += 'agents and builds may fail with an untrusted mount point error.'",
+  'if (-not $elevated) {',
+  '  [Console]::Out.Write((Invoke-EmdashDirectLaunch) + [Environment]::NewLine + $guardNote)',
   '  exit 0',
   '}',
   '$warning = $null',
   "$resultName = 'emdash-ws-launch-' + [guid]::NewGuid().ToString('N') + '.txt'",
   '$resultPath = Join-Path ([IO.Path]::GetTempPath()) $resultName',
-  "$powershell = Join-Path ([Environment]::SystemDirectory) 'WindowsPowerShell\\v1.0\\powershell.exe'",
-  "if ($powershell -match '[\\s\"]' -or $env:EMDASH_WS_LAUNCH_SELF -notmatch '^[A-Za-z0-9+/=]+$') {",
+  "if ($powershell -match '[\\s\"]' -or $env:EMDASH_WS_LAUNCH_SELF -notmatch $encodedPattern) {",
   "  $warning = 'the de-elevated launch command could not be formed'",
   '} else {',
   // runas takes one command line; it holds only a quote-free path and base64, so no quoting.
@@ -79,24 +210,27 @@ export const LAUNCH_OUTSIDE_SESSION_SCRIPT = [
   '  if ($runasExit -ne 0) {',
   "    $warning = 'runas /trustlevel failed (exit ' + $runasExit + '): ' + $runasOutput.Trim()",
   '  } else {',
-  '    $deadline = [DateTime]::UtcNow.AddSeconds(40)',
+  '    $deadline = [DateTime]::UtcNow.AddSeconds(25)',
   '    while (-not (Test-Path -LiteralPath $resultPath) -and [DateTime]::UtcNow -lt $deadline) {',
   '      Start-Sleep -Milliseconds 100',
   '    }',
   '    if (Test-Path -LiteralPath $resultPath) {',
   '      $line = [IO.File]::ReadAllText($resultPath).Trim()',
   '      Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue',
-  "      if ($line -match '^0 [1-9][0-9]*$') { [Console]::Out.Write($line); exit 0 }",
+  "      if ($line -match '^0 [1-9][0-9]*$') {",
+  '        [Console]::Out.Write($line + [Environment]::NewLine + $guardNote)',
+  '        exit 0',
+  '      }',
   "      $warning = 'the de-elevated launch reported: ' + $line",
   '    } else {',
-  "      $warning = 'the de-elevated launch did not report back within 40 seconds'",
+  "      $warning = 'the de-elevated launch did not report back within 25 seconds'",
   '    }',
   '  }',
   '}',
-  '$line = Invoke-EmdashLaunch',
   "$note = 'W The workspace server was started elevated, so a non-elevated app on this computer '",
   "$note += 'cannot connect to it: ' + $warning",
-  '[Console]::Out.Write($line + [Environment]::NewLine + $note)',
+  '$newLine = [Environment]::NewLine',
+  '[Console]::Out.Write((Invoke-EmdashDirectLaunch) + $newLine + $guardNote + $newLine + $note)',
 ].join('\n');
 
 export type PowerShellRunner = (
@@ -130,6 +264,7 @@ export function createOutsideSessionLauncher(
         EMDASH_WS_LAUNCH_COMMAND_LINE: formatWindowsCommandLine(argv),
         EMDASH_WS_LAUNCH_DIRECTORY: options.cwd,
         EMDASH_WS_LAUNCH_SELF: encoded,
+        EMDASH_WS_LAUNCH_TASK: encodePowerShellCommand(LAUNCH_TASK_SCRIPT),
       });
     } catch (error) {
       return err(`could not run powershell.exe: ${errorMessage(error)}`);
@@ -176,7 +311,7 @@ function runWindowsPowerShell(
         '-EncodedCommand',
         encodedCommand,
       ],
-      { encoding: 'utf8', env, timeout: 60_000, windowsHide: true, maxBuffer: 256 * 1024 },
+      { encoding: 'utf8', env, timeout: 90_000, windowsHide: true, maxBuffer: 256 * 1024 },
       (error, stdout, stderr) => {
         if (error && typeof error.code !== 'number') {
           reject(error);
