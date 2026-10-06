@@ -1,5 +1,54 @@
 import { describe, expect, it } from 'vitest';
+import { CLAUDE_DELEGATION_POLICY } from './delegation';
 import { provider } from './index';
+
+describe('claude provider delegation policy', () => {
+  const context = {
+    cli: 'claude',
+    autoApprove: false,
+    sessionId: '6f1c2f0e-7d1b-4c43-9a55-2d4b0e1f3a10',
+    providerSessionId: undefined,
+    model: '',
+  };
+  const policyArgs = ['--append-system-prompt', CLAUDE_DELEGATION_POLICY];
+
+  it('is one line, so a Windows command line carries it whole', () => {
+    expect(CLAUDE_DELEGATION_POLICY).not.toMatch(/[\r\n"]/);
+  });
+
+  it('is appended to the system prompt ahead of the prompt on a fresh session', () => {
+    const { args } = provider.behavior.prompt!.buildCommand({
+      ...context,
+      isResuming: false,
+      initialPrompt: 'refactor the parser',
+    });
+    expect(args.slice(-3)).toEqual([...policyArgs, 'refactor the parser']);
+  });
+
+  it('is sent again on resume, since Claude does not persist it', () => {
+    const { args } = provider.behavior.prompt!.buildCommand({ ...context, isResuming: true });
+    expect(args).toEqual(['--resume', context.sessionId, ...policyArgs]);
+  });
+
+  it.each([['--append-system-prompt', 'mine'], ['--system-prompt-file=/tmp/prompt.md']])(
+    "leaves the user's own system prompt alone (%s)",
+    (...extraArgs) => {
+      const { args } = provider.behavior.prompt!.buildCommand({
+        ...context,
+        isResuming: false,
+        extraArgs,
+      });
+      expect(args).not.toContain(CLAUDE_DELEGATION_POLICY);
+      expect(args.slice(-extraArgs.length)).toEqual(extraArgs);
+    }
+  );
+
+  it('reaches ACP sessions through the adapter system prompt', () => {
+    expect(provider.behavior.acp!.sessionMeta!()).toEqual({
+      systemPrompt: { append: CLAUDE_DELEGATION_POLICY },
+    });
+  });
+});
 
 describe('claude provider session MCP', () => {
   const launch = {

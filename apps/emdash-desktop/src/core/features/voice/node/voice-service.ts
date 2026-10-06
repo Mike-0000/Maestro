@@ -11,6 +11,7 @@ import {
   type VoiceSettings,
   type VoiceStatus,
 } from '../api/contract';
+import { HOLD_KEY_OFF, HoldComboTracker, holdComboKeycodes } from '../api/global-keys';
 import { HoldToTalkMachine, type HoldOutput } from '../api/hold-to-talk';
 import { DeepgramSttEngine } from './engines/deepgram';
 import { DeepgramStream } from './engines/deepgram-stream';
@@ -24,13 +25,6 @@ import { OPENROUTER_TTS_MODELS, streamOpenRouterTts } from './openrouter-tts';
 
 /** RIFF header (44 bytes) plus at least ~0.2 s of 16 kHz 16-bit audio. */
 const MIN_WAV_BYTES = 44 + 6400;
-/** uiohook key codes for the supported hold keys (libuiohook VC_* values). */
-const HOLD_KEYCODES: Record<VoiceSettings['globalHoldKey'], number | null> = {
-  off: null,
-  'right-ctrl': 3613,
-  'right-alt': 3640,
-};
-const SHIFT_KEYCODES = new Set([42, 54]);
 
 /**
  * A stream left open longer than this (a stuck key, a crashed renderer) is dropped. Click-to-talk
@@ -43,7 +37,7 @@ export class VoiceService {
   private readonly settings: JsonSettingsFile<VoiceSettings>;
   private readonly engines: Record<SttEngineId, SttEngine>;
   private registeredShortcut: string | null = null;
-  private holdKey: number | null = null;
+  private holdActive = false;
   private readonly hold: HoldToTalkMachine;
   private readonly ttsRequests = new Map<string, AbortController>();
   private localTts: LocalTts | null = null;
@@ -88,7 +82,7 @@ export class VoiceService {
   dispose(): void {
     for (const id of [...this.ttsRequests.keys()]) this.stopTts(id);
     for (const id of [...this.streams.keys()]) this.abortStream(id);
-    this.applyGlobalHold('off');
+    this.applyGlobalHold(HOLD_KEY_OFF);
     if (this.registeredShortcut) this.host.globalShortcuts.unregister(this.registeredShortcut);
     this.registeredShortcut = null;
   }
@@ -98,7 +92,7 @@ export class VoiceService {
       settings: await this.settings.read(),
       credentials: await this.credentials.presence(),
       globalShortcutRegistered: this.registeredShortcut !== null,
-      globalHoldActive: this.holdKey !== null,
+      globalHoldActive: this.holdActive,
     };
   }
 
@@ -282,22 +276,20 @@ export class VoiceService {
 
   /** Starts or stops the system-wide key hook for global hold-to-talk. */
   private applyGlobalHold(key: VoiceSettings['globalHoldKey']): void {
-    if (this.holdKey !== null) {
+    if (this.holdActive) {
       this.host.keyboardHook.stop();
       this.hold.reset();
-      this.holdKey = null;
+      this.holdActive = false;
     }
-    const keycode = HOLD_KEYCODES[key];
-    if (keycode === null) return;
-    const started = this.host.keyboardHook.start(({ type, keycode: pressed }) => {
-      if (pressed === keycode) {
-        if (type === 'down') this.hold.talkDown(false);
-        else this.hold.talkUp();
-      } else if (type === 'down') {
-        this.hold.otherDown(SHIFT_KEYCODES.has(pressed));
-      }
-    });
-    if (started) this.holdKey = keycode;
+    if (key.trim() === HOLD_KEY_OFF || !key.trim()) return;
+    const keycodes = holdComboKeycodes(key);
+    if (!keycodes) {
+      this.logger.warn('voice: unsupported global hold-to-talk key', { key });
+      return;
+    }
+    const tracker = new HoldComboTracker(keycodes, this.hold);
+    const started = this.host.keyboardHook.start((event) => tracker.onKey(event));
+    if (started) this.holdActive = true;
     else this.logger.warn('voice: global hold-to-talk could not start');
   }
 

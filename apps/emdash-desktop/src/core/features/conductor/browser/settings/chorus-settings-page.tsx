@@ -4,12 +4,20 @@ import { observer } from 'mobx-react-lite';
 import { useEffect, useState } from 'react';
 import { getCanvasStore } from '@core/features/canvas/contributions/browser/app-stores';
 import { getMachinesClient } from '@core/features/machines/api/browser/client';
+import {
+  acceleratorFromCodes,
+  acceleratorLabel,
+  HOLD_KEY_OFF,
+  holdComboFromCodes,
+  holdComboLabel,
+} from '@core/features/voice/api/global-keys';
 import { getVoiceStore } from '@core/features/voice/contributions/browser/app-stores';
 import type { ChorusCredentialId } from '@core/primitives/chorus-host/api/credentials';
 import { copyTextToClipboard } from '@core/primitives/desktop-host/browser/host-client';
 import { getConductorClient } from '../../api/browser/client';
 import type { SystemChecks } from '../../api/contract';
 import { getConductorStore } from '../../contributions/browser/app-stores';
+import { KeyCaptureControl } from './key-capture-control';
 
 function DiagnosticControls({ enabled }: { enabled: boolean }) {
   const conductor = getConductorStore();
@@ -99,12 +107,6 @@ const JEV_SOURCE_LABELS = {
   auto: 'Auto',
   openrouter: 'OpenRouter',
   typesafe: 'TypeSafe',
-} as const;
-
-const HOLD_KEY_LABELS = {
-  off: 'Only in Maestro',
-  'right-ctrl': 'Right Ctrl',
-  'right-alt': 'Right Alt',
 } as const;
 
 const EFFORT_LABELS = {
@@ -309,46 +311,43 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
         <SettingsRow
           label="Hold to talk anywhere"
           description={
-            voiceSettings?.globalHoldKey !== 'off' && voice.status && !voice.status.globalHoldActive
+            voiceSettings &&
+            voiceSettings.globalHoldKey !== HOLD_KEY_OFF &&
+            voice.status &&
+            !voice.status.globalHoldActive
               ? 'The system keyboard hook could not start; hold-to-talk works only inside Maestro.'
-              : 'Hold this key in any app to talk to Maestro. Maestro only watches for this key; it never records what you type.'
+              : 'Click, then press the key or keys to hold in any app to talk to Maestro. Off: hold-to-talk works only inside Maestro. Maestro only watches for these keys; it never records what you type.'
           }
           control={
-            <Select.Root
-              value={voiceSettings?.globalHoldKey ?? 'off'}
+            <KeyCaptureControl
+              label={holdComboLabel(voiceSettings?.globalHoldKey ?? HOLD_KEY_OFF)}
+              ariaLabel="Hold to talk anywhere key"
               disabled={!voiceSettings}
-              onValueChange={(globalHoldKey) => {
-                if (globalHoldKey) void voice.updateSettings({ globalHoldKey });
-              }}
-            >
-              <Select.Trigger className="w-[160px]">
-                <Select.Value>
-                  {HOLD_KEY_LABELS[voiceSettings?.globalHoldKey ?? 'off']}
-                </Select.Value>
-              </Select.Trigger>
-              <Select.Content align="end">
-                {Object.entries(HOLD_KEY_LABELS).map(([id, label]) => (
-                  <Select.Item key={id} value={id}>
-                    {label}
-                  </Select.Item>
-                ))}
-              </Select.Content>
-            </Select.Root>
+              resolve={holdComboFromCodes}
+              onCommit={(globalHoldKey) => void voice.updateSettings({ globalHoldKey })}
+              onClear={() => void voice.updateSettings({ globalHoldKey: HOLD_KEY_OFF })}
+            />
           }
         />
         <SettingsRow
           label="Global talk shortcut"
           description={
-            voice.status && !voice.status.globalShortcutRegistered
-              ? 'Another app owns this shortcut. Pick a different one.'
-              : 'Toggles listening from anywhere in Windows. In the app you can also hold Right Ctrl.'
+            voiceSettings?.globalShortcut && voice.status && !voice.status.globalShortcutRegistered
+              ? 'Windows would not register this shortcut: another app owns it, or the key cannot be a global shortcut. Record a different one.'
+              : 'Toggles listening from anywhere in Windows. Click, then press a key or a combination such as Num Lock or Ctrl + Alt + Space. In the app you can also hold Right Ctrl.'
           }
           control={
-            <CommitInput
-              value={voiceSettings?.globalShortcut ?? ''}
+            <KeyCaptureControl
+              label={
+                voiceSettings?.globalShortcut
+                  ? acceleratorLabel(voiceSettings.globalShortcut)
+                  : null
+              }
               ariaLabel="Global talk shortcut"
-              placeholder="Control+Alt+Space"
+              disabled={!voiceSettings}
+              resolve={acceleratorFromCodes}
               onCommit={(globalShortcut) => void voice.updateSettings({ globalShortcut })}
+              onClear={() => void voice.updateSettings({ globalShortcut: '' })}
             />
           }
         />

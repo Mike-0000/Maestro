@@ -27,6 +27,10 @@ export type NotificationType =
  *   May also carry `providerSessionId` when the provider includes its session id in
  *   every hook payload; the runtime adopts it whenever it differs from the stored id,
  *   so an in-session switch (Claude's `/resume`) is tracked without a dedicated event.
+ *   `backgroundWork` (stop only) lists the ids of in-flight background work — shells,
+ *   subagents, one-shot wakeups — that will wake the session when it settles: the turn ended
+ *   but the agent is waiting, not done. `initiator` (start only) is 'background' when such a
+ *   wake-up, rather than the user, opened the turn.
  * - kind: 'session' — carries a provider session id to persist on the conversation
  * - kind: 'ignore'  — event should be silently dropped
  */
@@ -39,6 +43,8 @@ export type CanonicalHookEvent =
       message?: string;
       lastAssistantMessage?: string;
       providerSessionId?: string;
+      backgroundWork?: string[];
+      initiator?: 'user' | 'background';
     }
   | { kind: 'session'; providerSessionId: string }
   | { kind: 'ignore' };

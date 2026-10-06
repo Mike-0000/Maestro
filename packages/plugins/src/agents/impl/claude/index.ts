@@ -12,6 +12,7 @@ import { resolveAdapterAsset } from '../../helpers/adapter-assets';
 import { enrichClaudeUpdate } from './acp-transform';
 import { claudeAdapter } from './adapter';
 import { claudeAuthStatus } from './auth';
+import { CLAUDE_DELEGATION_POLICY, withDelegationPolicy } from './delegation';
 import { buildClaudeHookConfig } from './hooks';
 import { icon } from './icon';
 import { buildClaudeTrustBehavior } from './trust';
@@ -154,19 +155,23 @@ export const provider = registerPluginBehavior(plugin, {
       return connectStdioAcp(io, toClient);
     },
     enrich: enrichClaudeUpdate,
+    sessionMeta: () => ({ systemPrompt: { append: CLAUDE_DELEGATION_POLICY } }),
   },
   auth: {
     checkStatus: claudeAuthStatus,
   },
   prompt: {
     buildCommand: (ctx) =>
-      buildStandardCommand(ctx, {
-        autoApproveFlag: '--dangerously-skip-permissions',
-        initialPromptFlag: '',
-        resumeFlag: '--resume',
-        sessionIdFlag: '--session-id',
-        modelFlag: '--model',
-      }),
+      buildStandardCommand(
+        { ...ctx, extraArgs: withDelegationPolicy(ctx.extraArgs) },
+        {
+          autoApproveFlag: '--dangerously-skip-permissions',
+          initialPromptFlag: '',
+          resumeFlag: '--resume',
+          sessionIdFlag: '--session-id',
+          modelFlag: '--model',
+        }
+      ),
   },
   hooks: buildClaudeHookConfig(),
   mcp: {

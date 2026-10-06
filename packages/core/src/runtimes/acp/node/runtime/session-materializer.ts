@@ -99,6 +99,7 @@ export class SessionMaterializer {
       connection.mcpCapabilities
     );
     const mcpServerSummary = summarizeAcpMcpServers(mcpServers);
+    const sessionMeta = binding.behavior.sessionMeta?.();
     const processOwner = routeOwnerId(connection.key, connection.generation);
     let record: SessionRecord | null = null;
     let resumeOutcome: SessionRecord['resumeOutcome'] = null;
@@ -133,7 +134,7 @@ export class SessionMaterializer {
           record.cell.beginReplay();
           const response = await abortable(
             connection.agent.loadSession(
-              this.buildLoadSessionRequest(input.cwd, input.sessionId, mcpServers)
+              this.buildLoadSessionRequest(input.cwd, input.sessionId, mcpServers, sessionMeta)
             ),
             signal
           );
@@ -180,7 +181,9 @@ export class SessionMaterializer {
         let response;
         try {
           response = await abortable(
-            connection.agent.newSession(this.buildNewSessionRequest(input.cwd, mcpServers)),
+            connection.agent.newSession(
+              this.buildNewSessionRequest(input.cwd, mcpServers, sessionMeta)
+            ),
             signal
           );
         } catch (error) {
@@ -447,17 +450,19 @@ export class SessionMaterializer {
 
   private buildNewSessionRequest(
     cwd: string,
-    mcpServers: NewSessionRequest['mcpServers']
+    mcpServers: NewSessionRequest['mcpServers'],
+    meta?: Record<string, unknown>
   ): NewSessionRequest {
-    return { cwd, mcpServers };
+    return { cwd, mcpServers, ...(meta ? { _meta: meta } : {}) };
   }
 
   private buildLoadSessionRequest(
     cwd: string,
     sessionId: string,
-    mcpServers: LoadSessionRequest['mcpServers']
+    mcpServers: LoadSessionRequest['mcpServers'],
+    meta?: Record<string, unknown>
   ): LoadSessionRequest {
-    return { cwd, sessionId, mcpServers };
+    return { cwd, sessionId, mcpServers, ...(meta ? { _meta: meta } : {}) };
   }
 }
 

@@ -29,6 +29,18 @@ installed by the `tui-agents` runtime in `packages/core/src/runtimes/tui-agents/
 does not infer agent status from terminal output. If a provider has no hook/plugin integration
 for an event, the renderer should not show or notify an inferred status for that event.
 
+A provider's turn-end hook is not always completion. A plugin's `parseHookEvent` may report
+`backgroundWork` on a `stop` event: the ids of in-flight work (background shells, subagents,
+one-shot scheduled wakeups) that will wake the session when it settles. The runtime then keeps the
+agent `working` with `awaitingBackgroundWork` set instead of `completed`, so no completion
+notification fires, and it ignores the provider's `idle_prompt` reminder while that work is
+awaited; permission and elicitation prompts still surface. A `start` event with
+`initiator: 'background'` marks the wake-up turn. A turn the user opens acknowledges whatever was
+already running, so a long-lived process such as a dev server holds back only the turn that
+launched it. Claude Code is the provider that reports this today, from the `background_tasks` and
+`session_crons` fields of its `Stop` payload; it also classifies `Notification` payloads by
+`notification_type`, dropping informational ones rather than reporting them as waiting for input.
+
 Shipped hook integrations install into user-global provider configuration, never into a task
 worktree. The provider behavior resolves its root from the same allowlisted environment passed to
 the CLI, including provider-specific home overrides and XDG/APPDATA conventions. Paths returned by
@@ -105,6 +117,12 @@ you select an OrcaRouter model from the OpenCode model picker.
 - Qwen Code hooks use the documented Qwen settings schema in `$QWEN_HOME/settings.json` (falling back to `~/.qwen/settings.json`). Emdash installs command hooks for permission requests and session end/stop events while preserving unrelated user hooks.
 - Antigravity CLI installs lifecycle hooks in `~/.gemini/config/plugins/emdash/` to report
   working and completion status while preserving existing user hooks.
+- Claude Code is launched with a sub-agent delegation policy appended to its system prompt
+  (`packages/plugins/src/agents/impl/claude/delegation.ts`): its Agent tool otherwise tells the
+  model not to spawn sub-agents unless the user asks. The TUI path passes `--append-system-prompt`
+  on fresh and resumed launches; the ACP path sends it as `_meta.systemPrompt.append` through the
+  plugin's `acp.sessionMeta`. A user who sets their own system-prompt flag in "Additional
+  parameters" keeps it and the policy is not added.
 - Muse Code installs managed hooks through `managed_hooks_path` in `settings.json`.
   `SessionStart`, `UserPromptSubmit`, and `Stop` report session, working, and completion events.
   `managed_hooks_env_vars` forwards the Emdash hook routing variables.

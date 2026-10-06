@@ -92,6 +92,12 @@ export interface IAcpBehavior {
    */
   enrich?: EnrichHook;
 
+  /**
+   * Provider-specific `_meta` sent with every new and loaded session, e.g. an addition to the
+   * adapter's system prompt. Omit to send none.
+   */
+  sessionMeta?(): Record<string, unknown>;
+
   /** Adapt provider terminal semantics; omitted means literal executable + argv. */
   terminalCommand?(request: Pick<CreateTerminalRequest, 'command' | 'args'>): CommandSpec;
 }

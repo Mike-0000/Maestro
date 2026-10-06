@@ -40,14 +40,14 @@ describe('voice interaction capture', () => {
     });
     transcribe.mockResolvedValueOnce({
       success: true,
-      data: { text: 'Chorus, take a note: ship it', latencyMs: 20, engine: 'whisper-local' },
+      data: { text: 'Maestro, take a note: ship it', latencyMs: 20, engine: 'whisper-local' },
     });
     await store.startListening('toggle', 'command', 'hands-free');
     await store.stopListening();
     expect(commands).toHaveLength(1);
     expect(commands[0]?.text).toBe('take a note: ship it');
     expect(events.find((event) => event.kind === 'stt-final')?.text).toBe(
-      'Chorus, take a note: ship it'
+      'Maestro, take a note: ship it'
     );
     expect(events[0]?.interactionId).toBe(commands[0]?.id);
 
