@@ -563,7 +563,9 @@ const CanvasSurface = observer(function CanvasSurface() {
   const store = getCanvasStore();
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
   return (
-    <div ref={setContainer} className="relative h-full w-full overflow-hidden">
+    // `isolate`: the stage's z-index must stay inside the canvas. App browser pages are drawn by
+    // `BrowserSurfaceHost` at the workspace shell (z-5) and have to paint above the stage.
+    <div ref={setContainer} className="relative isolate h-full w-full overflow-hidden">
       <div
         className={cn('h-full w-full', store.stageActive && 'invisible')}
         aria-hidden={store.stageActive}
