@@ -5,7 +5,7 @@
 # file into the install root's staging directory and runs it with a process-scope
 # `-ExecutionPolicy Bypass` (a Group Policy execution policy still applies). It never runs it from
 # memory: antivirus products block download-and-execute one-liners. It is also safe to run by hand:
-#   powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Version 0.1.9
+#   powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Version 0.1.10
 #
 # Layout (under %USERPROFILE%\.emdash\workspace-server unless -InstallRoot is given):
 #   versions\<version>\   extracted artifact (node.exe, dist\index.mjs, bin\rg.exe, ...)

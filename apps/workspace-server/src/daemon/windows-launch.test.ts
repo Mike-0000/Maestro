@@ -6,6 +6,7 @@ import {
   createOutsideSessionLauncher,
   launchOutsideSessionJob,
   LAUNCH_OUTSIDE_SESSION_SCRIPT,
+  LAUNCH_TASK_SCRIPT,
   type PowerShellRunner,
 } from './windows-launch';
 
@@ -38,6 +39,7 @@ describe('createOutsideSessionLauncher', () => {
         '"C:\\Users\\O\'Brien Dev\\node.exe" C:\\ws\\dist\\index.mjs daemonize --socket C:\\run\\workspace.sock',
       EMDASH_WS_LAUNCH_DIRECTORY: "C:\\Users\\O'Brien Dev",
       EMDASH_WS_LAUNCH_SELF: calls[0]?.encoded,
+      EMDASH_WS_LAUNCH_TASK: Buffer.from(LAUNCH_TASK_SCRIPT, 'utf16le').toString('base64'),
     });
   });
 
@@ -57,8 +59,29 @@ describe('createOutsideSessionLauncher', () => {
   it('keeps the de-elevation hop free of caller-controlled PowerShell', () => {
     // runas receives one command line: a system path plus the script's own base64 encoding.
     expect(LAUNCH_OUTSIDE_SESSION_SCRIPT).toContain("& runas.exe '/trustlevel:0x20000'");
-    expect(LAUNCH_OUTSIDE_SESSION_SCRIPT).toContain("-notmatch '^[A-Za-z0-9+/=]+$'");
+    expect(LAUNCH_OUTSIDE_SESSION_SCRIPT).toContain("$encodedPattern = '^[A-Za-z0-9+/=]+$'");
+    expect(LAUNCH_OUTSIDE_SESSION_SCRIPT).toContain(
+      '$env:EMDASH_WS_LAUNCH_SELF -notmatch $encodedPattern'
+    );
     expect(LAUNCH_OUTSIDE_SESSION_SCRIPT).not.toMatch(/Invoke-Expression|iex /u);
+  });
+
+  it('starts through Task Scheduler before falling back to the SSH session', () => {
+    // Processes started from the sshd session cannot follow junctions made by non-administrators.
+    const script = LAUNCH_OUTSIDE_SESSION_SCRIPT;
+    const task = script.indexOf("foreach ($logonType in @('Interactive', 'S4U'))");
+    expect(task).toBeGreaterThan(-1);
+    expect(task).toBeLessThan(script.indexOf('& runas.exe'));
+    expect(script).toContain('$flags + $env:EMDASH_WS_LAUNCH_TASK');
+    expect(script).toContain('untrusted mount point');
+    expect(LAUNCH_TASK_SCRIPT).not.toMatch(/Invoke-Expression|iex /u);
+  });
+
+  it('keeps both scripts within the Windows command-line limit', () => {
+    // powershell.exe and runas receive the encoded script as one argument (32,767 characters).
+    for (const script of [LAUNCH_OUTSIDE_SESSION_SCRIPT, LAUNCH_TASK_SCRIPT]) {
+      expect(Buffer.from(script, 'utf16le').toString('base64').length).toBeLessThan(30_000);
+    }
   });
 
   it('names Win32_Process.Create failures', async () => {
