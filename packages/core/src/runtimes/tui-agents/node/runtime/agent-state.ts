@@ -22,7 +22,16 @@ export type ProviderSessionIdChangedHandler = (
 
 export type AgentStateChangedHandler = (conversationId: string, state: TuiAgentState) => void;
 
+type BackgroundWork = {
+  /** Ids the latest stop reported as still in flight. */
+  inFlight: ReadonlySet<string>;
+  /** Ids already in flight when the user last opened a turn; they no longer hold completion. */
+  acknowledged: ReadonlySet<string>;
+};
+
 export class TuiAgentStates {
+  private readonly backgroundWork = new Map<string, BackgroundWork>();
+
   constructor(
     private readonly sessions: TuiSessionsListModel,
     private readonly agentStates: TuiAgentStatesListModel,
@@ -58,6 +67,7 @@ export class TuiAgentStates {
     }
 
     if (event.type === 'start') {
+      if (event.initiator !== 'background') this.acknowledgeBackgroundWork(conversationId);
       this.setStatus(conversationId, {
         providerId,
         source: 'hook',
@@ -70,10 +80,14 @@ export class TuiAgentStates {
     }
 
     if (event.type === 'stop') {
+      // A turn that ends with background work it is waiting on is paused, not finished: the
+      // provider wakes the session when that work settles and reports a further stop.
+      const awaiting = this.recordBackgroundWork(conversationId, event.backgroundWork ?? []);
       this.setStatus(conversationId, {
         providerId,
         source: 'hook',
-        status: 'completed',
+        status: awaiting ? 'working' : 'completed',
+        awaitingBackgroundWork: awaiting || undefined,
         title: event.title,
         message: event.message,
         lastAssistantMessage: event.lastAssistantMessage,
@@ -90,6 +104,12 @@ export class TuiAgentStates {
         message: event.message,
         lastAssistantMessage: event.lastAssistantMessage,
       });
+      return;
+    }
+
+    // The provider's idle reminder fires while it waits on background work too; the user has
+    // nothing to answer yet. Permission and elicitation prompts still surface.
+    if (event.notificationType === 'idle_prompt' && this.awaitsBackgroundWork(conversationId)) {
       return;
     }
 
@@ -143,10 +163,12 @@ export class TuiAgentStates {
   }
 
   resetToIdle(conversationId: string): void {
+    this.backgroundWork.delete(conversationId);
     this.setStatus(conversationId, { status: 'idle' });
   }
 
   clear(conversationId: string): void {
+    this.backgroundWork.delete(conversationId);
     produceCell(this.agentStates.states.list, (draft) => {
       delete draft[conversationId];
     });
@@ -160,6 +182,36 @@ export class TuiAgentStates {
     produceCell(this.agentStates.states.list, (draft) => {
       draft[state.conversationId] = state;
     });
+  }
+
+  /**
+   * A user-opened turn acknowledges whatever was already running: that work (a dev server, a
+   * build the user asked about mid-flight) must not hold back this turn's completion.
+   */
+  private acknowledgeBackgroundWork(conversationId: string): void {
+    const work = this.backgroundWork.get(conversationId);
+    if (work) this.backgroundWork.set(conversationId, { ...work, acknowledged: work.inFlight });
+  }
+
+  /** Records the in-flight ids a stop reported; true when any of them is still awaited. */
+  private recordBackgroundWork(conversationId: string, ids: readonly string[]): boolean {
+    const acknowledged = this.backgroundWork.get(conversationId)?.acknowledged ?? new Set<string>();
+    if (ids.length === 0 && acknowledged.size === 0) {
+      this.backgroundWork.delete(conversationId);
+      return false;
+    }
+    this.backgroundWork.set(conversationId, { inFlight: new Set(ids), acknowledged });
+    return ids.some((id) => !acknowledged.has(id));
+  }
+
+  /**
+   * The tracked ids outlive an interleaved permission prompt, which replaces the state; the
+   * state's own flag covers a restored session, whose tracked ids did not survive the restart.
+   */
+  private awaitsBackgroundWork(conversationId: string): boolean {
+    const work = this.backgroundWork.get(conversationId);
+    if (!work) return this.current(conversationId)?.awaitingBackgroundWork === true;
+    return [...work.inFlight].some((id) => !work.acknowledged.has(id));
   }
 
   private setStatus(
@@ -178,6 +230,7 @@ export class TuiAgentStates {
         title: patch.title,
         message: patch.message,
         lastAssistantMessage: patch.lastAssistantMessage,
+        awaitingBackgroundWork: patch.awaitingBackgroundWork,
         updatedAt: this.now(),
       };
 
@@ -189,7 +242,8 @@ export class TuiAgentStates {
         previous.notificationType === next.notificationType &&
         previous.title === next.title &&
         previous.message === next.message &&
-        previous.lastAssistantMessage === next.lastAssistantMessage
+        previous.lastAssistantMessage === next.lastAssistantMessage &&
+        previous.awaitingBackgroundWork === next.awaitingBackgroundWork
       ) {
         return;
       }

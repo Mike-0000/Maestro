@@ -890,6 +890,14 @@ export function createLocalUpdateService(
     let releaseShared: (() => void) | undefined;
     try {
       releaseShared = await acquireDispatchLease({ stateRoot, ownerId: processOwnerId });
+      // An install worker that gave up (failed, timed out, cancelled) leaves its result on disk;
+      // consume it here so a long-running app does not keep new sessions paused until restart.
+      const heldGate = await readInstallTargetGate(stateRoot);
+      if (heldGate) {
+        await completeInstallResults(heldGate.repositoryPath).catch((error) => {
+          log.warn('local updates: install result reconciliation failed', { projectId, error });
+        });
+      }
       await assertInstallTargetAvailable();
       const repositoryPath = await localRepository(projectId).catch(() => null);
       if (!repositoryPath) return combineReleases(releaseShared, release);

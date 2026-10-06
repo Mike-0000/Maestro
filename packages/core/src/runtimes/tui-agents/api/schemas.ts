@@ -160,6 +160,11 @@ export const tuiAgentStateSchema = z.object({
   title: z.string().optional(),
   message: z.string().optional(),
   lastAssistantMessage: z.string().optional(),
+  /**
+   * Set on `working` when the provider's turn ended but background work it launched (a shell,
+   * a subagent, a scheduled wakeup) is still in flight and will wake the session.
+   */
+  awaitingBackgroundWork: z.boolean().optional(),
   updatedAt: z.number().int(),
 });
 

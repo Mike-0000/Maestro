@@ -61,6 +61,129 @@ describe('claude hooks', () => {
     });
   });
 
+  it('reports a background shell still running at stop as work the turn is waiting on', () => {
+    // The Stop payload Claude Code 2.1.286 sent after launching a ~20 minute build-and-push
+    // with `run_in_background` and replying "I'll report … when it finishes".
+    expect(
+      parse('stop', {
+        session_id: RESUMED_SESSION_ID,
+        hook_event_name: 'Stop',
+        stop_hook_active: false,
+        last_assistant_message: 'The push is running in the background (about 20 minutes).',
+        background_tasks: [
+          {
+            id: 'bjfo4wxom',
+            type: 'shell',
+            status: 'running',
+            description: 'Ship the gate fix to the local install and publish the release',
+            command: 'node ship.mjs',
+          },
+        ],
+        session_crons: [],
+      })
+    ).toEqual({
+      kind: 'status',
+      type: 'stop',
+      lastAssistantMessage: 'The push is running in the background (about 20 minutes).',
+      backgroundWork: ['task:bjfo4wxom'],
+      providerSessionId: RESUMED_SESSION_ID,
+    });
+  });
+
+  it('reports a plain stop when nothing is in flight', () => {
+    const event = parse('stop', {
+      hook_event_name: 'Stop',
+      background_tasks: [],
+      session_crons: [],
+    });
+    expect(event).toEqual({ kind: 'status', type: 'stop' });
+    expect(event).not.toHaveProperty('backgroundWork');
+  });
+
+  it('counts only work that will wake the session', () => {
+    expect(
+      parse('stop', {
+        hook_event_name: 'Stop',
+        background_tasks: [
+          { id: 'a1', type: 'subagent', status: 'pending', description: 'review' },
+          { id: 'd1', type: 'dream', status: 'running', description: 'memory consolidation' },
+          { id: 's1', type: 'shell', status: 'completed', description: 'already done' },
+        ],
+        session_crons: [
+          { id: 'wake', schedule: '5 12 1 10 *', recurring: false, prompt: 'check the deploy' },
+          { id: 'daily', schedule: '0 9 * * 1-5', recurring: true, prompt: 'standup' },
+        ],
+      })
+    ).toEqual({ kind: 'status', type: 'stop', backgroundWork: ['task:a1', 'cron:wake'] });
+  });
+
+  it('marks a start submitted by a settled background task as a background wake-up', () => {
+    expect(
+      parse('start', {
+        hook_event_name: 'UserPromptSubmit',
+        prompt: '<task-notification>\n<task-id>bjfo4wxom</task-id>\n</task-notification>',
+      })
+    ).toEqual({ kind: 'status', type: 'start', initiator: 'background' });
+    expect(
+      parse('start', { hook_event_name: 'UserPromptSubmit', source: 'system', prompt: 'woke' })
+    ).toEqual({ kind: 'status', type: 'start', initiator: 'background' });
+  });
+
+  it('trusts the prompt source over its text for user prompts', () => {
+    const event = parse('start', {
+      hook_event_name: 'UserPromptSubmit',
+      source: 'user',
+      prompt: '<task-notification> is what the agent prints, why?',
+    });
+    expect(event).toEqual({ kind: 'status', type: 'start' });
+  });
+
+  it('classifies notifications by notification_type when Claude sends one', () => {
+    expect(
+      parse('notification', {
+        hook_event_name: 'Notification',
+        notification_type: 'worker_permission_prompt',
+        message: 'A teammate wants to run Bash',
+      })
+    ).toMatchObject({ kind: 'status', notificationType: 'permission_prompt' });
+    expect(
+      parse('notification', {
+        hook_event_name: 'Notification',
+        notification_type: 'idle_prompt',
+        message: 'Claude is waiting for your input',
+      })
+    ).toMatchObject({ kind: 'status', notificationType: 'idle_prompt' });
+    expect(
+      parse('notification', {
+        hook_event_name: 'Notification',
+        notification_type: 'elicitation_dialog',
+        message: 'An MCP server needs your input',
+      })
+    ).toMatchObject({ kind: 'status', notificationType: 'elicitation_dialog' });
+  });
+
+  it('ignores informational notifications instead of reporting the agent as waiting', () => {
+    for (const notificationType of ['agent_completed', 'auth_success', 'push_notification']) {
+      expect(
+        parse('notification', {
+          hook_event_name: 'Notification',
+          notification_type: notificationType,
+          message: 'Background agent finished',
+        })
+      ).toEqual({ kind: 'ignore' });
+    }
+  });
+
+  it('falls back to the message text for an unrecognized notification type', () => {
+    expect(
+      parse('notification', {
+        hook_event_name: 'Notification',
+        notification_type: 'some_future_type',
+        message: 'Claude needs your permission to use Bash',
+      })
+    ).toMatchObject({ kind: 'status', notificationType: 'permission_prompt' });
+  });
+
   it('omits the session id when the payload has none', () => {
     const event = parse('stop', { hook_event_name: 'Stop' });
     expect(event).toEqual({ kind: 'status', type: 'stop' });
@@ -88,7 +211,7 @@ describe('claude hooks', () => {
       model: '',
     });
 
-    expect(command.args).toEqual(['--resume', RESUMED_SESSION_ID]);
+    expect(command.args.slice(0, 2)).toEqual(['--resume', RESUMED_SESSION_ID]);
   });
 
   it('declares session as a supported hook event', () => {

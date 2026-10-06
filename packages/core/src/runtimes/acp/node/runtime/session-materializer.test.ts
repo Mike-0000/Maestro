@@ -92,6 +92,44 @@ describe('SessionMaterializer', () => {
     await setup.scope.dispose();
   });
 
+  it("sends the provider's session meta with new and loaded sessions", async () => {
+    const sessionMeta = { systemPrompt: { append: 'policy' } };
+    const acpBehavior = {
+      buildSpawn: () => ({ command: '/fake/node', args: ['agent.js'], env: {} }),
+      connect: vi.fn(),
+      sessionMeta: () => sessionMeta,
+    };
+
+    const loaded = makeAcpHarness({ acpBehavior });
+    loaded.agent.loadSession.mockResolvedValueOnce({});
+    const loadSetup = materializerHarness(loaded);
+    await loadSetup.materializer.materialize(
+      loadSetup.entry,
+      loadSetup.entry.descriptor,
+      1,
+      loadSetup.scope,
+      loadSetup.controller.signal
+    );
+    expect(loaded.agent.loadSession).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'retained-session', _meta: sessionMeta })
+    );
+    await loadSetup.scope.dispose();
+
+    const fresh = makeAcpHarness({ acpBehavior });
+    const freshSetup = materializerHarness(fresh, {}, { sessionId: null });
+    await freshSetup.materializer.materialize(
+      freshSetup.entry,
+      freshSetup.entry.descriptor,
+      1,
+      freshSetup.scope,
+      freshSetup.controller.signal
+    );
+    expect(fresh.agent.newSession).toHaveBeenCalledWith(
+      expect.objectContaining({ _meta: sessionMeta })
+    );
+    await freshSetup.scope.dispose();
+  });
+
   it('rejects a late completion after the caller aborts and invalidates the conversation', async () => {
     const h = makeAcpHarness();
     h.agent.newSession = vi.fn(() => new Promise<never>(() => {}));

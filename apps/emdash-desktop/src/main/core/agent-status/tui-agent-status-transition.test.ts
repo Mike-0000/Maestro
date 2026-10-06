@@ -60,4 +60,15 @@ describe('TUI agent status transition mapping', () => {
       shouldApplyAgentStateTransition(state({ status: 'working' }), state({ status: 'completed' }))
     ).toBe(true);
   });
+
+  it('does not report completion while the agent waits on background work', () => {
+    const waiting = state({
+      status: 'working',
+      awaitingBackgroundWork: true,
+      lastAssistantMessage: 'The push is running in the background.',
+    });
+
+    expect(shouldApplyAgentStateTransition(state({ status: 'working' }), waiting)).toBe(false);
+    expect(eventFromTuiAgentState(waiting)).toMatchObject({ type: 'start' });
+  });
 });

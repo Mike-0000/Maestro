@@ -17,8 +17,11 @@ export const voiceSettingsSchema = z.object({
   language: z.string(),
   /** Electron accelerator for the global toggle-to-talk shortcut; empty disables it. */
   globalShortcut: z.string(),
-  /** Key to hold for push-to-talk anywhere in Windows (not just when Chorus is focused). */
-  globalHoldKey: z.enum(['off', 'right-ctrl', 'right-alt']),
+  /**
+   * Key or chord to hold for push-to-talk anywhere in Windows (not just when Chorus is focused):
+   * `off`, or `KeyboardEvent.code` values joined with `+` (see `global-keys.ts`).
+   */
+  globalHoldKey: z.string(),
   speakReplies: z.boolean(),
   speakAttention: z.boolean(),
   ttsVoice: z.string(),
