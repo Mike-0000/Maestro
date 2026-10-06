@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { HostConversationRow } from '@core/primitives/conversations/api';
-import type {
-  HostWorkspaceGroup,
-  ProjectWorkspaceRow,
-  ProjectWorkspaceTask,
+import {
+  sameHostPath,
+  type HostWorkspaceGroup,
+  type ProjectWorkspaceRow,
+  type ProjectWorkspaceTask,
 } from '@core/primitives/workspaces/api';
-import { resolveMachineConversationContinue, sameHostPath } from './machine-conversation-continue';
+import { resolveMachineConversationContinue } from './machine-conversation-continue';
 
 type ConversationLink = Parameters<typeof resolveMachineConversationContinue>[0];
 
@@ -49,7 +50,14 @@ function workspace(overrides: Partial<ProjectWorkspaceRow> = {}): ProjectWorkspa
 }
 
 function groups(...workspaces: ProjectWorkspaceRow[]): HostWorkspaceGroup[] {
-  return [{ project: { id: 'project-1', name: 'Chorus' }, workspaces, warnings: [] }];
+  return [
+    {
+      project: { id: 'project-1', name: 'Chorus' },
+      workspaces,
+      unlinkedConversations: [],
+      warnings: [],
+    },
+  ];
 }
 
 describe('resolveMachineConversationContinue', () => {

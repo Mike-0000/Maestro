@@ -103,8 +103,12 @@ the WMI create from a one-shot task that it registers, runs, and deletes:
 
 1. With the user's interactive token when they are signed in at the computer: not elevated and
    unguarded, so agents behave as they do locally.
-2. Otherwise with a background (S4U) token: unguarded, but elevated for administrators, so a
-   local non-elevated app cannot open the pipe. A warning says so.
+2. Otherwise with a background (S4U) token: unguarded. For an administrator that token is
+   elevated, and an elevated daemon's pipe admits only Administrators, so the task reruns itself
+   through `runas /trustlevel:0x20000` (same user, Administrators deny-only) before creating the
+   process. The pipe then also admits the user, so the app on that computer ("This computer") can
+   reach the daemon and its conversations. If that hop fails the daemon stays elevated and a
+   warning says a local non-elevated app cannot connect.
 3. If Task Scheduler cannot be used, from the SSH session as before (through
    `runas /trustlevel:0x20000` for an elevated caller), with a warning about junctions.
 
@@ -163,4 +167,8 @@ under Windows PowerShell 5.1 before `publish` may run.
 - The workspace connection needs only SSH exec channels. Workspace preview port forwarding still
   needs `AllowTcpForwarding`, which Windows OpenSSH enables by default.
 - Start warnings from the daemon are logged by the desktop, not shown in the UI.
+- A daemon that is already running elevated (started by an older launcher, or after a failed
+  de-elevation) refuses the local app with an access-denied error that names the cause. Stop it
+  from an administrator terminal, or restart the computer, before the app on that computer can
+  connect; stopping it ends its running agents.
 - Open In detects Windows targets by path shape (drive letter or UNC), not by the probe.

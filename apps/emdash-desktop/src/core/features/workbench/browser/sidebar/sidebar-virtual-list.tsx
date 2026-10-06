@@ -34,6 +34,10 @@ import {
   useViewParams,
   useWorkspaceSlots,
 } from '@core/primitives/navigation/browser/navigation-hooks';
+import {
+  SidebarHostConversationItem,
+  SidebarHostConversationsSync,
+} from './host-conversation-item';
 import { SidebarProjectItem } from './project-item';
 import { SidebarTaskItem } from './task-item';
 
@@ -61,7 +65,10 @@ export const SidebarVirtualList = observer(function SidebarVirtualList() {
     currentView === 'task' && taskParams.projectId
       ? getSidebarStore().expandedProjectIds.has(taskParams.projectId)
       : null;
-  const allDndIds = useMemo(() => rows.map(rowToDndId), [rows]);
+  const allDndIds = useMemo(
+    () => rows.filter((row) => row.kind !== 'host-conversation').map(rowToDndId),
+    [rows]
+  );
 
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -204,6 +211,7 @@ export const SidebarVirtualList = observer(function SidebarVirtualList() {
       onDragEnd={handleDragEnd}
       onDragCancel={clearDragPointerY}
     >
+      <SidebarHostConversationsSync />
       <SortableContext items={allDndIds} strategy={verticalListSortingStrategy}>
         <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-3 pt-1 pb-3">
           <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
@@ -223,6 +231,17 @@ export const SidebarVirtualList = observer(function SidebarVirtualList() {
                   <SortableRow key={row.projectId} dndId={dndId} style={vStyle}>
                     <SidebarProjectItem projectId={row.projectId} />
                   </SortableRow>
+                );
+              }
+              if (row.kind === 'host-conversation') {
+                // Not a task yet, so it has no place in the manual order and does not drag.
+                return (
+                  <div key={dndId} style={vStyle}>
+                    <SidebarHostConversationItem
+                      projectId={row.projectId}
+                      conversationId={row.conversationId}
+                    />
+                  </div>
                 );
               }
               return (
@@ -251,6 +270,7 @@ type SidebarDndId =
 
 function rowToDndId(row: SidebarRow): string {
   if (row.kind === 'project') return toProjectDndId(row.projectId);
+  if (row.kind === 'host-conversation') return `conv::${row.projectId}::${row.conversationId}`;
   return toTaskDndId(row.projectId, row.taskId);
 }
 

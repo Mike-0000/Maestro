@@ -99,12 +99,46 @@ export type ProjectWorkspacesResult = {
   warnings: string[];
 };
 
+/**
+ * A conversation on the host that no task on this client is linked to yet, such as one started
+ * from another computer, placed on the project workspace it ran in.
+ */
+export type HostUnlinkedConversation = {
+  id: string;
+  title: string;
+  provider: string | null;
+  workspacePath: string;
+  workspaceId: string | null;
+  lastActivityAt: string;
+  /** Why a task cannot be opened on its workspace here; absent when it can. */
+  resumeDisabledReason?: string;
+};
+
 /** One machines-page group per project on a host, served live from the mirror. */
 export type HostWorkspaceGroup = {
   project: { id: string; name: string };
   workspaces: ProjectWorkspaceRow[];
+  /** Newest first. Only remote hosts report these. */
+  unlinkedConversations: HostUnlinkedConversation[];
   warnings: string[];
 };
+
+/**
+ * Host paths can reach the client with either separator and, on Windows hosts, any drive-letter
+ * or case spelling; compare them the way the host's filesystem would.
+ */
+export function sameHostPath(a: string, b: string): boolean {
+  return normalizeHostPath(a) === normalizeHostPath(b);
+}
+
+function normalizeHostPath(path: string): string {
+  const windows = /^[a-z]:[\\/]/iu.test(path) || path.startsWith('\\\\');
+  let normalized = windows ? path.replace(/\\/gu, '/') : path;
+  while (normalized.length > 1 && normalized.endsWith('/') && !/^[a-z]:\/$/iu.test(normalized)) {
+    normalized = normalized.slice(0, -1);
+  }
+  return windows ? normalized.toLowerCase() : normalized;
+}
 
 export type HostWorkspaceGroupsData = {
   groups: HostWorkspaceGroup[];

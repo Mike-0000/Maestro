@@ -31,12 +31,42 @@ const REQUEST_DIRECTORY =
  * caller, so it claims the request file the caller left (renaming it first, so a request is
  * launched once), creates the process, and reports through a result file renamed into place.
  * Requests older than two minutes are leftovers of a caller that died and are discarded.
+ *
+ * A background (S4U) task of an administrator is elevated, and an elevated daemon's named pipe
+ * admits only Administrators, so the same user's non-elevated app on this computer could not
+ * connect to it. That task therefore reruns itself through `runas /trustlevel:0x20000` (same user,
+ * Administrators deny-only) and leaves the requests to the copy, taking them itself only when the
+ * copy did not. A result line ends in ` elevated` when the process was created elevated anyway.
  */
 export const LAUNCH_TASK_SCRIPT = [
   "$ErrorActionPreference = 'Stop'",
   "$ProgressPreference = 'SilentlyContinue'",
   ...CREATE_PROCESS_FUNCTION,
   `$directory = ${REQUEST_DIRECTORY}`,
+  '$principal = New-Object Security.Principal.WindowsPrincipal(',
+  '  [Security.Principal.WindowsIdentity]::GetCurrent()',
+  ')',
+  '$elevated = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)',
+  '$background = [Diagnostics.Process]::GetCurrentProcess().SessionId -eq 0',
+  "$powershell = Join-Path ([Environment]::SystemDirectory) 'WindowsPowerShell\\v1.0\\powershell.exe'",
+  // runas takes one command line; it holds only a quote-free path and this script's own base64.
+  '$self = [Environment]::GetCommandLineArgs()[-1]',
+  '$deElevate = $elevated -and $background -and -not $env:EMDASH_WS_LAUNCH_DEELEVATED',
+  "if ($deElevate -and $self -match '^[A-Za-z0-9+/=]+$' -and $powershell -notmatch '[\\s\"]') {",
+  "  $flags = ' -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand '",
+  "  $env:EMDASH_WS_LAUNCH_DEELEVATED = '1'",
+  '  $started = $false',
+  '  try {',
+  "    & runas.exe '/trustlevel:0x20000' ($powershell + $flags + $self) 2>&1 | Out-Null",
+  '    $started = $LASTEXITCODE -eq 0',
+  '  } catch { }',
+  '  $deadline = [DateTime]::UtcNow.AddSeconds(6)',
+  '  while ($started -and [DateTime]::UtcNow -lt $deadline) {',
+  "    $waiting = @(Get-ChildItem -LiteralPath $directory -Filter '*.spec' -File)",
+  '    if ($waiting.Count -eq 0) { exit 0 }',
+  '    Start-Sleep -Milliseconds 100',
+  '  }',
+  '}',
   "foreach ($spec in @(Get-ChildItem -LiteralPath $directory -Filter '*.spec' -File)) {",
   '  if ($spec.LastWriteTimeUtc -lt [DateTime]::UtcNow.AddMinutes(-2)) {',
   '    Remove-Item -LiteralPath $spec.FullName -Force -ErrorAction SilentlyContinue',
@@ -49,6 +79,7 @@ export const LAUNCH_TASK_SCRIPT = [
   '    $request = [IO.File]::ReadAllText($claimed) | ConvertFrom-Json',
   '    $variables = [string[]]$request.variables',
   '    $line = Invoke-EmdashCreate $request.commandLine $request.directory $variables',
+  "    if ($elevated -and $background) { $line += ' elevated' }",
   "  } catch { $line = 'E ' + $_.Exception.Message }",
   '  Remove-Item -LiteralPath $claimed -Force -ErrorAction SilentlyContinue',
   "  [IO.File]::WriteAllText($resultPath + '.tmp', $line)",
@@ -73,10 +104,11 @@ export const LAUNCH_TASK_SCRIPT = [
  *
  * So the script first asks Task Scheduler, which is outside the SSH session, to do the WMI create
  * from a one-shot task: with the user's interactive token when they are signed in (not elevated,
- * unguarded), otherwise with a background S4U token (unguarded, but elevated for administrators).
- * If neither works it falls back to the guarded launch and a `W ` line says so: through
- * `runas /trustlevel:0x20000` (a Basic User SAFER token: same user, Administrators deny-only) when
- * the caller is elevated, so a local app can still reach the pipe, or directly otherwise.
+ * unguarded), otherwise with a background S4U token (unguarded; the task de-elevates itself, see
+ * `LAUNCH_TASK_SCRIPT`). If neither works it falls back to the guarded launch and a `W ` line says
+ * so: through `runas /trustlevel:0x20000` (a Basic User SAFER token: same user, Administrators
+ * deny-only) when the caller is elevated, so a local app can still reach the pipe, or directly
+ * otherwise.
  *
  * Both scripts are constant. The command line, working directory, environment, and the scripts'
  * own encodings reach them through environment variables or the request file, so no
@@ -170,12 +202,12 @@ export const LAUNCH_OUTSIDE_SESSION_SCRIPT = [
   "  foreach ($logonType in @('Interactive', 'S4U')) {",
   '    try {',
   '      $line = Invoke-EmdashTaskLaunch $request $logonType $powershell',
-  "      if ($line -match '^0 [1-9][0-9]*$') {",
-  '        [Console]::Out.Write($line)',
-  "        if ($logonType -eq 'S4U' -and $elevated) {",
+  "      if ($line -match '^0 [1-9][0-9]*( elevated)?$') {",
+  "        [Console]::Out.Write(($line -replace ' elevated$', ''))",
+  "        if ($line -match ' elevated$') {",
   "          $note = 'W The workspace server was started elevated because this user is not signed '",
-  "          $note += 'in at the computer, so a non-elevated app on this computer cannot connect '",
-  "          $note += 'to it.'",
+  "          $note += 'in at the computer and it could not be started without administrator '",
+  "          $note += 'rights, so a non-elevated app on this computer cannot connect to it.'",
   '          [Console]::Out.Write([Environment]::NewLine + $note)',
   '        }',
   '        exit 0',

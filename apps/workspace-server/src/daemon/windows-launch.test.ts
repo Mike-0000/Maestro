@@ -77,6 +77,21 @@ describe('createOutsideSessionLauncher', () => {
     expect(LAUNCH_TASK_SCRIPT).not.toMatch(/Invoke-Expression|iex /u);
   });
 
+  it('de-elevates a background task so a local app can open the daemon pipe', () => {
+    // An elevated daemon's pipe admits only Administrators, not the user's non-elevated app.
+    const task = LAUNCH_TASK_SCRIPT;
+    const hop = task.indexOf("& runas.exe '/trustlevel:0x20000' ($powershell + $flags + $self)");
+    expect(hop).toBeGreaterThan(-1);
+    expect(hop).toBeLessThan(task.indexOf('Move-Item -LiteralPath $spec.FullName'));
+    expect(task).toContain('$self = [Environment]::GetCommandLineArgs()[-1]');
+    expect(task).toContain("$self -match '^[A-Za-z0-9+/=]+$'");
+    expect(task).toContain('-not $env:EMDASH_WS_LAUNCH_DEELEVATED');
+    // A task that stayed elevated says so, and only then does the caller warn.
+    expect(task).toContain("if ($elevated -and $background) { $line += ' elevated' }");
+    expect(LAUNCH_OUTSIDE_SESSION_SCRIPT).toContain("if ($line -match ' elevated$') {");
+    expect(LAUNCH_OUTSIDE_SESSION_SCRIPT).toContain("($line -replace ' elevated$', '')");
+  });
+
   it('keeps both scripts within the Windows command-line limit', () => {
     // powershell.exe and runas receive the encoded script as one argument (32,767 characters).
     for (const script of [LAUNCH_OUTSIDE_SESSION_SCRIPT, LAUNCH_TASK_SCRIPT]) {

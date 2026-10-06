@@ -13,6 +13,7 @@ import {
   registeredTaskData,
   unregisteredTaskData,
 } from '@core/primitives/task-state/browser/task-state';
+import type { HostUnlinkedConversation } from '@core/primitives/workspaces/api';
 export type SidebarTaskSortBy = WorkbenchSidebarState['taskSortBy'];
 
 export type TaskSortKind = 'created' | 'updated';
@@ -44,12 +45,18 @@ function isVisibleRegularTask(task: TaskStore): boolean {
 
 export type SidebarRow =
   | { kind: 'project'; projectId: string }
-  | { kind: 'task'; projectId: string; taskId: string };
+  | { kind: 'task'; projectId: string; taskId: string }
+  | { kind: 'host-conversation'; projectId: string; conversationId: string };
 
 export class SidebarStore {
   private _handle: MementoHandle<WorkbenchSidebarState> | undefined;
   private _fallbackState: WorkbenchSidebarState = workbenchSidebarMemento.default;
   private readonly _revealedProjectIds = observable.set<string>();
+  /** Per machine: each project's host conversations that no task here is linked to. */
+  private readonly _hostConversations = observable.map<
+    string,
+    ReadonlyMap<string, readonly HostUnlinkedConversation[]>
+  >([], { deep: false });
 
   constructor(private readonly projectManager: ProjectManagerStore) {
     // `_handle` must stay observable: computeds reading `state` before the
@@ -57,10 +64,11 @@ export class SidebarStore {
     // and freeze at the fallback value forever.
     makeAutoObservable<
       SidebarStore,
-      '_fallbackState' | '_handle' | '_revealedProjectIds' | 'projectManager'
+      '_fallbackState' | '_handle' | '_hostConversations' | '_revealedProjectIds' | 'projectManager'
     >(this, {
       _fallbackState: false,
       _handle: observable.ref,
+      _hostConversations: false,
       _revealedProjectIds: false,
       projectManager: false,
       expandedProjectIds: computed.struct,
@@ -121,6 +129,9 @@ export class SidebarStore {
           if (task.data.isPinned) continue;
           rows.push({ kind: 'task', projectId, taskId: task.data.id });
         }
+        for (const conversation of this.hostConversationsForProject(projectId)) {
+          rows.push({ kind: 'host-conversation', projectId, conversationId: conversation.id });
+        }
       }
     }
     return rows;
@@ -167,6 +178,34 @@ export class SidebarStore {
       ? this.mergeTaskOrder(projectId, tasks)
       : this.sortTasksForSidebar(tasks);
     return ordered.map((t) => t.data.id);
+  }
+
+  /**
+   * Replaces what one machine reports: its conversations that ran in a project's workspace but
+   * belong to no task on this client (started from another computer, say). They are listed
+   * under the project, after its tasks, until they are resumed here.
+   */
+  setHostConversations(
+    machineId: string,
+    byProject: ReadonlyMap<string, readonly HostUnlinkedConversation[]> | undefined
+  ): void {
+    if (byProject) this._hostConversations.set(machineId, byProject);
+    else this._hostConversations.delete(machineId);
+  }
+
+  hostConversationsForProject(projectId: string): readonly HostUnlinkedConversation[] {
+    for (const byProject of this._hostConversations.values()) {
+      const conversations = byProject.get(projectId);
+      if (conversations) return conversations;
+    }
+    return [];
+  }
+
+  hostConversation(
+    projectId: string,
+    conversationId: string
+  ): HostUnlinkedConversation | undefined {
+    return this.hostConversationsForProject(projectId).find(({ id }) => id === conversationId);
   }
 
   get isEmpty(): boolean {
