@@ -3,9 +3,16 @@
  * testable on its own. Holding the talk key for HOLD_DELAY_MS starts listening; releasing it stops.
  * Pressing any other key first means the user is typing a chord (Ctrl+C), so nothing starts; a key
  * pressed after listening started cancels the utterance. Shift held at the start means dictation.
+ *
+ * A double tap latches instead: two quick taps start listening without holding the key, and one
+ * more tap stops. Other keys do not cancel a latched utterance, since nothing is being held.
  */
 
 export const HOLD_DELAY_MS = 180;
+/** After a quick tap, a second press within this window latches listening on. */
+export const DOUBLE_TAP_MS = 400;
+/** A latched utterance left open (the user walked away) is stopped after this long. */
+export const LATCH_MAX_MS = 5 * 60_000;
 
 export type HoldOutput =
   | { type: 'start'; intent: 'command' | 'dictation' }
@@ -18,9 +25,16 @@ export type HoldTimers = {
 };
 
 export class HoldToTalkMachine {
-  private state: 'idle' | 'pending' | 'listening' | 'chord' = 'idle';
+  /**
+   * `tapped`: a quick tap was released and a second press would latch. `latched`: listening with
+   * no key held. `ending`: the tap that stopped a latched utterance has not been released yet.
+   */
+  private state: 'idle' | 'pending' | 'listening' | 'chord' | 'tapped' | 'latched' | 'ending' =
+    'idle';
   private timer: unknown = null;
   private shift = false;
+  /** The press that latched is still down; its release must not count as the ending tap. */
+  private latchKeyDown = false;
 
   constructor(
     private readonly emit: (output: HoldOutput) => void,
@@ -32,6 +46,25 @@ export class HoldToTalkMachine {
 
   /** The talk key went down (auto-repeat keydowns are ignored). */
   talkDown(shift: boolean): void {
+    if (this.state === 'tapped') {
+      this.clearTimer();
+      this.state = 'latched';
+      this.latchKeyDown = true;
+      this.timer = this.timers.set(() => {
+        this.timer = null;
+        this.reset();
+        this.emit({ type: 'stop' });
+      }, LATCH_MAX_MS);
+      this.emit({ type: 'start', intent: this.shift || shift ? 'dictation' : 'command' });
+      return;
+    }
+    if (this.state === 'latched') {
+      if (this.latchKeyDown) return;
+      this.clearTimer();
+      this.state = 'ending';
+      this.emit({ type: 'stop' });
+      return;
+    }
     if (this.state !== 'idle') return;
     this.state = 'pending';
     this.shift = shift;
@@ -44,6 +77,20 @@ export class HoldToTalkMachine {
   }
 
   talkUp(): void {
+    if (this.state === 'latched') {
+      this.latchKeyDown = false;
+      return;
+    }
+    if (this.state === 'pending') {
+      // A quick tap: wait briefly for the second tap of a double tap.
+      this.clearTimer();
+      this.state = 'tapped';
+      this.timer = this.timers.set(() => {
+        this.timer = null;
+        if (this.state === 'tapped') this.reset();
+      }, DOUBLE_TAP_MS);
+      return;
+    }
     const previous = this.state;
     this.reset();
     if (previous === 'listening') this.emit({ type: 'stop' });
@@ -52,7 +99,7 @@ export class HoldToTalkMachine {
   /** Any other key went down while the talk key is held. Shift only switches to dictation. */
   otherDown(isShift: boolean): void {
     if (isShift) {
-      if (this.state === 'pending') this.shift = true;
+      if (this.state === 'pending' || this.state === 'tapped') this.shift = true;
       return;
     }
     if (this.state === 'pending') {
@@ -61,6 +108,9 @@ export class HoldToTalkMachine {
     } else if (this.state === 'listening') {
       this.state = 'chord';
       this.emit({ type: 'cancel' });
+    } else if (this.state === 'tapped') {
+      // Typing between the taps: this was not a double tap.
+      this.reset();
     }
   }
 
@@ -68,6 +118,7 @@ export class HoldToTalkMachine {
     this.clearTimer();
     this.state = 'idle';
     this.shift = false;
+    this.latchKeyDown = false;
   }
 
   private clearTimer(): void {

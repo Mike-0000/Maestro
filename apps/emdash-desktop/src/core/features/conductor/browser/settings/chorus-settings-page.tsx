@@ -316,7 +316,7 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
             voice.status &&
             !voice.status.globalHoldActive
               ? 'The system keyboard hook could not start; hold-to-talk works only inside Maestro.'
-              : 'Click, then press the key or keys to hold in any app to talk to Maestro. Off: hold-to-talk works only inside Maestro. Maestro only watches for these keys; it never records what you type.'
+              : 'Click, then press the key or keys to use in any app. Hold to talk and release to send, or double-tap to keep listening and tap once more to send. Off: hold-to-talk works only inside Maestro. Maestro only watches for these keys; it never records what you type.'
           }
           control={
             <KeyCaptureControl
