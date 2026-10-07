@@ -20,7 +20,7 @@ import { observer } from 'mobx-react-lite';
 import { useMemo, useState } from 'react';
 import { getTaskManagerStore } from '@core/features/tasks/api/browser/task-state/task-selectors';
 import { taskViewDef } from '@core/features/tasks/contributions/views';
-import { getTaskComposition } from '@core/features/workbench/api/browser/task-composition-selectors';
+import { openTaskConversation } from '@core/features/workbench/api/browser/task-composition-selectors';
 import { useWorkspaceGroups } from '@core/features/workspaces/api/browser/use-workspace-groups';
 import { useOpenModal } from '@core/manifests/browser/modal-api';
 import { useSearchFocusHotkeys } from '@core/primitives/keybindings/browser';
@@ -209,11 +209,7 @@ export function MachineConversationsList({
         });
         await refresh();
       }
-      getTaskComposition(target.projectId, taskId)?.paneLayout.open(
-        'conversation',
-        { conversationId: conversation.id },
-        { preview: false }
-      );
+      void openTaskConversation(target.projectId, taskId, conversation.id);
       navigate(taskViewDef({ projectId: target.projectId, taskId }));
     } catch (error) {
       toast.error('Could not continue conversation', {

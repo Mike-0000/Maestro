@@ -1,6 +1,7 @@
 import { openFixture } from '@tooling/utils/db';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createConversationRegistry } from '@core/features/conversations/api/node/registry';
+import { conversationWireEvents } from './event-host';
 import { linkConversationToTask } from './link-conversation-to-task';
 
 /**
@@ -67,6 +68,29 @@ describe('linkConversationToTask', () => {
       projectId: second.projectId,
       taskId: second.taskId,
     });
+  });
+
+  it('tells the task it joins, and the task it leaves, so open task views follow the link', async () => {
+    const first = seedProjectAndTask('a');
+    const second = seedProjectAndTask('b');
+    seedOrphan('conv-1');
+    const emit = vi.spyOn(conversationWireEvents, 'emit');
+
+    await linkConversationToTask(fixture.db, { conversationId: 'conv-1', ...first });
+    await linkConversationToTask(fixture.db, { conversationId: 'conv-1', ...second });
+
+    expect(emit.mock.calls).toEqual([
+      [
+        { taskId: first.taskId },
+        { type: 'created', conversation: expect.objectContaining({ id: 'conv-1', ...first }) },
+      ],
+      [{ taskId: first.taskId }, { type: 'deleted', conversationId: 'conv-1', ...first }],
+      [
+        { taskId: second.taskId },
+        { type: 'created', conversation: expect.objectContaining({ id: 'conv-1', ...second }) },
+      ],
+    ]);
+    emit.mockRestore();
   });
 
   it('rejects links to absent or mismatched tasks and absent conversations', async () => {
