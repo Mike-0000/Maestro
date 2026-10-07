@@ -6,7 +6,7 @@ import { getConversationsClient } from '@core/features/conversations/api/browser
 import { projectData } from '@core/features/projects/api/browser/stores/project-selectors';
 import { getTaskManagerStore } from '@core/features/tasks/api/browser/task-state/task-selectors';
 import { taskViewDef } from '@core/features/tasks/contributions/views';
-import { getTaskComposition } from '@core/features/workbench/api/browser/task-composition-selectors';
+import { openTaskConversation } from '@core/features/workbench/api/browser/task-composition-selectors';
 import { getSidebarStore } from '@core/features/workbench/contributions/browser/app-stores';
 import { useWorkspaceGroups } from '@core/features/workspaces/api/browser/use-workspace-groups';
 import { useOpenModal } from '@core/manifests/browser/modal-api';
@@ -146,10 +146,6 @@ async function resumeHostConversation(
   });
   const client = await getConversationsClient();
   await client.linkConversationToTask({ conversationId: conversation.id, projectId, taskId });
-  getTaskComposition(projectId, taskId)?.paneLayout.open(
-    'conversation',
-    { conversationId: conversation.id },
-    { preview: false }
-  );
+  void openTaskConversation(projectId, taskId, conversation.id);
   return taskId;
 }

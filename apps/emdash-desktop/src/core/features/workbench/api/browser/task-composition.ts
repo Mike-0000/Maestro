@@ -317,6 +317,29 @@ export class TaskComposition {
     });
   }
 
+  /**
+   * Opens a conversation's tab once the pane layout has been restored, so the restore cannot
+   * discard it. A conversation linked to the task a moment ago may not have reached the
+   * conversation store yet, in which case the list is loaded again first.
+   */
+  async openConversation(conversationId: string): Promise<void> {
+    if (!this._conversations.conversations.has(conversationId)) {
+      await this._conversations.list.load();
+    }
+    try {
+      await when(() => this._paneHydrated, { timeout: OPEN_CONVERSATION_TIMEOUT_MS });
+    } catch {
+      return;
+    }
+    const conversation = this._conversations.conversations.get(conversationId);
+    if (!conversation) return;
+    this.paneLayout.open(
+      conversation.data.type === 'acp' ? 'acp-chat' : 'conversation',
+      { conversationId },
+      { preview: false }
+    );
+  }
+
   activate(): void {
     this._activated = true;
     if (this._acquiredWorkspaceId) workspaceRegistry.activate(this._acquiredWorkspaceId);
@@ -543,6 +566,9 @@ export class TaskComposition {
 }
 
 const INITIAL_SIZE_MEASUREMENT_TIMEOUT_MS = 150;
+
+/** A task on a remote workspace restores its pane layout only once the workspace is reachable. */
+const OPEN_CONVERSATION_TIMEOUT_MS = 60_000;
 
 /**
  * Waits briefly for the pane hosting the conversation tab (or the focused

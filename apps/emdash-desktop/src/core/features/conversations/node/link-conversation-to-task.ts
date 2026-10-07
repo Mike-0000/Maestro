@@ -1,8 +1,10 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import { createConversationRegistry } from '@core/features/conversations/api/node/registry';
+import { mapConversationRowToConversation } from '@core/features/conversations/api/node/utils';
 import type { AppDb } from '@core/services/app-db/node/db';
 import { appDbPokes } from '@core/services/app-db/node/pokes';
 import { tasks } from '@core/services/app-db/node/schema';
+import { conversationWireEvents } from './event-host';
 
 /**
  * The machine page's "link into a task" affordance (spec §8): task links are client
@@ -35,6 +37,26 @@ export async function linkConversationToTask(
     projectId: input.projectId,
     taskId: input.taskId,
   });
+
+  // Open task surfaces hold their conversations in memory and only learn of membership changes
+  // through these events; without them the linked conversation cannot be opened in the task.
+  const previousTaskId = row.taskId;
+  if (row.projectId && previousTaskId && previousTaskId !== input.taskId) {
+    conversationWireEvents.emit(
+      { taskId: previousTaskId },
+      {
+        type: 'deleted',
+        conversationId: input.conversationId,
+        projectId: row.projectId,
+        taskId: previousTaskId,
+      }
+    );
+  }
+  const linked = registry.getLive(input.conversationId);
+  const conversation = linked ? mapConversationRowToConversation(linked) : null;
+  if (conversation && previousTaskId !== input.taskId) {
+    conversationWireEvents.emit({ taskId: input.taskId }, { type: 'created', conversation });
+  }
 
   appDbPokes.conversations.poke({ projectId: input.projectId, taskId: input.taskId });
   if (row.projectId && row.projectId !== input.projectId) {
