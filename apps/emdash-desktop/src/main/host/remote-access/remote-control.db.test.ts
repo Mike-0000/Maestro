@@ -13,6 +13,7 @@ import {
   taskNameFromPrompt,
   type RemoteControlPorts,
 } from './remote-control';
+import { idleRemoteVoice } from './testing';
 
 describe('remote control', () => {
   let fixture: Awaited<ReturnType<typeof openFixture>>;
@@ -59,6 +60,7 @@ describe('remote control', () => {
           error: { type: 'not-found', message: 'No terminal' },
         })),
       },
+      voice: idleRemoteVoice(),
       sessions: {
         describe: (conversationId) => ({
           agent: agents.get(conversationId),

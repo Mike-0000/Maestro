@@ -2,10 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  remoteDeviceWireContract,
-  type RemoteOverview,
-} from '@emdash/core/services/remote-control/api';
+import { remoteDeviceWireContract } from '@emdash/core/services/remote-control/api';
 import { hostRuntimesDefinitions } from '@emdash/core/services/runtime-broker/api';
 import { PROTOCOL_VERSION } from '@emdash/core/workspace-server';
 import { ok, type Secret } from '@emdash/shared';
@@ -17,7 +14,6 @@ import {
   type Contract,
   type ContractDefinitions,
 } from '@emdash/wire/rpc';
-import { cell, expose } from '@emdash/wire/state';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMaestroHostClient } from '@core/features/machines/node/maestro-host-client';
 import { normalizeMaestroHostUrl } from '@core/primitives/maestro-host/api/endpoint';
@@ -31,6 +27,7 @@ import { RemoteDeviceStore } from './device-store';
 import { createMaestroHostController } from './host-controller';
 import { createRemoteAccessHttpServer, type RemoteAccessHttpServer } from './http-server';
 import { PairingCodes } from './pairing';
+import { testRemoteControl } from './testing';
 
 /**
  * The two halves were written against a shared description of the HTTP and WebSocket
@@ -70,22 +67,10 @@ describe('a Maestro client against a Maestro host', () => {
     const controller = createMaestroHostController({
       clients,
       appVersion: '9.9.9',
-      remote: {
-        overview: expose(remoteDeviceWireContract.remote.overview, {
-          snapshot: cell<RemoteOverview>({
-            host: { id: 'h', name: 'studio', appVersion: '9.9.9' },
-            projects: [],
-            agents: [],
-            providers: [],
-            defaultProviderId: null,
-          }),
-        }),
-        output: () => {
-          throw new Error('No terminal in this test');
-        },
+      remote: testRemoteControl({
         adoptConversation: async ({ conversationId }) =>
           ok({ taskId: `task-for-${conversationId}`, projectId: 'p1' }),
-      },
+      }),
     });
     http = createRemoteAccessHttpServer({
       store,

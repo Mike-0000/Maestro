@@ -74,6 +74,19 @@ describe('tailscale', () => {
     expect(result).toMatchObject({ success: true, data: { serving: true } });
   });
 
+  it('points at the approval link when serving is not enabled for the tailnet', async () => {
+    const { run } = runner({
+      'serve --bg --https=443 http://127.0.0.1:7462': new Error(
+        'Serve is not enabled on your tailnet.\nTo enable, visit:\n\n         https://login.tailscale.com/f/serve?node=abc123\n'
+      ),
+    });
+    const result = await setTailscaleServe(7462, true, run);
+    expect(result).toMatchObject({ success: false });
+    expect(!result.success && result.error.message).toBe(
+      'Tailscale Serve is not enabled for your tailnet yet. Open https://login.tailscale.com/f/serve?node=abc123 to enable it, then try again.'
+    );
+  });
+
   it('surfaces a refused change', async () => {
     const { run } = runner({ 'serve --https=443 off': new Error('access denied') });
     expect(await setTailscaleServe(7462, false, run)).toEqual({

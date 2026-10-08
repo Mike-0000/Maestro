@@ -7,17 +7,30 @@ import {
   type AppScopedStoreContribution,
 } from '@core/primitives/scoped-stores/browser';
 import { ConductorStore } from '../../browser/conductor-store';
+import { startRemoteVoiceBridge } from '../../browser/remote-voice-bridge';
 
 const conductorStoreToken = scopedStoreToken<ConductorStore>('conductor');
+
+let stopRemoteVoiceBridge: (() => void) | undefined;
 
 // Resolves the canvas and voice stores at create time; register after both.
 export const conductorAppStoreContributions: readonly AppScopedStoreContribution[] = [
   contributeScopedStore({
     token: conductorStoreToken,
-    create: (_context, stores) =>
-      new ConductorStore(stores.get(canvasStoreToken), stores.get(voiceStoreToken)),
+    create: (_context, stores) => {
+      const canvas = stores.get(canvasStoreToken);
+      const conductor = new ConductorStore(canvas, stores.get(voiceStoreToken));
+      // Paired devices drive this conductor too; the bridge lives as long as the store.
+      stopRemoteVoiceBridge?.();
+      stopRemoteVoiceBridge = startRemoteVoiceBridge(conductor, canvas);
+      return conductor;
+    },
     activate: (store) => store.activate(),
-    dispose: (store) => store.dispose(),
+    dispose: (store) => {
+      stopRemoteVoiceBridge?.();
+      stopRemoteVoiceBridge = undefined;
+      store.dispose();
+    },
   }),
 ];
 

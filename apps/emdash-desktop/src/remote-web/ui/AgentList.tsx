@@ -11,6 +11,7 @@ import { ConnectionStatus } from './ConnectionStatus';
 import { Button, IconButton } from './controls';
 import { cx, useIsWide } from './hooks';
 import { agentStatusLabel, agentTone, StatusIndicator } from './StatusIndicator';
+import { VoiceFab } from './VoiceMic';
 
 /** Follows an in-app link without a page load, leaving modified clicks to the browser. */
 function useLinkHandler(route: Route): (event: MouseEvent<HTMLAnchorElement>) => void {
@@ -87,6 +88,16 @@ export const AgentList = observer(function AgentList() {
           New agent
         </button>
       ) : null}
+
+      {loading ? null : (
+        <VoiceFab
+          className={
+            wide
+              ? 'right-4 bottom-4'
+              : 'bottom-[max(1.25rem,env(safe-area-inset-bottom))] left-[max(1.25rem,env(safe-area-inset-left))]'
+          }
+        />
+      )}
     </section>
   );
 });

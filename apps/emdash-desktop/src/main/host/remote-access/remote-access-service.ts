@@ -4,6 +4,7 @@ import { PROTOCOL_VERSION } from '@emdash/core/workspace-server';
 import { err, ok, type Result } from '@emdash/shared';
 import { createScope, type Scope } from '@emdash/shared/concurrency';
 import type { Logger } from '@emdash/shared/logger';
+import { createEventStreamHost } from '@emdash/wire/live';
 import {
   createInProcessWire,
   serve,
@@ -12,6 +13,10 @@ import {
   type WireTransport,
 } from '@emdash/wire/rpc';
 import { cell, peek } from '@emdash/wire/state';
+import {
+  remoteAccessContract,
+  type RemoteConductorSnapshot,
+} from '@core/features/remote-access/api';
 import type {
   RemoteAccessError,
   RemoteAccessPairing,
@@ -39,6 +44,7 @@ import {
 } from './http-server';
 import { PairingCodes } from './pairing';
 import { createRemoteControl, type RemoteControl, type RemoteControlPorts } from './remote-control';
+import { createRemoteVoice, type RemoteVoice, type RemoteVoiceImpl } from './remote-voice';
 import { inspectTailscale, setTailscaleServe } from './tailscale';
 import { createTriggerRoute } from './trigger-route';
 
@@ -67,6 +73,7 @@ type Attached = {
   store: RemoteDeviceStore;
   desktop: DesktopWire;
   remoteControl: RemoteControl;
+  remoteVoice: RemoteVoice;
   hostController: Controller;
   browserController: Controller;
 };
@@ -102,6 +109,11 @@ export class RemoteAccessService {
   private listenError: string | null = null;
   private lifecycle: Promise<void> = Promise.resolve();
   private pairingExpiry: ReturnType<typeof setTimeout> | undefined;
+  private readonly conductorCommands = createEventStreamHost(
+    remoteAccessContract.conductorCommands
+  );
+  /** Kept so a window that reports before the service attaches is not lost. */
+  private conductorSnapshot: RemoteConductorSnapshot | undefined;
 
   readonly operations: RemoteAccessOperations = {
     status: this.statusCell,
@@ -137,6 +149,11 @@ export class RemoteAccessService {
       await this.attached?.store.setTrigger(name, null);
       this.publish();
     },
+    publishConductorState: (snapshot) => {
+      this.conductorSnapshot = snapshot;
+      this.attached?.remoteVoice.publishConductorState(snapshot);
+    },
+    conductorCommands: this.conductorCommands,
     getTailscale: () => inspectTailscale(peek(this.statusCell).port),
     setTailscaleServe: (enabled) => this.setTailscaleServe(enabled),
   };
@@ -148,8 +165,14 @@ export class RemoteAccessService {
     const store = new RemoteDeviceStore(join(deps.dataDirectory, SETTINGS_FILE));
     await store.load();
     const desktop = createInProcessWire(desktopWireContract, deps.desktopController);
+    const remoteVoice = createRemoteVoice({
+      voice: desktop.client.voice,
+      conductorCommands: this.conductorCommands,
+      snapshot: this.conductorSnapshot,
+      scope: scope.child('remote-voice'),
+    });
     const remoteControl = createRemoteControl(
-      remoteControlPorts(deps, store, desktop),
+      remoteControlPorts(deps, store, desktop, remoteVoice.impl),
       scope.child('remote-control')
     );
     this.attached = {
@@ -158,6 +181,7 @@ export class RemoteAccessService {
       store,
       desktop,
       remoteControl,
+      remoteVoice,
       hostController: createMaestroHostController({
         clients: deps.clients,
         remote: remoteControl.impl,
@@ -176,6 +200,7 @@ export class RemoteAccessService {
     await this.enqueue(() => this.stopListener());
     if (!attached) return;
     attached.remoteControl.dispose();
+    attached.remoteVoice.dispose();
     await attached.desktop.dispose();
     await attached.scope.dispose();
   }
@@ -345,7 +370,8 @@ export class RemoteAccessService {
 function remoteControlPorts(
   deps: RemoteAccessDependencies,
   store: RemoteDeviceStore,
-  desktop: DesktopWire
+  desktop: DesktopWire,
+  voice: RemoteVoiceImpl
 ): RemoteControlPorts {
   const { client } = desktop;
   let providers: Promise<Array<{ id: string; name: string }>> | undefined;
@@ -379,6 +405,7 @@ function remoteControlPorts(
       sendInput: (input) => attempt(() => client.conversations.tui.sendInput(input)),
       resize: (input) => attempt(() => client.conversations.tui.resize(input)),
     },
+    voice,
     sessions: {
       describe: (conversationId) => tuiAgentStatusBridge.describe(conversationId),
       onChanged: (listener) => tuiAgentStatusBridge.onChanged(listener),

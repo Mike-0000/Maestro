@@ -1,8 +1,9 @@
 import { createContext, useContext } from 'react';
 import type { AppStore } from '../state/app-store';
 import type { Router } from '../state/router';
+import type { VoiceStore } from '../state/voice-store';
 
-export type AppServices = { app: AppStore; router: Router };
+export type AppServices = { app: AppStore; router: Router; voice: VoiceStore };
 
 export const AppContext = createContext<AppServices | null>(null);
 
@@ -18,4 +19,8 @@ export function useApp(): AppStore {
 
 export function useRouter(): Router {
   return useServices().router;
+}
+
+export function useVoice(): VoiceStore {
+  return useServices().voice;
 }

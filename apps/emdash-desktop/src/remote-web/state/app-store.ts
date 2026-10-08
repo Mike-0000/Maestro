@@ -48,6 +48,10 @@ export class AppStore {
   phase: AppPhase = 'loading';
   session: SessionInfo | null = null;
   linkStatus: LinkStatus = 'connecting';
+  /** The socket itself, without the grace that keeps `linkStatus` from flickering. */
+  linkUp = false;
+  /** When the socket last came up (Unix ms); 0 before the first time. */
+  linkUpAt = 0;
   projectFilter: string | null = null;
   showArchived = false;
   toasts: Toast[] = [];
@@ -258,6 +262,10 @@ export class AppStore {
    */
   private reflectLinkStatus(status: LinkStatus): void {
     clearTimeout(this.statusTimer);
+    runInAction(() => {
+      this.linkUp = status === 'online';
+      if (status === 'online') this.linkUpAt = Date.now();
+    });
     if (status !== 'reconnecting') {
       runInAction(() => {
         this.linkStatus = status;
@@ -312,6 +320,7 @@ export class AppStore {
     this.link?.close();
     this.link = null;
     this.linkStatus = 'connecting';
+    this.linkUp = false;
   }
 }
 

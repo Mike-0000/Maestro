@@ -1,9 +1,6 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import {
-  remoteDeviceWireContract,
-  type RemoteOverview,
-} from '@emdash/core/services/remote-control/api';
+import { remoteDeviceWireContract } from '@emdash/core/services/remote-control/api';
 import { hostRuntimesDefinitions } from '@emdash/core/services/runtime-broker/api';
 import { PROTOCOL_VERSION, workspaceWireContract } from '@emdash/core/workspace-server';
 import { ok } from '@emdash/shared';
@@ -17,12 +14,11 @@ import {
   type ContractDefinitions,
   type WireTransport,
 } from '@emdash/wire/rpc';
-import { cell, expose } from '@emdash/wire/state';
 import { afterEach, describe, expect, it } from 'vitest';
 import { initializeWorkspaceServerTransport } from '@core/services/hosts/node/workspace-server/connect/protocol';
 import type { DesktopRuntimeClients } from '@main/gateway/desktop-workers';
 import { createBrowserDeviceController, createMaestroHostController } from './host-controller';
-import type { RemoteControlImpl } from './remote-control';
+import { testRemoteControl } from './testing';
 
 const cleanups: Array<() => Promise<void> | void> = [];
 
@@ -50,21 +46,9 @@ function runtimeClients(): DesktopRuntimeClients {
   return clients as unknown as DesktopRuntimeClients;
 }
 
-const overview = cell<RemoteOverview>({
-  host: { id: 'host-1', name: 'studio', appVersion: '1.2.3' },
-  projects: [],
-  agents: [],
-  providers: [],
-  defaultProviderId: null,
-});
-
-const remote: RemoteControlImpl = {
-  overview: expose(remoteDeviceWireContract.remote.overview, { snapshot: overview }),
+const remote = testRemoteControl({
   startAgent: async ({ projectId }) => ok({ taskId: `task-${projectId}`, conversationId: 'c1' }),
-  output: () => {
-    throw new Error('No terminal in this test');
-  },
-};
+});
 
 async function listen(controller: ReturnType<typeof createMaestroHostController>): Promise<string> {
   const server: Server = createServer();
