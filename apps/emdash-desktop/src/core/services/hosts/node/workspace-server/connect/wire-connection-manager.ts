@@ -4,6 +4,10 @@ import type { Connection, ContractClient, WireTransport } from '@emdash/wire/rpc
 import type { WorkspaceServerTarget } from '../../../api/targets';
 import type { WorkspaceServerSshPort } from '../ports';
 import { openLocalWorkspaceServerTransport } from './local-socket-transport';
+import {
+  openMaestroWorkspaceServerTransport,
+  type MaestroHostConnectPort,
+} from './maestro-websocket-transport';
 import { initializeWorkspaceServerTransport } from './protocol';
 import { openSshWorkspaceServerTransport } from './ssh-streamlocal-transport';
 
@@ -28,6 +32,7 @@ export type WorkspaceServerDialerOptions = {
   protocolVersion?: string;
   client?: { id: string; appVersion: string };
   ssh?: WorkspaceServerSshPort;
+  maestro?: MaestroHostConnectPort;
   openTransport?: (target: WorkspaceServerTarget) => Promise<WireTransport>;
   invalidateConnection?(connectionId: string): Promise<void>;
 };
@@ -47,6 +52,10 @@ function openWorkspaceServerTransport(
   options: WorkspaceServerDialerOptions
 ): Promise<WireTransport> {
   if (target.kind === 'local-socket') return openLocalWorkspaceServerTransport(target);
+  if (target.kind === 'maestro') {
+    if (!options.maestro) throw new Error('A Maestro host port is required for a Maestro target');
+    return openMaestroWorkspaceServerTransport(target, options.maestro);
+  }
   if (!options.ssh) throw new Error('SSH control is required for a remote workspace-server target');
   return openSshWorkspaceServerTransport(target, options.ssh);
 }

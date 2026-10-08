@@ -1,6 +1,6 @@
 import { CollectionToolbar, CollectionView, PageLayout } from '@emdash/ui/react/patterns';
 import { Button, toast } from '@emdash/ui/react/primitives';
-import { MonitorIcon, PlusIcon, ServerIcon } from 'lucide-react';
+import { MonitorIcon, PlusIcon, RadioTowerIcon, ServerIcon } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useState } from 'react';
 import { getMachinesStore } from '@core/features/machines/contributions/app-stores';
@@ -19,6 +19,7 @@ export const MachinesSettingsPage = observer(function MachinesSettingsPage({
 }: SettingsPageProps) {
   const machinesStore = getMachinesStore();
   const openMachineModal = useOpenModal('addSshConnModal');
+  const openMaestroHostModal = useOpenModal('maestroHostModal');
   // The machines store is MobX-observable, so the view's source getter reads it
   // directly and the list pipeline re-derives on store changes — no bridge needed.
   const [view] = useState(() =>
@@ -30,6 +31,10 @@ export const MachinesSettingsPage = observer(function MachinesSettingsPage({
 
   const openCreateModal = () => {
     void openMachineModal({ dismissControl: 'close' });
+  };
+  const addMaestroHost = async () => {
+    const outcome = await openMaestroHostModal({ mode: 'add' });
+    if (outcome.success) openDetail(outcome.data.connectionId);
   };
   const hasThisComputer = machinesStore.connections.some(
     (machine) => machine.transport === 'local'
@@ -61,6 +66,7 @@ export const MachinesSettingsPage = observer(function MachinesSettingsPage({
             <MachinesToolbar
               view={view}
               onAdd={openCreateModal}
+              onAddMaestroHost={() => void addMaestroHost()}
               onAddThisComputer={hasThisComputer ? undefined : () => void addThisComputer()}
             />
           }
@@ -75,10 +81,12 @@ export const MachinesSettingsPage = observer(function MachinesSettingsPage({
 const MachinesToolbar = observer(function MachinesToolbar({
   view,
   onAdd,
+  onAddMaestroHost,
   onAddThisComputer,
 }: {
   view: MachinesListViewModel;
   onAdd: () => void;
+  onAddMaestroHost: () => void;
   /** Absent once this computer is already a machine. */
   onAddThisComputer?: () => void;
 }) {
@@ -103,6 +111,15 @@ const MachinesToolbar = observer(function MachinesToolbar({
             Add this computer
           </Button>
         ) : null}
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={onAddMaestroHost}
+          title="Use the Maestro app running on another computer as a machine, without SSH"
+        >
+          <RadioTowerIcon />
+          Add Maestro host
+        </Button>
         <Button type="button" variant="primary" onClick={onAdd}>
           <PlusIcon />
           Add machine

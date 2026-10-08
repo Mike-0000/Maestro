@@ -49,3 +49,10 @@
 - Do not assume a POSIX remote because the connection succeeded; branch on the probed platform
   (`probeRemotePlatform`) and keep Linux/macOS paths unchanged. See
   `apps/workspace-server/docs/windows-hosts.md`.
+- A machine with `transport: 'maestro'` (connection metadata v6) is a Maestro host: the Maestro app
+  on another computer, reached over its WebSocket listener. It has no SSH connection, proxy, or
+  exec channel. Its Host service (`services/hosts/node/maestro/`) reuses the connection supervisor
+  with an always-satisfied SSH leg, so never call `getProxy`/`ensureProxy` or build a shell command
+  for one; refuse with `MaestroHostUnsupportedError` instead of waiting on a connection that cannot
+  exist. Its device token and Cloudflare Access client secret live in the encrypted secret store
+  (`maestro-host-credentials.ts`), never in metadata, and are disclosed only as request headers.

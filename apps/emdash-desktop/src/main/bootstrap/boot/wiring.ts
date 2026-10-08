@@ -22,6 +22,7 @@ import { browserOperations } from '@main/host/browser/controller';
 import { createChorusHostServices } from '@main/host/chorus-host';
 import { createDevPerfOperations } from '@main/host/dev-perf/controller-operations';
 import { writeRendererLogEntry } from '@main/host/file-logger';
+import { remoteAccessService } from '@main/host/remote-access/remote-access-service';
 import { getActiveSessionSummary } from '@main/host/sessions/active-session-summary';
 import { setTrayVisible } from '@main/host/tray';
 import { updateOperations } from '@main/host/updates/controller-operations';
@@ -135,6 +136,7 @@ export function createDesktopWireOptions(
     projectSettings: services.projectSettings,
     providerSettings: services.providerSettings,
     reconcileSweep: services.reconcileSweep,
+    remoteAccessOperations: remoteAccessService.operations,
     search: services.search,
     sessionLaunchContexts: services.sessionLaunchContexts,
     runtimeClients: {

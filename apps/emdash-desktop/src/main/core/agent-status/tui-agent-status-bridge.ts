@@ -38,6 +38,23 @@ export class TuiAgentStatusBridge {
   private workerStateUnsubscribe: Unsubscribe | null = null;
   private dependencies: TuiAgentStatusBridgeDependencies | undefined;
   private disposed = false;
+  private readonly changeListeners = new Set<() => void>();
+
+  /** Fires whenever an attached host's agent states or sessions change. */
+  onChanged(listener: () => void): Unsubscribe {
+    this.changeListeners.add(listener);
+    return () => this.changeListeners.delete(listener);
+  }
+
+  /** The last agent state and session seen for a conversation on any attached host. */
+  describe(conversationId: string): { agent?: TuiAgentState; session?: TuiSessionState } {
+    for (const attachment of this.attachments.values()) {
+      const agent = attachment.agentStates.get(conversationId);
+      const session = attachment.sessions.get(conversationId);
+      if (agent || session) return { agent, session };
+    }
+    return {};
+  }
 
   initialize(dependencies: TuiAgentStatusBridgeDependencies): void {
     this.disposed = false;
@@ -142,6 +159,7 @@ export class TuiAgentStatusBridge {
     attachment.agentStates.clear();
     attachment.sessions.clear();
     void attachment.scope.dispose();
+    this.notifyChanged();
   }
 
   dispose(): void {
@@ -178,6 +196,7 @@ export class TuiAgentStatusBridge {
       await this.resetConversation(previous.conversationId);
       attachment.agentStates.delete(conversationId);
     }
+    this.notifyChanged();
     if (bootstrap) await this.resetMissingHostStatuses(host, seen);
   }
 
@@ -205,6 +224,11 @@ export class TuiAgentStatusBridge {
       if (!bootstrap) await this.resetConversation(previous.conversationId);
       attachment.sessions.delete(conversationId);
     }
+    this.notifyChanged();
+  }
+
+  private notifyChanged(): void {
+    for (const listener of this.changeListeners) listener();
   }
 
   private async applyAgentStateSnapshot(state: TuiAgentState): Promise<void> {

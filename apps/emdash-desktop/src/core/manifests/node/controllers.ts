@@ -55,6 +55,10 @@ import type { ProjectSettingsService } from '@core/features/projects/api/node/se
 import type { ProjectDeletionDependencies } from '@core/features/projects/node/operations/deleteProject';
 import { getProjectById } from '@core/features/projects/node/operations/getProjects';
 import { createProjectsWireController } from '@core/features/projects/node/wire-controller';
+import {
+  createRemoteAccessWireController,
+  type RemoteAccessOperations,
+} from '@core/features/remote-access/node/wire-controller';
 import { createRepositoryWireController } from '@core/features/repository/node/wire-controller';
 import type { SearchService } from '@core/features/search/node/search-service';
 import { createSearchWireController } from '@core/features/search/node/wire-controller';
@@ -154,6 +158,7 @@ export type DesktopControllerContext = {
   readonly projectSettings: ProjectSettingsService;
   readonly providerSettings: ProviderOverrideSettings;
   readonly reconcileSweep: ReconcileSweepHandle;
+  readonly remoteAccessOperations: RemoteAccessOperations;
   readonly hosts: Hosts;
   readonly runtimeClients: {
     getMementosRuntimeClient(): Promise<MementosRuntimeClient>;
@@ -210,6 +215,10 @@ export const desktopNodeControllers = {
     create: ({ appSettings, settingsRuntime }) =>
       createAppSettingsWireController(appSettings, settingsRuntime),
   },
+  remoteAccess: {
+    create: ({ remoteAccessOperations, scope }) =>
+      createRemoteAccessWireController(remoteAccessOperations, scope),
+  },
   devPerf: {
     create: ({ devPerfOperations, logger }) =>
       createDevPerfWireController(devPerfOperations, logger),
@@ -233,7 +242,8 @@ export const desktopNodeControllers = {
     create: ({ loggingOperations }) => createLoggingWireController(loggingOperations),
   },
   machines: {
-    create: ({ runtimes, ssh }) => createMachinesWireController(ssh.machines, runtimes),
+    create: ({ runtimes, ssh }) =>
+      createMachinesWireController(ssh.machines, runtimes, ssh.maestroHosts),
   },
   projectSettings: {
     create: ({ runtimes, workspaceIdentity }) =>

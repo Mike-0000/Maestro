@@ -1,0 +1,17 @@
+export {
+  remoteAccessContract,
+  remoteAccessDeviceSchema,
+  remoteAccessDomain,
+  remoteAccessErrorSchema,
+  remoteAccessPairingSchema,
+  remoteAccessStatusSchema,
+  remoteAccessTailscaleSchema,
+  remoteAccessTriggerSchema,
+  type RemoteAccessContract,
+  type RemoteAccessDevice,
+  type RemoteAccessError,
+  type RemoteAccessPairing,
+  type RemoteAccessStatus,
+  type RemoteAccessTailscale,
+  type RemoteAccessTrigger,
+} from './contract';

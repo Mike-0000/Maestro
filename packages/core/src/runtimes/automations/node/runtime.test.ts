@@ -318,4 +318,33 @@ describe('AutomationsRuntime', () => {
     expect(overview.data.latestRun?.automationId).toBe('auto-1');
     expect(overview.data.nextScheduledRun?.status).toBe('scheduled');
   });
+
+  it('deploys an on-demand automation without consulting its schedule', async () => {
+    const result = await runtime.deploy(
+      deployment({ schedule: { expr: 'not a cron', tz: 'UTC' }, triggers: { cron: false } })
+    );
+
+    expect(result.success).toBe(true);
+    expect(runsOf(runtime, 'auto-1')).toEqual([]);
+  });
+
+  it('startRun resolves a repeated request to the run it already started', async () => {
+    await runtime.deploy(deployment({ triggers: { cron: false } }));
+    await runtime.deploy(deployment({ automationId: 'auto-2', triggers: { cron: false } }));
+    const request = {
+      id: '0f3c9a52-6d1e-4b7a-9c3e-2a1b4c5d6e7f',
+      title: 'Add CSV export',
+      body: '',
+    };
+
+    const first = await runtime.startRun({ automationId: 'auto-1', request });
+    const second = await runtime.startRun({ automationId: 'auto-1', request });
+    const elsewhere = await runtime.startRun({ automationId: 'auto-2', request });
+
+    expect(first.success && first.data.run.id).toBe(request.id);
+    expect(second.success && second.data.run.id).toBe(request.id);
+    expect(runsOf(runtime, 'auto-1')).toHaveLength(1);
+    expect(elsewhere).toMatchObject({ success: false, error: { type: 'automation-not-found' } });
+    expect(runsOf(runtime, 'auto-2')).toEqual([]);
+  });
 });

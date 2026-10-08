@@ -110,6 +110,33 @@ const v5Schema = v4Schema.extend({
 });
 
 // ---------------------------------------------------------------------------
+// v6 schema — adds the 'maestro' transport and its endpoint
+// ---------------------------------------------------------------------------
+
+const maestroHostMetadataSchema = z.object({
+  /** Normalised base URL of the host's Maestro app, e.g. https://my-pc.tailnet.ts.net. */
+  url: z.string(),
+  /** The host's own stable identity, as it reported when this device paired. */
+  hostId: z.string().optional(),
+  /** Cloudflare Access service-token client ID. The client secret is stored as a secret. */
+  cfAccessClientId: z.string().optional(),
+});
+
+const v6Schema = v5Schema.extend({
+  version: z.literal('6').optional(),
+  /**
+   * 'maestro' reaches the Maestro app running on another computer over its WebSocket listener:
+   * no SSH, no workspace-server daemon, and no shell or exec channel. Absent still means SSH.
+   */
+  transport: z.enum(['local', 'maestro']).optional(),
+  /**
+   * Where a 'maestro' machine is reached. The device token and the Cloudflare Access client
+   * secret are deliberately absent: they live in the encrypted secret store.
+   */
+  maestro: maestroHostMetadataSchema.optional(),
+});
+
+// ---------------------------------------------------------------------------
 // Versioned schema
 // ---------------------------------------------------------------------------
 
@@ -125,6 +152,7 @@ const v5Schema = v4Schema.extend({
  * v3: adds { kind: 'pinned', realpath } to installOverrideSchema (pass-through)
  * v4: adds syncLocalSettings (absent = false; pass-through)
  * v5: adds transport (absent = SSH; pass-through)
+ * v6: adds the 'maestro' transport and its endpoint (pass-through)
  */
 export const sshConnectionMetadata = defineVersionedSchema()
   .unversioned(v0Schema)
@@ -165,6 +193,11 @@ export const sshConnectionMetadata = defineVersionedSchema()
     ...prev,
     version: '5' as const,
   }))
+  .version('6', v6Schema, (prev) => ({
+    // Pass-through: existing machines keep their transport; none is a Maestro host.
+    ...prev,
+    version: '6' as const,
+  }))
   .build();
 
 // ---------------------------------------------------------------------------
@@ -173,6 +206,9 @@ export const sshConnectionMetadata = defineVersionedSchema()
 
 /** The TypeScript type for SSH connection metadata. */
 export type SshConnectionMetadata = typeof sshConnectionMetadata.Type;
+
+/** Where a 'maestro' machine is reached; see the v6 schema. */
+export type MaestroHostMetadata = z.infer<typeof maestroHostMetadataSchema>;
 
 function normalizeSelection(raw: unknown): z.infer<typeof installOverrideV2Schema> {
   if (raw === null || raw === undefined) return null;
@@ -284,5 +320,6 @@ export function sshConfigFromRow(row: SshConnectionConfigRow): SshConfig {
     proxyJump: metadata.proxyJump,
     syncLocalSettings: metadata.syncLocalSettings,
     ...(metadata.transport ? { transport: metadata.transport } : {}),
+    ...(metadata.maestro ? { maestro: metadata.maestro } : {}),
   };
 }

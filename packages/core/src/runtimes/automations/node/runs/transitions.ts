@@ -1,6 +1,7 @@
 import type { HostFileRef } from '#primitives/path/api';
 import type {
   AutomationRun,
+  AutomationRunDelivery,
   AutomationRunError,
   AutomationRunId,
   AutomationRunStatus,
@@ -74,6 +75,18 @@ export class AutomationRunTransitions {
       sessionId: session.sessionId,
       finishedAt,
     });
+  }
+
+  /**
+   * Delivery progress is recorded on a `done` run: the status stays put so clients
+   * that only know the session-start lifecycle keep working.
+   */
+  updateDelivery(runId: AutomationRunId, delivery: AutomationRunDelivery): AutomationRun | null {
+    const transition: RunTransition = {
+      from: ['done'],
+      to: 'done',
+    };
+    return this.transition(runId, transition, { status: transition.to, delivery });
   }
 
   markFailed(

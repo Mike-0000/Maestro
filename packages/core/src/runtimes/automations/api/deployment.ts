@@ -88,6 +88,28 @@ export const automationAgentConfigSchema = z.discriminatedUnion('type', [
   automationTuiAgentConfigSchema,
 ]);
 
+/**
+ * Which triggers start runs. Absent means cron-scheduled (the original behaviour);
+ * `cron: false` makes the automation on-demand only (`startRun`).
+ */
+export const automationTriggersSchema = z.object({
+  cron: z.boolean(),
+});
+
+export const AUTOMATION_COMPLETION_DEFAULT_TIMEOUT_MS = 60 * 60_000;
+
+/**
+ * Post-session delivery. When present, a run keeps its worker slot after the session
+ * starts, waits for the agent to settle, then pushes the run branch and opens a pull
+ * request against `baseBranch`. Nothing merges automatically.
+ */
+export const automationCompletionSchema = z.object({
+  kind: z.literal('pull-request'),
+  baseBranch: nonBlankStringSchema,
+  remote: nonBlankStringSchema,
+  timeoutMs: z.number().int().positive().optional(),
+});
+
 export const automationDeploymentSchema = z.object({
   automationId: automationIdSchema,
   revision: z.number().int().positive(),
@@ -96,6 +118,10 @@ export const automationDeploymentSchema = z.object({
   schedule: automationScheduleSchema,
   agent: automationAgentConfigSchema,
   workspace: automationWorkspaceConfigSchema,
+  triggers: automationTriggersSchema.optional(),
+  /** Runs of this automation allowed in flight at once. Absent means 1. */
+  maxConcurrentRuns: z.number().int().positive().optional(),
+  completion: automationCompletionSchema.optional(),
 });
 
 export const automationRunConfigSnapshotSchema = automationDeploymentSchema.pick({
@@ -103,6 +129,7 @@ export const automationRunConfigSnapshotSchema = automationDeploymentSchema.pick
   schedule: true,
   agent: true,
   workspace: true,
+  completion: true,
 });
 
 export type AutomationId = z.infer<typeof automationIdSchema>;
@@ -115,5 +142,7 @@ export type AutomationSchedule = z.infer<typeof automationScheduleSchema>;
 export type AutomationAcpAgentConfig = z.infer<typeof automationAcpAgentConfigSchema>;
 export type AutomationTuiAgentConfig = z.infer<typeof automationTuiAgentConfigSchema>;
 export type AutomationAgentConfig = z.infer<typeof automationAgentConfigSchema>;
+export type AutomationTriggers = z.infer<typeof automationTriggersSchema>;
+export type AutomationCompletion = z.infer<typeof automationCompletionSchema>;
 export type AutomationDeployment = z.infer<typeof automationDeploymentSchema>;
 export type AutomationRunConfigSnapshot = z.infer<typeof automationRunConfigSnapshotSchema>;

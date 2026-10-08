@@ -2,6 +2,7 @@ import { createScope } from '@emdash/shared/concurrency';
 import type { Logger } from '@emdash/shared/logger';
 import { describe, expect, it, vi } from 'vitest';
 import type { AppDb } from '@core/services/app-db/node/db';
+import type { MaestroHostCredentialService } from '@core/services/hosts/node/maestro/maestro-host-credentials';
 import type { SshCredentialService } from '@core/services/ssh/node/credentials/ssh-credential-service';
 import { SshConnectionManager } from '@core/services/ssh/node/lifecycle/ssh-connection-manager';
 import { createSshService } from './ssh-service-factory';
@@ -31,6 +32,12 @@ describe('createSshService', () => {
       db: {} as AppDb,
       credentials,
       prepareCredentials: () => () => {},
+      maestroCredentials: {
+        getDeviceToken: vi.fn(async () => null),
+        getCfAccessClientSecret: vi.fn(async () => null),
+        deleteAllCredentials: vi.fn(),
+      } as unknown as MaestroHostCredentialService,
+      prepareMaestroSecrets: () => () => {},
       logger,
       telemetry: { capture: vi.fn() },
     });

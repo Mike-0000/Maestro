@@ -1,6 +1,7 @@
 import { sshConnectionIdOf, type HostRef } from '@emdash/core/primitives/host/api';
 import type { Scope } from '@emdash/shared/concurrency';
 import { cell, derived, snapshot, type Cell, type Readable } from '@emdash/wire/state';
+import type { SshConnectionEvent } from '@core/primitives/ssh/api';
 import type { SshConnectionLifecycle } from '@core/primitives/ssh/api/node/connection-control';
 import type { SshConnectionManagerEvent } from '@core/primitives/ssh/api/node/ssh-connection-manager';
 import type { HostInvalidation, MachineMutationEvents } from '../api';
@@ -11,7 +12,9 @@ import {
   type CreateHostServiceOptions,
   type HostServiceEntry,
 } from './host-service';
+import { createMaestroHostService } from './maestro/maestro-host-service';
 import { HostStateModel } from './state-model';
+import type { MaestroHostConnectPort } from './workspace-server/connect/maestro-websocket-transport';
 import type { WorkspaceServerConnection } from './workspace-server/connect/wire-connection-manager';
 
 export interface Hosts {
@@ -37,6 +40,15 @@ export type CreateHostsOptions = Omit<
   'host' | 'stateModel' | 'nextGeneration' | 'onReady'
 > & {
   machineEvents: MachineMutationEvents;
+  /**
+   * Machines reached over the Maestro app's WebSocket listener instead of SSH. Absent means every
+   * machine is an SSH (or this-computer) machine.
+   */
+  maestro?: MaestroHostConnectPort & {
+    /** Decides, when a machine's service is first needed, which kind of Host it is. */
+    isMaestroHost(connectionId: string): boolean;
+    publishConnectionEvent?(event: SshConnectionEvent): void;
+  };
 };
 
 /** Registry and identity owner. Host-specific connection and server work lives in HostService. */
@@ -74,13 +86,12 @@ export function createHosts(options: CreateHostsOptions): Hosts {
     scope.signal.throwIfAborted();
     const existing = entries.get(id);
     if (existing) return existing;
-    const instance = createHostService({
-      ...options,
+    const identity = {
       scope,
-      host: { type: 'remote', id },
+      host: { type: 'remote', id } as const,
       stateModel,
       nextGeneration: () => ++generation,
-      onReady: (attachment) => {
+      onReady: (attachment: WorkspaceServerConnection) => {
         if (entries.get(id) !== instance) return;
         for (const listener of readyListeners) {
           try {
@@ -90,7 +101,18 @@ export function createHosts(options: CreateHostsOptions): Hosts {
           }
         }
       },
-    });
+    };
+    const maestro = options.maestro;
+    const instance: HostServiceEntry = maestro?.isMaestroHost(id)
+      ? createMaestroHostService({
+          ...identity,
+          intent: options.ssh.control,
+          maestro,
+          publishConnectionEvent: maestro.publishConnectionEvent,
+          client: options.client,
+          logger: options.logger,
+        })
+      : createHostService({ ...options, ...identity });
     entries.set(id, instance);
     slot(id).source.set(instance.service.connection.availability);
     return instance;

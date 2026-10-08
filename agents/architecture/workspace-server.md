@@ -116,13 +116,34 @@ port is accepting connections on IPv4, IPv6, or both. Desktop clients can use
 this as the wire control plane before opening a transport-native data stream for
 preview traffic.
 
+## On-Demand Runs and the Trigger Gateway
+
+An automation deployed with `triggers.cron: false` runs only through `automations.startRun`. A
+request-carrying `startRun` uses the caller's request id as the run id (repeats return the same
+run), appends the request to the automation's prompt in the run's config snapshot, and queues
+behind the automation's `maxConcurrentRuns` instead of being skipped. With a `completion` config
+the run keeps its worker slot after its session starts: the executor polls the app-supplied
+`automationDeliveryContract` until the agent settles, then publishes the run branch as a pull
+request. The run status stays `done`; progress is on the optional `delivery` field, so clients
+that only know the session-start lifecycle are unaffected. A delivery interrupted by a restart is
+marked `failed` on the next start.
+
+The delivery contract is implemented once, in
+`packages/core/src/services/runtime-broker/node/automation-delivery/`, from the ACP and TUI session live
+models, with `git`/`gh` publishing in `runtimes/automations/node/publish/`; the workspace server and the desktop's local runtime both supply it.
+`emdash-workspace-server trigger-gateway` is a separate process that serves a small
+bearer-authenticated HTTP API on loopback and forwards to the daemon over its socket; it holds no
+state. The same HTTP handler (`.../automations/node/trigger/`) is mounted on a desktop app's
+[remote access](remote-access.md) listener, answered by the app's own runtime. Setup, the HTTP API, and the security model are in
+[`apps/workspace-server/docs/cloud-agents.md`](../../apps/workspace-server/docs/cloud-agents.md).
+
 ## Protocol Version
 
 The wire contract is versioned with a single [semver](https://semver.org) string, defined in
 [`packages/core/src/workspace-server/versions/index.ts`](../../packages/core/src/workspace-server/versions/index.ts):
 
 ```ts
-export const PROTOCOL_VERSION = '9.1.0';
+export const PROTOCOL_VERSION = '10.1.0';
 ```
 
 ### What each component means
@@ -275,6 +296,10 @@ The desktop forwards the read-only agent hook-status procedure to the selected h
 | [`apps/workspace-server/src/gateway/worker-paths.ts`](../../apps/workspace-server/src/gateway/worker-paths.ts) | packaged worker executable path resolution |
 | [`apps/workspace-server/src/gateway/entries/`](../../apps/workspace-server/src/gateway/entries/) | plugin-injecting ACP, agent config, and TUI-agent worker entries |
 | [`apps/workspace-server/src/index.ts`](../../apps/workspace-server/src/index.ts) | CLI and daemon entry point |
+| [`apps/workspace-server/src/trigger/`](../../apps/workspace-server/src/trigger/) | Trigger gateway process and its daemon client |
+| [`packages/core/src/runtimes/automations/node/trigger/`](../../packages/core/src/runtimes/automations/node/trigger/) | Trigger HTTP handler, status mapping, and config, shared with the desktop |
+| [`packages/core/src/services/runtime-broker/node/automation-delivery/`](../../packages/core/src/services/runtime-broker/node/automation-delivery/) | Session-settled detection for automation runs; publishing is `runtimes/automations/node/publish/` |
+| [`packages/core/src/runtimes/automations/api/delivery.ts`](../../packages/core/src/runtimes/automations/api/delivery.ts) | App-supplied delivery contract required by the automations runtime |
 | [`apps/emdash-desktop/src/core/services/hosts/`](../../apps/emdash-desktop/src/core/services/hosts/) | Desktop orchestration and lifecycle policy for SSH hosts |
 | [`apps/emdash-desktop/src/core/services/hosts/node/workspace-server/`](../../apps/emdash-desktop/src/core/services/hosts/node/workspace-server/) | Wire connection manager, hosted-script installer, daemon control, and provisioner |
 | [`apps/workspace-server/install.sh`](../../apps/workspace-server/install.sh) | Remote platform detection and atomic pinned-artifact installation |

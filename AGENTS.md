@@ -403,6 +403,7 @@ pnpm run test
 - [Shared Chorus integration skill](.agents/skills/chorus-integrate/SKILL.md)
 - [Remote development workflow](agents/workflows/remote-development.md)
 - [Workspace server architecture](agents/architecture/workspace-server.md)
+- [Remote access architecture](agents/architecture/remote-access.md)
 - [Provider integration](agents/integrations/providers.md)
 - [MCP integration](agents/integrations/mcp.md)
 - [IPC conventions](agents/conventions/ipc.md)

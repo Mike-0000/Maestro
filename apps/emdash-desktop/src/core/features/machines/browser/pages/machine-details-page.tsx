@@ -4,6 +4,7 @@ import {
   getPillTabId,
   PillTabs,
   SettingsCard,
+  SettingsRow,
   type PillTab,
 } from '@emdash/ui/react/patterns';
 import {
@@ -19,6 +20,7 @@ import {
   Brain,
   EllipsisIcon,
   Folder,
+  KeyRoundIcon,
   MessageSquare,
   PencilIcon,
   Trash2Icon,
@@ -38,6 +40,7 @@ import { AgentsPanel } from '@core/features/settings/contributions/browser/agent
 import { SkillsPanel } from '@core/features/skills/contributions/browser/SkillsPanel';
 import { WorkspaceDetailPage } from '@core/features/workspaces/contributions/browser/workspace-detail-page';
 import { useOpenModal } from '@core/manifests/browser/modal-api';
+import { maestroHostUnsupportedMessage } from '@core/primitives/maestro-host/api/unsupported';
 import type { SettingsPageDetailProps } from '@core/primitives/settings/api/page-contribution';
 import { cn } from '@core/primitives/styling/browser/cn';
 import { isServerUsable } from '@core/services/hosts/api';
@@ -108,6 +111,7 @@ export const MachineDetailsPage = observer(function MachineDetailsPage({
   const machine = machinesStore.connections.find((connection) => connection.id === detailId);
   const openConfirm = useOpenModal('confirmActionModal');
   const openMachineModal = useOpenModal('addSshConnModal');
+  const openMaestroHostModal = useOpenModal('maestroHostModal');
   const state = machine ? machinesStore.stateFor(machine.id) : 'disconnected';
   const connected = state === 'connected';
   const availability = useMachineAvailability(machine?.id);
@@ -181,8 +185,14 @@ export const MachineDetailsPage = observer(function MachineDetailsPage({
     }
   };
 
+  // A Maestro host has no SSH settings: its form edits the address and pairs the device.
+  const maestro = machine.transport === 'maestro';
   const editConnectionSettings = () => {
-    void openMachineModal({ dismissControl: 'close', initialConfig: machine });
+    if (maestro) void openMaestroHostModal({ mode: 'edit', machine });
+    else void openMachineModal({ dismissControl: 'close', initialConfig: machine });
+  };
+  const pairAgain = () => {
+    void openMaestroHostModal({ mode: 'repair', machine });
   };
 
   const requestDelete = async () => {
@@ -269,6 +279,12 @@ export const MachineDetailsPage = observer(function MachineDetailsPage({
                 <PencilIcon />
                 Rename
               </DropdownMenu.Item>
+              {maestro ? (
+                <DropdownMenu.Item onClick={pairAgain}>
+                  <KeyRoundIcon />
+                  Pair again
+                </DropdownMenu.Item>
+              ) : null}
               <DropdownMenu.Separator />
               <DropdownMenu.Item
                 variant="destructive"
@@ -310,18 +326,31 @@ export const MachineDetailsPage = observer(function MachineDetailsPage({
                   onConnect={connectMachine}
                   onRetry={retryMachine}
                   onDisconnect={disconnectMachine}
+                  onPairAgain={maestro ? pairAgain : undefined}
                 />
                 <div
                   aria-disabled={!connected}
                   className={cn(!connected && 'pointer-events-none opacity-33')}
                 >
-                  <WorkspaceRuntimeRow
-                    availability={availability}
-                    connected={connected}
-                    loading={workspaceServer.loading}
-                    state={workspaceServer.state}
-                    actions={workspaceServer}
-                  />
+                  {maestro ? (
+                    <SettingsRow
+                      label="Workspace Runtime"
+                      description={
+                        workspaceServer.state?.version
+                          ? `${maestroHostUnsupportedMessage('workspace-server-control')} · Maestro v${workspaceServer.state.version}`
+                          : maestroHostUnsupportedMessage('workspace-server-control')
+                      }
+                      control={null}
+                    />
+                  ) : (
+                    <WorkspaceRuntimeRow
+                      availability={availability}
+                      connected={connected}
+                      loading={workspaceServer.loading}
+                      state={workspaceServer.state}
+                      actions={workspaceServer}
+                    />
+                  )}
                 </div>
                 <div
                   aria-disabled={!connected}

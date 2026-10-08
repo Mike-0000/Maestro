@@ -2,6 +2,7 @@ import { MachineStatus, type MachineStatusKind } from '@emdash/ui/react/componen
 import { CollectionViewCell } from '@emdash/ui/react/patterns';
 import { observer } from 'mobx-react-lite';
 import type { SshConfig } from '@core/primitives/ssh/api';
+import { maestroHostEndpointLabel } from '../maestro-host-form-model';
 import { useMachineStatusKind } from '../use-machine-status-kind';
 
 const STATUS_TEXT: Record<MachineStatusKind, string> = {
@@ -13,6 +14,7 @@ const STATUS_TEXT: Record<MachineStatusKind, string> = {
 
 function machineEndpoint(machine: SshConfig): string {
   if (machine.transport === 'local') return 'This computer, shared without SSH';
+  if (machine.transport === 'maestro') return `Maestro host · ${maestroHostEndpointLabel(machine)}`;
   const host = machine.sshConfigAlias?.trim() || machine.host;
   const target = machine.username ? `${machine.username}@${host}` : host;
   return machine.port !== 22 ? `${target}:${machine.port}` : target;

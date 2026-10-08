@@ -17,4 +17,17 @@ export type SshWorkspaceServerTarget = {
   channel: SshWorkspaceServerChannel;
 };
 
-export type WorkspaceServerTarget = LocalWorkspaceServerTarget | SshWorkspaceServerTarget;
+/**
+ * The Maestro app on another computer, serving the workspace Wire contract itself over a
+ * WebSocket. The address and credentials are read from the machine at dial time, so an edit or
+ * a new pairing never leaves a stale target behind.
+ */
+export type MaestroWorkspaceServerTarget = {
+  kind: 'maestro';
+  connectionId: string;
+};
+
+export type WorkspaceServerTarget =
+  | LocalWorkspaceServerTarget
+  | SshWorkspaceServerTarget
+  | MaestroWorkspaceServerTarget;

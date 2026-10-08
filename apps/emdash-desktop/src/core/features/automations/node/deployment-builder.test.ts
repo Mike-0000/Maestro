@@ -232,4 +232,73 @@ describe('buildAutomationDeployment', () => {
     });
     expect(mocks.resolveWorktreePool).not.toHaveBeenCalled();
   });
+
+  it('deploys an on-demand automation as an unattended pull-request run', async () => {
+    mocks.rows.push([
+      {
+        base: JSON.stringify({ baseRemote: 'origin', pushRemote: 'fork' }),
+        shareable: JSON.stringify({}),
+      },
+    ]);
+    const automation = automationFixture();
+    automation.triggerConfig = {
+      expr: '0 9 * * 1',
+      tz: 'UTC',
+      onDemand: { timeoutMinutes: 30 },
+    };
+
+    const result = await buildAutomationDeployment(dependencies, automation);
+
+    expect(result).toMatchObject({
+      success: true,
+      data: {
+        triggers: { cron: false },
+        maxConcurrentRuns: 2,
+        completion: {
+          kind: 'pull-request',
+          baseBranch: 'main',
+          remote: 'fork',
+          timeoutMs: 30 * 60_000,
+        },
+        agent: {
+          type: 'acp',
+          start: { providerId: 'claude', modeId: 'bypassPermissions' },
+        },
+      },
+    });
+    // A request run is titled by its request, so no fixed title is deployed.
+    expect(result.success && result.data.agent.title).toBeUndefined();
+  });
+
+  it('auto-approves an on-demand terminal agent', async () => {
+    const automation = automationFixture();
+    automation.triggerConfig = { expr: '0 9 * * 1', tz: 'UTC', onDemand: {} };
+    automation.conversationConfig = { ...automation.conversationConfig!, type: 'pty' };
+
+    const result = await buildAutomationDeployment(dependencies, automation);
+
+    expect(result).toMatchObject({
+      success: true,
+      data: {
+        agent: { type: 'tui', start: { autoApprove: true } },
+        completion: { baseBranch: 'main', remote: 'origin' },
+      },
+    });
+  });
+
+  it('refuses an on-demand automation that does not create a branch per run', async () => {
+    const automation = automationFixture();
+    automation.triggerConfig = { expr: '0 9 * * 1', tz: 'UTC', onDemand: {} };
+    automation.taskConfig!.workspaceConfig.workspace = {
+      kind: 'repository-instance',
+      workspaceId: 'repository-workspace',
+    };
+
+    const result = await buildAutomationDeployment(dependencies, automation);
+
+    expect(result).toMatchObject({
+      success: false,
+      error: { type: 'workspace-not-supported' },
+    });
+  });
 });

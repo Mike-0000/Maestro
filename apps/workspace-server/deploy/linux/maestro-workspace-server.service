@@ -1,0 +1,21 @@
+# Runs the workspace server daemon for the dedicated agent user.
+# Install as /etc/systemd/system/maestro-workspace-server.service; see docs/cloud-agents.md.
+[Unit]
+Description=Maestro workspace server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=maestro
+Group=maestro
+WorkingDirectory=/home/maestro
+ExecStart=/home/maestro/.emdash/workspace-server/current/bin/emdash-workspace-server serve --socket /home/maestro/.emdash/workspace-server/run/workspace.sock
+Restart=on-failure
+RestartSec=5
+# Agents and their builds are children of this unit; stop them with it.
+KillMode=control-group
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

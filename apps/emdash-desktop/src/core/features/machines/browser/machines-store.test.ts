@@ -1,5 +1,5 @@
 import type { HostDependencySnapshot } from '@emdash/core/services/host-dependencies/api';
-import { ok } from '@emdash/shared';
+import { err, ok, type Result } from '@emdash/shared';
 import { cell, expose, peek, produce } from '@emdash/wire/state';
 import { createTestWire } from '@emdash/wire/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,6 +8,11 @@ import {
   type InstallMachineSystemDependenciesInput,
   type SaveMachineInput,
 } from '@core/features/machines/api';
+import type {
+  AddMaestroHostInput,
+  MaestroHostError,
+  RepairMaestroHostInput,
+} from '@core/features/machines/api/maestro-host';
 import type { SshConfig } from '@core/primitives/ssh/api';
 import { sshContract, type SshConnectionsRuntime } from '@core/services/ssh/api';
 import { MachinesStore } from './machines-store';
@@ -25,6 +30,17 @@ const savedConnection: SshConfig = {
   username: 'alice',
   authType: 'agent',
   useAgent: true,
+};
+
+const maestroHost: SshConfig = {
+  id: 'maestro-1',
+  name: 'Studio',
+  host: 'my-pc.tailnet.ts.net',
+  port: 443,
+  username: '',
+  authType: 'agent',
+  transport: 'maestro',
+  maestro: { url: 'https://my-pc.tailnet.ts.net', hostId: 'host-1' },
 };
 
 describe('MachinesStore', () => {
@@ -154,6 +170,59 @@ describe('MachinesStore', () => {
     await fixture.dispose();
   });
 
+  it('adds a paired Maestro host to the list and requests its connection', async () => {
+    const fixture = setup();
+    await fixture.store.start();
+
+    await expect(
+      fixture.store.addMaestroHost({ url: 'https://my-pc.tailnet.ts.net', code: '123456' })
+    ).resolves.toEqual({ success: true, data: maestroHost });
+
+    expect(fixture.store.connections).toEqual([maestroHost]);
+    expect(hostCommands.requestReady).toHaveBeenCalledWith({
+      host: { type: 'remote', id: 'maestro-1' },
+      cause: 'connect',
+    });
+
+    await fixture.dispose();
+  });
+
+  it('leaves the list alone and does not connect when pairing fails', async () => {
+    const fixture = setup();
+    await fixture.store.start();
+    const failure: MaestroHostError = { type: 'invalid-code', message: 'Wrong code' };
+    fixture.addMaestroHost.mockResolvedValueOnce(err(failure));
+
+    await expect(
+      fixture.store.addMaestroHost({ url: 'https://my-pc.tailnet.ts.net', code: '000000' })
+    ).resolves.toEqual({ success: false, error: failure });
+
+    expect(fixture.store.connections).toEqual([]);
+    expect(hostCommands.requestReady).not.toHaveBeenCalled();
+
+    await fixture.dispose();
+  });
+
+  it('retries the blocked connection after pairing a Maestro host again', async () => {
+    const fixture = setup({ saved: [maestroHost] });
+    await fixture.store.start();
+
+    await expect(
+      fixture.store.repairMaestroHost({ id: 'maestro-1', code: '654321' })
+    ).resolves.toMatchObject({ success: true });
+
+    expect(fixture.repairMaestroHost.mock.calls[0]?.[0]).toEqual({
+      id: 'maestro-1',
+      code: '654321',
+    });
+    expect(hostCommands.requestReady).toHaveBeenCalledWith({
+      host: { type: 'remote', id: 'maestro-1' },
+      cause: 'retry',
+    });
+
+    await fixture.dispose();
+  });
+
   it('runs system dependency installs through the live job client', async () => {
     const fixture = setup();
 
@@ -205,6 +274,14 @@ function setup(
     })
   );
   const renameMachine = vi.fn(async (_input: { id: string; name: string }) => {});
+  const addMaestroHost = vi.fn(
+    async (_input: AddMaestroHostInput): Promise<Result<SshConfig, MaestroHostError>> =>
+      ok(maestroHost)
+  );
+  const repairMaestroHost = vi.fn(
+    async (_input: RepairMaestroHostInput): Promise<Result<SshConfig, MaestroHostError>> =>
+      ok(maestroHost)
+  );
   const deleteMachine = vi.fn(async ({ id }: { id: string }) => {
     if (!options.removeRuntimeOnDelete) return;
     updateRuntime((runtime) => {
@@ -296,6 +373,8 @@ function setup(
       }),
     },
     saveMachine,
+    addMaestroHost,
+    repairMaestroHost,
     deleteMachine,
     renameMachine,
   });
@@ -311,6 +390,8 @@ function setup(
     connect,
     disconnect,
     saveMachine,
+    addMaestroHost,
+    repairMaestroHost,
     renameMachine,
     deleteMachine,
     installSystemDependencies,

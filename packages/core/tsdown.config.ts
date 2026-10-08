@@ -28,6 +28,8 @@ export default defineConfig({
     'services-host-dependencies-api': 'src/services/host-dependencies/api/index.ts',
     'services-host-dependencies-node': 'src/services/host-dependencies/node/index.ts',
     'services-runtime-broker-api': 'src/services/runtime-broker/api/index.ts',
+    'services-runtime-broker-node': 'src/services/runtime-broker/node/index.ts',
+    'services-remote-control-api': 'src/services/remote-control/api/index.ts',
     'services-agent-plugins-api-plugins': 'src/services/agent-plugins/api/plugins/index.ts',
     'services-agent-plugins-api-plugins-helpers':
       'src/services/agent-plugins/api/plugins/helpers/index.ts',

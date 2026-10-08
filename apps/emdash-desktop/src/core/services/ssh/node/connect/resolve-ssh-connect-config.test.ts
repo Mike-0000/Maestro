@@ -155,6 +155,24 @@ function row(partial: Partial<SshConnectionRow> = {}): SshConnectionRow {
 }
 
 describe('resolveSshConnectConfig', () => {
+  it('refuses a Maestro host instead of dialing its placeholder SSH address', async () => {
+    await expect(
+      resolveSshConnectConfig({
+        kind: 'transient',
+        config: {
+          id: 'maestro-1',
+          name: 'Studio',
+          host: 'my-pc.tailnet.ts.net',
+          port: 443,
+          username: '',
+          authType: 'agent',
+          transport: 'maestro',
+          maestro: { url: 'https://my-pc.tailnet.ts.net' },
+        },
+      })
+    ).rejects.toThrow('This machine is a Maestro host and has no SSH connection');
+  });
+
   it.each(['transient', 'persisted'] as const)(
     'uses a key override with an SSH config target for %s connections',
     async (kind) => {

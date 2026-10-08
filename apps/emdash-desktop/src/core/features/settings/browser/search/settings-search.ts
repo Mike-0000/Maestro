@@ -220,6 +220,31 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     keywords: ['remote', 'host'],
   },
 
+  // Remote access
+  {
+    id: 'remote-access',
+    label: 'Remote access',
+    tab: 'remote-access',
+    description: "Reach this computer's agents from your phone or another computer.",
+    keywords: [
+      'phone',
+      'mobile',
+      'browser',
+      'pair',
+      'pairing code',
+      'devices',
+      'tailscale',
+      'port',
+    ],
+  },
+  {
+    id: 'request-triggers',
+    label: 'Request triggers',
+    tab: 'remote-access',
+    description: 'Let another service start agents on this computer over HTTP.',
+    keywords: ['api', 'token', 'webhook', 'automation', 'on demand'],
+  },
+
   // Repository
   {
     id: 'branch-prefix',

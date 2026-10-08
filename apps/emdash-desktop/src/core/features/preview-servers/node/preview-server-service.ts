@@ -3,6 +3,7 @@ import { hostRef } from '@emdash/core/primitives/host/api';
 import { runtimeHostUnavailable } from '@emdash/core/primitives/runtime-resolution/api';
 import { err, ok, type Result } from '@emdash/shared';
 import { log } from '@emdash/shared/logger';
+import { MaestroHostUnsupportedError } from '@core/primitives/maestro-host/api/unsupported';
 import type {
   DirectPreviewServer,
   DirectPreviewServerHost,
@@ -338,7 +339,7 @@ export class PreviewServerService {
       if (!current || current.kind !== 'forwarded') return starting;
       const next: PreviewServer = {
         ...current,
-        status: { kind: 'failed', message: 'Failed to open SSH port forward' },
+        status: { kind: 'failed', message: forwardOpenFailureMessage(error) },
       };
       this.servers.set(id, next);
       this.emit({ type: 'upsert', server: next });
@@ -454,7 +455,7 @@ export class PreviewServerService {
       if (!current || current.kind !== 'forwarded') return server;
       const next: ForwardedPreviewServer = {
         ...current,
-        status: { kind: 'failed', message: 'Failed to open SSH port forward' },
+        status: { kind: 'failed', message: forwardOpenFailureMessage(error) },
       };
       this.servers.set(next.id, next);
       this.emit({ type: 'upsert', server: next });
@@ -568,6 +569,9 @@ export class PreviewServerService {
         connectionId,
         error: String(error),
       });
+      if (error instanceof MaestroHostUnsupportedError) {
+        return err({ type: 'not-ssh-workspace', message: error.message });
+      }
       return err(manualForwardOpenFailedError());
     }
   }
@@ -664,6 +668,13 @@ function manualForwardCancelledError(): ManualPreviewServerError {
     type: 'cancelled',
     message: 'Manual preview forwarding was cancelled',
   };
+}
+
+/** A Maestro host has no SSH channel to tunnel through; say so instead of a generic failure. */
+function forwardOpenFailureMessage(error: unknown): string {
+  return error instanceof MaestroHostUnsupportedError
+    ? error.message
+    : 'Failed to open SSH port forward';
 }
 
 function manualForwardOpenFailedError(): ManualPreviewServerError {

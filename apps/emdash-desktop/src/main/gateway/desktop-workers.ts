@@ -10,7 +10,10 @@ import {
   automationsContract,
   type AutomationsContract,
 } from '@emdash/core/runtimes/automations/api';
-import { automationsWorkerSpec } from '@emdash/core/runtimes/automations/node';
+import {
+  automationsWorkerSpec,
+  createAutomationPublisher,
+} from '@emdash/core/runtimes/automations/node';
 import {
   conversationsContract,
   type ConversationsContract,
@@ -51,6 +54,7 @@ import {
   createHostDependenciesComponent,
   type HostDependenciesContract,
 } from '@emdash/core/services/host-dependencies/node';
+import { createAutomationDeliveryController } from '@emdash/core/services/runtime-broker/node';
 import { createUserShellEnvController } from '@emdash/core/services/shell-env/node';
 import { pluginRegistry } from '@emdash/plugins/agents';
 import type { Unsubscribe } from '@emdash/shared';
@@ -473,6 +477,14 @@ function startDesktopWorkersWithHost(
               acpLauncher: acp,
               tuiSessions: tuiAgents.client,
               conversationIndex: conversationsClient,
+              // On-demand runs finish as pull requests from this computer too: the app's
+              // own sessions are watched and `git`/`gh` run as the signed-in user.
+              delivery: createAutomationDeliveryController({
+                acp,
+                tuiAgents: tuiAgents.client,
+                publish: createAutomationPublisher(process.env),
+                scope: workerScope.child('automation-delivery'),
+              }),
             },
             dbFile: paths.dbFile,
           })
