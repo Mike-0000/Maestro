@@ -1,4 +1,15 @@
-import { defineContract, fallible, liveModel, liveState, procedure } from '@emdash/wire/rpc';
+import {
+  remoteVoicePendingSchema,
+  remoteVoicePlanSchema,
+} from '@emdash/core/services/remote-control/api';
+import {
+  defineContract,
+  eventStream,
+  fallible,
+  liveModel,
+  liveState,
+  procedure,
+} from '@emdash/wire/rpc';
 import { z } from 'zod';
 
 export const remoteAccessDeviceSchema = z.object({
@@ -68,6 +79,29 @@ export const remoteAccessErrorSchema = z.object({
 });
 export type RemoteAccessError = z.infer<typeof remoteAccessErrorSchema>;
 
+/** The conductor's heads-up display, as this window reports it for paired devices. */
+export const remoteConductorSnapshotSchema = z.object({
+  phase: z.enum(['idle', 'thinking', 'acting']),
+  activity: z.string(),
+  lastUtterance: z.string(),
+  reply: z.string(),
+  replyAt: z.number(),
+  error: z.string().nullable(),
+  pending: remoteVoicePendingSchema.nullable(),
+  plan: remoteVoicePlanSchema.nullable(),
+  agentNames: z.array(z.string()),
+  /** Vocabulary hints for speech-to-text: agent names, projects, branches. */
+  vocabulary: z.array(z.string()).max(200),
+});
+export type RemoteConductorSnapshot = z.infer<typeof remoteConductorSnapshotSchema>;
+
+/** What a paired device asked the conductor to do; this window carries it out. */
+export const remoteConductorCommandSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('utterance'), text: z.string() }),
+  z.object({ type: z.literal('respond'), decision: z.enum(['yes', 'no']) }),
+]);
+export type RemoteConductorCommand = z.infer<typeof remoteConductorCommandSchema>;
+
 export const remoteAccessDomain = 'remoteAccess' as const;
 
 export const remoteAccessContract = defineContract({
@@ -104,6 +138,10 @@ export const remoteAccessContract = defineContract({
     error: remoteAccessErrorSchema,
   }),
   removeTrigger: procedure({ input: z.object({ name: z.string() }), output: z.void() }),
+  /** The window reports the conductor's display so paired devices can mirror it. */
+  publishConductorState: procedure({ input: remoteConductorSnapshotSchema, output: z.void() }),
+  /** Commands from paired devices for the conductor in this window. */
+  conductorCommands: eventStream({ key: z.void(), event: remoteConductorCommandSchema }),
   getTailscale: procedure({ input: z.void(), output: remoteAccessTailscaleSchema }),
   /** Turns Tailscale's HTTPS forwarding to the listener on or off. */
   setTailscaleServe: fallible({

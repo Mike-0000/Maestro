@@ -3,7 +3,7 @@ import { observer } from 'mobx-react-lite';
 import { useEffect } from 'react';
 import { AgentList } from './AgentList';
 import { AgentScreen } from './AgentScreen';
-import { useApp, useRouter } from './app-context';
+import { useApp, useRouter, useVoice } from './app-context';
 import { BrandMark } from './BrandMark';
 import { Button, Spinner } from './controls';
 import { cx, useIsWide, useVisualViewport } from './hooks';
@@ -11,11 +11,14 @@ import { NewAgentSheet } from './NewAgentSheet';
 import { PairingScreen } from './PairingScreen';
 import { SettingsSheet } from './SettingsSheet';
 import { Toasts } from './Toasts';
+import { VoiceHud } from './VoiceHud';
 
 export const App = observer(function App() {
   const app = useApp();
+  const voice = useVoice();
   useVisualViewport();
   useEffect(() => app.start(), [app]);
+  useEffect(() => voice.start(), [voice]);
 
   return (
     <div className="app-frame">
@@ -106,6 +109,7 @@ const Workspace = observer(function Workspace() {
         </div>
       ) : null}
 
+      <VoiceHud />
       {sheet === 'new' ? <NewAgentSheet /> : null}
       {sheet === 'settings' ? <SettingsSheet /> : null}
     </>

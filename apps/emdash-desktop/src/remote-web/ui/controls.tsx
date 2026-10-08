@@ -84,6 +84,44 @@ export function IconButton({
   );
 }
 
+type SwitchProps = {
+  checked: boolean;
+  onChange(checked: boolean): void;
+  /** Id of the element that names this switch. */
+  labelledBy: string;
+  describedBy?: string;
+};
+
+/** An on/off setting that takes effect at once. */
+export function Switch({ checked, onChange, labelledBy, describedBy }: SwitchProps) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-labelledby={labelledBy}
+      aria-describedby={describedBy}
+      onClick={() => onChange(!checked)}
+      // The track is small; the padding makes the touch target 44px tall.
+      className="-my-2 -mr-1 flex h-11 shrink-0 items-center rounded-full px-1"
+    >
+      <span
+        className={cx(
+          'flex h-[30px] w-[50px] items-center rounded-full p-[3px] transition-colors duration-200',
+          checked ? 'bg-primary' : 'bg-surface-3'
+        )}
+      >
+        <span
+          className={cx(
+            'size-6 rounded-full shadow-sm transition-transform duration-200',
+            checked ? 'translate-x-5 bg-primary-fg' : 'bg-fg-muted'
+          )}
+        />
+      </span>
+    </button>
+  );
+}
+
 export function Spinner({ className }: { className?: string }) {
   return (
     <span

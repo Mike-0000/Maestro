@@ -102,7 +102,11 @@ afterEach(async () => {
   );
 });
 
-describe('persistent Chorus delivery coordinator', () => {
+// Every test drives real git in temporary repositories. On Windows, alongside a candidate build,
+// the longer ones run past Vitest's 5-second default without anything being wrong.
+const GIT_TEST_TIMEOUT_MS = 30_000;
+
+describe('persistent Chorus delivery coordinator', { timeout: GIT_TEST_TIMEOUT_MS }, () => {
   it('identifies linked worktrees as one repository coordinator', async () => {
     const fixture = await createFixture();
     const second = join(fixture.root, 'task-b');

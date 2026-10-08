@@ -10,10 +10,11 @@ import { TerminalSession } from '../state/terminal-session';
 import { useApp } from './app-context';
 import { Composer } from './Composer';
 import { Button, IconButton, Spinner } from './controls';
-import { cx, useThemeVersion } from './hooks';
+import { cx, useIsWide, useThemeVersion } from './hooks';
 import { KeyBar } from './KeyBar';
 import { Notice, ScreenFrame } from './ScreenFrame';
 import { Sheet } from './Sheet';
+import { VoiceFab } from './VoiceMic';
 
 const FONT_LOAD_TIMEOUT_MS = 1_200;
 /** Below this fitted size the text is hard to read, and the screen says what can be done. */
@@ -45,6 +46,7 @@ export const TerminalAgent = observer(function TerminalAgent({
   const [displayOpen, setDisplayOpen] = useState(false);
   const [hintDismissed, setHintDismissed] = useState(smallTextHintDismissed);
   const themeVersion = useThemeVersion();
+  const wide = useIsWide();
   const conversationId = agent.conversationId;
 
   useEffect(() => {
@@ -150,12 +152,18 @@ export const TerminalAgent = observer(function TerminalAgent({
           <button
             type="button"
             onClick={() => session.jumpToLatest()}
-            className="animate-pop-in border-line-strong bg-raised text-fg absolute right-3 bottom-3 flex h-9 items-center gap-1.5 rounded-full border pr-3.5 pl-2.5 text-[13px] font-medium shadow-lg shadow-black/25"
+            className={cx(
+              'animate-pop-in border-line-strong bg-raised text-fg absolute bottom-3 flex h-9 items-center gap-1.5 rounded-full border pr-3.5 pl-2.5 text-[13px] font-medium shadow-lg shadow-black/25',
+              // On a phone the mic floats in the corner; sit beside it.
+              wide ? 'right-3' : 'right-[4.5rem] bottom-[1.125rem]'
+            )}
           >
             <ArrowDown className="size-4" aria-hidden="true" />
             Latest
           </button>
         ) : null}
+        {/* A wide screen has the mic in the list column. */}
+        {wide ? null : <VoiceFab size="compact" className="right-3 bottom-3" />}
       </div>
 
       {/* Always laid out, so the terminal area has its final height before the session opens. */}

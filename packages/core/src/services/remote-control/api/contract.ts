@@ -8,6 +8,7 @@ import {
   remoteStartAgentInputSchema,
   remoteTerminalSizeSchema,
 } from './schemas';
+import { remoteVoiceContract } from './voice-contract';
 
 const conversation = z.object({ conversationId: z.string() });
 
@@ -69,6 +70,8 @@ export const remoteControlContract = defineContract({
     data: z.object({ taskId: z.string(), projectId: z.string() }),
     error: remoteControlErrorSchema,
   }),
+
+  voice: remoteVoiceContract,
 });
 
 export type RemoteControlContract = typeof remoteControlContract;

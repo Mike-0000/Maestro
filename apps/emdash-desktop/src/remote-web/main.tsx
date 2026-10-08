@@ -4,12 +4,17 @@ import '@fontsource-variable/inter/index.css';
 import '@fontsource-variable/jetbrains-mono/index.css';
 import './styles.css';
 import { registerServiceWorker } from './lib/service-worker';
+import { installRandomUuidFallback } from './lib/uuid';
 import { AppStore } from './state/app-store';
 import { Router } from './state/router';
+import { VoiceStore } from './state/voice-store';
 import { App } from './ui/App';
 import { AppContext, type AppServices } from './ui/app-context';
 
-const services: AppServices = { app: new AppStore(), router: new Router() };
+installRandomUuidFallback();
+
+const app = new AppStore();
+const services: AppServices = { app, router: new Router(), voice: new VoiceStore(app) };
 
 const container = document.getElementById('root');
 if (!container) throw new Error('Maestro web client: #root is missing from index.html');

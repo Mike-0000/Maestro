@@ -7,6 +7,8 @@ export {
   remoteAccessStatusSchema,
   remoteAccessTailscaleSchema,
   remoteAccessTriggerSchema,
+  remoteConductorCommandSchema,
+  remoteConductorSnapshotSchema,
   type RemoteAccessContract,
   type RemoteAccessDevice,
   type RemoteAccessError,
@@ -14,4 +16,6 @@ export {
   type RemoteAccessStatus,
   type RemoteAccessTailscale,
   type RemoteAccessTrigger,
+  type RemoteConductorCommand,
+  type RemoteConductorSnapshot,
 } from './contract';

@@ -29,6 +29,7 @@ import { sameHostPath } from '@core/primitives/workspaces/api';
 import type { AppDb } from '@core/services/app-db/node/db';
 import { appDbPokes } from '@core/services/app-db/node/pokes';
 import { projects, tasks } from '@core/services/app-db/node/schema';
+import type { RemoteVoiceImpl } from './remote-voice';
 
 // Endpoint ids come from where a contract is mounted, so the implementation is built against
 // the mounted definitions (`remote.*`), which every host endpoint shares.
@@ -69,6 +70,8 @@ export type RemoteControlPorts = {
       rows: number;
     }): Promise<{ success: true } | Failure>;
   };
+  /** Voice control; the conductor it reaches lives in the window. */
+  voice: RemoteVoiceImpl;
   /** Live agent detail the status bridge already tracks for every attached host. */
   sessions: {
     describe(conversationId: string): { agent?: TuiAgentState; session?: TuiSessionState };
@@ -174,6 +177,8 @@ export function createRemoteControl(ports: RemoteControlPorts, scope: Scope): Re
     sendInput: async (input) => toRemoteResult(await ports.terminal.sendInput(input)),
 
     resize: async (input) => toRemoteResult(await ports.terminal.resize(input)),
+
+    voice: ports.voice,
 
     adoptConversation: (input) => {
       const inFlight = adoptions.get(input.conversationId);

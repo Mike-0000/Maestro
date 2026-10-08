@@ -4,7 +4,19 @@ export {
   type RemoteControlContract,
   type RemoteDeviceWireContract,
 } from './contract';
+export { remoteVoiceContract, type RemoteVoiceContract } from './voice-contract';
 export {
+  REMOTE_MAX_UTTERANCE_BYTES,
+  remoteTranscriptionSchema,
+  remoteVoiceEventSchema,
+  remoteVoicePendingSchema,
+  remoteVoicePlanSchema,
+  remoteVoiceStateSchema,
+  type RemoteTranscription,
+  type RemoteVoiceEvent,
+  type RemoteVoicePending,
+  type RemoteVoicePlan,
+  type RemoteVoiceState,
   remoteAdoptConversationInputSchema,
   remoteAgentSchema,
   remoteAgentStatusSchema,

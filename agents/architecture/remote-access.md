@@ -90,6 +90,25 @@ calls `remote.adoptConversation` after creating one, and the host creates its ow
 workspace the conversation runs in. Adoption is idempotent per conversation and waits briefly
 for the conversation and its worktree to reach the host's mirrors.
 
+### Voice
+
+The conductor (grammar, routing, tools) runs in the host's window, against its canvas and task
+stores. A paired device is its remote microphone, speaker, and heads-up display
+(`remote.voice.*`, `remote-voice.ts`):
+
+- The window publishes the conductor's display through `remoteAccess.publishConductorState`
+  (`conductor/browser/remote-voice-bridge.ts`); devices read it as `voice.state`.
+- A device's words reach the window as `remoteAccess.conductorCommands` events and run through
+  `handleUtterance` as typed input, so the reply is shown, not spoken, on the host, and the
+  device voices it. "Yes" and "no" take the same path, so countdowns, confirmations, and plan
+  approval are the conductor's own.
+- Transcription and synthesis use the host's voice service; no key reaches a device. Partial
+  transcripts and synthesized audio are forwarded only for streams and requests a device opened.
+  When the host's spoken output is the system voice, devices use their own speech synthesis.
+
+Voice needs the window to exist: with the app running but no window loaded, `voice.state`
+reports `available: false`.
+
 ## Client side: Maestro hosts
 
 A machine whose connection metadata has `transport: 'maestro'` is reached without SSH. Its
@@ -126,6 +145,8 @@ and status mapping are shared with the daemon from
 | `src/main/host/remote-access/http-server.ts` | Routes, auth, origin checks, static serving, upgrade |
 | `src/main/host/remote-access/host-controller.ts` | Contracts served to desktop and browser devices |
 | `src/main/host/remote-access/remote-control.ts` | Remote-control implementation |
+| `src/main/host/remote-access/remote-voice.ts` | Voice relay between devices, the voice service, and the window |
+| `src/core/features/conductor/browser/remote-voice-bridge.ts` | Publishes the conductor's display and runs device commands in the window |
 | `src/main/host/remote-access/trigger-route.ts` | On-demand agent API on the listener |
 | `src/core/features/remote-access/` | Settings contract, controller, and page |
 | `src/remote-web/` | The web app |

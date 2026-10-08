@@ -1,5 +1,6 @@
 import type { Result } from '@emdash/shared';
 import type { Scope } from '@emdash/shared/concurrency';
+import type { EventStreamHost } from '@emdash/wire/live';
 import { createController, type Controller } from '@emdash/wire/rpc';
 import { expose, type Readable } from '@emdash/wire/state';
 import {
@@ -9,6 +10,7 @@ import {
   type RemoteAccessStatus,
   type RemoteAccessTailscale,
   type RemoteAccessTrigger,
+  type RemoteConductorSnapshot,
 } from '../api';
 
 /** The listener itself lives in the main process; the slice only describes and steers it. */
@@ -25,6 +27,8 @@ export type RemoteAccessOperations = {
   rotateTriggerToken(): Promise<Result<{ token: string }, RemoteAccessError>>;
   setTrigger(trigger: RemoteAccessTrigger): Promise<Result<void, RemoteAccessError>>;
   removeTrigger(name: string): Promise<void>;
+  publishConductorState(snapshot: RemoteConductorSnapshot): void;
+  readonly conductorCommands: EventStreamHost<typeof remoteAccessContract.conductorCommands>;
   getTailscale(): Promise<RemoteAccessTailscale>;
   setTailscaleServe(enabled: boolean): Promise<Result<RemoteAccessTailscale, RemoteAccessError>>;
 };
@@ -42,6 +46,8 @@ export function createRemoteAccessWireController(
     rotateTriggerToken: () => operations.rotateTriggerToken(),
     setTrigger: (trigger) => operations.setTrigger(trigger),
     removeTrigger: ({ name }) => operations.removeTrigger(name),
+    publishConductorState: (snapshot) => operations.publishConductorState(snapshot),
+    conductorCommands: operations.conductorCommands,
     getTailscale: () => operations.getTailscale(),
     setTailscaleServe: ({ enabled }) => operations.setTailscaleServe(enabled),
   });

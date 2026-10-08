@@ -2,8 +2,10 @@ import {
   remoteDeviceWireContract,
   type RemoteAdoptConversationInput,
   type RemoteControlError,
+  type RemoteVoiceState,
 } from '@emdash/core/services/remote-control/api';
 import { err, ok, type Result } from '@emdash/shared';
+import { createEventStreamHost } from '@emdash/wire/live';
 import { connect, createController, memoryTransportPair, serve } from '@emdash/wire/rpc';
 import { cell, expose } from '@emdash/wire/state';
 import { openFixture } from '@tooling/utils/db';
@@ -46,6 +48,25 @@ describe('installMaestroHostAdoption', () => {
             throw new Error('unused');
           },
           adoptConversation: (input) => adopt(input),
+          voice: {
+            state: expose(remoteDeviceWireContract.remote.voice.state, {
+              hud: cell<RemoteVoiceState>({
+                available: false,
+                transcriptionReady: true,
+                phase: 'idle',
+                activity: '',
+                lastUtterance: '',
+                reply: '',
+                replyAt: 0,
+                error: null,
+                pending: null,
+                plan: null,
+                agentNames: [],
+                speech: 'device',
+              }),
+            }),
+            events: createEventStreamHost(remoteDeviceWireContract.remote.voice.events),
+          },
         },
       })
     );

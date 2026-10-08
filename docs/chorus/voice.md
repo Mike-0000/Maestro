@@ -21,6 +21,14 @@ model that can read, message, start, and plan across your agents.
 Pausing never ends a recording: it runs until you release the hold key, press the toggle shortcut
 again, or click **Send** (up to 5 minutes). Only hands-free listening stops on a pause.
 
+## From your phone
+
+With [remote access](../../agents/architecture/remote-access.md) on, the web app has the same
+voice mode: hold the mic to talk, tap to toggle, or type. Your words are transcribed by this
+computer's speech-to-text engine and handled by the same conductor, so every command below
+works, including the countdowns and confirmations. Replies are shown and spoken on the phone,
+not on this computer. Commands that move windows act on this computer's canvas.
+
 ## Built-in commands (instant, no API key needed)
 
 - "Focus Claude 2" / "go to Codex 1" / "show me the codex one"

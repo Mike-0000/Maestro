@@ -32,7 +32,8 @@ const runTailscale: TailscaleRunner = (args) =>
       { timeout: COMMAND_TIMEOUT_MS, windowsHide: true },
       (error, stdout, stderr) => {
         if (error) {
-          resolve({ ok: false, message: (stderr || error.message).trim() });
+          // Tailscale explains a refusal on stdout and then waits, so a timeout still has text.
+          resolve({ ok: false, message: (stderr || stdout || error.message).trim() });
           return;
         }
         resolve({ ok: true, stdout });
@@ -97,10 +98,24 @@ export async function setTailscaleServe(
   if (!result.ok) {
     return err({
       type: 'failed',
-      message: result.message || 'Tailscale did not accept the change.',
+      message: describeServeFailure(result.message),
     });
   }
   return ok(await inspectTailscale(port, run));
+}
+
+/**
+ * Serving needs a one-time approval in the tailnet's admin console. Tailscale prints the link
+ * and waits; the link is what the person needs.
+ */
+export function describeServeFailure(output: string): string {
+  if (/serve is not enabled/iu.test(output)) {
+    const link = /https:\/\/login\.tailscale\.com\/\S+/u.exec(output)?.[0];
+    return link
+      ? `Tailscale Serve is not enabled for your tailnet yet. Open ${link} to enable it, then try again.`
+      : 'Tailscale Serve is not enabled for your tailnet yet. Enable HTTPS and Serve in the Tailscale admin console, then try again.';
+  }
+  return output || 'Tailscale did not accept the change.';
 }
 
 /** True when the node's HTTPS name proxies its root path to the listener's loopback port. */
