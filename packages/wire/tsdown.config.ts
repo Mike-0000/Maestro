@@ -9,6 +9,7 @@ export default defineConfig({
     testing: 'src/testing/index.ts',
     worker: 'src/worker/index.ts',
     'worker-node': 'src/worker/node/index.ts',
+    node: 'src/node/index.ts',
   },
   format: ['esm'],
   dts: true,

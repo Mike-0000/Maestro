@@ -14,6 +14,7 @@ import { spawnServeProcess, startDaemon } from './daemon/start';
 import { statusDaemon } from './daemon/status';
 import { stopDaemon } from './daemon/stop';
 import { createWorkspaceServerRuntimeHost } from './gateway/workspace-workers';
+import { runTriggerGateway } from './trigger/command';
 import { serveSocket } from './wire/serve-socket';
 import { serveStdio } from './wire/serve-stdio';
 
@@ -46,6 +47,18 @@ async function main(): Promise<void> {
     case 'daemonize':
       await runDaemonize(config.data);
       break;
+    case 'trigger-gateway': {
+      if (config.data.serve.kind !== 'socket') {
+        throw new Error('trigger-gateway only supports socket mode');
+      }
+      installSignalHandlers(
+        await runTriggerGateway({
+          socketPath: config.data.serve.path,
+          appVersion: config.data.appVersion,
+        })
+      );
+      break;
+    }
   }
 }
 

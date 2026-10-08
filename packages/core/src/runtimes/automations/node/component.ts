@@ -6,8 +6,10 @@ import { conversationIndexContract } from '#services/conversation-index/api';
 import { acpSessionLaunchContract, tuiSessionStartContract } from '#services/session-start/api';
 import { automationsContract } from '../api';
 import { workspaceCreationAdmissionContract } from '../api/creation-admission';
+import { automationDeliveryContract } from '../api/delivery';
 import { createAutomationsController } from './api/controller';
 import { automationsStore } from './persistence/store';
+import { createDeliveryPortFromDependency } from './ports/delivery';
 import { createSessionPortFromDependencies } from './ports/session-start';
 import { createWorkspacePortFromDependency } from './ports/workspace-provisioning';
 import { AutomationsRuntime } from './runtime';
@@ -30,6 +32,9 @@ export function createAutomationsComponent() {
       acpLauncher: requireContract(acpSessionLaunchContract),
       tuiSessions: requireContract(tuiSessionStartContract),
       conversationIndex: requireContract(conversationIndexContract),
+      // Watching a session settle and publishing its branch reach into session
+      // runtimes, git, and the forge CLI, so the app supplies both.
+      delivery: requireContract(automationDeliveryContract),
     },
     configSchema: automationsComponentConfigSchema,
     create: ({ config, dependencies, instance, logger, scope }) => {
@@ -48,6 +53,7 @@ export function createAutomationsComponent() {
           tui: dependencies.tuiSessions,
           conversationIndex: dependencies.conversationIndex,
         }),
+        deliveryPort: createDeliveryPortFromDependency(dependencies.delivery),
         logger,
         tickIntervalMs: config.tickIntervalMs,
         maxConcurrentRuns: config.maxConcurrentRuns,

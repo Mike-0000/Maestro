@@ -7,6 +7,11 @@ import type { SshService } from '@core/primitives/ssh/api';
 import type { AppDb } from '@core/services/app-db/node/db';
 import { sshConnections } from '@core/services/app-db/node/schema';
 import { createHosts, type Hosts } from '@core/services/hosts/node/hosts';
+import { MaestroHostCredentialService } from '@core/services/hosts/node/maestro/maestro-host-credentials';
+import {
+  createMaestroHostDirectory,
+  type MaestroHostDirectory,
+} from '@core/services/hosts/node/maestro/maestro-host-directory';
 import { windowsBundleLoader } from '@core/services/hosts/node/workspace-server/provision/windows-bundle';
 import { sshCredentialChanges } from '@core/services/ssh/node/credentials/credential-record';
 import { SshCredentialService } from '@core/services/ssh/node/credentials/ssh-credential-service';
@@ -21,23 +26,36 @@ import type { DatabaseBundle } from './database';
 export type InfrastructureBundle = {
   readonly ssh: SshServiceHandle;
   readonly hosts: Hosts;
+  /** Machines reached over the Maestro app's listener; they have no SSH connection at all. */
+  readonly maestroHosts: MaestroHostDirectory;
 };
 
 export async function bootInfrastructure(database: DatabaseBundle): Promise<InfrastructureBundle> {
+  const maestroCredentials = new MaestroHostCredentialService(encryptedAppSecretsStore);
   const ssh = createSshService({
     scope: appScope,
     db: database.db,
     credentials: new SshCredentialService(encryptedAppSecretsStore),
     prepareCredentials: (id, credentials) =>
       encryptedAppSecretsStore.prepareChanges(sshCredentialChanges(id, credentials)),
+    maestroCredentials,
+    prepareMaestroSecrets: (changes) => encryptedAppSecretsStore.prepareChanges(changes),
     logger: log,
     telemetry: telemetryService,
   });
   const hostSettings = await database.appSettings.get('remoteMachine');
   const clientId = await getDesktopClientId();
+  const maestroHosts = createMaestroHostDirectory({
+    db: database.db,
+    credentials: maestroCredentials,
+  });
   const hosts = createHosts({
     scope: appScope,
     ssh: { manager: ssh.manager, control: ssh.control },
+    maestro: {
+      ...maestroHosts,
+      publishConnectionEvent: (event) => ssh.connections.publishEvent(event),
+    },
     machineEvents: ssh.machines,
     installBaseUrl: hostSettings.installBaseUrl,
     releaseChannel: IS_CANARY ? 'canary' : 'stable',
@@ -56,7 +74,7 @@ export async function bootInfrastructure(database: DatabaseBundle): Promise<Infr
     powerMonitor.off('suspend', suspend);
   });
   void reconnectIntendedSshConnections(database.db, ssh.ssh);
-  return { ssh, hosts };
+  return { ssh, hosts, maestroHosts };
 }
 
 /** Prepared by scripts/prepare-workspace-server-bundle.ts and shipped as an extra resource. */

@@ -7,7 +7,10 @@ import { eq } from 'drizzle-orm';
 import { storedGitSettingsFromRow } from '@core/features/projects/api/node/settings/effective-settings';
 import type { WorkspaceIdentity } from '@core/features/workspaces/api/node/workspace-identity-service';
 import type { Automation, AutomationDefinitionError } from '@core/primitives/automations/api';
-import { getLocalTimeZone } from '@core/primitives/automations/api';
+import {
+  DEFAULT_ON_DEMAND_MAX_CONCURRENT_RUNS,
+  getLocalTimeZone,
+} from '@core/primitives/automations/api';
 import { hostPathFromNative } from '@core/primitives/desktop-runtime/api';
 import { resolveEffectiveSettings, type RepoFacts } from '@core/primitives/project-settings/api';
 import { projectHostRef, type Project } from '@core/primitives/projects/api';
@@ -152,8 +155,32 @@ async function buildAutomationDeploymentOnce(
     });
   }
 
+  const onDemand = automation.triggerConfig.onDemand;
+  let completion: AutomationDeployment['completion'];
+  if (onDemand) {
+    // The run branch is the pull request head, so an on-demand automation must
+    // create a branch of its own for every run.
+    if (workspace.kind !== 'worktree' || workspace.git.kind !== 'create-branch') {
+      return err({
+        type: 'workspace-not-supported',
+        message:
+          'On-demand automations open a pull request per run, so they need a new worktree ' +
+          'with a new branch.',
+      });
+    }
+    completion = {
+      kind: 'pull-request',
+      baseBranch: workspace.git.fromBranch.branch,
+      remote: workspace.git.pushRemote ?? workspace.baseRemote,
+      ...(onDemand.timeoutMinutes && { timeoutMs: onDemand.timeoutMinutes * 60_000 }),
+    };
+  }
+
   const model = conversation.model?.trim() || null;
   const title = conversation.title?.trim() || automation.name.trim();
+  // Nobody is watching an on-demand run, so a permission prompt would stall it
+  // until the timeout; it runs unattended inside its own worktree instead.
+  const unattendedModeId = onDemand ? UNATTENDED_ACP_MODE_IDS[conversation.provider] : undefined;
   const agent: AutomationDeployment['agent'] =
     conversation.type === 'acp'
       ? {
@@ -161,9 +188,11 @@ async function buildAutomationDeploymentOnce(
           start: {
             providerId: conversation.provider,
             model,
+            ...(unattendedModeId && { modeId: unattendedModeId }),
             initialQueue: [{ text: prompt }],
           },
-          title,
+          // A request run is titled by its request; a fixed title would hide it.
+          ...(!onDemand && { title }),
         }
       : {
           type: 'tui',
@@ -171,9 +200,9 @@ async function buildAutomationDeploymentOnce(
             providerId: conversation.provider,
             model,
             initialPrompt: prompt,
-            autoApprove: conversation.autoApprove,
+            autoApprove: onDemand ? true : conversation.autoApprove,
           },
-          title,
+          ...(!onDemand && { title }),
         };
 
   return ok({
@@ -187,8 +216,18 @@ async function buildAutomationDeploymentOnce(
     },
     agent,
     workspace,
+    ...(onDemand && {
+      triggers: { cron: false },
+      maxConcurrentRuns: onDemand.maxConcurrentRuns ?? DEFAULT_ON_DEMAND_MAX_CONCURRENT_RUNS,
+      completion,
+    }),
   });
 }
+
+/** ACP session mode that lets a provider act without permission prompts. */
+const UNATTENDED_ACP_MODE_IDS: Record<string, string | undefined> = {
+  claude: 'bypassPermissions',
+};
 
 function runtimeUnavailable(error: unknown): AutomationDefinitionError {
   return {

@@ -6,16 +6,23 @@ import {
   type AutomationDeployment,
   type AutomationId,
 } from '../../api/deployment';
-import type { AutomationRun, AutomationRunId } from '../../api/run';
+import type { AutomationRun, AutomationRunId, AutomationRunRequest } from '../../api/run';
 import type { AutomationDeploymentStore } from '../persistence/deployment-store';
 import type { AutomationRunStore } from '../persistence/run-store';
-import type { AutomationRunExecutor } from '../runs/executor';
-import type { AutomationRunTransitions, OnRunChanged } from '../runs/transitions';
+import { RUN_CANCELLED_REASON, type AutomationRunExecutor } from '../runs/executor';
+import { agentForRequest, requestRunIdentity } from '../runs/request';
+import {
+  INTERRUPTED_BY_RESTART,
+  type AutomationRunTransitions,
+  type OnRunChanged,
+} from '../runs/transitions';
 import { nextRunTimes } from './cron';
 
 const DEFAULT_TICK_INTERVAL_MS = 60_000;
 const DEFAULT_MAX_CONCURRENT_RUNS = 4;
 const DEFAULT_MAX_DUE_PER_TICK = 100;
+/** Queued runs inspected per drain, so held request runs cannot starve other automations. */
+const QUEUE_SCAN_LIMIT = 200;
 
 export type AutomationRunIdentity = {
   id: AutomationRunId;
@@ -114,14 +121,24 @@ export class AutomationScheduler {
     this.drainQueue();
   }
 
-  runNow(deployment: AutomationDeployment): AutomationRun {
-    const run = this.insertRun(deployment, {
-      status: 'queued',
-      triggerKind: 'manual',
-      scheduledAt: null,
-      deadlineAt: null,
-    });
+  /**
+   * Queues a run immediately. A request run takes the request id as its run id, so
+   * resubmitting a request returns the run it already started.
+   */
+  runNow(deployment: AutomationDeployment, request?: AutomationRunRequest): AutomationRun {
+    const run = this.insertRun(
+      deployment,
+      {
+        status: 'queued',
+        triggerKind: 'manual',
+        scheduledAt: null,
+        deadlineAt: null,
+      },
+      request
+    );
     if (!run) {
+      const existing = request ? this.runStore.getRun(request.id) : null;
+      if (existing) return existing;
       throw new Error(`Failed to insert manual automation run for ${deployment.automationId}`);
     }
     this.drainQueue();
@@ -140,9 +157,15 @@ export class AutomationScheduler {
             this.clock.now()
           )
         : this.transitions.markCancelled(runId, this.clock.now());
-    if (!cancelled) return run;
+    const worker = this.workers.get(runId);
+    if (!cancelled) {
+      // A `done` run still holding a worker is in its delivery phase; the executor
+      // records the cancellation on the run's delivery.
+      if (run.status === 'done') worker?.abortController.abort(RUN_CANCELLED_REASON);
+      return run;
+    }
 
-    this.workers.get(runId)?.abortController.abort();
+    worker?.abortController.abort(RUN_CANCELLED_REASON);
     return cancelled;
   }
 
@@ -159,6 +182,15 @@ export class AutomationScheduler {
     ]);
     const now = this.clock.now();
     for (const run of stuckRuns) this.transitions.markInterrupted(run, now);
+
+    for (const run of this.runStore.listRunsWithActiveDelivery()) {
+      this.transitions.updateDelivery(run.id, {
+        state: 'failed',
+        pullRequestUrl: null,
+        error: { code: INTERRUPTED_BY_RESTART },
+        finishedAt: now,
+      });
+    }
   }
 
   private scheduleNextTick(): void {
@@ -195,6 +227,7 @@ export class AutomationScheduler {
       if (run.status !== 'scheduled') continue;
 
       const scheduleChanged =
+        deployment.triggers?.cron === false ||
         run.configSnapshot.schedule.expr !== deployment.schedule.expr ||
         run.configSnapshot.schedule.tz !== deployment.schedule.tz;
       if (scheduleChanged) {
@@ -216,6 +249,7 @@ export class AutomationScheduler {
   }
 
   private ensureScheduledRun(deployment: AutomationDeployment, now: number): AutomationRun | null {
+    if (deployment.triggers?.cron === false) return null;
     const existing = this.runStore.getScheduledRun(deployment.automationId);
     if (existing) return existing;
 
@@ -231,14 +265,19 @@ export class AutomationScheduler {
 
   private insertRun(
     deployment: AutomationDeployment,
-    values: Pick<AutomationRun, 'status' | 'triggerKind' | 'scheduledAt' | 'deadlineAt'>
+    values: Pick<AutomationRun, 'status' | 'triggerKind' | 'scheduledAt' | 'deadlineAt'>,
+    request?: AutomationRunRequest
   ): AutomationRun | null {
-    const identity = this.createRunIdentity(deployment);
+    const identity = request ? requestRunIdentity(request) : this.createRunIdentity(deployment);
+    const configSnapshot = automationRunConfigSnapshotSchema.parse(deployment);
     const run = this.runStore.insertRun({
       ...identity,
       automationId: deployment.automationId,
       ...values,
-      configSnapshot: automationRunConfigSnapshotSchema.parse(deployment),
+      configSnapshot: request
+        ? { ...configSnapshot, agent: agentForRequest(configSnapshot.agent, request) }
+        : configSnapshot,
+      ...(request && { request }),
       startedAt: null,
       finishedAt: null,
       workspace: null,
@@ -256,7 +295,7 @@ export class AutomationScheduler {
       const capacity = this.maxConcurrentRuns - this.workers.size;
       if (capacity <= 0) return;
 
-      const queuedRuns = this.runStore.listQueuedRuns(capacity);
+      const queuedRuns = this.runStore.listQueuedRuns(QUEUE_SCAN_LIMIT);
       if (queuedRuns.length === 0) return;
 
       let madeProgress = false;
@@ -281,7 +320,10 @@ export class AutomationScheduler {
           madeProgress = true;
           continue;
         }
-        if (this.isAutomationActive(run.automationId)) {
+        if (this.isAutomationAtCapacity(deployment)) {
+          // A request is work someone asked for: it waits its turn. A cron or manual
+          // run that overlaps the previous one is redundant and is skipped.
+          if (run.request) continue;
           this.transitions.markSkipped(run.id, { step: 'queue', code: 'previous_running' }, now);
           madeProgress = true;
           continue;
@@ -297,11 +339,12 @@ export class AutomationScheduler {
     }
   }
 
-  private isAutomationActive(automationId: AutomationId): boolean {
+  private isAutomationAtCapacity(deployment: AutomationDeployment): boolean {
+    let active = 0;
     for (const worker of this.workers.values()) {
-      if (worker.automationId === automationId) return true;
+      if (worker.automationId === deployment.automationId) active += 1;
     }
-    return false;
+    return active >= (deployment.maxConcurrentRuns ?? 1);
   }
 
   private startWorker(run: AutomationRun): void {

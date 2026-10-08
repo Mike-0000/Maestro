@@ -10,6 +10,7 @@ import type { Disposable } from '@emdash/shared/concurrency';
 import { eq } from 'drizzle-orm';
 import { app, clipboard, dialog, Menu, shell } from 'electron';
 import { nativePathFromHost, resolveRelativePath } from '@core/primitives/desktop-runtime/api';
+import { MaestroHostUnsupportedError } from '@core/primitives/maestro-host/api/unsupported';
 import {
   getAppById,
   getResolvedLabel,
@@ -401,6 +402,10 @@ class AppService implements Disposable {
       .limit(1);
 
     if (!connection) throw new Error('SSH connection not found');
+    // Editors and terminals reach a remote folder over SSH, which a Maestro host does not have.
+    if (connection.metadata?.transport === 'maestro') {
+      throw new MaestroHostUnsupportedError('open-in-app');
+    }
 
     const { host, username, port } = connection;
 

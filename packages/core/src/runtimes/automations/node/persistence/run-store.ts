@@ -184,6 +184,22 @@ export class AutomationRunStore {
       .map(({ payload }) => parseRunPayload(payload));
   }
 
+  /** `done` runs whose post-session delivery has not reached a terminal state. */
+  listRunsWithActiveDelivery(): AutomationRun[] {
+    return this.handle.db
+      .select({ payload: automationRuns.payload })
+      .from(automationRuns)
+      .where(
+        and(
+          eq(automationRuns.status, 'done'),
+          sql`json_extract(${automationRuns.payload}, '$.delivery.state') IN ('agent_running', 'publishing')`
+        )
+      )
+      .orderBy(automationRuns.seq)
+      .all()
+      .map(({ payload }) => parseRunPayload(payload));
+  }
+
   listChangedRuns(input: {
     sinceSeq: number;
     automationId: AutomationId;

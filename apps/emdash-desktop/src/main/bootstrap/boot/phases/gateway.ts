@@ -1,3 +1,6 @@
+import { hostname } from 'node:os';
+import { join } from 'node:path';
+import { app } from 'electron';
 import { conversationEvents } from '@core/features/conversations/api/node/conversation-events';
 import { emitConversationWireEvent } from '@core/features/conversations/node/event-host';
 import { loadActiveAgentStatusConversationIds } from '@core/features/conversations/node/load-active-agent-status-conversation-ids';
@@ -6,8 +9,13 @@ import { acpAgentStatusBridge } from '@main/core/acp/agent-status-bridge';
 import { setAgentStatusConversationEventPublisher } from '@main/core/agent-status/agent-status-service';
 import { tuiAgentStatusBridge } from '@main/core/agent-status/tui-agent-status-bridge';
 import type { DesktopRuntimes } from '@main/gateway/desktop-runtimes';
-import { installDesktopWire, registerDesktopWireControllers } from '@main/gateway/desktop-wire';
+import {
+  createDesktopWireController,
+  installDesktopWire,
+  registerDesktopWireControllers,
+} from '@main/gateway/desktop-wire';
 import { createDesktopDevServerBridgeParticipant } from '@main/gateway/dev-server-bridge';
+import { remoteAccessService } from '@main/host/remote-access/remote-access-service';
 import { log } from '@main/lib/logger';
 import { appScope } from '../../core/app-scope';
 import { runInBackground } from '../../core/background';
@@ -70,6 +78,21 @@ export function installGateway(
       label: 'tui-agent-status',
       attach: (host) => tuiAgentStatusBridge.attachHost(host),
       detach: (host) => tuiAgentStatusBridge.detachHost(host),
+    })
+  );
+
+  appScope.add(() => remoteAccessService.dispose());
+  runInBackground('remote-access', () =>
+    remoteAccessService.attach({
+      db: database.db,
+      clients: runtimes.clients,
+      desktopController: createDesktopWireController(),
+      taskService: services.taskService,
+      dataDirectory: app.getPath('userData'),
+      staticRoot: join(app.getAppPath(), 'out', 'remote-web'),
+      appVersion: app.getVersion(),
+      hostName: hostname(),
+      logger: log,
     })
   );
 

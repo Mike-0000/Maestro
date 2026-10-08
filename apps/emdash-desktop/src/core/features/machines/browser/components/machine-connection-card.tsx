@@ -1,8 +1,10 @@
 import { SettingsRow } from '@emdash/ui/react/patterns';
 import { Button } from '@emdash/ui/react/primitives';
-import { Cog, PlugIcon } from 'lucide-react';
+import { Cog, KeyRoundIcon, PlugIcon } from 'lucide-react';
+import { MAESTRO_HOST_NOT_PAIRED_MESSAGE } from '@core/primitives/maestro-host/api/messages';
 import type { ConnectionState, SshConfig } from '@core/primitives/ssh/api';
 import type { HostAvailabilityState } from '@core/services/hosts/api';
+import { maestroHostEndpointLabel } from '../maestro-host-form-model';
 import { authLabel } from './machine-formatters';
 import { MachineBadge } from './MachineBadge';
 
@@ -14,6 +16,7 @@ export function MachineConnectionRow({
   onConnect,
   onRetry,
   onDisconnect,
+  onPairAgain,
 }: {
   machine: SshConfig;
   state: ConnectionState;
@@ -22,6 +25,8 @@ export function MachineConnectionRow({
   onConnect: () => void;
   onRetry: () => void;
   onDisconnect: () => void;
+  /** Maestro hosts only: pair this device again after the host revoked it. */
+  onPairAgain?: () => void;
 }) {
   const transportActive =
     state === 'connected' || state === 'connecting' || state === 'reconnecting';
@@ -29,12 +34,18 @@ export function MachineConnectionRow({
   const ready = availability?.kind === 'ready';
   const retry = availability?.kind === 'unavailable' && availability.issue !== undefined;
   const local = machine.transport === 'local';
+  const maestro = machine.transport === 'maestro';
+  // Retrying cannot help once the host has revoked this device; only a new pairing can.
+  const unpaired =
+    maestro &&
+    availability?.kind === 'unavailable' &&
+    availability.issue?.message === MAESTRO_HOST_NOT_PAIRED_MESSAGE;
 
   return (
     <SettingsRow
       label={
         <span className="flex items-center gap-2">
-          {local ? 'Connection' : 'SSH Connection'}
+          {local ? 'Connection' : maestro ? 'Maestro host' : 'SSH Connection'}
           <MachineBadge state={state} />
         </span>
       }
@@ -43,13 +54,27 @@ export function MachineConnectionRow({
           <span>
             {local
               ? `This computer, without SSH · ${machine.username} · shared with SSH clients of this computer`
-              : `${machine.host} · ${machine.username} · ${authLabel(machine)}`}
+              : maestro
+                ? `${maestroHostEndpointLabel(machine)} · paired with the Maestro app on that computer${
+                    machine.maestro?.cfAccessClientId ? ' · through Cloudflare Access' : ''
+                  }`
+                : `${machine.host} · ${machine.username} · ${authLabel(machine)}`}
           </span>
+          {maestro && availability?.kind === 'unavailable' && availability.issue ? (
+            <span className="basis-full text-foreground-destructive">
+              {availability.issue.message}
+            </span>
+          ) : null}
         </span>
       }
       control={
         <span className="flex items-center gap-2">
-          {availability && !ready && !preparing ? (
+          {unpaired && onPairAgain ? (
+            <Button type="button" variant="primary" size="xs" onClick={onPairAgain}>
+              <KeyRoundIcon />
+              Pair again
+            </Button>
+          ) : availability && !ready && !preparing ? (
             <Button type="button" variant="primary" size="xs" onClick={retry ? onRetry : onConnect}>
               <PlugIcon />
               {retry ? 'Retry' : 'Connect'}

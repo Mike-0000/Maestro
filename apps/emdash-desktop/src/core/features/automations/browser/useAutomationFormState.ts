@@ -95,6 +95,7 @@ export function useAutomationFormState(
     seedTrigger?.expr ?? initialTemplate?.defaultTrigger.expr ?? DEFAULT_CRON
   );
   const [cronTz] = useState<string>(seedTrigger?.tz ?? getLocalTimeZone());
+  const [onDemand, setOnDemand] = useState<boolean>(seedTrigger?.onDemand !== undefined);
 
   const effectiveProjectId =
     projectId && asAvailableProject(getProjectStore(projectId))
@@ -229,7 +230,12 @@ export function useAutomationFormState(
     return JSON.parse(JSON.stringify(result)) as StoredAutomationTaskConfig;
   }
 
-  const triggerConfig: TriggerConfig = { expr: cronExpr.trim(), tz: cronTz };
+  // The schedule is kept while on demand so switching back restores it.
+  const triggerConfig: TriggerConfig = {
+    expr: cronExpr.trim(),
+    tz: cronTz,
+    ...(onDemand && { onDemand: seedTrigger?.onDemand ?? {} }),
+  };
 
   function applyTemplate(template: BuiltinAutomationTemplate) {
     setName(template.name);
@@ -246,6 +252,8 @@ export function useAutomationFormState(
     cronExpr,
     setCronExpr,
     cronTz,
+    onDemand,
+    setOnDemand,
     initialConversation,
     workspaceConfig,
     isUnborn,

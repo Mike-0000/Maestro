@@ -1,4 +1,5 @@
 import { hostRef } from '@emdash/core/primitives/host/api';
+import type { Result } from '@emdash/shared';
 import { createScope, type Scope } from '@emdash/shared/concurrency';
 import { observe, remote, whenReady } from '@emdash/wire/state';
 import { action, computed, makeObservable, observable, runInAction } from 'mobx';
@@ -24,6 +25,14 @@ import type {
   InstallMachineSystemDependenciesInput,
   InstallMachineSystemDependenciesResult,
 } from '../api';
+import type {
+  AddMaestroHostInput,
+  InspectMaestroHostInput,
+  MaestroHostError,
+  MaestroHostInfo,
+  RepairMaestroHostInput,
+  UpdateMaestroHostInput,
+} from '../api/maestro-host';
 
 type SaveConnectionInput = Partial<Pick<SshConfig, 'id'>> &
   Omit<SshConfig, 'id'> & { password?: string; passphrase?: string };
@@ -171,6 +180,30 @@ export class MachinesStore {
     });
   }
 
+  /** Asks a Maestro host's address who it is, without pairing or saving anything. */
+  async inspectMaestroHost(
+    input: InspectMaestroHostInput
+  ): Promise<Result<MaestroHostInfo, MaestroHostError>> {
+    return await (await this.getMachinesClient()).inspectMaestroHost(input);
+  }
+
+  async addMaestroHost(input: AddMaestroHostInput): Promise<Result<SshConfig, MaestroHostError>> {
+    return await this.saveMaestroHost(async (client) => client.addMaestroHost(input), 'connect');
+  }
+
+  /** Pairs again after the host revoked this device, then retries the blocked connection. */
+  async repairMaestroHost(
+    input: RepairMaestroHostInput
+  ): Promise<Result<SshConfig, MaestroHostError>> {
+    return await this.saveMaestroHost(async (client) => client.repairMaestroHost(input), 'retry');
+  }
+
+  async updateMaestroHost(
+    input: UpdateMaestroHostInput
+  ): Promise<Result<SshConfig, MaestroHostError>> {
+    return await this.saveMaestroHost(async (client) => client.updateMaestroHost(input), 'retry');
+  }
+
   async setSyncLocalSettings(id: string, enabled: boolean): Promise<void> {
     await this.withMutation(async () => {
       const updated = await (await this.getMachinesClient()).setSyncLocalSettings({ id, enabled });
@@ -216,6 +249,23 @@ export class MachinesStore {
     input: InstallMachineSystemDependenciesInput
   ): Promise<InstallMachineSystemDependenciesResult> {
     return await runSystemDependencyInstall(await this.getMachinesClient(), input);
+  }
+
+  private async saveMaestroHost(
+    save: (client: MachinesClient) => Promise<Result<SshConfig, MaestroHostError>>,
+    cause: 'connect' | 'retry'
+  ): Promise<Result<SshConfig, MaestroHostError>> {
+    const result = await this.withMutation(async () => {
+      const saved = await save(await this.getMachinesClient());
+      if (saved.success) this.connectionsResource.setValue(this.upsertConnection(saved.data));
+      return saved;
+    });
+    // The machine is saved either way; a failed connection shows on its page with a Retry.
+    if (result.success) {
+      const request = cause === 'connect' ? this.connect : this.retry;
+      await request.call(this, result.data.id).catch(() => {});
+    }
+    return result;
   }
 
   private get runtime(): SshConnectionsRuntime {

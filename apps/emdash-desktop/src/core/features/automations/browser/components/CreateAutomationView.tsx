@@ -130,6 +130,7 @@ export const CreateAutomationView = observer(function CreateAutomationView({
             cronError={cronError}
             onCronExprChange={(expr) => formState.setCronExpr(expr)}
             onCronErrorClear={() => setCronError(null)}
+            onOnDemandChange={(onDemand) => formState.setOnDemand(onDemand)}
             error={error}
           />
           {availability.data?.available === false && effectiveProjectId && (

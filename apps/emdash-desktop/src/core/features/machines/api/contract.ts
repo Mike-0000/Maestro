@@ -29,6 +29,14 @@ import {
 } from '@emdash/wire/rpc';
 import { z } from 'zod';
 import type { SshConfig, SshConnectionUsage } from '@core/primitives/ssh/api';
+import {
+  addMaestroHostInputSchema,
+  inspectMaestroHostInputSchema,
+  maestroHostErrorSchema,
+  maestroHostInfoSchema,
+  repairMaestroHostInputSchema,
+  updateMaestroHostInputSchema,
+} from './maestro-host';
 
 // syncLocalSettings is excluded from save: it is toggled through the dedicated
 // setSyncLocalSettings procedure so flipping it never drops the pinned connection.
@@ -138,6 +146,34 @@ export const machinesContract = defineContract({
   addThisComputer: procedure({
     input: voidInput,
     output: z.custom<SshConfig>(),
+  }),
+  /**
+   * Maestro hosts: the Maestro app on another computer, reached over its own WebSocket listener
+   * instead of SSH. The requests to the host run in the main process; see ./maestro-host.
+   */
+  /** Asks an address who it is, without pairing or saving anything. */
+  inspectMaestroHost: fallible({
+    input: inspectMaestroHostInputSchema,
+    data: maestroHostInfoSchema,
+    error: maestroHostErrorSchema,
+  }),
+  /** Pairs with a host using a one-time code and saves it as a machine. */
+  addMaestroHost: fallible({
+    input: addMaestroHostInputSchema,
+    data: z.custom<SshConfig>(),
+    error: maestroHostErrorSchema,
+  }),
+  /** Pairs an existing machine again after the host revoked this device. */
+  repairMaestroHost: fallible({
+    input: repairMaestroHostInputSchema,
+    data: z.custom<SshConfig>(),
+    error: maestroHostErrorSchema,
+  }),
+  /** Changes a machine's address or Cloudflare Access credentials, keeping its pairing. */
+  updateMaestroHost: fallible({
+    input: updateMaestroHostInputSchema,
+    data: z.custom<SshConfig>(),
+    error: maestroHostErrorSchema,
   }),
   setSyncLocalSettings: procedure({
     input: z.object({ id: z.string(), enabled: z.boolean() }),

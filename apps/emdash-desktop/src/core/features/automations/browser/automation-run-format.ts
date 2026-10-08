@@ -1,3 +1,4 @@
+import type { AutomationRunDelivery } from '@emdash/core/runtimes/automations/api';
 import type {
   AutomationRunTriggerKind,
   RunError,
@@ -23,6 +24,22 @@ export function formatRunError(error: RunError | null): string {
     return error.message ?? 'Could not start the agent session';
   }
   return error.message ?? `${error.step}:${error.code}`;
+}
+
+const RUN_DELIVERY_LABELS: Record<AutomationRunDelivery['state'], string> = {
+  agent_running: 'Agent working',
+  publishing: 'Opening pull request',
+  pr_open: 'Pull request ready for review',
+  pr_draft: 'Draft pull request (agent did not finish cleanly)',
+  no_changes: 'Finished without changes',
+  failed: 'Delivery failed',
+  cancelled: 'Cancelled',
+};
+
+export function formatRunDeliveryLabel(delivery: AutomationRunDelivery): string {
+  const label = RUN_DELIVERY_LABELS[delivery.state];
+  if (delivery.state !== 'failed' || !delivery.error) return label;
+  return `${label}: ${delivery.error.message ?? delivery.error.code}`;
 }
 
 export function formatRunTriggerKindLabel(kind: AutomationRunTriggerKind): string {

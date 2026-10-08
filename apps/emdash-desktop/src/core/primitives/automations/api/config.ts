@@ -3,10 +3,23 @@ import z from 'zod';
 import { taskConfig } from '@core/primitives/tasks/api';
 import { workspaceConfig } from '@core/primitives/workspaces/api';
 
+/**
+ * On-demand automations ignore their schedule: runs start only when requested (from
+ * the app or through a workspace server's trigger gateway), wait for the agent to
+ * finish, and hand the result off as a pull request.
+ */
+export const onDemandTriggerSchema = z.object({
+  maxConcurrentRuns: z.number().int().positive().optional(),
+  timeoutMinutes: z.number().int().positive().optional(),
+});
+
 export const triggerConfigSchema = z.object({
   expr: z.string(),
   tz: z.string().optional(),
+  onDemand: onDemandTriggerSchema.optional(),
 });
+
+export const DEFAULT_ON_DEMAND_MAX_CONCURRENT_RUNS = 2;
 
 export type TriggerConfig = z.infer<typeof triggerConfigSchema>;
 

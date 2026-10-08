@@ -19,6 +19,8 @@ import { ProviderTokenDispatcher } from '@core/features/account/node/services/pr
 import { getPluginMetadata } from '@core/features/agents/api/node/plugin-registry';
 import { AutomationsService } from '@core/features/automations/api/node/automations-service';
 import { buildAutomationDeployment } from '@core/features/automations/node/deployment-builder';
+import { conversationEvents } from '@core/features/conversations/api/node/conversation-events';
+import { installMaestroHostAdoption } from '@core/features/conversations/node/maestro-host-adoption';
 import { createConversationDeletionSweepKind } from '@core/features/conversations/node/sweep/conversation-deletion-sweep';
 import { ConversationBackfillService } from '@core/features/conversations/node/sync/conversation-backfill';
 import { ConversationSyncService } from '@core/features/conversations/node/sync/conversation-sync-service';
@@ -94,6 +96,7 @@ import { createWorkspaceDeletionSweepKind } from '@core/features/workspaces/node
 import { WorkspaceRegistryBackfillService } from '@core/features/workspaces/node/sync/workspace-registry-backfill';
 import { WorkspaceRegistrySyncService } from '@core/features/workspaces/node/sync/workspace-registry-sync-service';
 import { isGitHubAccountSummary } from '@core/primitives/github/api';
+import { MaestroHostUnsupportedError } from '@core/primitives/maestro-host/api/unsupported';
 import { startPeriodicSweep } from '@core/primitives/periodic-sweep/node/periodic-sweep';
 import { DEFAULT_AGENT_GIT_CREDENTIALS } from '@core/primitives/project-settings/api';
 import type { HostReachabilityProbe } from '@core/primitives/ssh/api';
@@ -206,6 +209,10 @@ export async function bootServices(
     getConnectionState: (connectionId) =>
       infrastructure.ssh.manager.getConnectionState(connectionId),
     getSshProxy: async (connectionId) => {
+      // A Maestro host has no SSH connection to tunnel through; fail before waiting for one.
+      if (infrastructure.maestroHosts.isMaestroHost(connectionId)) {
+        throw new MaestroHostUnsupportedError('port-forwarding');
+      }
       await infrastructure.ssh.ssh.ensureConnected(connectionId);
       const proxy = infrastructure.ssh.manager.getProxy(connectionId);
       if (!proxy) throw new Error(`SSH connection ${connectionId} is not available`);
@@ -382,7 +389,13 @@ export async function bootServices(
   };
   // Legacy consumers still read raw SSH reachability. Task/workspace mutations use
   // ProjectAttachmentManager.requireAttached instead.
-  const hostIsReachable = createHostReachabilityProbe(infrastructure.ssh.manager);
+  const hostIsReachable = createHostReachabilityProbe({
+    // A Maestro host has no SSH connection; it is reachable while its Host connection is ready.
+    isConnected: (connectionId) =>
+      infrastructure.ssh.manager.isConnected(connectionId) ||
+      (infrastructure.maestroHosts.isMaestroHost(connectionId) &&
+        peek(infrastructure.hosts.availability(connectionId)).kind === 'ready'),
+  });
   const taskService = new TaskService({
     db,
     projects: projectManager,
@@ -439,6 +452,24 @@ export async function bootServices(
   });
   installAutomationTelemetry(telemetryService, automationsService);
   installTaskTelemetry(telemetryService, taskService, taskSessionManager);
+  appScope.add(
+    installMaestroHostAdoption({
+      db,
+      isMaestroHost: (connectionId) => infrastructure.maestroHosts.isMaestroHost(connectionId),
+      connectionFor: async (connectionId) => {
+        const host = infrastructure.hosts.get(hostRef('remote', connectionId));
+        if (!host) return undefined;
+        try {
+          return (await host.runtime.client({ waitForReady: false })).connection;
+        } catch {
+          return undefined;
+        }
+      },
+      onTaskCreated: (handler) => taskService.on('task:created', handler),
+      onConversationCreated: (handler) => conversationEvents.on('conversation:created', handler),
+      logger: log,
+    })
+  );
 
   // Unmigrated string-typed consumers get the documented plaintext view over
   // the Secret-typed secrets store (see toPlaintextSecretStore).

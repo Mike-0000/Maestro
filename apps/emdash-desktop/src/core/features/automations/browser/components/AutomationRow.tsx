@@ -76,15 +76,17 @@ export const AutomationRow = observer(function AutomationRow({
   const agentStatus = taskStore ? taskAgentStatus(taskStore) : null;
 
   const expr = automation.triggerConfig?.expr ?? null;
-  const cronLabel = expr
-    ? (() => {
-        try {
-          return cronstrue.toString(expr.trim());
-        } catch {
-          return expr;
-        }
-      })()
-    : null;
+  const cronLabel = automation.triggerConfig?.onDemand
+    ? 'On demand'
+    : expr
+      ? (() => {
+          try {
+            return cronstrue.toString(expr.trim());
+          } catch {
+            return expr;
+          }
+        })()
+      : null;
 
   return (
     <div className="group flex w-full items-center gap-4 text-left">

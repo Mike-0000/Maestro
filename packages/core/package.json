@@ -150,6 +150,16 @@
       "types": "./dist/services-host-dependencies-node.d.mts",
       "default": "./dist/services-host-dependencies-node.mjs"
     },
+    "./services/remote-control/api": {
+      "development": "./src/services/remote-control/api/index.ts",
+      "types": "./dist/services-remote-control-api.d.mts",
+      "default": "./dist/services-remote-control-api.mjs"
+    },
+    "./services/runtime-broker/node": {
+      "development": "./src/services/runtime-broker/node/index.ts",
+      "types": "./dist/services-runtime-broker-node.d.mts",
+      "default": "./dist/services-runtime-broker-node.mjs"
+    },
     "./services/runtime-broker/api": {
       "development": "./src/services/runtime-broker/api/index.ts",
       "types": "./dist/services-runtime-broker-api.d.mts",

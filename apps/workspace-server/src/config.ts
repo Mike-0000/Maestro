@@ -8,8 +8,17 @@ const DEFAULT_ENV_FILES = ['.env'];
 /**
  * `daemonize` is internal: on Windows, `start` launches it outside the SSH session's job object
  * and it spawns the detached `serve` process with output redirected to the daemon log.
+ * `trigger-gateway` serves the HTTP entry point that starts on-demand automation runs on the
+ * daemon at the socket path; see `docs/cloud-agents.md`.
  */
-const workspaceServerCommands = ['serve', 'start', 'stop', 'status', 'daemonize'] as const;
+const workspaceServerCommands = [
+  'serve',
+  'start',
+  'stop',
+  'status',
+  'daemonize',
+  'trigger-gateway',
+] as const;
 
 export type WorkspaceServerCommand = (typeof workspaceServerCommands)[number];
 

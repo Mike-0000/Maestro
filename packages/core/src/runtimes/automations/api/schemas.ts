@@ -1,6 +1,11 @@
 import { z } from 'zod';
 import { automationDeploymentSchema, automationIdSchema } from './deployment';
-import { automationRunIdSchema, automationRunSchema, automationRunStatusSchema } from './run';
+import {
+  automationRunIdSchema,
+  automationRunRequestSchema,
+  automationRunSchema,
+  automationRunStatusSchema,
+} from './run';
 
 export const LIST_RUNS_DEFAULT_LIMIT = 50;
 export const LIST_RUNS_MAX_LIMIT = 200;
@@ -20,6 +25,8 @@ export const removeInputSchema = z.object({
 
 export const startRunInputSchema = z.object({
   automationId: automationIdSchema,
+  /** Present for request-triggered runs; repeating a request id returns its run. */
+  request: automationRunRequestSchema.optional(),
 });
 
 export const startRunResultSchema = z.object({

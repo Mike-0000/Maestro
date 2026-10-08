@@ -1,0 +1,13 @@
+{
+  // Browser program for the Maestro web client (src/remote-web), the PWA served by the
+  // remote-access listener. It is deliberately alias-free: the client may import workspace
+  // packages only, never `@core`/`@renderer`/`@main` code, so those imports fail to resolve here.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["react", "react-dom", "vite/client"]
+  },
+  "include": ["src/remote-web/**/*"],
+  // `dev/` is a Node script with its own program (src/remote-web/dev/tsconfig.json).
+  "exclude": ["node_modules", "dist", "out", "src/remote-web/dev/**"]
+}

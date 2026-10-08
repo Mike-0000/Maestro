@@ -33,6 +33,7 @@ import { LIST_CHANGED_RUNS_DEFAULT_LIMIT, LIST_RUNS_DEFAULT_LIMIT } from '../api
 import { AutomationDeploymentStore } from './persistence/deployment-store';
 import { AutomationRunStore } from './persistence/run-store';
 import type { AutomationsDb } from './persistence/store';
+import type { AutomationDeliveryPort } from './ports/delivery';
 import type { AutomationSessionPort } from './ports/session-start';
 import type { AutomationWorkspacePort } from './ports/workspace-provisioning';
 import { createAutomationRunExecutor } from './runs/executor';
@@ -44,6 +45,7 @@ export type AutomationsRuntimeOptions = {
   handle: StoreHandle<AutomationsDb>;
   workspacePort: AutomationWorkspacePort;
   sessionPort: AutomationSessionPort;
+  deliveryPort?: AutomationDeliveryPort;
   clock?: Clock;
   logger?: Logger;
   tickIntervalMs?: number;
@@ -91,6 +93,8 @@ export class AutomationsRuntime {
       transitions: this.transitions,
       workspacePort: options.workspacePort,
       sessionPort: options.sessionPort,
+      deliveryPort: options.deliveryPort,
+      now: () => this.clock.now(),
     });
 
     this.scheduler = new AutomationScheduler({
@@ -117,8 +121,11 @@ export class AutomationsRuntime {
 
   async deploy(input: DeployInput): Promise<Result<DeployResult, DeployError>> {
     const now = this.clock.now();
-    const scheduleError = validateAutomationSchedule(input.schedule, now);
-    if (scheduleError) return err(scheduleError);
+    // An on-demand automation never consults its schedule, so it cannot be invalid.
+    if (input.triggers?.cron !== false) {
+      const scheduleError = validateAutomationSchedule(input.schedule, now);
+      if (scheduleError) return err(scheduleError);
+    }
 
     const stored = this.deploymentStore.upsertDeployment(input, now);
     this.scheduler.reconcile();
@@ -145,13 +152,18 @@ export class AutomationsRuntime {
       if (run.automationId !== automationId) continue;
       this.scheduler.cancelRun(run.id);
     }
+    // Runs still delivering hold a worker and a live agent; stop them before their
+    // rows disappear.
+    for (const run of this.runStore.listRunsWithActiveDelivery()) {
+      if (run.automationId === automationId) this.scheduler.cancelRun(run.id);
+    }
     this.runStore.deleteRunsForAutomation(automationId);
     this.deploymentStore.removeDeployment(automationId);
     return ok(undefined);
   }
 
   async startRun(input: StartRunInput): Promise<Result<StartRunResult, StartRunError>> {
-    const { automationId } = input;
+    const { automationId, request } = input;
     const deployment = this.deploymentStore.getDeployment(automationId);
     if (!deployment) {
       return err({
@@ -160,6 +172,17 @@ export class AutomationsRuntime {
         message: `Automation ${automationId} not found`,
       });
     }
+    if (request) {
+      const existing = this.runStore.getRun(request.id);
+      if (existing) {
+        if (existing.automationId === automationId) return ok({ run: existing });
+        return err({
+          type: 'automation-not-found',
+          automationId,
+          message: `Request ${request.id} belongs to a different automation`,
+        });
+      }
+    }
     if (!deployment.enabled) {
       return err({
         type: 'automation-disabled',
@@ -167,7 +190,7 @@ export class AutomationsRuntime {
         message: `Automation ${automationId} is disabled`,
       });
     }
-    const run = this.scheduler.runNow(deployment);
+    const run = this.scheduler.runNow(deployment, request);
     return ok({ run });
   }
 

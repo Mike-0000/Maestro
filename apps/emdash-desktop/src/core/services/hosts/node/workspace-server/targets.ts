@@ -19,5 +19,7 @@ export function workspaceServerTargetKey(target: WorkspaceServerTarget): string 
       return `${target.kind}\0${target.socketPath}`;
     case 'ssh':
       return `${target.kind}\0${target.sshConnectionId}\0${target.channel}\0${target.socketPath}`;
+    case 'maestro':
+      return `${target.kind}\0${target.connectionId}`;
   }
 }

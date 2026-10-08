@@ -1,0 +1,10 @@
+{
+  // Node program for the web client's development-only scripts (the fake host). Kept apart
+  // from tsconfig.remote-web.json so Node globals never leak into the browser program.
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": ["node"]
+  },
+  "include": ["./**/*.ts"]
+}

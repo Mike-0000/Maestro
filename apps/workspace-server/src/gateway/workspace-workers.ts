@@ -6,7 +6,10 @@ import type { AgentConfigContract } from '@emdash/core/runtimes/agent-config/api
 import { agentConfigWorkerSpec } from '@emdash/core/runtimes/agent-config/node';
 import type { AutomationsContract } from '@emdash/core/runtimes/automations/api';
 import { workspaceCreationAdmissionContract } from '@emdash/core/runtimes/automations/api';
-import { automationsWorkerSpec } from '@emdash/core/runtimes/automations/node';
+import {
+  automationsWorkerSpec,
+  createAutomationPublisher,
+} from '@emdash/core/runtimes/automations/node';
 import type { ConversationsContract } from '@emdash/core/runtimes/conversations/api';
 import { conversationsWorkerSpec } from '@emdash/core/runtimes/conversations/node';
 import type { FileSearchContract } from '@emdash/core/runtimes/file-search/api';
@@ -35,6 +38,7 @@ import {
   createHostDependenciesComponent,
   type HostDependenciesContract,
 } from '@emdash/core/services/host-dependencies/node';
+import { createAutomationDeliveryController } from '@emdash/core/services/runtime-broker/node';
 import {
   createUserShellEnvController,
   type ShellEnvManager,
@@ -296,6 +300,12 @@ export async function createWorkspaceServerRuntimeHost(
         acpLauncher: acp,
         tuiSessions: tuiAgents,
         conversationIndex: conversations,
+        delivery: createAutomationDeliveryController({
+          acp,
+          tuiAgents,
+          publish: createAutomationPublisher(env),
+          scope: options.scope.child('automation-delivery'),
+        }),
       },
       dbFile: paths.automationsDatabase,
     })

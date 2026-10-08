@@ -1,0 +1,12 @@
+# /etc/cloudflared/config.yml
+# Create the tunnel first:  cloudflared tunnel login && cloudflared tunnel create maestro-agents
+# Route DNS:                cloudflared tunnel route dns maestro-agents agents.example.com
+# Then put a Cloudflare Access application with a Service Auth policy in front of the hostname.
+tunnel: maestro-agents
+credentials-file: /etc/cloudflared/<TUNNEL-UUID>.json
+
+ingress:
+  - hostname: agents.example.com
+    service: http://127.0.0.1:7461
+  # Everything else is refused at the tunnel.
+  - service: http_status:404

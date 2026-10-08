@@ -12,12 +12,17 @@ import { forwardLiveModel } from '@core/services/runtime-clients/node/forward-li
 import { runRuntimeLiveJob } from '@core/services/runtime-clients/node/live-job';
 import type { InstallMachineSystemDependenciesResult } from '../api';
 import { machinesContract } from '../api';
+import type { MaestroHostError } from '../api/maestro-host';
 import { mapSystemDependencyView, systemDependencyIds } from '../api/system-dependencies';
+import type { MaestroHostsService } from './maestro-hosts-service';
 
 export function createMachinesWireController(
   service: MachinesService,
-  runtimes: RuntimeBroker
+  runtimes: RuntimeBroker,
+  maestroHosts?: MaestroHostsService
 ): Controller {
+  const maestro = async <T>(run: (hosts: MaestroHostsService) => Promise<T>) =>
+    maestroHosts ? await run(maestroHosts) : err(MAESTRO_HOSTS_UNAVAILABLE);
   return createController(machinesContract, {
     getMachines: () => service.getMachines(),
     getMachineUsage: () => service.getMachineUsage(),
@@ -76,11 +81,20 @@ export function createMachinesWireController(
     },
     saveMachine: (input) => service.saveMachine(input),
     addThisComputer: () => service.addThisComputer(),
+    inspectMaestroHost: (input) => maestro((hosts) => hosts.inspect(input)),
+    addMaestroHost: (input) => maestro((hosts) => hosts.add(input)),
+    repairMaestroHost: (input) => maestro((hosts) => hosts.repair(input)),
+    updateMaestroHost: (input) => maestro((hosts) => hosts.update(input)),
     setSyncLocalSettings: ({ id, enabled }) => service.setSyncLocalSettings(id, enabled),
     deleteMachine: ({ id }) => service.deleteMachine(id),
     renameMachine: ({ id, name }) => service.renameMachine(id, name),
   });
 }
+
+const MAESTRO_HOSTS_UNAVAILABLE: MaestroHostError = {
+  type: 'failed',
+  message: 'Maestro hosts are not available in this build.',
+};
 
 function createSystemDependenciesModelProvider(
   runtimes: RuntimeBroker

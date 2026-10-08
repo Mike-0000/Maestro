@@ -10,9 +10,10 @@ import {
   getTaskStore,
 } from '@core/features/tasks/api/browser/task-state/task-selectors';
 import { taskViewDef } from '@core/features/tasks/contributions/views';
+import { openExternal } from '@core/primitives/desktop-host/browser/host-client';
 import { useNavigate } from '@core/primitives/navigation/browser/navigation-hooks';
 import { cn } from '@core/primitives/styling/browser/cn';
-import { formatAutomationError } from '../automation-run-format';
+import { formatAutomationError, formatRunDeliveryLabel } from '../automation-run-format';
 import { useAutomationRun } from '../use-automations';
 import { RunMetaLine } from './RunMetaLine';
 import { TaskDataLine } from './TaskDataLine';
@@ -104,6 +105,23 @@ export const AutomationRunRow = observer(function AutomationRunRow({
         runStatus={run.status}
         error={run.error}
       />
+      {run.delivery && (
+        <div className="flex min-w-0 items-center gap-2 text-tiny text-foreground-muted">
+          <span>{formatRunDeliveryLabel(run.delivery)}</span>
+          {run.delivery.pullRequestUrl && (
+            <button
+              type="button"
+              className="truncate underline"
+              onClick={(event) => {
+                event.stopPropagation();
+                if (run.delivery?.pullRequestUrl) void openExternal(run.delivery.pullRequestUrl);
+              }}
+            >
+              {run.delivery.pullRequestUrl}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 });

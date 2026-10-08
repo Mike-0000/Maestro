@@ -1,4 +1,5 @@
 import type { MachinesService } from '@core/features/machines/api/node/machines-service';
+import type { MaestroHostsService } from '@core/features/machines/node/maestro-hosts-service';
 import type { SshService } from '@core/primitives/ssh/api';
 import type {
   SshConnectionControl,
@@ -12,6 +13,8 @@ export interface SshServiceHandle {
   bindLifecycle(lifecycle: SshConnectionLifecycle): void;
   readonly ssh: SshService;
   readonly machines: MachinesService;
+  /** Pairing and upkeep of machines reached over the Maestro app's listener instead of SSH. */
+  readonly maestroHosts: MaestroHostsService;
   readonly manager: SshConnectionManager;
   readonly connections: SshConnectionsModel;
   dispose(): Promise<void>;

@@ -1,7 +1,5 @@
 import { sshConnectionIdOf, type HostRef } from '@emdash/core/primitives/host/api';
-import { runtimeHostUnavailable } from '@emdash/core/primitives/runtime-resolution/api';
 import type { ReleaseChannel } from '@emdash/core/workspace-server';
-import { err, ok } from '@emdash/shared';
 import type { Scope } from '@emdash/shared/concurrency';
 import { waitWithSignal } from '@emdash/shared/scheduling';
 import { peek } from '@emdash/wire/state';
@@ -9,9 +7,9 @@ import type { SshConnectionControl } from '@core/primitives/ssh/api/node/connect
 import type { SshConnectionManager } from '@core/primitives/ssh/api/node/ssh-connection-manager';
 import type { HostServerState } from '../api';
 import type { HostService } from '../api/node/host-service';
+import { createHostRuntimeAccess } from './host-runtime-access';
 import { ManagedHostConnection } from './managed-host-connection';
 import { RemoteHostWorkspaceServer } from './remote-host-workspace-server';
-import { translateHostPreparationError } from './runtime-resolution';
 import type { HostStateModel } from './state-model';
 import { openSshWorkspaceServerTransport } from './workspace-server/connect/ssh-streamlocal-transport';
 import {
@@ -179,33 +177,7 @@ export function createHostService(options: CreateHostServiceOptions): HostServic
   const service: HostService = {
     host: options.host,
     connection: managed,
-    runtime: {
-      waitUntilReady: async (signal) => {
-        try {
-          return ok({
-            host: options.host,
-            generation: await managed.supervisor.awaitUsable(signal),
-          });
-        } catch (error) {
-          return err(translateHostPreparationError(options.host, 'handshaking', error));
-        }
-      },
-      client: async (request) => {
-        scope.signal.throwIfAborted();
-        if (request?.waitForReady === false) {
-          const availability = peek(managed.availability);
-          if (availability.kind !== 'ready')
-            throw availability.kind === 'unavailable' && availability.issue
-              ? availability.issue
-              : runtimeHostUnavailable(
-                  options.host,
-                  'runtime-unavailable',
-                  'Host runtime is not currently usable'
-                );
-        } else await managed.supervisor.awaitUsable(request?.signal);
-        return managed.supervisor.attachment;
-      },
-    },
+    runtime: createHostRuntimeAccess(options.host, scope, managed),
     server,
   };
   return {

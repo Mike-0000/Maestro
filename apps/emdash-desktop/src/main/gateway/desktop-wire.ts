@@ -45,6 +45,14 @@ function createMessageChannel() {
   return { port1: channel.port1, port2: channel.port2 };
 }
 
+/**
+ * The controller the renderer is served by, for in-process callers that need the same verbs
+ * (remote access drives tasks and conversations through it).
+ */
+export function createDesktopWireController(): Controller {
+  return createLazyRoutingController();
+}
+
 function createLazyRoutingController(): Controller {
   return {
     async call(path, input, meta) {

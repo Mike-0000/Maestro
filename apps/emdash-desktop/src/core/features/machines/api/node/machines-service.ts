@@ -11,6 +11,7 @@ import {
   workspaceRegistryTable as workspaces,
 } from '@core/features/workspaces/api/node/registry';
 import { HookCore, type Hookable } from '@core/primitives/hooks/api/hookable';
+import { maestroHostUnsupportedMessage } from '@core/primitives/maestro-host/api/unsupported';
 import {
   mergeSshConnectionMetadata,
   sshConfigFromRow,
@@ -55,6 +56,8 @@ type MachinesLog = {
 export interface MachinesServiceDeps {
   db: AppDb;
   credentials: MachinesCredentials;
+  /** Device token and Cloudflare secret of Maestro hosts; removed with the machine. */
+  maestroCredentials?: { deleteAllCredentials(connectionId: string): Promise<void> };
   prepareCredentials: (id: string, credentials: ResolvedCredentialDraft) => (tx: DrizzleTx) => void;
   resolveSshConfig?: typeof resolveSshConfig;
   readFile?: (path: string, encoding: BufferEncoding) => Promise<string>;
@@ -101,6 +104,11 @@ export class MachinesService implements Hookable<MachinesServiceHooks> {
 
   on<K extends keyof MachinesServiceHooks>(name: K, handler: MachinesServiceHooks[K]): () => void {
     return this.hooks.on(name, handler);
+  }
+
+  /** For sibling services that persist a machine themselves (Maestro hosts). */
+  notifyMutated(event: MachineMutationEvent): void {
+    this.hooks.callHookBackground('machine:mutated', event);
   }
 
   async getMachines(): Promise<SshConfig[]> {
@@ -151,6 +159,9 @@ export class MachinesService implements Hookable<MachinesServiceHooks> {
     const before = captureMachineSave(this.deps.db, connectionId);
     if (before.connection?.metadata?.transport === 'local') {
       throw new Error('This computer connects without SSH, so it has no SSH settings to edit.');
+    }
+    if (before.connection?.metadata?.transport === 'maestro') {
+      throw new Error(maestroHostUnsupportedMessage('ssh-settings'));
     }
     const existingMetadata: SshConnectionMetadata = before.connection?.metadata ?? {};
 
@@ -256,7 +267,7 @@ export class MachinesService implements Hookable<MachinesServiceHooks> {
       authType: 'agent',
       privateKeyPath: null,
       useAgent: 0,
-      metadata: { version: '5', transport: 'local' } satisfies SshConnectionMetadata,
+      metadata: { version: '6', transport: 'local' } satisfies SshConnectionMetadata,
     } satisfies SshConnectionInsert;
     await this.deps.db.insert(sshConnectionsTable).values(row);
     this.hooks.callHookBackground('machine:mutated', { type: 'saved', connectionId: row.id });
@@ -272,7 +283,7 @@ export class MachinesService implements Hookable<MachinesServiceHooks> {
 
     const metadata: SshConnectionMetadata = {
       ...(row.metadata ?? {}),
-      version: '5',
+      version: '6',
       syncLocalSettings: enabled,
     };
     await this.deps.db
@@ -343,6 +354,7 @@ export class MachinesService implements Hookable<MachinesServiceHooks> {
     await this.deps.db.delete(sshConnectionsTable).where(eq(sshConnectionsTable.id, id));
     try {
       await this.deps.credentials.deleteAllCredentials(id);
+      await this.deps.maestroCredentials?.deleteAllCredentials(id);
     } finally {
       this.deps.ssh.removeRuntimeState(id);
       this.hooks.callHookBackground('machine:mutated', {

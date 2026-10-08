@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import type { Secret } from '@emdash/shared';
 import ssh2, { type BaseAgent, type ConnectConfig } from 'ssh2';
+import { MaestroHostUnsupportedError } from '@core/primitives/maestro-host/api/unsupported';
 import type { SshConfig } from '@core/primitives/ssh/api';
 import { sshConfigFromRow } from '@core/primitives/ssh/api';
 import type { SshConnectionRow } from '@core/services/app-db/node/schema';
@@ -93,6 +94,9 @@ export async function resolveSshConnectConfig(
       transport: 'local',
     };
   }
+  // A Maestro host is reached over the Maestro app's listener and has nothing to SSH into. Its
+  // Host service never asks for an SSH connection; refuse rather than dial a placeholder address.
+  if (base.transport === 'maestro') throw new MaestroHostUnsupportedError('ssh-connection');
   const alias = base.sshConfigAlias;
   const resolved = alias ? await deps.resolveSshConfig(alias) : undefined;
   const shouldResolveHostForAgent = !alias && base.authType === 'agent';

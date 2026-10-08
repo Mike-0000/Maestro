@@ -1,0 +1,23 @@
+# Runs the HTTP trigger gateway next to the daemon. It listens on loopback only; cloudflared is
+# the single thing that reaches it. Install as /etc/systemd/system/maestro-trigger-gateway.service.
+[Unit]
+Description=Maestro trigger gateway
+After=maestro-workspace-server.service
+Wants=maestro-workspace-server.service
+
+[Service]
+Type=simple
+User=maestro
+Group=maestro
+WorkingDirectory=/home/maestro
+# Root-owned, mode 0600. Holds MAESTRO_TRIGGER_TOKEN, which the daemon and its agents never see.
+EnvironmentFile=/etc/maestro/trigger-gateway.env
+Environment=MAESTRO_TRIGGER_CONFIG=/etc/maestro/triggers.json
+ExecStart=/home/maestro/.emdash/workspace-server/current/bin/emdash-workspace-server trigger-gateway --socket /home/maestro/.emdash/workspace-server/run/workspace.sock
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

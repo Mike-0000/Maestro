@@ -66,7 +66,17 @@ export function useAutomationSettingsAutoSave(automation: Automation, editable =
 
   function setCronExpr(expr: string) {
     formState.setCronExpr(expr);
-    savePatch({ expr, tz: cronTz });
+    savePatch({ ...triggerConfig, expr, tz: cronTz });
+  }
+
+  function setOnDemand(onDemand: boolean) {
+    formState.setOnDemand(onDemand);
+    const { onDemand: current, ...schedule } = triggerConfig;
+    savePatch(
+      onDemand
+        ? { ...schedule, onDemand: current ?? automation.triggerConfig?.onDemand ?? {} }
+        : schedule
+    );
   }
 
   // Provider lives inside the initialConversation sub-hook and is not directly
@@ -117,6 +127,7 @@ export function useAutomationSettingsAutoSave(automation: Automation, editable =
   return {
     formState,
     setCronExpr,
+    setOnDemand,
     handlePromptBlur,
     handleNameBlur,
     isSaving: update.isPending,
