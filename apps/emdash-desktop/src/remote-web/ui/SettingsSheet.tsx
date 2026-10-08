@@ -1,7 +1,8 @@
-import { LogOut, Volume2 } from 'lucide-react';
+import { BellRing, LogOut, Volume2 } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
-import { useState, type ReactNode } from 'react';
-import { useApp, useRouter, useVoice } from './app-context';
+import { useEffect, useState, type ReactNode } from 'react';
+import type { PushStatus } from '../state/push-store';
+import { useApp, usePush, useRouter, useVoice } from './app-context';
 import { ConnectionStatus } from './ConnectionStatus';
 import { Button, Switch } from './controls';
 import { Sheet } from './Sheet';
@@ -31,6 +32,8 @@ export const SettingsSheet = observer(function SettingsSheet() {
         </Row>
         {host?.appVersion ? <Row label="Maestro version">{host.appVersion}</Row> : null}
       </dl>
+
+      <NotificationSettings />
 
       <VoiceSettings />
 
@@ -71,6 +74,95 @@ export const SettingsSheet = observer(function SettingsSheet() {
         Agents keep running on your computer when you close this app.
       </p>
     </Sheet>
+  );
+});
+
+/** Why notifications cannot be turned on here, for the states where they cannot. */
+const PUSH_UNAVAILABLE: Partial<Record<PushStatus, string>> = {
+  checking: 'Checking…',
+  unsupported:
+    'This browser cannot receive notifications here. Open Maestro in Chrome through its https address and install it to your home screen.',
+  unavailable: 'Your computer cannot store notification keys securely, so notifications are off.',
+  unreachable: 'Could not reach your computer.',
+  blocked:
+    'Notifications are blocked for Maestro on this phone. Allow them in Android settings, then come back.',
+};
+
+/** Whether this phone is told when an agent finishes or needs input, even with the app closed. */
+const NotificationSettings = observer(function NotificationSettings() {
+  const push = usePush();
+  useEffect(() => {
+    void push.sync();
+  }, [push]);
+
+  const unavailable = PUSH_UNAVAILABLE[push.status];
+  const on = push.status === 'on';
+  return (
+    <section aria-labelledby="settings-notifications" className="mt-6">
+      <h3
+        id="settings-notifications"
+        className="text-fg-muted px-1 pb-1.5 text-[12.5px] font-semibold tracking-wide uppercase"
+      >
+        Notifications
+      </h3>
+      <div className="border-line bg-canvas overflow-hidden rounded-2xl border">
+        {unavailable ? (
+          <p className="text-fg-muted px-4 py-3 text-[13.5px] leading-snug">{unavailable}</p>
+        ) : (
+          <ToggleRow
+            id="push-enabled"
+            label="Notify this phone"
+            hint="Get a notification even when Maestro is closed."
+            checked={on}
+            onChange={(next) => void (next ? push.enable() : push.disable())}
+          />
+        )}
+        {on ? (
+          <>
+            <ToggleRow
+              id="push-complete"
+              label="Agent finished"
+              hint="When an agent is done working."
+              checked={push.events.complete}
+              onChange={(next) => void push.setEvent('complete', next)}
+            />
+            <ToggleRow
+              id="push-attention"
+              label="Needs attention"
+              hint="When an agent is waiting for you."
+              checked={push.events.attention}
+              onChange={(next) => void push.setEvent('attention', next)}
+            />
+            <div className="flex min-h-12 items-center justify-between gap-4 px-4 py-2.5">
+              <p className="text-fg-muted min-w-0 text-[13.5px] leading-snug">
+                {push.hostEnabled
+                  ? 'Your computer must be on, with Maestro running.'
+                  : 'Notifications are turned off in Maestro on your computer.'}
+              </p>
+              <Button
+                variant="secondary"
+                className="h-9 shrink-0 px-3.5 text-[14px]"
+                busy={push.testing}
+                onClick={() => void push.sendTest()}
+              >
+                <BellRing className="size-4" aria-hidden="true" />
+                Send test
+              </Button>
+            </div>
+          </>
+        ) : null}
+      </div>
+      {push.message ? (
+        <p
+          role="status"
+          className={`mt-2 px-1 text-[13px] leading-snug ${
+            push.message.tone === 'error' ? 'text-danger' : 'text-fg-muted'
+          }`}
+        >
+          {push.message.text}
+        </p>
+      ) : null}
+    </section>
   );
 });
 

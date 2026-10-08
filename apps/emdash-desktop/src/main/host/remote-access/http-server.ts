@@ -229,9 +229,7 @@ export function createRemoteAccessHttpServer(
   }
 
   function authenticate(request: IncomingMessage): RemoteDevice | undefined {
-    return options.store.authenticate(
-      bearerCredential(request) ?? readCookie(request, SESSION_COOKIE)
-    );
+    return options.store.authenticate(bearerCredential(request) ?? sessionCredential(request));
   }
 
   async function serveStatic(
@@ -330,6 +328,11 @@ function bearerCredential(request: IncomingMessage): string | undefined {
   return match?.[1]?.trim();
 }
 
+/** The credential a paired browser presents: its HttpOnly session cookie. */
+export function sessionCredential(request: IncomingMessage): string | undefined {
+  return readCookie(request, SESSION_COOKIE);
+}
+
 function readCookie(request: IncomingMessage, name: string): string | undefined {
   for (const part of (request.headers.cookie ?? '').split(';')) {
     const separator = part.indexOf('=');
@@ -362,7 +365,7 @@ function forwardedProtocol(request: IncomingMessage): string {
 }
 
 /** The request's `Origin` names the same host the request was addressed to. */
-function sameOrigin(request: IncomingMessage): boolean {
+export function sameOrigin(request: IncomingMessage): boolean {
   const origin = request.headers.origin;
   if (!origin) return false;
   try {
@@ -377,7 +380,7 @@ function sameOriginOrNonBrowser(request: IncomingMessage): boolean {
   return request.headers.origin === undefined || sameOrigin(request);
 }
 
-async function readJsonBody(request: IncomingMessage): Promise<unknown> {
+export async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
@@ -393,7 +396,7 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   }
 }
 
-function sendJson(response: ServerResponse, status: number, body: unknown): void {
+export function sendJson(response: ServerResponse, status: number, body: unknown): void {
   response.statusCode = status;
   response.setHeader('Content-Type', 'application/json; charset=utf-8');
   response.setHeader('Cache-Control', 'no-store');

@@ -27,6 +27,7 @@ import type { RemoteAccessOperations } from '@core/features/remote-access/node/w
 import type { TaskService } from '@core/features/tasks/api/node/task-service';
 import { desktopWireContract } from '@core/manifests/shared/desktop-wire-contract';
 import type { AppDb } from '@core/services/app-db/node/db';
+import type { NotificationSink } from '@core/services/notifications/api/ports';
 import { tuiAgentStatusBridge } from '@main/core/agent-status/tui-agent-status-bridge';
 import type { DesktopRuntimeClients } from '@main/gateway/desktop-workers';
 import {
@@ -43,6 +44,10 @@ import {
   type RemoteAccessRoute,
 } from './http-server';
 import { PairingCodes } from './pairing';
+import { createPushDispatcher, type PushDispatcher } from './push/push-dispatcher';
+import { createPushRoute } from './push/push-route';
+import { PushStore, type PushSecrets } from './push/push-store';
+import { createPushSender } from './push/web-push';
 import { createRemoteControl, type RemoteControl, type RemoteControlPorts } from './remote-control';
 import { createRemoteVoice, type RemoteVoice, type RemoteVoiceImpl } from './remote-voice';
 import { inspectTailscale, setTailscaleServe } from './tailscale';
@@ -65,6 +70,12 @@ export type RemoteAccessDependencies = {
   logger: Logger;
   /** Extra HTTP surfaces served by the same listener. */
   routes?: readonly RemoteAccessRoute[];
+  /** Where agent notifications come from, to forward them to paired phones. */
+  notifications: { registerSink(sink: NotificationSink): () => void };
+  /** The app-wide notifications switch. */
+  notificationsEnabled(): Promise<boolean>;
+  /** Encrypted storage for this host's push key and the phones' subscriptions. */
+  secrets: PushSecrets;
 };
 
 type Attached = {
@@ -74,6 +85,8 @@ type Attached = {
   desktop: DesktopWire;
   remoteControl: RemoteControl;
   remoteVoice: RemoteVoice;
+  pushStore: PushStore;
+  pushDispatcher: PushDispatcher;
   hostController: Controller;
   browserController: Controller;
 };
@@ -175,6 +188,15 @@ export class RemoteAccessService {
       remoteControlPorts(deps, store, desktop, remoteVoice.impl),
       scope.child('remote-control')
     );
+    const pushStore = new PushStore(deps.secrets);
+    const pushDispatcher = createPushDispatcher({
+      store: pushStore,
+      send: createPushSender(),
+      enabled: () => store.current().enabled,
+      pairedDeviceIds: () => store.devices().map((device) => device.id),
+      logger: deps.logger,
+    });
+    scope.add(deps.notifications.registerSink(pushDispatcher.sink));
     this.attached = {
       deps,
       scope,
@@ -182,6 +204,8 @@ export class RemoteAccessService {
       desktop,
       remoteControl,
       remoteVoice,
+      pushStore,
+      pushDispatcher,
       hostController: createMaestroHostController({
         clients: deps.clients,
         remote: remoteControl.impl,
@@ -285,6 +309,12 @@ export class RemoteAccessService {
           automations: deps.clients.automations,
           triggers: () => store.current().triggers,
           log: (entry) => deps.logger.info('Trigger request', entry),
+        }),
+        createPushRoute({
+          devices: store,
+          store: attached.pushStore,
+          dispatcher: attached.pushDispatcher,
+          notificationsEnabled: deps.notificationsEnabled,
         }),
         ...(deps.routes ?? []),
       ],
