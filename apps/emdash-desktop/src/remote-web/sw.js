@@ -5,6 +5,9 @@
 // It caches the app shell — and only the shell — so the installed app opens instantly and
 // offline shows its own "reconnecting" state instead of a browser error page. Everything live
 // (/api, /wire) always goes to the network and is never stored.
+//
+// It also shows the notifications the host pushes when an agent finishes or needs input, which
+// is the one thing that reaches this device while the app is closed.
 
 const SHELL_FILES = /*__PRECACHE_MANIFEST__*/ [];
 const CACHE_PREFIX = 'maestro-shell-';
@@ -89,3 +92,44 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
+
+self.addEventListener('push', (event) => {
+  let data = {};
+  try {
+    const parsed = event.data ? event.data.json() : null;
+    if (typeof parsed === 'object' && parsed !== null) data = parsed;
+  } catch {
+    // Fall through to the generic notification: the browser requires one for every push.
+  }
+  const text = (value, fallback) => (typeof value === 'string' && value ? value : fallback);
+  event.waitUntil(
+    self.registration.showNotification(text(data.title, 'Maestro'), {
+      body: text(data.body, 'An agent needs a look.'),
+      // One card per conversation: a newer event replaces the older one and alerts again.
+      tag: text(data.tag, 'maestro'),
+      renotify: true,
+      icon: '/icons/icon-192.png',
+      badge: '/icons/badge-96.png',
+      data: { path: agentPath(data.url) },
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const path = agentPath(event.notification.data && event.notification.data.path);
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
+      const open = windows.find((client) => new URL(client.url).origin === self.location.origin);
+      if (!open) return self.clients.openWindow(path);
+      // The running app routes in place, which keeps its connection and avoids a reload.
+      open.postMessage({ type: 'maestro:navigate', path });
+      return open.focus();
+    })
+  );
+});
+
+/** A pushed link may only ever lead to one of this app's agent screens. */
+function agentPath(value) {
+  return typeof value === 'string' && /^\/agent\/[^/?#]+$/.test(value) ? value : '/';
+}

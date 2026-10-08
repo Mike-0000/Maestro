@@ -33,10 +33,12 @@ describe('defaultRoutingPolicy', () => {
     expect(defaultRoutingPolicy(baseNotification, { appFocused: false, settings })).toEqual({
       system: true,
       sound: true,
+      push: true,
     });
     expect(defaultRoutingPolicy(baseNotification, { appFocused: true, settings })).toEqual({
       system: false,
       sound: true,
+      push: true,
     });
   });
 
@@ -46,14 +48,22 @@ describe('defaultRoutingPolicy', () => {
         appFocused: true,
         settings: { ...settings, soundFocusMode: 'unfocused' },
       })
-    ).toEqual({ system: false, sound: false });
+    ).toEqual({ system: false, sound: false, push: true });
 
     expect(
       defaultRoutingPolicy(baseNotification, {
         appFocused: false,
         settings: { ...settings, enabled: false },
       })
-    ).toEqual({ system: false, sound: false });
+    ).toEqual({ system: false, sound: false, push: false });
+  });
+
+  it('forwards only agent notifications to phones', () => {
+    const decide = (kind: string) =>
+      defaultRoutingPolicy({ ...baseNotification, kind }, { appFocused: true, settings }).push;
+    expect(decide('agent-complete')).toBe(true);
+    expect(decide('agent-attention')).toBe(true);
+    expect(decide('update-downloaded')).toBe(false);
   });
 
   it('keeps non-urgent update notifications feed-only', () => {
@@ -68,7 +78,7 @@ describe('defaultRoutingPolicy', () => {
         },
         { appFocused: false, settings }
       )
-    ).toEqual({ system: false, sound: false });
+    ).toEqual({ system: false, sound: false, push: false });
 
     expect(
       defaultRoutingPolicy(
@@ -81,6 +91,6 @@ describe('defaultRoutingPolicy', () => {
         },
         { appFocused: false, settings }
       )
-    ).toEqual({ system: false, sound: false });
+    ).toEqual({ system: false, sound: false, push: false });
   });
 });

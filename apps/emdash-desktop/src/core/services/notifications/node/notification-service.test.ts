@@ -174,6 +174,54 @@ describe('NotificationService', () => {
     );
   });
 
+  it('forwards to phones even while the desktop app is focused', async () => {
+    const clock = new ManualClock();
+    const systemSink = { id: 'system', deliver: vi.fn() };
+    const pushSink = { id: 'mobile-push', deliver: vi.fn() };
+    service = new NotificationService({
+      store: new MemoryNotificationStore(),
+      clock,
+      routingContext: () => ({ ...routingContext(), appFocused: true }),
+    });
+    service.registerSink(systemSink);
+    service.registerSink(pushSink);
+
+    service.publish(input());
+    clock.runAll();
+
+    await vi.waitFor(() => expect(pushSink.deliver).toHaveBeenCalledTimes(1));
+    expect(systemSink.deliver).not.toHaveBeenCalled();
+  });
+
+  it('still delivers to the remaining sinks when one fails', async () => {
+    const clock = new ManualClock();
+    const warn = vi.fn();
+    const systemSink = {
+      id: 'system',
+      deliver: vi.fn(() => {
+        throw new Error('no display');
+      }),
+    };
+    const soundSink = { id: 'sound', deliver: vi.fn() };
+    service = new NotificationService({
+      store: new MemoryNotificationStore(),
+      clock,
+      routingContext: routingContext,
+      logger: { warn },
+    });
+    service.registerSink(systemSink);
+    service.registerSink(soundSink);
+
+    service.publish(input());
+    clock.runAll();
+
+    await vi.waitFor(() => expect(soundSink.deliver).toHaveBeenCalledTimes(1));
+    expect(warn).toHaveBeenCalledWith(
+      'notifications: delivery failed',
+      expect.objectContaining({ sink: 'system' })
+    );
+  });
+
   it('emits delivery stream events', () => {
     service = new NotificationService({
       store: new MemoryNotificationStore(),

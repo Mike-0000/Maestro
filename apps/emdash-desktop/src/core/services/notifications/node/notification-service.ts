@@ -12,7 +12,13 @@ import {
   type PublishNotification,
 } from '../api';
 import { reduceDismiss, reduceMarkAllRead, reduceMarkRead } from '../api/optimistic';
-import type { Clock, NotificationSink, NotificationStore, TimerHandle } from '../api/ports';
+import type {
+  Clock,
+  NotificationDeliveryBatch,
+  NotificationSink,
+  NotificationStore,
+  TimerHandle,
+} from '../api/ports';
 import { systemClock } from '../api/ports';
 import type { RoutingContext, RoutingPolicy } from '../api/routing';
 import { defaultRoutingPolicy } from '../api/routing';
@@ -219,11 +225,20 @@ export class NotificationService {
     const summary = summarize(batch.items);
     const deliveryBatch = { notification, items: batch.items, summary };
 
-    if (decision.system) {
-      await this.sinks.get('system')?.deliver(deliveryBatch);
-    }
-    if (decision.sound) {
-      await this.sinks.get('sound')?.deliver(deliveryBatch);
+    if (decision.system) await this.deliverTo('system', deliveryBatch);
+    if (decision.sound) await this.deliverTo('sound', deliveryBatch);
+    if (decision.push) await this.deliverTo('mobile-push', deliveryBatch);
+  }
+
+  /** One sink failing must not keep the batch from the others. */
+  private async deliverTo(sinkId: string, batch: NotificationDeliveryBatch): Promise<void> {
+    try {
+      await this.sinks.get(sinkId)?.deliver(batch);
+    } catch (error) {
+      this.deps.logger?.warn('notifications: delivery failed', {
+        sink: sinkId,
+        error: String(error),
+      });
     }
   }
 

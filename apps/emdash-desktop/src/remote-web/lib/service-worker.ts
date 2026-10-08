@@ -32,3 +32,17 @@ export function registerServiceWorker(): void {
       });
   });
 }
+
+/**
+ * Calls back with the in-app path of a notification the person tapped while the app was open.
+ * (When it was closed, the worker opens the app at that path instead.)
+ */
+export function onNotificationNavigate(handler: (path: string) => void): void {
+  if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.addEventListener('message', (event: MessageEvent<unknown>) => {
+    const data = event.data;
+    if (typeof data !== 'object' || data === null) return;
+    const { type, path } = data as { type?: unknown; path?: unknown };
+    if (type === 'maestro:navigate' && typeof path === 'string') handler(path);
+  });
+}

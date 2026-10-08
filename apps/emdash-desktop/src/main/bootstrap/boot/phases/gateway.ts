@@ -16,6 +16,7 @@ import {
 } from '@main/gateway/desktop-wire';
 import { createDesktopDevServerBridgeParticipant } from '@main/gateway/dev-server-bridge';
 import { remoteAccessService } from '@main/host/remote-access/remote-access-service';
+import { encryptedAppSecretsStore } from '@main/host/secrets/encrypted-app-secrets-store';
 import { log } from '@main/lib/logger';
 import { appScope } from '../../core/app-scope';
 import { runInBackground } from '../../core/background';
@@ -93,6 +94,9 @@ export function installGateway(
       appVersion: app.getVersion(),
       hostName: hostname(),
       logger: log,
+      notifications: services.notifications,
+      notificationsEnabled: async () => (await database.appSettings.get('notifications')).enabled,
+      secrets: encryptedAppSecretsStore,
     })
   );
 
