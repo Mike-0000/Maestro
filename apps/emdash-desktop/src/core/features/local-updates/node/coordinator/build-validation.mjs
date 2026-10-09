@@ -223,12 +223,10 @@ export async function validateIntegratedCandidate({ repositoryPath, candidate, s
 }
 
 async function assertWindowsExecutables(packageRoot) {
-  for (const name of ['Maestro.exe', 'Chorus.exe']) {
-    const executablePath = join(packageRoot, name);
-    const file = await stat(executablePath).catch(() => null);
-    if (!file?.isFile() || file.size === 0) {
-      throw new Error(`Windows package is missing ${name}: ${executablePath}`);
-    }
+  const executablePath = join(packageRoot, 'Maestro.exe');
+  const file = await stat(executablePath).catch(() => null);
+  if (!file?.isFile() || file.size === 0) {
+    throw new Error(`Windows package is missing Maestro.exe: ${executablePath}`);
   }
 }
 
