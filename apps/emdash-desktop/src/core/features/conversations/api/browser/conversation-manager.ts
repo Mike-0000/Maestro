@@ -579,6 +579,17 @@ function createTuiAgentsConnector(
         logBinding = null;
       };
     },
+    async mirror(terminal: Terminal) {
+      const runtime = await client();
+      // Its own replica of the output log: the retained snapshot replays, then it follows live.
+      const binding = new ReplicaLog(runtime.tui.output.handle({ conversationId }), {
+        store: createXtermLogSink(terminal),
+      });
+      await binding.ready;
+      return () => {
+        void binding.dispose();
+      };
+    },
     sendInput(data: string) {
       const sentGeneration = generation();
       if (sentGeneration === undefined) return;
