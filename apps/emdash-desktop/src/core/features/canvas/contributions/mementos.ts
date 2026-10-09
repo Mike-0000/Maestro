@@ -2,6 +2,7 @@ import { defineVersionedSchema } from '@emdash/core/primitives/versioned-schema/
 import { z } from 'zod';
 import { days, defineMemento } from '@core/primitives/mementos/api';
 import { appSubject } from '@core/primitives/subjects/api';
+import { MAX_PANES } from '../api/canvas-panes';
 import { REGION_COLORS } from '../api/canvas-regions';
 import type { SplitNode } from '../api/stage-layout';
 
@@ -116,6 +117,20 @@ const layoutSettingsSchema = z.object({
   placeNewWindowsInProjectRegion: z.boolean().default(true),
 });
 
+const panesSchema = z.object({
+  /** How many views of the board share the screen (1: the single canvas). */
+  count: z.number().int().min(1).max(MAX_PANES),
+  /** The view commands, the toolbar, and the conductor act on. */
+  active: z.number().int().min(0),
+  /** Each view's camera and the sub-canvas it is in; empty for the single canvas. */
+  views: z.array(
+    z.object({
+      viewport: z.object({ x: z.number(), y: z.number(), zoom: z.number() }),
+      regionScope: z.string().nullable(),
+    })
+  ),
+});
+
 const canvasBoardV4Schema = canvasBoardV3Schema.extend({
   version: z.literal('4'),
   /** Named, nestable regions keyed by `region:<uuid>`. */
@@ -129,6 +144,8 @@ const canvasBoardV4Schema = canvasBoardV3Schema.extend({
   /** Where the user was: reopened on launch. */
   location: locationSchema,
   layoutSettings: layoutSettingsSchema,
+  /** Multi-canvas: several views of the board side by side. Absent on the single canvas. */
+  panes: panesSchema.optional(),
 });
 
 export const DEFAULT_LAYOUT_SETTINGS = {

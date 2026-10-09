@@ -276,6 +276,12 @@ export function WindowScope({ children }: { readonly children: ReactNode }) {
         getCanvasStore().home();
       },
     }),
+    'canvas.toggleMultiCanvas': () => ({
+      execute: () => {
+        if (currentView !== 'canvas') getNavigation().navigate(canvasViewDef({}));
+        getCanvasStore().toggleMultiCanvas();
+      },
+    }),
     'voice.toggleListening': () => ({
       execute: () => void getVoiceStore().toggle(),
     }),

@@ -13,6 +13,7 @@ import { getNavigation } from '@core/primitives/navigation/browser/navigation-se
 import { cn } from '@core/primitives/styling/browser/cn';
 import { MIN_TILE_SIZE, zoomBand } from '../../api/canvas-model';
 import { getCanvasStore } from '../../contributions/browser/app-stores';
+import { useIsLivePane } from '../canvas-pane-context';
 import { AgentAcpLive } from './agent-acp';
 import { AgentTerminal, TerminalPlaceholder } from './agent-terminal';
 import { statusPresentation } from './status-presentation';
@@ -31,6 +32,8 @@ export const AgentTileNode = observer(function AgentTileNode({ data, selected }:
     store.entryForConversation(projectId, taskId, conversationId) ?? store.entryForTile(tileId);
   // Subscribe to zoom bands, not raw zoom, so pan/zoom does not re-render every tile per frame.
   const band = useStore((state) => zoomBand(state.transform[2]));
+  // Multi-canvas: an agent showing in several views is mounted in one of them.
+  const live = useIsLivePane(tileId);
 
   if (!entry) return null;
 
@@ -74,6 +77,8 @@ export const AgentTileNode = observer(function AgentTileNode({ data, selected }:
           <TerminalPlaceholder label="On the stage" />
         ) : !store.shouldAttach(entry) ? (
           <ResumePrompt entry={entry} />
+        ) : !live ? (
+          <TerminalPlaceholder label="Live in another view. Click to bring it here." />
         ) : entry.type === 'acp' ? (
           <AgentAcpLive
             entry={entry}

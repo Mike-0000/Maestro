@@ -16,6 +16,7 @@ import {
 import { observer } from 'mobx-react-lite';
 import { cn } from '@core/primitives/styling/browser/cn';
 import type { OrganizeBy } from '../api/canvas-layout';
+import { MAX_PANES } from '../api/canvas-panes';
 import { adjacentRegion } from '../api/region-tiling';
 import { getCanvasStore } from '../contributions/browser/app-stores';
 
@@ -26,6 +27,8 @@ const ORGANIZE_OPTIONS: { value: OrganizeBy | 'tidy'; label: string }[] = [
   { value: 'status', label: 'Group by status' },
   { value: 'provider', label: 'Group by agent type' },
 ];
+
+const VIEW_OPTIONS = Array.from({ length: MAX_PANES }, (_, index) => index + 1);
 
 export const CanvasToolbar = observer(function CanvasToolbar() {
   const store = getCanvasStore();
@@ -132,6 +135,19 @@ export const CanvasToolbar = observer(function CanvasToolbar() {
         <LayoutPanelTop className="size-3.5" />
         Stage
       </ToolbarButton>
+      <select
+        aria-label="Canvas views"
+        title="Multi-canvas: split the canvas into side-by-side views, each with its own pan and zoom (Ctrl+Alt+1 to 4)"
+        value={store.paneCount}
+        onChange={(event) => store.setPaneCount(Number(event.currentTarget.value))}
+        className="h-7 rounded-md border border-border bg-background px-2 text-xs text-foreground outline-none"
+      >
+        {VIEW_OPTIONS.map((count) => (
+          <option key={count} value={count}>
+            {count === 1 ? '1 view' : `${count} views`}
+          </option>
+        ))}
+      </select>
       <Divider />
       <ToolbarButton
         label="Jump to the agent that has waited longest for you"

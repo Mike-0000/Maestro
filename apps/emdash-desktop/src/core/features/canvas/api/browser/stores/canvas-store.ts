@@ -60,6 +60,13 @@ import {
   type TileRect,
 } from '../../canvas-model';
 import {
+  clampPaneCount,
+  livePane,
+  paneBoxes,
+  splitViewport,
+  type PaneView,
+} from '../../canvas-panes';
+import {
   descendantTiles,
   frameAllowanceFor,
   isFoldedAway,
@@ -257,6 +264,9 @@ export type ViewportCommand =
   /** Put the camera back where it was (the main canvas the user left for a region). */
   | { readonly id: number; readonly kind: 'restore'; readonly viewport: CanvasViewport };
 
+/** Views shown when multi-canvas is switched on without a number. */
+const DEFAULT_MULTI_COUNT = 4;
+
 /** How long a board resize settles before a screen-sized workspace re-tiles to it. */
 const REFIT_DELAY_MS = 250;
 
@@ -334,6 +344,12 @@ export class CanvasStore {
   /** Main-canvas camera from before the user entered a region, restored on the way out. */
   private rootViewport: CanvasViewport | null = null;
   private refitTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Size of each multi-canvas view in CSS px, reported by its board. */
+  paneSizes: { width: number; height: number }[] = [];
+  /** How many views "multi-canvas on" last meant, for switching it back on. */
+  private lastMultiCount = DEFAULT_MULTI_COUNT;
+  /** Each inactive view's main-canvas camera from before it entered a region. */
+  private readonly paneRootViewports = new Map<number, CanvasViewport | null>();
   /** Stage arrangement for selection and solo stages (region stages persist theirs). */
   private transientStage: StageSaved = EMPTY_STAGE;
   /** Region names reserved for agents about to be created (a plan's agents arrive together). */
@@ -374,6 +390,16 @@ export class CanvasStore {
       previousRegionId: observable,
       newestRegionId: observable,
       scopeFramedZoom: observable,
+      paneSizes: observable.ref,
+      paneCount: computed,
+      activePane: computed,
+      paneViews: computed,
+      paneRects: computed,
+      setPaneCount: action,
+      toggleMultiCanvas: action,
+      activatePane: action,
+      setPaneViewport: action,
+      setPaneSize: action,
       focusedRegionId: computed,
       promotedTileIds: computed({ equals: comparer.structural }),
       promotedSet: computed,
@@ -958,6 +984,169 @@ export class CanvasStore {
 
   setProjectFilter(projectId: string | null): void {
     this.updateState((current) => ({ ...current, projectFilter: projectId }));
+  }
+
+  // ── Multi-canvas ───────────────────────────────────────────────────────────
+
+  /** How many views of the board share the screen (1: the single canvas). */
+  get paneCount(): number {
+    return clampPaneCount(this.state.panes?.count ?? 1);
+  }
+
+  get multiCanvas(): boolean {
+    return this.paneCount > 1;
+  }
+
+  /**
+   * The view the user last touched. `viewport`, `boardSize`, the board scope, and every viewport
+   * command (focus, fit, frame) are this view's.
+   */
+  get activePane(): number {
+    return Math.min(this.state.panes?.active ?? 0, this.paneCount - 1);
+  }
+
+  /** One entry per view; the active view's camera is always the board's `viewport`. */
+  get paneViews(): PaneView[] {
+    const stored = this.state.panes?.views ?? [];
+    const active = this.activePane;
+    const viewport = this.state.viewport;
+    return Array.from({ length: this.paneCount }, (_, index) => {
+      const view = stored[index] ?? { viewport, regionScope: null };
+      return index === active ? { ...view, viewport } : view;
+    });
+  }
+
+  /** The part of the board each view shows, in canvas units. */
+  get paneRects(): TileRect[] {
+    return this.paneViews.map((view, index) =>
+      viewportRect(view.viewport, this.paneSizes[index] ?? this.boardSize)
+    );
+  }
+
+  paneViewport(pane: number): CanvasViewport {
+    return this.paneViews[pane]?.viewport ?? this.state.viewport;
+  }
+
+  /** The sub-canvas a view is in: the board scope for the active view, its own otherwise. */
+  paneScope(pane: number): string | null {
+    if (pane === this.activePane) return this.focusedRegionId;
+    const scope = this.paneViews[pane]?.regionScope;
+    const region = scope ? this.state.regions[scope] : undefined;
+    return scope && region && !region.collapsed ? scope : null;
+  }
+
+  /**
+   * The view a window is live in. A terminal or a webview mounts once, so a window that shows in
+   * several views is live in the active one (else the first) and a placeholder in the others.
+   */
+  livePaneOf(tileId: string): number {
+    if (this.paneCount === 1) return 0;
+    return livePane(this.tileRect(tileId), this.paneRects, this.activePane);
+  }
+
+  /**
+   * Splits the canvas into `count` views, or back into one. Splitting the single canvas keeps the
+   * picture: each view continues it where that view lies. Going back keeps the active view.
+   */
+  setPaneCount(requested: number): void {
+    const count = clampPaneCount(requested);
+    const before = this.paneCount;
+    if (count === before) return;
+    const current = this.paneViews;
+    const active = this.activePane;
+    const location = this.location;
+    let views: PaneView[] = [];
+    let nextActive = 0;
+    if (count > 1 && before === 1) {
+      const scope = location.kind === 'board' ? location.regionScope : null;
+      views = splitViewport(this.state.viewport, paneBoxes(count, this.boardSize)).map(
+        (viewport, index) => ({ viewport, regionScope: index === 0 ? scope : null })
+      );
+    } else if (count > 1) {
+      views = Array.from(
+        { length: count },
+        (_, index) => current[index] ?? { viewport: this.state.viewport, regionScope: null }
+      );
+      // The active view survives a smaller split: it takes the last place.
+      nextActive = Math.min(active, count - 1);
+      const kept = current[active];
+      if (kept && nextActive !== active) views[nextActive] = kept;
+    }
+    if (count > 1) this.lastMultiCount = count;
+    this.paneRootViewports.clear();
+    this.paneSizes = [];
+    this.updateState((state) => ({ ...state, panes: { count, active: nextActive, views } }));
+  }
+
+  /** Multi-canvas on (the number of views it last had) or off. */
+  toggleMultiCanvas(): void {
+    this.setPaneCount(this.multiCanvas ? 1 : this.lastMultiCount);
+  }
+
+  /** Makes a view the active one: the board takes its camera and the sub-canvas it was in. */
+  activatePane(pane: number): void {
+    const count = this.paneCount;
+    const from = this.activePane;
+    if (count === 1 || pane === from || pane < 0 || pane >= count) return;
+    const location = this.location;
+    const views = [...this.paneViews];
+    const left = views[from];
+    const next = views[pane];
+    if (!left || !next) return;
+    if (location.kind === 'board') views[from] = { ...left, regionScope: location.regionScope };
+    this.paneRootViewports.set(from, this.rootViewport);
+    this.updateState((state) => ({
+      ...state,
+      viewport: next.viewport,
+      panes: { count, active: pane, views },
+    }));
+    const size = this.paneSizes[pane];
+    if (size) this.boardSize = size;
+    if (location.kind === 'board') {
+      const scope = next.regionScope && this.state.regions[next.regionScope];
+      this.navigate(
+        { kind: 'board', regionScope: scope ? next.regionScope : null },
+        { record: false, reveal: false }
+      );
+    }
+    this.rootViewport = this.paneRootViewports.get(pane) ?? null;
+  }
+
+  /** A view's camera moved. */
+  setPaneViewport(pane: number, viewport: CanvasViewport): void {
+    const panes = this.state.panes;
+    if (!panes || this.paneCount === 1) {
+      this.setViewport(viewport);
+      return;
+    }
+    const views = this.paneViews;
+    const current = views[pane]?.viewport;
+    if (!current) return;
+    if (current.x === viewport.x && current.y === viewport.y && current.zoom === viewport.zoom) {
+      return;
+    }
+    const active = this.activePane;
+    this.updateState((state) => ({
+      ...state,
+      ...(pane === active ? { viewport } : {}),
+      panes: {
+        count: this.paneCount,
+        active,
+        views: views.map((view, index) => (index === pane ? { ...view, viewport } : view)),
+      },
+    }));
+  }
+
+  /** A view's size in CSS px; the active view's is the board size. */
+  setPaneSize(pane: number, width: number, height: number): void {
+    if (width <= 0 || height <= 0) return;
+    const known = this.paneSizes[pane];
+    if (!known || known.width !== width || known.height !== height) {
+      const sizes = [...this.paneSizes];
+      sizes[pane] = { width, height };
+      this.paneSizes = sizes;
+    }
+    if (pane === this.activePane) this.setBoardSize(width, height);
   }
 
   // ── Focus and viewport commands ────────────────────────────────────────────

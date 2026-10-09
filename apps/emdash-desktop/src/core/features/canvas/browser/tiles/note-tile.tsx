@@ -5,6 +5,7 @@ import type { NoteTileEntry } from '@core/features/canvas/api/browser/stores/can
 import { cn } from '@core/primitives/styling/browser/cn';
 import { MIN_TILE_SIZE } from '../../api/canvas-model';
 import { getCanvasStore } from '../../contributions/browser/app-stores';
+import { useIsLivePane } from '../canvas-pane-context';
 
 export type NoteTileData = { tileId: string; noteId: string };
 
@@ -22,6 +23,8 @@ export const NoteTileNode = observer(function NoteTileNode({ data, selected }: N
   const { tileId, noteId } = data as NoteTileData;
   const store = getCanvasStore();
   const note = store.noteEntries.find((entry) => entry.noteId === noteId);
+  // Multi-canvas: a note showing in several views is edited in one; the others follow its text.
+  const live = useIsLivePane(tileId);
   if (!note) return null;
 
   return (
@@ -66,10 +69,14 @@ export const NoteTileNode = observer(function NoteTileNode({ data, selected }: N
         </button>
       </div>
       <textarea
+        key={live ? 'live' : note.text}
+        readOnly={!live}
         className="nodrag nowheel min-h-0 flex-1 resize-none bg-transparent px-3 pb-3 text-sm text-foreground outline-none placeholder:text-foreground-muted"
         placeholder="Write a goal, a plan, or a prompt…"
         defaultValue={note.text}
-        onBlur={(event) => store.updateNote(noteId, { text: event.currentTarget.value })}
+        onBlur={(event) => {
+          if (live) store.updateNote(noteId, { text: event.currentTarget.value });
+        }}
       />
     </div>
   );

@@ -179,6 +179,22 @@ The current canvas: free-form geometry, pan/zoom, minimap, level-of-detail tiles
 nodes (rendered below windows, above task frames, header strip takes pointer input like frames
 do today). The camera moves only when the user asks (§7.3).
 
+**Multi-canvas** (built 2026-10-08) shows the Board as two, three, or four views side by side
+(four make quadrants), each with its own pan and zoom over the same windows, separated only by a
+one-pixel line. Switch with the toolbar's "views" menu, Ctrl+Alt+1 to 4, or the "Toggle
+Multi-Canvas" command.
+
+- State lives in the board memento's optional `panes` (`count`, `active`, per-view `viewport` and
+  `regionScope`); the pure rules are in `api/canvas-panes.ts`.
+- Splitting the single canvas keeps the picture: each view continues it where that view lies.
+  Going back to one view keeps the active view's camera.
+- The **active view** is the one last touched. `viewport`, `boardSize`, the board scope, the
+  selection, and every viewport command (focus, fit, frame, voice) are its. Each view remembers
+  the sub-canvas it is in.
+- A window showing in several views is live in one (the active view when it shows there, else the
+  first); the others show a placeholder, since a terminal or a webview mounts once (§3.3).
+- The Stage covers all views. The minimap is hidden while the canvas is split.
+
 ### 3.2 Stage
 
 A **Stage** is a full-screen, tiled, zoom-1 view of a set of windows:

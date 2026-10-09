@@ -113,6 +113,26 @@ describe('canvasBoardSchema', () => {
     }
   });
 
+  it('keeps multi-canvas views and rejects more than four', () => {
+    const v4 = {
+      ...v2,
+      ...v4Defaults,
+      version: '4',
+      browsers: {},
+      panes: {
+        count: 2,
+        active: 1,
+        views: [
+          { viewport: { x: 0, y: 0, zoom: 1 }, regionScope: null },
+          { viewport: { x: -400, y: 20, zoom: 0.5 }, regionScope: 'region:r1' },
+        ],
+      },
+    };
+    expect(canvasBoardSchema.safeParse(v4)).toEqual({ status: 'ok', data: v4 });
+    const tooMany = { ...v4, panes: { ...v4.panes, count: 5 } };
+    expect(canvasBoardSchema.safeParse(tooMany).status).not.toBe('ok');
+  });
+
   it('rejects an unknown control value', () => {
     const bad = {
       ...v2,

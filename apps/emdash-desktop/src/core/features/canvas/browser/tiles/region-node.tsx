@@ -15,6 +15,7 @@ import type { RegionEntry } from '@core/features/canvas/api/browser/stores/canva
 import { cn } from '@core/primitives/styling/browser/cn';
 import { REGION_COLORS, REGION_HEADER, type RegionColor } from '../../api/canvas-regions';
 import { getCanvasStore } from '../../contributions/browser/app-stores';
+import { useCanvasPane } from '../canvas-pane-context';
 
 export type RegionNodeData = { regionId: string };
 
@@ -123,7 +124,9 @@ export const RegionNode = observer(function RegionNode({ data, selected }: NodeP
 const RegionHeader = observer(function RegionHeader({ region }: { region: RegionEntry }) {
   const store = getCanvasStore();
   const style = regionStyle(region.color);
-  const renaming = store.renamingRegionId === region.regionId;
+  // Multi-canvas: the name field opens in the active view only (two would steal focus in turn).
+  const pane = useCanvasPane();
+  const renaming = store.renamingRegionId === region.regionId && store.activePane === pane;
   const run = (label: string, op: Parameters<typeof store.runLayout>[0][number]) =>
     store.runLayout([op], { source: 'pointer', label });
 

@@ -35,6 +35,7 @@ function keyboardTargets(store: CanvasStore): string[] {
  * - Esc on the board: out of the sub-canvas you are in, one level at a time.
  * - Ctrl+Alt+Left/Right/Up: back, forward, and up a level; Ctrl+Alt+Home: the main canvas.
  * - Ctrl+Alt+PageDown/PageUp: the next or previous sub-canvas.
+ * - Ctrl+Alt+1 to 4: that many views of the canvas side by side (1: the single canvas).
  */
 export function handleCanvasKey(store: CanvasStore, event: KeyboardEvent): boolean {
   if (event.defaultPrevented || isTypingTarget(event.target)) return false;
@@ -92,6 +93,12 @@ export function handleCanvasKey(store: CanvasStore, event: KeyboardEvent): boole
     }
     if (key === 'PageDown') return store.goToAdjacentRegion(1) !== null;
     if (key === 'PageUp') return store.goToAdjacentRegion(-1) !== null;
+    // By key position: Alt changes what the digit keys type on some layouts.
+    const views = /^Digit([1-4])$/.exec(event.code)?.[1];
+    if (views && !event.shiftKey) {
+      store.setPaneCount(Number(views));
+      return true;
+    }
   }
 
   const direction = ARROWS[key];
