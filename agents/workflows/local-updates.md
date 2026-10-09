@@ -1,5 +1,11 @@
 # Coordinated local Chorus updates
 
+> **Installing is now done through the Azure update feed.** Use the coordinator to combine,
+> validate, and promote agent work onto `chorus/main`, then ship with `/push`
+> (`.claude/skills/push`), which publishes a release that every machine installs through
+> Download and Restart. Installer builds refuse the local install and rollback steps below
+> (steps 5 to 8); they remain only for legacy unpacked installs. See `docs/chorus/auto-update.md`.
+
 ## Purpose
 
 Chorus task worktrees are isolated while agents work, but an installed local Chorus update must
@@ -53,14 +59,10 @@ coordinator per Git common directory. Its journal and snapshot live under
    check script recognizes Windows delivery provenance and runs this same native setup, static
    checks, and focused tests. Ordinary repository checks continue running the full suite.
 
-   During the Chorus-to-Maestro transition, Windows packages keep `Maestro.exe` as the primary
-   executable and add a `Chorus.exe` compatibility copy during packing. After the builder flips
-   Electron fuses and signs the primary executable, it refreshes the copy to identical final bytes
-   before the coordinator hashes the package. The installed Chorus coordinator and worker require
-   `Chorus.exe` to validate and start their first Maestro candidate. New validation requires both
-   names; the new worker prefers `Maestro.exe` and accepts `Chorus.exe` for older installed or
-   retained rollback builds. The install directory, app ID, delivery state, and existing profile
-   paths remain unchanged.
+   Windows packages ship only `Maestro.exe`. The `Chorus.exe` compatibility copy from the
+   Chorus-to-Maestro transition is gone, because every machine now updates from the feed. The
+   worker still prefers `Maestro.exe` and accepts `Chorus.exe` for retained rollback builds. The
+   install directory, app ID, delivery state, and existing profile paths remain unchanged.
 4. Promotion is a separate, user-confirmed fast-forward of local `chorus/main`. It refuses a moved
    branch or dirty canonical checkout. A separate confirmed backup action pushes that exact commit
    to `origin/main` without force; a rejected push remains visibly pending.

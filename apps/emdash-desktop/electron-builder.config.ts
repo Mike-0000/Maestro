@@ -1,4 +1,4 @@
-import { copyFile, mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Configuration } from 'electron-builder';
 import { LOCAL_TTS_MODEL_DIR, prepareLocalTtsModel } from './scripts/prepare-local-tts-model.ts';
@@ -49,24 +49,12 @@ const config: Configuration = {
       to: 'chorus-delivery/install-chorus-update.ps1',
     },
   ],
-  afterPack: async ({ appOutDir, electronPlatformName }) => {
-    // Installed Chorus workers still require this executable in every Windows candidate.
-    // Copy the primary binary before packaging/signing and before delivery hashes the tree.
-    if (electronPlatformName === 'win32') {
-      await copyFile(join(appOutDir, `${PRODUCT_NAME}.exe`), join(appOutDir, 'Chorus.exe'));
-    }
+  afterPack: async ({ appOutDir }) => {
     const provenance = process.env.CHORUS_BUILD_PROVENANCE_JSON;
     if (!provenance) return;
     const resourcesPath = join(appOutDir, 'resources');
     await mkdir(resourcesPath, { recursive: true });
     await writeFile(join(resourcesPath, 'build-provenance.json'), provenance, 'utf8');
-  },
-  afterSign: async ({ appOutDir, electronPlatformName }) => {
-    if (electronPlatformName === 'win32') {
-      // electron-builder flips fuses and edits/signs Maestro.exe after afterPack.
-      // Refresh the alias so a legacy worker boots the same final binary and cookie store.
-      await copyFile(join(appOutDir, `${PRODUCT_NAME}.exe`), join(appOutDir, 'Chorus.exe'));
-    }
   },
   asarUnpack: [
     'out/main/adapters/**',

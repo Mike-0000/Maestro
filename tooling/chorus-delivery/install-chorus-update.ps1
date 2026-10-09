@@ -144,9 +144,7 @@ function Assert-Package([string]$SourceRoot, [string]$ManifestPath, [string]$Sta
   try { $computedDigest = [BitConverter]::ToString($sha.ComputeHash($digestBytes)).Replace('-', '').ToLowerInvariant() }
   finally { $sha.Dispose() }
   if ($computedDigest -ne $ExpectedDigest) { throw 'Package tree digest does not match the scheduled receipt.' }
-  if (-not (Test-Path -LiteralPath (Join-Path $source 'Chorus.exe') -PathType Leaf)) {
-    throw 'The validated package does not contain Chorus.exe.'
-  }
+  [void](Get-AppExecutable $source)
   return $manifest
 }
 

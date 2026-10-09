@@ -26,27 +26,6 @@ importers:
       '@anthropic-ai/sdk':
         specifier: 0.106.0
         version: 0.106.0(zod@4.4.3)
-      '@emdash/chat-ui':
-        specifier: workspace:*
-        version: link:../../packages/chat-ui
-      '@emdash/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@emdash/plugins':
-        specifier: workspace:*
-        version: link:../../packages/plugins
-      '@emdash/shared':
-        specifier: workspace:*
-        version: link:../../packages/shared
-      '@emdash/theme':
-        specifier: workspace:*
-        version: link:../../packages/theme
-      '@emdash/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
-      '@emdash/wire':
-        specifier: workspace:*
-        version: link:../../packages/wire
       '@fontsource-variable/inter':
         specifier: ^5.2.8
         version: 5.2.8
@@ -89,6 +68,9 @@ importers:
       electron-updater:
         specifier: ^6.3.9
         version: 6.8.9
+      follow-redirects:
+        specifier: ^1.16.0
+        version: 1.16.0
       human-id:
         specifier: ^4.1.2
         version: 4.2.0
@@ -116,6 +98,9 @@ importers:
       ssh2:
         specifier: ^1.17.0
         version: 1.17.0
+      superagent:
+        specifier: ^6.1.0
+        version: 6.1.0
       tinykeys:
         specifier: ^4.0.0
         version: 4.0.0
@@ -147,6 +132,27 @@ importers:
       '@electron/rebuild':
         specifier: ^4.0.1
         version: 4.0.4
+      '@emdash/chat-ui':
+        specifier: workspace:*
+        version: link:../../packages/chat-ui
+      '@emdash/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@emdash/plugins':
+        specifier: workspace:*
+        version: link:../../packages/plugins
+      '@emdash/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      '@emdash/theme':
+        specifier: workspace:*
+        version: link:../../packages/theme
+      '@emdash/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      '@emdash/wire':
+        specifier: workspace:*
+        version: link:../../packages/wire
       '@monaco-editor/react':
         specifier: ^4.7.0
         version: 4.7.0(monaco-editor@0.55.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -17054,9 +17060,9 @@ snapshots:
       formidable: 1.2.6
       methods: 1.1.2
       mime: 2.6.0
-      qs: 6.15.2
+      qs: 6.16.0
       readable-stream: 3.6.2
-      semver: 7.8.4
+      semver: 7.8.5
     transitivePeerDependencies:
       - supports-color
 
