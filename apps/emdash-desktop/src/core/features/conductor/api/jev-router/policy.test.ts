@@ -298,6 +298,25 @@ describe('decideRoute', () => {
     expect(decision).toMatchObject({ kind: 'llm', reason: 'answers-question' });
   });
 
+  it('leaves a half-sure command to Claude while its own question is open', () => {
+    // "Set that to Maple 2" after "did you mean Maple 2?": Jev read it as focus at 0.75.
+    const context = new ConversationContext(() => 1_000);
+    context.noteReply("I don't have a Vesper on the canvas — did you mean Maple 2?");
+    const slots = {
+      intent: choice('focus', 0.76),
+      target: choice('Maple 2', 0.9),
+      action: choice(catalogKey.agent('focus', 'Maple 2'), 0.8),
+    };
+    const asked = buildRouterRequest(input('Set that to Maple 2', context));
+    expect(decideRoute(answers(slots), asked.plan, options)).toMatchObject({
+      kind: 'llm',
+      reason: 'pending-question',
+    });
+    // The same reading acts when nothing was asked.
+    const fresh = buildRouterRequest(input('Set that to Maple 2'));
+    expect(decideRoute(answers(slots), fresh.plan, options)).toMatchObject({ kind: 'act' });
+  });
+
   it('never acts when destructive intents carry real mass', () => {
     const request = buildRouterRequest(input('close Tango'));
     const decision = decideRoute(

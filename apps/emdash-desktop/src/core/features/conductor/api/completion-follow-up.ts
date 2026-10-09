@@ -17,6 +17,8 @@ export const COMPLETION_FOLLOW_UP_TOOLS: ReadonlySet<ConductorToolName> = new Se
   'read_agent',
   'describe_canvas',
   'show_app',
+  'agent_details',
+  'recent_activity',
 ]);
 
 /** The report text the model sees per agent; the full report stays available via read_agent. */

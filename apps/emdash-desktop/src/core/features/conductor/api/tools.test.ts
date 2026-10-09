@@ -8,7 +8,7 @@ import {
 
 describe('conductor tools', () => {
   it('appends the app tools after the agent tools (prompt-cache order)', () => {
-    expect(conductorToolNames.slice(-19, -13)).toEqual([
+    expect(conductorToolNames.slice(-25, -19)).toEqual([
       'start_app',
       'show_app',
       'look_at_app',
@@ -16,16 +16,16 @@ describe('conductor tools', () => {
       'stop_app',
       'close_app',
     ]);
-    expect(conductorToolNames.indexOf('stop_agent')).toBe(conductorToolNames.length - 20);
+    expect(conductorToolNames.indexOf('stop_agent')).toBe(conductorToolNames.length - 26);
   });
 
-  it('appends the canvas layout tools last', () => {
-    expect(conductorToolNames.slice(-13, -10)).toEqual([
+  it('appends the canvas layout, delivery, and data tools last', () => {
+    expect(conductorToolNames.slice(-19, -16)).toEqual([
       'describe_canvas',
       'arrange_canvas',
       'canvas_view',
     ]);
-    expect(conductorToolNames.slice(-10)).toEqual([
+    expect(conductorToolNames.slice(-16, -6)).toEqual([
       'delivery_status',
       'enable_delivery',
       'prepare_delivery',
@@ -36,6 +36,14 @@ describe('conductor tools', () => {
       'schedule_delivery',
       'cancel_delivery',
       'rollback_delivery',
+    ]);
+    expect(conductorToolNames.slice(-6)).toEqual([
+      'agent_details',
+      'recent_activity',
+      'find_conversations',
+      'read_clipboard',
+      'rename_agent',
+      'filter_canvas',
     ]);
     expect(
       conductorToolSchemas.arrange_canvas.safeParse({

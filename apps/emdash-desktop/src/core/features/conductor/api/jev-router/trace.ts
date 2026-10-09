@@ -62,7 +62,7 @@ export function layoutBypass(text: string, layoutCue: boolean): boolean {
  * without a Jev round trip so they never reach Claude as a command.
  */
 export function looksLikeSttArtifact(text: string): boolean {
-  return /^(?:i'?m sorry,?\s+(?:but\s+)?i\s+(?:can(?:'|no)?t|cannot|am unable to|couldn'?t)\s+(?:hear|understand|process|make out)|(?:thanks|thank you) for watching|there (?:is|was) no (?:audio|speech)|please (?:provide|share) (?:the )?audio)/i.test(
+  return /^(?:i'?m sorry,?\s+(?:but\s+)?i\s+(?:can(?:'|no)?t|cannot|am unable to|couldn'?t)\s+(?:hear|understand|process|make out)|(?:thanks|thank you) for watching|there (?:is|was) no (?:audio|speech)|(?:sure[,.!]?\s+)?please (?:provide|share) (?:the )?audio)/i.test(
     text.trim()
   );
 }

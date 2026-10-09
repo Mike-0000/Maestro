@@ -19,6 +19,29 @@ export function trimHistory(
   return messages.slice(cut);
 }
 
+/** Stands in for the state a past turn was sent with. */
+export const CONTEXT_OMITTED =
+  '<context>\n(The state at that time is omitted; the latest message carries the current state.)\n</context>';
+
+/**
+ * Replaces the <context> block of every stored turn with a short marker. Each new turn brings the
+ * current roster and activity, so a past turn's copy is only stale state that costs tokens on
+ * every later request; what the developer said stays.
+ */
+export function dropStaleContexts(
+  messages: Anthropic.Beta.BetaMessageParam[]
+): Anthropic.Beta.BetaMessageParam[] {
+  return messages.map((message) => {
+    if (message.role !== 'user' || typeof message.content !== 'string') return message;
+    const end = message.content.indexOf('</context>');
+    if (!message.content.startsWith('<context>') || end === -1) return message;
+    return {
+      ...message,
+      content: CONTEXT_OMITTED + message.content.slice(end + '</context>'.length),
+    };
+  });
+}
+
 /** Stands in for a screenshot dropped from context. */
 export const SCREENSHOT_OMITTED = '[screenshot omitted]';
 

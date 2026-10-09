@@ -1,6 +1,13 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { describe, expect, it } from 'vitest';
-import { pruneScreenshots, SCREENSHOT_OMITTED, trimHistory } from './history';
+import {
+  CONTEXT_OMITTED,
+  dropStaleContexts,
+  pruneScreenshots,
+  SCREENSHOT_OMITTED,
+  trimHistory,
+} from './history';
+import { conductorUserMessage } from './system-prompt';
 
 type Message = Anthropic.Beta.BetaMessageParam;
 
@@ -72,5 +79,21 @@ describe('pruneScreenshots', () => {
 
   it('drops every screenshot from stored history', () => {
     expect(pruneScreenshots([shot('a'), shot('b')], 0).some(hasImage)).toBe(false);
+  });
+});
+
+describe('dropStaleContexts', () => {
+  it('keeps what was said and drops the state it was sent with', () => {
+    const messages: Message[] = [
+      { role: 'user', content: conductorUserMessage('Agents:\n- Atlas 3: working', 'focus Atlas') },
+      { role: 'assistant', content: [{ type: 'text', text: 'Focused Atlas 3.' }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] },
+      { role: 'user', content: 'no context here' },
+    ];
+    const kept = dropStaleContexts(messages);
+    expect(kept[0]).toEqual({ role: 'user', content: `${CONTEXT_OMITTED}\n\nfocus Atlas` });
+    expect(kept.slice(1)).toEqual(messages.slice(1));
+    // Still a turn start for trimHistory.
+    expect(trimHistory(kept, 1)).toEqual(kept.slice(3));
   });
 });

@@ -118,6 +118,10 @@ export type AgentTileEntry = {
   readonly workspaceId: string | null;
   readonly linesAdded: number;
   readonly linesDeleted: number;
+  /** When the agent's task was created (ISO), for "the latest agent"; null while it is being made. */
+  readonly createdAt: string | null;
+  /** When the user last sent this agent something (ISO), if ever. */
+  readonly lastInteractedAt: string | null;
 };
 
 export type NoteTileEntry = {
@@ -1006,6 +1010,11 @@ export class CanvasStore {
     if (!next) return false;
     this.requestFocus(next.tileId);
     return true;
+  }
+
+  /** When an agent started waiting for the user (epoch ms), if it is waiting now. */
+  waitingSince(tileId: string): number | undefined {
+    return this.attentionSince.get(tileId);
   }
 
   private trackAttention(): void {
@@ -2206,6 +2215,10 @@ function toAgentEntry(
     workspaceId: task.workspaceId,
     linesAdded: workspaceGit?.linesAdded ?? 0,
     linesDeleted: workspaceGit?.linesDeleted ?? 0,
+    createdAt: 'createdAt' in task.data ? task.data.createdAt : null,
+    lastInteractedAt:
+      data.lastInteractedAt ??
+      ('lastInteractedAt' in task.data ? (task.data.lastInteractedAt ?? null) : null),
   };
 }
 
