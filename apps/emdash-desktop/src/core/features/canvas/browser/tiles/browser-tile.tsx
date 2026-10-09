@@ -1,7 +1,7 @@
 import { NodeResizer, useStore, type NodeProps } from '@xyflow/react';
 import { Bot, Globe, Hand, Maximize2, Play, X } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import type { BrowserTileEntry } from '@core/features/canvas/api/browser/stores/canvas-store';
 import { cn } from '@core/primitives/styling/browser/cn';
 import {
@@ -13,6 +13,7 @@ import {
   type TileRect,
 } from '../../api/canvas-model';
 import { getCanvasBrowserHost, getCanvasStore } from '../../contributions/browser/app-stores';
+import { useIsLivePane } from '../canvas-pane-context';
 
 export type BrowserTileData = { tileId: string };
 
@@ -37,13 +38,18 @@ export const BrowserTileNode = observer(function BrowserTileNode({ data, selecte
   const browserId = entry?.browserId;
   const alive = browserId ? host.isAlive(browserId) : false;
   const leased = browserId ? host.isLeased(browserId) : false;
+  // Multi-canvas: one webview per browser, so only the view the tile is live in places it. The
+  // other views show the last capture.
+  const owner = useIsLivePane(tileId);
+  const ownerRef = useRef(owner);
+  ownerRef.current = owner;
 
   // Report where the page area is on screen so the host can place (or hide) the webview. Runs
   // after every render: drags, resizes, and viewport moves all re-render this node.
   const stageActive = store.stageActive;
   const staged = browserId ? store.isStaged(tileId) : false;
   useLayoutEffect(() => {
-    if (!browserId) return;
+    if (!browserId || !owner) return;
     // The stage owns a staged browser's surface; other board browsers hide behind the stage.
     if (stageActive) {
       if (!staged) host.placeSurface(browserId, null);
@@ -81,16 +87,19 @@ export const BrowserTileNode = observer(function BrowserTileNode({ data, selecte
     });
   });
 
-  useEffect(() => {
+  // A layout effect, so a tile leaving one view hides the page before another view places it.
+  useLayoutEffect(() => {
     if (!browserId) return;
     return () => {
-      if (!getCanvasStore().isStaged(tileId)) host.placeSurface(browserId, null);
+      if (ownerRef.current && !getCanvasStore().isStaged(tileId)) {
+        host.placeSurface(browserId, null);
+      }
     };
   }, [browserId, host, tileId]);
 
   if (!entry || !browserId) return null;
   const layout = host.layouts.get(browserId);
-  const live = layout?.live ?? false;
+  const live = owner && (layout?.live ?? false);
   const glyph = zoom < GLYPH_ZOOM_THRESHOLD;
   const focused = store.focusedTileId === tileId;
   const preview = host.previews.get(browserId);

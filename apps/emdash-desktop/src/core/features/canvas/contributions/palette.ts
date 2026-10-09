@@ -18,6 +18,7 @@ import {
   leaveStageCommand,
   canvasBackCommand,
   canvasHomeCommand,
+  toggleMultiCanvasCommand,
 } from './commands';
 
 export const CANVAS_COMMAND_PALETTE_ITEMS = [
@@ -80,5 +81,9 @@ export const CANVAS_COMMAND_PALETTE_ITEMS = [
   defineCommandPaletteItem({
     command: canvasHomeCommand,
     aliases: ['home', 'whole board', 'overview'],
+  }),
+  defineCommandPaletteItem({
+    command: toggleMultiCanvasCommand,
+    aliases: ['multi canvas', 'split', 'views', 'quadrants', 'side by side'],
   }),
 ] as const;

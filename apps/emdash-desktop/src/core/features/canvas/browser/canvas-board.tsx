@@ -18,6 +18,7 @@ import type { CanvasStore } from '@core/features/canvas/api/browser/stores/canva
 import { cn } from '@core/primitives/styling/browser/cn';
 import { regionAt } from '../api/canvas-layout';
 import { MAX_ZOOM, MIN_ZOOM, viewportRect, type TileRect } from '../api/canvas-model';
+import { PANE_DIVIDER, paneGrid } from '../api/canvas-panes';
 import {
   descendantRegions,
   descendantTiles,
@@ -29,6 +30,7 @@ import {
 import { frameViewport } from '../api/region-tiling';
 import { getCanvasStore } from '../contributions/browser/app-stores';
 import { handleCanvasKey } from './canvas-keys';
+import { CanvasPaneContext } from './canvas-pane-context';
 import { CanvasToolbar } from './canvas-toolbar';
 import { CanvasStage } from './stage/canvas-stage';
 import { AgentTileNode } from './tiles/agent-tile';
@@ -77,10 +79,11 @@ function outsideScope(layout: LayoutState, scope: string | null, id: string): bo
 const recede = (outside: boolean) => (outside ? { opacity: OUTSIDE_SCOPE_OPACITY } : undefined);
 
 /** Desired node geometry from the store; React Flow keeps selection and drag state. */
-function buildNodes(store: CanvasStore): Node[] {
+function buildNodes(store: CanvasStore, pane: number): Node[] {
   const nodes: Node[] = [];
   const layout = store.layoutState;
-  const scope = store.focusedRegionId;
+  // Each multi-canvas view recedes what is outside the sub-canvas that view is in.
+  const scope = store.paneScope(pane);
   const outside = (id: string) => outsideScope(layout, scope, id);
   // Regions first and lowest (nested ones above their parents), then task frames, then windows.
   // Only their header strips take pointer input.
@@ -225,20 +228,52 @@ type GroupDrag = {
   followers: Map<string, { x: number; y: number }>;
 };
 
-const Board = observer(function Board({ container }: { container: HTMLDivElement | null }) {
+/** Selected windows and regions of a view (task frames and ghosts are never part of a selection). */
+function selectedIds(nodes: readonly Node[]): string[] {
+  return nodes
+    .filter((node) => node.type !== 'frame' && node.type !== 'ghost')
+    .map((node) => node.id);
+}
+
+/**
+ * One view of the board. The single canvas is view 0; multi-canvas mounts one per view, each with
+ * its own camera over the same windows. Only the active view takes viewport commands and owns the
+ * selection and the board scope.
+ */
+const Board = observer(function Board({
+  container,
+  pane,
+}: {
+  container: HTMLDivElement | null;
+  pane: number;
+}) {
   const store = getCanvasStore();
   const flow = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [animating, setAnimating] = useState(false);
+  const multi = store.multiCanvas;
+  const active = store.activePane === pane;
 
   useEffect(
     () =>
       reaction(
-        () => buildNodes(store),
+        () => buildNodes(store, pane),
         (next) => setNodes((previous) => mergeNodes(previous, next)),
         { fireImmediately: true, equals: comparer.structural }
       ),
-    [store, setNodes]
+    [store, pane, setNodes]
+  );
+
+  // The view that becomes active brings its own selection with it.
+  useEffect(
+    () =>
+      reaction(
+        () => store.activePane === pane,
+        (isActive) => {
+          if (isActive) store.setSelection(selectedIds(flow.getNodes().filter((n) => n.selected)));
+        }
+      ),
+    [store, pane, flow]
   );
 
   // Apply focus/fit requests coming from commands, the toolbar, and the voice conductor.
@@ -247,7 +282,7 @@ const Board = observer(function Board({ container }: { container: HTMLDivElement
       reaction(
         () => store.viewportCommand,
         (command) => {
-          if (!command) return;
+          if (!command || store.activePane !== pane) return;
           store.consumeViewportCommand(command.id);
           switch (command.kind) {
             case 'focus': {
@@ -285,7 +320,7 @@ const Board = observer(function Board({ container }: { container: HTMLDivElement
         },
         { fireImmediately: true }
       ),
-    [store, flow]
+    [store, flow, pane]
   );
 
   // Layout changes that did not come from the pointer glide into place, and their targets glow.
@@ -321,31 +356,17 @@ const Board = observer(function Board({ container }: { container: HTMLDivElement
     };
   }, [store, setNodes]);
 
-  // The board's size feeds screen-relative sizes ("half the screen") and slot placement.
+  // The view's size feeds screen-relative sizes ("half the screen") and slot placement.
   useEffect(() => {
     if (!container) return;
     const observer = new ResizeObserver(([entry]) => {
-      if (entry) store.setBoardSize(entry.contentRect.width, entry.contentRect.height);
+      if (entry) store.setPaneSize(pane, entry.contentRect.width, entry.contentRect.height);
     });
     observer.observe(container);
     return () => observer.disconnect();
-  }, [container, store]);
+  }, [container, store, pane]);
 
-  // Board keyboard: undo/redo, group, nudge, stage, and navigation (never while typing).
-  useEffect(() => {
-    if (!container) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (container.offsetParent === null) return;
-      if (handleCanvasKey(store, event)) {
-        event.preventDefault();
-        event.stopPropagation();
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [container, store]);
-
-  const defaultViewport = useMemo(() => store.viewport, [store]);
+  const defaultViewport = useMemo(() => store.paneViewport(pane), [store, pane]);
   // While a task frame or a region is dragged, what is inside it follows.
   const groupDrag = useRef<GroupDrag | null>(null);
   const frameTiles = (frameId: string) =>
@@ -388,18 +409,20 @@ const Board = observer(function Board({ container }: { container: HTMLDivElement
 
   return (
     <ReactFlow
+      // Per view: React Flow derives its SVG pattern ids from it, and they must not collide.
+      id={`chorus-canvas-${pane}`}
       nodes={nodes}
       edges={[]}
       nodeTypes={nodeTypes}
       onNodesChange={onNodesChange}
       elevateNodesOnSelect={false}
-      onSelectionChange={({ nodes: selected }) =>
-        store.setSelection(
-          selected
-            .filter((node) => node.type !== 'frame' && node.type !== 'ghost')
-            .map((node) => node.id)
-        )
-      }
+      onSelectionChange={({ nodes: selected }) => {
+        if (store.activePane === pane) store.setSelection(selectedIds(selected));
+      }}
+      // Panning or zooming a view (also by wheel, without a click) makes it the active one.
+      onMoveStart={(event) => {
+        if (event) store.activatePane(pane);
+      }}
       onNodeDragStart={(_event, node) => {
         const followers = followersOf(node);
         groupDrag.current = followers
@@ -453,9 +476,11 @@ const Board = observer(function Board({ container }: { container: HTMLDivElement
         if (dragged.length === 1 && only?.id.startsWith('note:')) store.noteDropped(only.id);
       }}
       onMoveEnd={(event, viewport) => {
-        store.setViewport(viewport);
+        store.setPaneViewport(pane, viewport);
         // Only the user's own pans and zooms leave a sub-canvas; framing it never does.
-        if (event) store.cameraMoved(viewportRect(viewport, store.boardSize), viewport.zoom);
+        if (event && store.activePane === pane) {
+          store.cameraMoved(viewportRect(viewport, store.boardSize), viewport.zoom);
+        }
       }}
       onPaneClick={(event) => {
         store.focusTile(null);
@@ -511,7 +536,7 @@ const Board = observer(function Board({ container }: { container: HTMLDivElement
       )}
     >
       <Background variant={BackgroundVariant.Dots} gap={24} size={1.2} className="opacity-40" />
-      {!store.focusedRegionId && (
+      {!multi && !store.focusedRegionId && (
         <MiniMap
           pannable
           zoomable
@@ -522,10 +547,12 @@ const Board = observer(function Board({ container }: { container: HTMLDivElement
           {...overlayProps}
         />
       )}
-      <Panel position="top-left" {...overlayProps}>
-        <CanvasToolbar />
-      </Panel>
-      <GhostBanner />
+      {!multi && (
+        <Panel position="top-left" {...overlayProps}>
+          <CanvasToolbar />
+        </Panel>
+      )}
+      {active && <GhostBanner />}
     </ReactFlow>
   );
 });
@@ -559,28 +586,76 @@ const GhostBanner = observer(function GhostBanner() {
   );
 });
 
+/** One view's cell: no frame of its own, so neighbouring views meet at the divider line. */
+function BoardPane({ pane }: { pane: number }) {
+  const store = getCanvasStore();
+  const [container, setContainer] = useState<HTMLDivElement | null>(null);
+  return (
+    <div
+      ref={setContainer}
+      className="relative min-h-0 min-w-0 overflow-hidden bg-background"
+      onPointerDownCapture={() => store.activatePane(pane)}
+    >
+      <CanvasPaneContext.Provider value={pane}>
+        <ReactFlowProvider>
+          <Board container={container} pane={pane} />
+        </ReactFlowProvider>
+      </CanvasPaneContext.Provider>
+    </div>
+  );
+}
+
 const CanvasSurface = observer(function CanvasSurface() {
   const store = getCanvasStore();
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
+  const count = store.paneCount;
+  const { columns, rows } = paneGrid(count);
+
+  // Board keyboard: undo/redo, group, nudge, stage, and navigation (never while typing).
+  useEffect(() => {
+    if (!container) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (container.offsetParent === null) return;
+      if (handleCanvasKey(store, event)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [container, store]);
+
   return (
     // `isolate`: the stage's z-index must stay inside the canvas. App browser pages are drawn by
     // `BrowserSurfaceHost` at the workspace shell (z-5) and have to paint above the stage.
     <div ref={setContainer} className="relative isolate h-full w-full overflow-hidden">
+      {/* The views fill the surface; the grid's own color shows through the gaps as the dividers. */}
       <div
-        className={cn('h-full w-full', store.stageActive && 'invisible')}
+        className={cn('grid h-full w-full bg-border', store.stageActive && 'invisible')}
+        style={{
+          gap: PANE_DIVIDER,
+          gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+          gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
+        }}
         aria-hidden={store.stageActive}
       >
-        <Board container={container} />
+        {Array.from({ length: count }, (_, pane) => (
+          // Keyed by the split: changing it remounts every view at its new camera.
+          <BoardPane key={`${count}:${pane}`} pane={pane} />
+        ))}
       </div>
+      {count > 1 &&
+        !store.stageActive && (
+          // One toolbar for all views, over the split rather than inside a view it would not fit.
+          <div className="absolute top-[15px] left-[15px] z-10" {...overlayProps}>
+            <CanvasToolbar />
+          </div>
+        )}
       {store.stageActive && <CanvasStage />}
     </div>
   );
 });
 
 export function CanvasBoard() {
-  return (
-    <ReactFlowProvider>
-      <CanvasSurface />
-    </ReactFlowProvider>
-  );
+  return <CanvasSurface />;
 }

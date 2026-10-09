@@ -147,6 +147,14 @@ export const canvasHomeCommand = defineCommand({
   icon: 'house',
 });
 
+export const toggleMultiCanvasCommand = defineCommand({
+  id: 'canvas.toggleMultiCanvas',
+  title: 'Toggle Multi-Canvas',
+  description: 'Split the canvas into several side-by-side views, or go back to one',
+  category: 'Canvas',
+  icon: 'grid-2x2',
+});
+
 export const CANVAS_COMMAND_DEFS = [
   openCanvasCommand,
   nextAttentionCommand,
@@ -166,4 +174,5 @@ export const CANVAS_COMMAND_DEFS = [
   leaveStageCommand,
   canvasBackCommand,
   canvasHomeCommand,
+  toggleMultiCanvasCommand,
 ] as const;
