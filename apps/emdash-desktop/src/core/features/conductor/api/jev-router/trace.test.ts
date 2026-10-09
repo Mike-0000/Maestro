@@ -43,6 +43,10 @@ describe('looksLikeSttArtifact', () => {
   it('catches assistant-style apologies and outros only', () => {
     expect(looksLikeSttArtifact("I'm sorry, but I can't hear any audio.")).toBe(true);
     expect(looksLikeSttArtifact('Thank you for watching!')).toBe(true);
+    expect(
+      looksLikeSttArtifact('Sure, please provide the audio you would like me to transcribe.')
+    ).toBe(true);
     expect(looksLikeSttArtifact("I'm sorry, focus Maple")).toBe(false);
+    expect(looksLikeSttArtifact('Sure, send that to Maple')).toBe(false);
   });
 });

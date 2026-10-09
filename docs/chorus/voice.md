@@ -137,6 +137,42 @@ depend on the model's summary. The start/send countdown shows the prompt's size 
 and the tool result tells the conductor exactly how much was delivered. If you say an agent got
 too little, the conductor reads what the agent actually received before resending.
 
+### What the conductor knows
+
+Every request carries the current state, so questions about your agents are answered from data
+instead of guessed or refused:
+
+- the local date and time;
+- each agent, newest first: name, provider, status and how long it has waited, task, project,
+  when it started, when you last messaged it, its region, and any other title it goes by (an
+  agent started from your phone keeps the name it got there);
+- the newest agent in each project, who has waited longest, and the current project ("this
+  project" is the focused agent's project, or the one the canvas is filtered to);
+- closed windows, app browsers, regions, the selection, and the last layout change;
+- the conductor's recent activity: the last few things sent and started, with the exact text,
+  including commands the built-in grammar handled without the model.
+
+So these work:
+
+| Say | What happens |
+| --- | --- |
+| "Send this to the latest agent in this project" | Goes to the newest agent of the current project |
+| "Tell the newest Codex agent in Chorus to rebase" | Picks by provider, project, and start time |
+| "Ask Atlas in ACE COMBAT 8 …" | Only an Atlas in that project matches; otherwise you are told who is there |
+| "That message was supposed to go to Echo" | Resends the exact earlier text to Echo |
+| "What did I tell Lima earlier?" | Read back from the recent activity (`recent_activity`) |
+| "Where is Lima working?" / "when did I start Atlas?" | Folder, branch, timing (`agent_details`) |
+| "I started an agent from my phone and can't see it" | Looks through archived tasks and conversations that are not on the canvas (`find_conversations`) |
+| "Send what I copied to Atlas" | Reads the clipboard (`read_clipboard`; Maestro must be the focused window) |
+| "Rename Atlas to Backend" | Changes the spoken name |
+| "Only show the Chorus project" / "show all projects" | Filters the canvas |
+
+"The latest agent in Chorus" and "Atlas in ACE COMBAT 8" also work in the instant commands
+("tell the latest agent in Chorus to run the tests"). With agents in more than one project, the
+send countdown names the project ("Send to Atlas 3 (Chorus): …"), so a message headed to the
+wrong project can be cancelled before it leaves. Recent activity is kept in memory; with
+diagnostic history on, the last 20 turns are recalled after a restart.
+
 ### When an agent finishes
 
 The conductor hears what a finished agent told you: its final reply, not just "Zulu is done".

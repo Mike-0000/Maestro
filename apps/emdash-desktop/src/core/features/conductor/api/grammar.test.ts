@@ -162,3 +162,117 @@ describe('chooseMode', () => {
     expect(chooseMode(utterance)).toBe(mode);
   });
 });
+
+/** Transcripts from the developer's logs that used to lose the first words of the message. */
+describe('messages keep their first words', () => {
+  const named: RosterAgent[] = [
+    { id: 'lima', name: 'Lima 3', providerLabel: 'Claude', taskName: 'Harder difficulty mode' },
+    { id: 'atlas', name: 'Atlas 3', providerLabel: 'Claude', taskName: 'Redesign admin menus' },
+    { id: 'oscar', name: 'Oscar 3', providerLabel: 'Claude', taskName: 'Skip mission 13' },
+    { id: 'sparrow', name: 'Sparrow 3', providerLabel: 'Claude', taskName: 'Phone notifications' },
+    { id: 'iris', name: 'Iris 2', providerLabel: 'Claude', taskName: 'make sure push works' },
+  ];
+
+  it.each([
+    [
+      'Ask Lima 3 how much more difficult are the modes now.',
+      'lima',
+      'how much more difficult are the modes now',
+    ],
+    [
+      'Tell Atlas 3: see if anything in the latest update may have affected artillery.',
+      'atlas',
+      'see if anything in the latest update may have affected artillery',
+    ],
+    [
+      'Tell Oscar 3 go ahead and push it to the X drive.',
+      'oscar',
+      'go ahead and push it to the X drive',
+    ],
+    [
+      "Ask Sparrow 3 if I need to reinstall the PWA on my phone or if it'll work out of the box.",
+      'sparrow',
+      "if I need to reinstall the PWA on my phone or if it'll work out of the box",
+    ],
+    ['Tell at less three to run the tests', 'atlas', 'run the tests'],
+  ])('%s', (utterance, agent, text) => {
+    expect(parseCommand(utterance, named, null)).toMatchObject({
+      kind: 'send',
+      agent: { id: agent },
+      text,
+    });
+  });
+
+  it('does not take an opening clause for an agent because a task contains the word', () => {
+    expect(
+      parseCommand('Sure, please provide the audio you would like me to transcribe.', named, null)
+    ).toBeNull();
+    expect(parseCommand('Iris 2, run the tests', named, null)).toMatchObject({
+      kind: 'send',
+      agent: { id: 'iris' },
+    });
+  });
+});
+
+describe('project scopes stay out of the message', () => {
+  const HOUR = 3_600_000;
+  const scoped: RosterAgent[] = [
+    {
+      id: 'atlas',
+      name: 'Atlas',
+      providerLabel: 'Claude',
+      taskName: 'menus',
+      projectName: 'ace',
+      createdAt: HOUR,
+    },
+    {
+      id: 'bravo',
+      name: 'Bravo',
+      providerLabel: 'Claude',
+      taskName: 'voice',
+      projectName: 'chorus',
+      createdAt: 2 * HOUR,
+    },
+    {
+      id: 'echo',
+      name: 'Echo',
+      providerLabel: 'Codex',
+      taskName: 'forecast',
+      projectName: 'weather-app',
+      createdAt: 3 * HOUR,
+    },
+  ];
+
+  it('sends to the latest agent of the named project', () => {
+    expect(
+      parseCommand('Tell the latest agent in the chorus project to run the tests', scoped, null)
+    ).toMatchObject({ kind: 'send', agent: { id: 'bravo' }, text: 'run the tests' });
+    expect(parseCommand('Tell Bravo in chorus to run the tests', scoped, null)).toMatchObject({
+      kind: 'send',
+      agent: { id: 'bravo' },
+      text: 'run the tests',
+    });
+  });
+
+  it('leaves a name that is not in the named project to the model', () => {
+    expect(parseCommand('Ask Atlas in chorus to run the tests', scoped, null)).toBeNull();
+  });
+
+  it('keeps the most of the message when the name itself was misheard', () => {
+    const named: RosterAgent[] = [
+      { id: 'lima', name: 'Lima 3', providerLabel: 'Claude', taskName: 'difficulty' },
+    ];
+    expect(parseCommand('Ask Lema 3 how much more difficult is it', named, null)).toMatchObject({
+      kind: 'send',
+      agent: { id: 'lima' },
+      text: 'how much more difficult is it',
+    });
+    expect(
+      parseCommand(
+        'Sure, I can help with that.',
+        [{ id: 'sora', name: 'Sora', providerLabel: 'Claude', taskName: 'video' }],
+        null
+      )
+    ).toBeNull();
+  });
+});

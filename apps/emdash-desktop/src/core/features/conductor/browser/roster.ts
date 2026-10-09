@@ -8,6 +8,15 @@ import { spokenProviderLabel } from '@core/features/canvas/api/provider-names';
 import type { CompletionReport } from '@core/primitives/agents/api/completion-report';
 import { log } from '@core/primitives/logging/browser/logger';
 import type { CanvasEntity, CanvasRefContext } from '../api/canvas-refs';
+import {
+  agentLine,
+  epoch,
+  newestFirst,
+  newestPerProject,
+  nowLine,
+  waitingLine,
+  type AgentFact,
+} from '../api/context-facts';
 import type { RosterAgent } from '../api/resolver';
 import { agentMetadata } from './spawn';
 
@@ -41,13 +50,81 @@ export function installedProviders(): Promise<InstalledProvider[]> {
 }
 
 export function toRosterAgent(canvas: CanvasStore, entry: AgentTileEntry): RosterAgent {
+  const name = canvas.spokenName(entry.conversationId);
+  const title = otherTitle(canvas, entry);
+  const createdAt = epoch(entry.createdAt);
   const agent: RosterAgent = {
     id: entry.conversationId,
-    name: canvas.spokenName(entry.conversationId),
+    name,
     providerLabel: spokenProviderLabel(entry.providerId),
     taskName: entry.taskName,
+    projectName: entry.projectName,
+    ...(title ? { title } : {}),
+    ...(createdAt !== undefined ? { createdAt } : {}),
   };
   return canvas.isOffBoard(entry) ? { ...agent, hidden: true } : agent;
+}
+
+/**
+ * The conversation's own title when it is not the spoken name: an agent started outside the
+ * canvas (from a phone, another computer) keeps the name it was given there, and the developer
+ * may call it that.
+ */
+function otherTitle(canvas: CanvasStore, entry: AgentTileEntry): string | undefined {
+  const title = entry.conversationTitle.trim();
+  const key = title.toLowerCase();
+  if (!key) return undefined;
+  // Titles default per task, so many agents can be titled "Atlas": a title only counts as a
+  // name when it is this agent's alone and is nobody's spoken name.
+  for (const other of canvas.agentEntries) {
+    if (canvas.spokenName(other.conversationId).toLowerCase() === key) return undefined;
+    if (other.conversationId === entry.conversationId) continue;
+    if (other.conversationTitle.trim().toLowerCase() === key) return undefined;
+  }
+  return title;
+}
+
+/** What the per-turn context says about one agent. */
+export function agentFact(canvas: CanvasStore, entry: AgentTileEntry): AgentFact {
+  const name = canvas.spokenName(entry.conversationId);
+  const title = otherTitle(canvas, entry);
+  const createdAt = epoch(entry.createdAt);
+  const lastMessagedAt = epoch(entry.lastInteractedAt);
+  const waitingSince = canvas.waitingSince(entry.tileId);
+  const region = canvas.regionOf(entry.tileId);
+  const diff =
+    entry.linesAdded || entry.linesDeleted
+      ? `+${entry.linesAdded}/-${entry.linesDeleted} lines`
+      : undefined;
+  return {
+    name,
+    providerLabel: spokenProviderLabel(entry.providerId),
+    status: describeStatus(entry),
+    taskName: entry.taskName,
+    projectName: entry.projectName,
+    ...(title ? { title } : {}),
+    ...(createdAt !== undefined ? { createdAt } : {}),
+    ...(lastMessagedAt !== undefined ? { lastMessagedAt } : {}),
+    ...(waitingSince !== undefined ? { waitingSince } : {}),
+    ...(region ? { region: canvas.windowName(region) } : {}),
+    ...(canvas.focusedTileId === entry.tileId ? { focused: true } : {}),
+    ...(diff ? { diff } : {}),
+  };
+}
+
+/**
+ * The project "this project" and "here" mean: the focused agent's, else the one the canvas is
+ * filtered to. Null when neither says.
+ */
+export function currentProject(canvas: CanvasStore): { name: string; why: string } | null {
+  const focused = focusedConversationId(canvas);
+  const entry = focused ? entryForConversation(canvas, focused) : undefined;
+  if (entry) return { name: entry.projectName, why: "the focused agent's project" };
+  const filter = canvas.projectFilter;
+  const filtered = filter
+    ? canvas.projectOptions.find((project) => project.id === filter)?.name
+    : undefined;
+  return filtered ? { name: filtered, why: 'the canvas is filtered to it' } : null;
 }
 
 /**
@@ -202,39 +279,42 @@ export function finishedReplyLines(
   return lines;
 }
 
-/** The per-turn <context> block: roster, focus, projects, providers, and any open plan. */
+/**
+ * The per-turn <context> block: the time, the roster with when each agent started and was last
+ * messaged, the current project, focus, projects, providers, and any open plan.
+ */
 export function buildContext(
   canvas: CanvasStore,
   providers: readonly InstalledProvider[],
   extra: readonly string[] = [],
-  reportOf: ReportLookup = reportFromEntry
+  reportOf: ReportLookup = reportFromEntry,
+  now = Date.now()
 ): string {
-  const lines: string[] = [];
+  const lines: string[] = [nowLine(now)];
   const entries = canvas.visibleAgentEntries;
-  if (entries.length === 0) {
+  const facts = newestFirst(entries.map((entry) => agentFact(canvas, entry)));
+  if (facts.length === 0) {
     lines.push('Agents: none yet.');
   } else {
-    lines.push('Agents:');
-    for (const entry of entries) {
-      const diff =
-        entry.linesAdded || entry.linesDeleted
-          ? `, +${entry.linesAdded}/-${entry.linesDeleted} lines`
-          : '';
-      lines.push(
-        `- ${canvas.spokenName(entry.conversationId)} (${spokenProviderLabel(entry.providerId)}): ${describeStatus(entry)}; task "${entry.taskName}" in project ${entry.projectName}${diff}`
-      );
-    }
+    lines.push('Agents, newest first:');
+    for (const fact of facts) lines.push(agentLine(fact, now));
   }
+  const newest = newestPerProject(facts);
+  if (newest) lines.push(`Newest agent in each project: ${newest}`);
+  const waiting = waitingLine(facts, now);
+  if (waiting) lines.push(`Waiting on the developer, longest first: ${waiting}`);
   lines.push(...finishedReplyLines(canvas, entries, reportOf));
-  const closed = offBoardEntries(canvas);
+  const closed = newestFirst(offBoardEntries(canvas).map((entry) => agentFact(canvas, entry)));
   if (closed.length > 0) {
-    const names = closed.map(
-      (entry) => `${canvas.spokenName(entry.conversationId)} (${describeStatus(entry)})`
-    );
-    lines.push(`Closed windows (off the canvas, reopen with reopen_agent): ${names.join(', ')}`);
+    lines.push('Closed windows (off the canvas, still addressable; reopen with reopen_agent):');
+    for (const fact of closed) lines.push(agentLine(fact, now));
   }
   const focused = focusedConversationId(canvas);
   lines.push(`Focused agent: ${focused ? canvas.spokenName(focused) : 'none'}`);
+  const project = currentProject(canvas);
+  lines.push(
+    `Current project ("this project", "here"): ${project ? `${project.name} (${project.why})` : 'unknown, nothing is focused; ask which project'}`
+  );
   const apps = canvas.visibleBrowserEntries;
   if (apps.length > 0) {
     lines.push('App browsers:');
@@ -269,6 +349,7 @@ export function vocabulary(canvas: CanvasStore): string[] {
     words.add(canvas.spokenName(entry.conversationId));
     words.add(spokenProviderLabel(entry.providerId));
     words.add(entry.taskName);
+    if (entry.conversationTitle.trim()) words.add(entry.conversationTitle.trim());
   }
   for (const project of canvas.projectOptions) if (project.name) words.add(project.name);
   for (const region of canvas.regionEntries) words.add(region.name);

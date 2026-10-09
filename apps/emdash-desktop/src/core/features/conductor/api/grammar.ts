@@ -1,6 +1,12 @@
 import type { CanvasRefContext } from './canvas-refs';
 import { parseCanvasCommand, type CanvasAction } from './grammar-canvas';
-import { isDeictic, normalizeSpoken, resolveAgent, type RosterAgent } from './resolver';
+import {
+  isDeictic,
+  normalizeSpoken,
+  resolveAgent,
+  startsWithProjectScope,
+  type RosterAgent,
+} from './resolver';
 
 /**
  * Deterministic fast path for the most common spoken commands. It runs before any model call:
@@ -215,12 +221,23 @@ function parseWindowCommand(
   return null;
 }
 
-type Split = { agent: RosterAgent; text: string; refEndsWithTo: boolean; connector: boolean };
+/** Longest reference tried: "the latest claude code agent in the ace combat project". */
+const MAX_REFERENCE_WORDS = 9;
+
+type Split = {
+  agent: RosterAgent;
+  text: string;
+  refEndsWithTo: boolean;
+  connector: boolean;
+  /** The reference only resembled the agent's name; a reading that is a name is preferred. */
+  fuzzy: boolean;
+};
 
 /**
  * Splits "codex to run the tests" / "claude two to fix lint" into an agent and an instruction,
  * trying the longest agent reference first. A reference that only matched because "to" was read
- * as "two" is used only when no shorter reading works.
+ * as "two" is used only when no shorter reading works. A reference that merely resembles a name
+ * loses to one that is a name, so "Lima 3 how much…" is Lima 3 plus "how much…", not "Lima 3 how".
  */
 function splitAddressed(
   rest: string,
@@ -230,7 +247,7 @@ function splitAddressed(
   const words = rest.split(/\s+/).filter(Boolean);
   const splits: Split[] = [];
   let ambiguity: { question: string } | null = null;
-  for (let k = Math.min(5, words.length - 1); k >= 1; k--) {
+  for (let k = Math.min(MAX_REFERENCE_WORDS, words.length - 1); k >= 1; k--) {
     const reference = words.slice(0, k).join(' ');
     const lastWord = (words[k - 1] ?? '').toLowerCase().replace(/[^a-z]/g, '');
     let remainder = words.slice(k);
@@ -241,6 +258,9 @@ function splitAddressed(
     ) {
       continue;
     }
+    // "Atlas | in chorus to run…": the scope belongs to the reference, not to the message. The
+    // longer reading resolves it, or nobody matches and the model sorts it out.
+    if (startsWithProjectScope(remainder, roster)) continue;
     const connector = /^(?:to|that)$/i.test(remainder[0] ?? '');
     if (connector) remainder = remainder.slice(1);
     const text = remainder.join(' ').trim();
@@ -252,12 +272,16 @@ function splitAddressed(
         text,
         refEndsWithTo: /^(?:to|too)$/.test(lastWord),
         connector,
+        fuzzy: resolution.fuzzy === true,
       });
     } else if (resolution.kind === 'ambiguous' && !ambiguity) {
       ambiguity = { question: `Which one: ${describeCandidates(resolution.candidates)}?` };
     }
   }
-  const preferred = splits.find((split) => !split.refEndsWithTo);
+  // Among readings that only resemble a name, the shortest keeps the most of the message.
+  const preferred =
+    splits.find((split) => !split.refEndsWithTo && !split.fuzzy) ??
+    [...splits].reverse().find((split) => !split.refEndsWithTo);
   if (preferred) return preferred;
   // "Claude too to run…": a name read with a trailing to/too counts as "2" only when a connector
   // still follows it; "tell Claude to run…" stays ambiguous instead of guessing Claude 2.
@@ -332,8 +356,9 @@ export function parseCommand(
   // Vocative form: "Claude 2, run the tests." Requires the comma the recognizer inserts.
   const vocative = /^([^,]{2,40}),\s*(.+)$/.exec(text);
   if (vocative?.[1] && vocative[2]) {
-    const resolution = resolveAgent(vocative[1], roster, focusedId);
-    if (resolution.kind === 'match') {
+    // Names only: any opening clause could match a task ("Sure, please…" against "Make sure…").
+    const resolution = resolveAgent(vocative[1], roster, focusedId, 'name');
+    if (resolution.kind === 'match' && !resolution.fuzzy) {
       return { kind: 'send', agent: resolution.agent, text: vocative[2].trim() };
     }
   }

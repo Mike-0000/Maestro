@@ -18,9 +18,11 @@ const report = buildCompletionReport(
 describe('completion follow-up tools', () => {
   it('allows reading state and opening a local app only', () => {
     expect([...COMPLETION_FOLLOW_UP_TOOLS].sort()).toEqual([
+      'agent_details',
       'describe_canvas',
       'list_agents',
       'read_agent',
+      'recent_activity',
       'show_app',
     ]);
   });

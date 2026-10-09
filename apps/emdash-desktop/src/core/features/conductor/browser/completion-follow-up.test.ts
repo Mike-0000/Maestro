@@ -104,6 +104,8 @@ function agent(overrides: Partial<AgentTileEntry> = {}): AgentTileEntry {
     workspaceId: 'ws-z',
     linesAdded: 120,
     linesDeleted: 0,
+    createdAt: null,
+    lastInteractedAt: null,
     ...overrides,
   } as AgentTileEntry;
 }
@@ -115,7 +117,8 @@ function fakeCanvas(entries: AgentTileEntry[]): CanvasStore {
     attentionEntries: [],
     browserEntries: [],
     visibleBrowserEntries: [],
-    projectOptions: [{ name: 'demo' }],
+    projectOptions: [{ id: 'proj', name: 'demo' }],
+    projectFilter: null,
     regionEntries: [],
     layoutWindows: [],
     selection: [],
@@ -126,6 +129,9 @@ function fakeCanvas(entries: AgentTileEntry[]): CanvasStore {
     insights: new Map(),
     spokenName: () => 'Zulu',
     isOffBoard: () => false,
+    waitingSince: () => undefined,
+    regionOf: () => null,
+    windowName: (id: string) => id,
     entryForTile: () => undefined,
     insight: () => undefined,
     browserForTask: () => undefined,

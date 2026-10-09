@@ -129,7 +129,15 @@ export const conductorTurnRecordSchema = z.object({
   at: z.string(),
   utterance: z.string(),
   route: z.enum(['grammar', 'jev', 'llm']),
-  actions: z.array(z.object({ tool: z.string(), input: z.unknown(), outcome: z.string() })),
+  actions: z.array(
+    z.object({
+      tool: z.string(),
+      input: z.unknown(),
+      outcome: z.string(),
+      /** Set when the action did not happen: it failed, or the user cancelled it. */
+      status: z.enum(['failed', 'cancelled']).optional(),
+    })
+  ),
   reply: z.string(),
   latencyMs: z.number(),
   tokens: z.number().optional(),

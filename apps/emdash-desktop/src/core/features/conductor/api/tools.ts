@@ -13,7 +13,12 @@ import { ARRANGE_OPS, ARRANGE_SIZES, ARRANGE_SLOTS } from './canvas-tool-ops';
  * Order is fixed so the tool prefix stays byte-identical for prompt caching.
  */
 
-const agentRef = z.string().min(1).describe('An agent name from the roster, e.g. "Atlas".');
+const agentRef = z
+  .string()
+  .min(1)
+  .describe(
+    'An agent name from the roster, e.g. "Atlas 3". A description also resolves: "the latest agent in chorus", "the newest codex agent", "Atlas in ACE COMBAT 8", or the title an agent is also known by.'
+  );
 const appRef = agentRef
   .optional()
   .describe("Whose task's app: an agent name. Defaults to the focused agent or app.");
@@ -179,6 +184,24 @@ export const conductorToolSchemas = {
   }),
   cancel_delivery: z.object({ project: z.string().optional(), candidate_id: z.string().uuid() }),
   rollback_delivery: z.object({ project: z.string().optional(), candidate_id: z.string().uuid() }),
+  // Data and app control (appended; see the note above).
+  agent_details: z.object({ agent: agentRef }),
+  recent_activity: z.object({
+    agent: z.string().optional().describe('Only turns that involved this agent.'),
+    limit: z.number().int().min(1).max(20).optional(),
+  }),
+  find_conversations: z.object({
+    query: z
+      .string()
+      .optional()
+      .describe('Words from the task name, title, or folder. Omit to list the most recent.'),
+    project: z.string().optional(),
+  }),
+  read_clipboard: z.object({}),
+  rename_agent: z.object({ agent: agentRef, name: z.string().min(1).max(40) }),
+  filter_canvas: z.object({
+    project: z.string().optional().describe('Project to show; omit to show every project.'),
+  }),
 } as const;
 
 export type ConductorToolName = keyof typeof conductorToolSchemas;
@@ -245,6 +268,18 @@ const descriptions: Record<ConductorToolName, string> = {
     'Cancel a prepared candidate or atomically cancel a scheduled install before the replacement worker claims it. Once file replacement begins, cancellation is refused and recovery must finish.',
   rollback_delivery:
     'Roll back the currently installed candidate to its exact retained previous build after explicit user confirmation. The matched pre-update Maestro profile is restored and the current profile is retained for recovery; every Maestro session must be stopped and Maestro must be quit normally.',
+  agent_details:
+    'Everything known about one agent: project, folder, task, titles, provider, when it started and was last messaged, how long it has waited, its region, changes, what it reported, and the last thing you sent it.',
+  recent_activity:
+    'What you (the conductor) did lately, newest first, including the exact text of each message sent and each agent started, whichever way the command was handled. Use it before resending, redirecting, or quoting an earlier message.',
+  find_conversations:
+    "Find agents and conversations that are NOT on the canvas: archived tasks, and conversations this computer's hosts know about that no task shows (started from a phone or another computer). Use when the developer mentions work you cannot see in the roster.",
+  read_clipboard:
+    'Read the text on the clipboard. Only when the developer refers to what they copied ("send what I copied", "paste this to Atlas") and gave no other content.',
+  rename_agent:
+    "Change an agent's spoken name (the name on its tile that the developer says to address it).",
+  filter_canvas:
+    "Show only one project's windows on the canvas, or every project when project is omitted. Nothing is closed or stopped.",
   stop_agent:
     "Stop an agent's session entirely (ends its process; the conversation is kept and can be resumed). Only when the user asks to stop, kill, or shut down an agent, not to interrupt its current step; the user confirms first.",
 };

@@ -43,6 +43,8 @@ export const SPAN_CONFIDENCE = 0.7;
 export const DESTRUCTIVE_MASS = 0.15;
 /** Artifact probability above which an utterance is dropped as a transcription error. */
 export const ARTIFACT_THRESHOLD = 0.85;
+/** While the conductor's own question is open, Jev acts alone only at this intent confidence. */
+export const PENDING_QUESTION_CONFIDENCE = 0.9;
 
 export type RouterAction =
   | { verb: 'focus' | 'status' | 'interrupt' | 'close' | 'reopen'; agent: RosterAgent }
@@ -446,6 +448,12 @@ export function decideRoute(
   if (addressee?.choice === ADDRESSEE.conversation) return llm('conversation');
   if (addressee?.choice === ADDRESSEE.cancel) return llm('cancel');
   if (addressee?.choice === ADDRESSEE.answer) return llm('answers-question');
+  // The conductor just asked something. A short reply that Jev reads as a new command without
+  // being sure ("Set that to Maple 3" as "focus Maple 3") is more likely the answer: Claude has
+  // the question and decides.
+  if (context.awaitingAnswer && intent.confidence < PENDING_QUESTION_CONFIDENCE) {
+    return llm('pending-question');
+  }
   if (addressee?.choice === ADDRESSEE.correction) {
     return correction(answers, plan, options) ?? llm('correction');
   }
