@@ -4,6 +4,7 @@ import type { AgentTileEntry } from '@core/features/canvas/api/browser/stores/ca
 import { conversationRegistry } from '@core/features/conversations/api/browser/stores/conversation-registry';
 import { PaneSizingContextProvider } from '@core/features/terminals/contributions/browser/pty/pane-sizing-context';
 import { PtyPane } from '@core/features/terminals/contributions/browser/pty/pty-pane';
+import { mountTerminalMirror } from '@core/features/terminals/contributions/browser/pty/terminal-mirror';
 import { log } from '@core/primitives/logging/browser/logger';
 import { cn } from '@core/primitives/styling/browser/cn';
 import {
@@ -113,6 +114,36 @@ export const AgentTerminal = observer(function AgentTerminal({
           onClick={onActivate}
         />
       )}
+    </div>
+  );
+});
+
+/**
+ * The same agent terminal in another multi-canvas view. The real xterm mounts in one view only, so
+ * the others show a read-only terminal that follows the same output. Clicking it makes that view
+ * the active one, and the real terminal moves there.
+ */
+export const AgentTerminalMirror = observer(function AgentTerminalMirror({
+  entry,
+}: {
+  entry: AgentTileEntry;
+}) {
+  const { taskId, conversationId } = entry;
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const session = conversationRegistry.get(taskId)?.sessions.get(conversationId);
+  const pty = session?.status === 'ready' ? session.pty : null;
+  const mirrored = pty?.canMirror ? pty : null;
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!mirrored || !host) return;
+    return mountTerminalMirror(mirrored, host);
+  }, [mirrored]);
+
+  if (!mirrored) return <TerminalPlaceholder label="Live in another view" />;
+  return (
+    <div className="relative h-full min-h-0 bg-(--xterm-bg)">
+      <div ref={hostRef} className="pointer-events-none h-full w-full" />
     </div>
   );
 });

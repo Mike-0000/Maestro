@@ -15,7 +15,7 @@ import { MIN_TILE_SIZE, zoomBand } from '../../api/canvas-model';
 import { getCanvasStore } from '../../contributions/browser/app-stores';
 import { useIsLivePane } from '../canvas-pane-context';
 import { AgentAcpLive } from './agent-acp';
-import { AgentTerminal, TerminalPlaceholder } from './agent-terminal';
+import { AgentTerminal, AgentTerminalMirror, TerminalPlaceholder } from './agent-terminal';
 import { statusPresentation } from './status-presentation';
 
 export type AgentTileData = {
@@ -32,7 +32,8 @@ export const AgentTileNode = observer(function AgentTileNode({ data, selected }:
     store.entryForConversation(projectId, taskId, conversationId) ?? store.entryForTile(tileId);
   // Subscribe to zoom bands, not raw zoom, so pan/zoom does not re-render every tile per frame.
   const band = useStore((state) => zoomBand(state.transform[2]));
-  // Multi-canvas: an agent showing in several views is mounted in one of them.
+  // Multi-canvas: an agent showing in several views has its real terminal in one of them and a
+  // read-only copy that follows it in the others.
   const live = useIsLivePane(tileId);
 
   if (!entry) return null;
@@ -77,14 +78,14 @@ export const AgentTileNode = observer(function AgentTileNode({ data, selected }:
           <TerminalPlaceholder label="On the stage" />
         ) : !store.shouldAttach(entry) ? (
           <ResumePrompt entry={entry} />
-        ) : !live ? (
-          <TerminalPlaceholder label="Live in another view. Click to bring it here." />
         ) : entry.type === 'acp' ? (
           <AgentAcpLive
             entry={entry}
-            interactive={band === 'interactive'}
+            interactive={live && band === 'interactive'}
             onActivate={() => store.requestFocus(tileId)}
           />
+        ) : !live ? (
+          <AgentTerminalMirror entry={entry} />
         ) : (
           <AgentTerminal
             entry={entry}

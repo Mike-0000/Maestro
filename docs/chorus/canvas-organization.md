@@ -192,7 +192,11 @@ Multi-Canvas" command.
   selection, and every viewport command (focus, fit, frame, voice) are its. Each view remembers
   the sub-canvas it is in.
 - A window showing in several views is live in one (the active view when it shows there, else the
-  first); the others show a placeholder, since a terminal or a webview mounts once (§3.3).
+  first), since a terminal or a webview mounts once (§3.3). The other views still show it: an
+  agent terminal as a read-only mirror (`terminal-mirror.ts`: a second xterm on its own replica of
+  the output log, following the real one's grid size and scroll), a chat agent as its transcript,
+  a note as read-only text, an app browser as its last capture. Clicking a copy makes that view
+  active and the live window moves there.
 - The Stage covers all views. The minimap is hidden while the canvas is split.
 
 ### 3.2 Stage

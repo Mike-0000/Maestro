@@ -37,6 +37,11 @@ export interface SessionTheme {
 
 export type FrontendPtyConnector = {
   connect(terminal: Terminal): Promise<() => void> | (() => void);
+  /**
+   * Streams the session's output into another, read-only terminal: the retained output first,
+   * then live. Independent of `connect`; several mirrors may be open at once.
+   */
+  mirror?(terminal: Terminal): Promise<() => void> | (() => void);
   sendInput?(data: string): void;
   resize?(cols: number, rows: number): void;
 };
@@ -248,6 +253,16 @@ export class FrontendPty {
     this.offData?.();
     this.offData = null;
     this.offData = await this.connector.connect(this.terminal);
+  }
+
+  /** True when the session's output can be streamed into a second terminal. */
+  get canMirror(): boolean {
+    return this.connector.mirror !== undefined;
+  }
+
+  /** Streams this session's output into `terminal` (see `mountTerminalMirror`). */
+  async connectMirror(terminal: Terminal): Promise<() => void> {
+    return (await this.connector.mirror?.(terminal)) ?? (() => {});
   }
 
   sendInput(data: string): void {
