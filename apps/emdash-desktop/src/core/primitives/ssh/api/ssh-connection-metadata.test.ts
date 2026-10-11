@@ -32,7 +32,7 @@ describe('sshConnectionMetadata versioned schema', () => {
     });
     expect(result.status).toBe('ok');
     if (result.status !== 'ok') return;
-    expect(result.data.version).toBe('6');
+    expect(result.data.version).toBe('7');
     expect(result.data.dependencySelections).toEqual({
       claude: { kind: 'pinned', realpath: '/usr/local/bin/claude' },
       codex: null,
@@ -49,7 +49,7 @@ describe('sshConnectionMetadata versioned schema', () => {
     expect(result.status).toBe('ok');
     if (result.status !== 'ok') return;
     expect(result.data).toEqual({
-      version: '6',
+      version: '7',
       sshConfigAlias: 'my-host',
       syncLocalSettings: true,
     });
@@ -64,19 +64,19 @@ describe('sshConnectionMetadata versioned schema', () => {
     });
     expect(result).toEqual({
       status: 'ok',
-      data: { version: '6', transport: 'local', syncLocalSettings: true },
+      data: { version: '7', transport: 'local', syncLocalSettings: true },
     });
   });
 
   it('round-trips a local machine through serialize/parseJson', () => {
-    const value = sshConnectionMetadata.schema.parse({ version: '6', transport: 'local' });
+    const value = sshConnectionMetadata.schema.parse({ version: '7', transport: 'local' });
     const roundTripped = sshConnectionMetadata.parseJson(sshConnectionMetadata.serialize(value));
-    expect(roundTripped).toEqual({ version: '6', transport: 'local' });
+    expect(roundTripped).toEqual({ version: '7', transport: 'local' });
   });
 
   it('round-trips a Maestro host through serialize/parseJson', () => {
     const value = sshConnectionMetadata.schema.parse({
-      version: '6',
+      version: '7',
       transport: 'maestro',
       maestro: {
         url: 'https://my-pc.tailnet.ts.net',
@@ -99,7 +99,7 @@ describe('sshConnectionMetadata versioned schema', () => {
       privateKeyPath: null,
       useAgent: 0,
       metadata: {
-        version: '6',
+        version: '7',
         transport: 'maestro',
         maestro: { url: 'https://my-pc.tailnet.ts.net', hostId: 'host-1' },
       },
@@ -109,15 +109,15 @@ describe('sshConnectionMetadata versioned schema', () => {
   });
 
   it('reports a version written by a newer app instead of guessing', () => {
-    expect(sshConnectionMetadata.safeParse({ version: '7', transport: 'maestro' })).toMatchObject({
+    expect(sshConnectionMetadata.safeParse({ version: '8', transport: 'maestro' })).toMatchObject({
       status: 'future-version',
-      version: '7',
+      version: '8',
     });
   });
 
   it('round-trips an object with syncLocalSettings through serialize/parseJson', () => {
     const value = sshConnectionMetadata.schema.parse({
-      version: '6',
+      version: '7',
       sshConfigAlias: 'my-host',
       syncLocalSettings: true,
     });

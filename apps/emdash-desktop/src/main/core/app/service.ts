@@ -407,6 +407,19 @@ class AppService implements Disposable {
       throw new MaestroHostUnsupportedError('open-in-app');
     }
 
+    // A WSL distro has no SSH endpoint. VS Code-family editors open it through their WSL remote.
+    if (connection.metadata?.transport === 'wsl') {
+      const distro = connection.metadata.wsl?.distro;
+      if (distro && (appId === 'vscode' || appId === 'vscodium' || appId === 'cursor')) {
+        const encodedPath = target.split('/').map(encodeURIComponent).join('/');
+        await shell.openExternal(
+          `${appId}://vscode-remote/wsl+${encodeURIComponent(distro)}${encodedPath}`
+        );
+        return;
+      }
+      throw new Error(`${label} cannot open a folder inside a WSL distro from here.`);
+    }
+
     const { host, username, port } = connection;
 
     if (appId === 'vscode' || appId === 'vscodium' || appId === 'cursor' || appId === 'zed') {

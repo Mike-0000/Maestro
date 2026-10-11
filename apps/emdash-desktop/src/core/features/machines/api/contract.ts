@@ -148,6 +148,14 @@ export const machinesContract = defineContract({
     output: z.custom<SshConfig>(),
   }),
   /**
+   * Adds (or returns) a WSL2 distro on this computer as a Host. Without a name, the first
+   * usable distro that is not a machine yet.
+   */
+  addWslDistro: procedure({
+    input: z.object({ distro: z.string().min(1).optional() }),
+    output: z.custom<SshConfig>(),
+  }),
+  /**
    * Maestro hosts: the Maestro app on another computer, reached over its own WebSocket listener
    * instead of SSH. The requests to the host run in the main process; see ./maestro-host.
    */

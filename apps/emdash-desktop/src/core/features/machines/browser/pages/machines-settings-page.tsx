@@ -1,6 +1,6 @@
 import { CollectionToolbar, CollectionView, PageLayout } from '@emdash/ui/react/patterns';
 import { Button, toast } from '@emdash/ui/react/primitives';
-import { MonitorIcon, PlusIcon, RadioTowerIcon, ServerIcon } from 'lucide-react';
+import { MonitorIcon, PlusIcon, RadioTowerIcon, ServerIcon, TerminalIcon } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useState } from 'react';
 import { getMachinesStore } from '@core/features/machines/contributions/app-stores';
@@ -50,6 +50,17 @@ export const MachinesSettingsPage = observer(function MachinesSettingsPage({
     }
   };
 
+  const addWslDistro = async () => {
+    try {
+      const machine = await machinesStore.addWslDistro();
+      openDetail(machine.id);
+    } catch (error) {
+      toast.error('Failed to add a WSL distro', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
   return (
     <div className="flex min-h-0 flex-col gap-8">
       <PageLayout.Header
@@ -68,6 +79,9 @@ export const MachinesSettingsPage = observer(function MachinesSettingsPage({
               onAdd={openCreateModal}
               onAddMaestroHost={() => void addMaestroHost()}
               onAddThisComputer={hasThisComputer ? undefined : () => void addThisComputer()}
+              onAddWslDistro={
+                navigator.userAgent.includes('Windows') ? () => void addWslDistro() : undefined
+              }
             />
           }
           onItemClick={(machine) => openDetail(machine.id)}
@@ -83,12 +97,15 @@ const MachinesToolbar = observer(function MachinesToolbar({
   onAdd,
   onAddMaestroHost,
   onAddThisComputer,
+  onAddWslDistro,
 }: {
   view: MachinesListViewModel;
   onAdd: () => void;
   onAddMaestroHost: () => void;
   /** Absent once this computer is already a machine. */
   onAddThisComputer?: () => void;
+  /** Windows only. */
+  onAddWslDistro?: () => void;
 }) {
   const search = view.useSearch();
   return (
@@ -109,6 +126,17 @@ const MachinesToolbar = observer(function MachinesToolbar({
           >
             <MonitorIcon />
             Add this computer
+          </Button>
+        ) : null}
+        {onAddWslDistro ? (
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={onAddWslDistro}
+            title="Run projects and agents inside a WSL2 distro on this computer, on its Linux filesystem. Adds the next distro that is not a machine yet."
+          >
+            <TerminalIcon />
+            Add WSL distro
           </Button>
         ) : null}
         <Button

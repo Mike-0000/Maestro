@@ -180,7 +180,9 @@ export class SshConnectionManager extends EventEmitter implements SshConnectionM
     const client =
       resolved.transport === 'local'
         ? new LocalShellClient().asSshClient()
-        : (this.deps.createClient?.() ?? new ssh2.Client());
+        : resolved.transport === 'wsl' && resolved.wslDistro
+          ? new LocalShellClient({ wsl: { distro: resolved.wslDistro } }).asSshClient()
+          : (this.deps.createClient?.() ?? new ssh2.Client());
     entry.client = client;
     let cleaned = false;
     const cleanup = () => {

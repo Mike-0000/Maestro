@@ -19,6 +19,11 @@ export type LocalShellClientDeps = {
   connect?: (options: net.NetConnectOpts) => net.Socket;
   /** Windows only: ends a command's whole process tree (cmd.exe does not forward kills). */
   killTree?: (pid: number) => void;
+  /**
+   * Run everything inside this WSL2 distro instead of on Windows: commands through
+   * `wsl.exe --exec /bin/sh -c`, and socket forwards through a relay inside the distro.
+   */
+  wsl?: { distro: string };
 };
 
 /**
@@ -29,6 +34,14 @@ export type LocalShellClientDeps = {
  * shell (`cmd.exe /c`) or `/bin/sh -c`, from the home directory. Callers already build those
  * command lines with the SSH quoting helpers, so this adds no quoting of its own. Forwarding opens
  * the same local TCP ports and sockets the remote end of an SSH forward would.
+ *
+ * With `wsl`, the machine is a WSL2 distro on this computer. A command is handed to the
+ * distro's `/bin/sh -c` as one argument, which `wsl.exe --exec` passes on untouched, so the POSIX
+ * quoting callers already did is all the quoting there is. The command starts in the distro
+ * user's home with the Windows directories taken off `PATH`, as an SSH login would find it. A
+ * socket in the distro is not reachable from Windows, so a forward to one runs a small relay
+ * inside the distro and uses its stdin and stdout as the channel. TCP forwards still dial
+ * `localhost` from Windows, which WSL maps to the distro.
  *
  * Only the Client surface the SSH proxy uses is implemented: connect/end/destroy, `exec`,
  * `forwardOut`, and `openssh_forwardOutStreamLocal`, plus the ready/close/end/error events.
@@ -100,8 +113,48 @@ export class LocalShellClient extends EventEmitter {
   }
 
   openssh_forwardOutStreamLocal(socketPath: string, callback: ChannelCallback): this {
+    if (this.deps.wsl) {
+      // The relay is an exec channel like any other: its stdio is the socket's byte stream.
+      this.execRaw(WSL_SOCKET_RELAY_ARGS(socketPath), callback);
+      return this;
+    }
     this.openSocket({ path: socketPath }, callback);
     return this;
+  }
+
+  /** Runs `wsl.exe --exec <argv>` in the distro and hands its stdio back as a channel. */
+  private execRaw(argv: readonly string[], callback: ChannelCallback): void {
+    const failure = this.unavailable();
+    if (failure) {
+      queueMicrotask(() => callback(failure, undefined as unknown as ClientChannel));
+      return;
+    }
+    let channel: LocalExecChannel;
+    try {
+      channel = new LocalExecChannel(this.spawnInDistro(argv), 'win32', this.deps.killTree);
+    } catch (error) {
+      queueMicrotask(() => callback(asError(error), undefined as unknown as ClientChannel));
+      return;
+    }
+    this.channels.add(channel);
+    channel.once('close', () => this.channels.delete(channel));
+    queueMicrotask(() => callback(undefined, channel.asClientChannel()));
+  }
+
+  private spawnInDistro(argv: readonly string[]): ChildProcessWithoutNullStreams {
+    const run = this.deps.spawn ?? (spawn as NonNullable<LocalShellClientDeps['spawn']>);
+    const distro = this.deps.wsl?.distro ?? '';
+    // `--cd ~` is the distro user's home; without it the command would start in the Windows
+    // directory the app runs from, seen through the drive mount.
+    return run(
+      wslExecutable(this.deps.env ?? process.env),
+      ['-d', distro, '--cd', '~', '--exec', ...argv],
+      {
+        env: localShellEnvironment(this.deps.env ?? process.env),
+        stdio: 'pipe',
+        windowsHide: true,
+      }
+    );
   }
 
   private openSocket(options: net.NetConnectOpts, callback: ChannelCallback): void {
@@ -128,6 +181,9 @@ export class LocalShellClient extends EventEmitter {
   }
 
   private spawnShell(command: string): ChildProcessWithoutNullStreams {
+    if (this.deps.wsl) {
+      return this.spawnInDistro(['/bin/sh', '-c', `${WSL_POSIX_PATH}\n${command}`]);
+    }
     const run = this.deps.spawn ?? (spawn as NonNullable<LocalShellClientDeps['spawn']>);
     const options: SpawnOptions = {
       cwd: this.deps.cwd ?? homedir(),
@@ -170,6 +226,42 @@ export class LocalShellClient extends EventEmitter {
       this.emit('close');
     });
   }
+}
+
+/**
+ * WSL appends every Windows `PATH` directory to the distro's. Left in, the distro would find
+ * Windows programs (`git.exe`, a Windows `claude`) and every lookup would cross the drive mount.
+ * This drops them for the command and everything it starts, the workspace server included.
+ */
+const WSL_POSIX_PATH =
+  'PATH=$(printf %s "$PATH" | tr ":" "\\n" | grep -v "^/mnt/[a-z]/" | paste -sd: -); export PATH';
+
+/**
+ * A stdin/stdout relay to a unix socket inside the distro, run by the Node the workspace server
+ * ships with (`<root>/current/node`, two levels above `<root>/run/<socket>`). It exits when
+ * either side closes, and with a non-zero code when the socket cannot be reached.
+ */
+const WSL_SOCKET_RELAY =
+  "const n=require('net');const s=n.connect(process.argv[1]);" +
+  'process.stdin.pipe(s);s.pipe(process.stdout);' +
+  "s.on('error',(e)=>{process.stderr.write(String(e&&e.message||e));process.exit(111)});" +
+  "s.on('close',()=>process.exit(0));process.stdin.on('end',()=>s.end());";
+
+function WSL_SOCKET_RELAY_ARGS(socketPath: string): string[] {
+  return [
+    '/bin/sh',
+    '-c',
+    'exec "$(dirname -- "$(dirname -- "$1")")/current/node" -e "$2" "$1"',
+    'relay',
+    socketPath,
+    WSL_SOCKET_RELAY,
+  ];
+}
+
+/** `wsl.exe` from the Windows system directory, never from a `PATH` someone else can add to. */
+function wslExecutable(env: NodeJS.ProcessEnv): string {
+  const root = env.SystemRoot ?? env.SYSTEMROOT ?? env.windir;
+  return root ? `${root}\\System32\\wsl.exe` : 'wsl.exe';
 }
 
 /**

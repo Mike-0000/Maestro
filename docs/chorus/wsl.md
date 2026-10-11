@@ -1,52 +1,80 @@
-# Running Claude Code in WSL2
+# Running projects in WSL2
 
-On Windows, Maestro can start Claude Code's terminal sessions inside WSL2 instead of as native
-Windows processes. It is off by default.
+On Windows, Maestro can run whole projects inside a WSL2 distro: the repository, every task's
+worktree, git, the terminals and the agents all live and run on the distro's Linux filesystem.
+That is where WSL2 is fast, and parallel agents gain the most, because nothing they read,
+search or install crosses the Windows boundary.
 
-Turn it on in Settings → Agents → Claude Code → Advanced settings → **Run in WSL2**. The switch
-is shown only on a Windows machine, for the local host.
+## Add the distro as a machine
 
-## What you need
+Settings → Machines → **Add WSL distro**. The button is shown on Windows. It adds the next WSL2
+distro that is not a machine yet, the default distro first; Docker Desktop's own distros are
+left out. The machine is named `<distro> (WSL)`.
 
-- A WSL2 distro that is your **default** one (`wsl --set-default <name>`). Docker Desktop's own
-  distro does not count.
-- Claude Code installed in that distro and on the login shell's `PATH` (`sh -lc 'command -v
-  claude'` must print a path), and signed in there. The distro has its own `~/.claude`, separate
-  from the one on Windows.
-- Claude Code also installed on Windows. Maestro still finds the agent through the Windows
-  install; only the launch goes through WSL.
-- Windows interop on in the distro (the default), so the distro can run `cmd.exe` and
-  `powershell.exe`. Maestro's status hooks depend on it.
+Then create or clone a project **on that machine**, the same way as on an SSH machine. Its
+files go under the distro's home (`~/emdash/…` by default, or the machine's worktree root).
+A project that already lives on a Windows drive stays a Windows project: move it by cloning it
+onto the WSL machine.
 
-## What happens
+## What the distro needs
 
-- Before a session starts, Maestro asks the default distro for `claude`. When it answers, the
-  session runs as `wsl.exe --exec sh -lc "claude …"` in the task's folder, which the distro sees
-  under `/mnt/<drive>/…`.
-- When there is no such distro, or WSL does not answer within 15 seconds, the session starts
-  on Windows exactly as with the switch off. The log says why. The answer is kept for a minute.
-- Paths Maestro passes on the command line (the MCP configuration, a long prompt written to a
-  file) are translated. The variables the agent needs are named in `WSLENV`; variables that
-  describe Windows (`PATH`, `HOME`, `USERPROFILE`, …) are not forwarded.
-- Maestro installs its status hooks into the distro's `~/.claude/settings.json`. They are the
-  Windows hook commands: the distro runs them through interop, and they report to Maestro on
-  the Windows loopback address.
+- **WSL2**, with network access, `curl` or `wget`, `tar`, `sha256sum`, and glibc. A stock Ubuntu
+  has all of them.
+- **git**, and **tmux** if you want agent sessions to survive Maestro restarting.
+- **The agent CLIs inside the distro**, signed in there. For Claude Code:
+  `curl -fsSL https://claude.ai/install.sh | bash`, then `claude` once to sign in. The distro's
+  `~/.claude` is separate from the one on Windows.
+- **git credentials inside the distro** (an SSH key or a credential helper). Maestro's managed
+  credential helper is for this computer's own projects only.
 
-## What does not work yet
+## How it works
 
-- **Chat (ACP) sessions** always run on Windows.
-- **Maestro's per-session MCP servers** (browser tools, conductor requests, `show_markdown`)
-  listen on the Windows loopback address. A Linux process reaches that only with WSL's mirrored
-  networking (`networkingMode=mirrored` in `.wslconfig`). Without it Claude reports those
-  servers as unreachable and everything else works.
-- **Workspace trust** is not written for you; Claude asks once per folder in the distro.
-- **Shell setup** from the host or project settings is a `cmd.exe` line and is not run in the
-  distro. Put what the agent needs in the distro's `~/.profile`.
-- **A named distro.** Only the default distro is used.
-- **Sessions started on Windows** cannot be resumed in WSL, or the other way round: each side
-  keeps its own session files.
-- File paths the agent prints are `/mnt/c/…` paths; links made from them may not open.
+The distro is a machine like an SSH host, reached without SSH:
 
-This path was built without a WSL distro to test against. The command line, the path and
-variable handling, and the fallback are covered by unit tests; a real session in a distro has
-not been run.
+- Commands run as `wsl.exe -d <distro> --cd ~ --exec /bin/sh -c <command>`. The command is one
+  argument that `wsl.exe` passes on untouched, so nothing is re-quoted on the way.
+- Windows directories are taken off `PATH` first. Otherwise the distro would find Windows
+  programs (`git.exe`, a Windows `claude`) and every lookup would cross the drive mount.
+- Maestro installs its workspace server in the distro on first connect
+  (`~/.emdash/workspace-server`), downloaded by the distro itself, and starts it as a background
+  process there. It keeps running between connections; reconnecting takes under a second.
+- The connection to it is a small relay inside the distro whose input and output carry the
+  protocol, because a socket in the distro cannot be opened from Windows.
+- Preview servers are reached on `localhost`, which WSL maps to the distro.
+
+## Limits
+
+The same things that are off for SSH machines are off here:
+
+- Maestro's per-session MCP tools (browser tools, conductor requests, `show_markdown`).
+- The managed git credential helper, conductor code checks, and the Markdown viewer.
+- "Show in folder" and "Open with the default app". **Open in VS Code / Cursor** works, through
+  their WSL remote.
+
+Also:
+
+- The workspace server in the distro is the published build for this protocol version, not
+  built from this checkout. Features that exist only in the desktop app are unaffected.
+- The workspace server reads the distro's login environment when it starts. An agent CLI
+  installed afterwards is not found until the server restarts: disconnect and reconnect the
+  machine after `~/.emdash/workspace-server/current/bin/emdash-workspace-server stop --socket
+  ~/.emdash/workspace-server/run/workspace.sock`, or run `wsl --terminate <distro>`.
+- A distro that WSL shuts down takes its workspace server with it; Maestro starts it again on
+  the next connect. Agent sessions inside tmux survive a Maestro restart, not a distro shutdown.
+
+## What was tested
+
+Against a real Ubuntu distro: command quoting, starting directory, `PATH`, scripts on stdin, a
+missing socket, and the whole path from a cold distro (install, start, protocol handshake, a
+file-system call) and from a warm one. Run them with
+`EMDASH_TEST_WSL_DISTRO=<distro> pnpm exec vitest run --project node src/main/gateway/workspace-server.wsl.test.ts src/core/services/ssh/node/local`.
+
+Not tested: an agent session in the distro driven from the app's own window, a project created
+through the UI, and preview servers.
+
+## The older per-agent switch
+
+Settings → Agents → Claude Code → Advanced settings → **Run in WSL2** starts only Claude's
+terminal process in the default distro while the project stays on the Windows drive. It does
+not make anything faster, since every file access then crosses into Windows, and it has never
+been run in a real session. Prefer a WSL machine.

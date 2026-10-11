@@ -147,7 +147,7 @@ describe('MaestroHostsService', () => {
     ]);
     expect(host.calls[1]?.body).toEqual({ code: '123456', deviceName: 'Laptop', kind: 'desktop' });
     expect(row('maestro-1')?.metadata).toEqual({
-      version: '6',
+      version: '7',
       transport: 'maestro',
       maestro: { url: HOST_URL, hostId: 'host-1' },
     });

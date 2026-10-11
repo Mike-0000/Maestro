@@ -27,9 +27,13 @@ export interface SshConfig {
    * SSH, so conversations started here or from other computers over SSH appear in one place.
    * 'maestro' reaches the Maestro app on another computer over its WebSocket listener: there is
    * no SSH connection and no shell channel, so the SSH fields above are placeholders.
+   * 'wsl' is a WSL2 distro on this computer, reached through `wsl.exe`: its workspace server,
+   * repositories and agents live on the distro's filesystem, and the SSH fields are placeholders.
    * Stored in connection metadata; absent means SSH.
    */
-  transport?: 'local' | 'maestro';
+  transport?: 'local' | 'maestro' | 'wsl';
+  /** The distro of a 'wsl' machine. */
+  wsl?: { distro: string };
   /** Endpoint of a 'maestro' machine. Its device token and Cloudflare secret are never here. */
   maestro?: { url: string; hostId?: string; cfAccessClientId?: string };
 }

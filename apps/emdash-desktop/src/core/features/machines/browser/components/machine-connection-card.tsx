@@ -35,6 +35,7 @@ export function MachineConnectionRow({
   const retry = availability?.kind === 'unavailable' && availability.issue !== undefined;
   const local = machine.transport === 'local';
   const maestro = machine.transport === 'maestro';
+  const wsl = machine.transport === 'wsl';
   // Retrying cannot help once the host has revoked this device; only a new pairing can.
   const unpaired =
     maestro &&
@@ -45,7 +46,7 @@ export function MachineConnectionRow({
     <SettingsRow
       label={
         <span className="flex items-center gap-2">
-          {local ? 'Connection' : maestro ? 'Maestro host' : 'SSH Connection'}
+          {local || wsl ? 'Connection' : maestro ? 'Maestro host' : 'SSH Connection'}
           <MachineBadge state={state} />
         </span>
       }
@@ -54,11 +55,13 @@ export function MachineConnectionRow({
           <span>
             {local
               ? `This computer, without SSH · ${machine.username} · shared with SSH clients of this computer`
-              : maestro
-                ? `${maestroHostEndpointLabel(machine)} · paired with the Maestro app on that computer${
-                    machine.maestro?.cfAccessClientId ? ' · through Cloudflare Access' : ''
-                  }`
-                : `${machine.host} · ${machine.username} · ${authLabel(machine)}`}
+              : wsl
+                ? `WSL2 distro ${machine.wsl?.distro ?? ''} on this computer · projects and agents run on its Linux filesystem`
+                : maestro
+                  ? `${maestroHostEndpointLabel(machine)} · paired with the Maestro app on that computer${
+                      machine.maestro?.cfAccessClientId ? ' · through Cloudflare Access' : ''
+                    }`
+                  : `${machine.host} · ${machine.username} · ${authLabel(machine)}`}
           </span>
           {maestro && availability?.kind === 'unavailable' && availability.issue ? (
             <span className="basis-full text-foreground-destructive">
