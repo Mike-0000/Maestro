@@ -58,7 +58,11 @@ export class SpeechOutput {
     return typeof speechSynthesis === 'undefined' ? [] : speechSynthesis.getVoices();
   }
 
-  speak(text: string, onStatus?: SpeechStatusListener): void {
+  /**
+   * Speaks `text`, replacing whatever is playing. `platform` forces the system voice: it starts
+   * without a network round trip and reads exactly what it is given.
+   */
+  speak(text: string, onStatus?: SpeechStatusListener, options: { platform?: boolean } = {}): void {
     if (!text.trim()) {
       onStatus?.('failed');
       return;
@@ -66,7 +70,7 @@ export class SpeechOutput {
     this.stop();
     this.active = onceStarted(onStatus ?? (() => {}));
     const generation = this.generation;
-    if (!this.engineAvailable() || text.length > 1200) {
+    if (options.platform || !this.engineAvailable() || text.length > 1200) {
       this.speakPlatform(text, generation);
       return;
     }

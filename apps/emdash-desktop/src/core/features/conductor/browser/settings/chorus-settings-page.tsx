@@ -4,6 +4,8 @@ import { observer } from 'mobx-react-lite';
 import { useEffect, useState } from 'react';
 import { getCanvasStore } from '@core/features/canvas/contributions/browser/app-stores';
 import { getMachinesClient } from '@core/features/machines/api/browser/client';
+import { TALK_MODELS } from '@core/features/talk/api/usage';
+import { getTalkStore } from '@core/features/talk/contributions/browser/app-stores';
 import {
   acceleratorFromCodes,
   acceleratorLabel,
@@ -15,7 +17,7 @@ import { getVoiceStore } from '@core/features/voice/contributions/browser/app-st
 import type { ChorusCredentialId } from '@core/primitives/chorus-host/api/credentials';
 import { copyTextToClipboard } from '@core/primitives/desktop-host/browser/host-client';
 import { getConductorClient } from '../../api/browser/client';
-import type { SystemChecks } from '../../api/contract';
+import { CODE_CHECKS_UI, type SystemChecks } from '../../api/contract';
 import { getConductorStore } from '../../contributions/browser/app-stores';
 import { KeyCaptureControl } from './key-capture-control';
 
@@ -107,6 +109,12 @@ const JEV_SOURCE_LABELS = {
   auto: 'Auto',
   openrouter: 'OpenRouter',
   typesafe: 'TypeSafe',
+} as const;
+
+const CALL_MODE_LABELS = {
+  off: 'Off',
+  quiet: 'Shown',
+  spoken: 'Spoken',
 } as const;
 
 const EFFORT_LABELS = {
@@ -703,6 +711,58 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
           }
         />
         <SettingsRow
+          label="Let agents ask the conductor"
+          description="Claude Code and Codex agents on this computer can ask the conductor to start another agent, pass a message to one, ask you a question, or tell you something by voice. The conductor decides requests to start or message an agent, or asks you when it is unsure; you can cancel each one as it starts. Off: every request is refused."
+          control={
+            <Switch
+              checked={conductorSettings?.agentRequests ?? true}
+              disabled={!conductorSettings}
+              onCheckedChange={(agentRequests) => void conductor.updateSettings({ agentRequests })}
+            />
+          }
+        />
+        <SettingsRow
+          label="Calls from agents"
+          description="Agents reach you one at a time. While one is on the line, tap Right Ctrl (or hold it, or press Answer) and what you say goes to that agent without naming it. Confirmations are read aloud, and so are sends when you answered a call or Maestro is not in front. Spoken reads each call out; Shown only displays it. Off: one combined announcement, as before."
+          control={
+            <Select.Root
+              value={conductorSettings?.calls ?? 'off'}
+              disabled={!conductorSettings}
+              onValueChange={(calls) => {
+                if (calls) void conductor.updateSettings({ calls });
+              }}
+            >
+              <Select.Trigger className="w-[160px]">
+                <Select.Value>{CALL_MODE_LABELS[conductorSettings?.calls ?? 'off']}</Select.Value>
+              </Select.Trigger>
+              <Select.Content align="end">
+                {Object.entries(CALL_MODE_LABELS).map(([id, label]) => (
+                  <Select.Item key={id} value={id}>
+                    {label}
+                  </Select.Item>
+                ))}
+              </Select.Content>
+            </Select.Root>
+          }
+        />
+        <SettingsRow
+          label="Seconds a call stays on the line"
+          description="How long you have to pick a call up after it was delivered (2 to 30). After that the next call comes, and the agent still shows as waiting."
+          control={
+            <CommitInput
+              value={String(conductorSettings?.callWindowSec ?? 6)}
+              ariaLabel="Seconds a call stays on the line"
+              className="w-20"
+              onCommit={(value) => {
+                const callWindowSec = Number.parseInt(value, 10);
+                if (callWindowSec >= 2 && callWindowSec <= 30) {
+                  void conductor.updateSettings({ callWindowSec });
+                }
+              }}
+            />
+          }
+        />
+        <SettingsRow
           label="Daily token budget"
           description={
             conductor.status
@@ -731,7 +791,258 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
           }
         />
       </SettingsSection>
+
+      <TalkLineSettings />
+
+      {CODE_CHECKS_UI && <CodeCheckSettings />}
     </div>
+  );
+});
+
+const INVESTIGATOR_MODELS = { haiku: 'Haiku (fast, cheap)', sonnet: 'Sonnet' } as const;
+
+/**
+ * Code checks: a read-only Claude Code process that answers the conductor's questions about a
+ * project's files. Hidden until the gates in docs/conductor-subagent-plan.md pass.
+ */
+const CodeCheckSettings = observer(function CodeCheckSettings() {
+  const conductor = getConductorStore();
+  const settings = conductor.settings;
+  const status = conductor.status;
+  const [checking, setChecking] = useState(false);
+  const recheck = () => {
+    setChecking(true);
+    void getConductorClient()
+      // The self-test runs the CLI three times; the default call deadline is too short for it.
+      .then((client) => client.recheckInvestigator(undefined, { timeoutMs: 0 }))
+      .then(() => conductor.refreshStatus())
+      .catch(() => undefined)
+      .finally(() => setChecking(false));
+  };
+  const investigator = status?.investigator;
+  const state = checking
+    ? 'Checking…'
+    : investigator?.state === 'ready'
+      ? 'Ready.'
+      : investigator?.state === 'unavailable'
+        ? `Unavailable: ${investigator.reason ?? 'unknown reason'}.`
+        : 'Off.';
+  const model = settings?.investigatorModel ?? 'haiku';
+  return (
+    <SettingsSection title="Code checks">
+      <SettingsRow
+        label="Let the conductor read project files"
+        description={`Lets the conductor read a project's files through Claude Code, read-only, to check facts before it plans. File contents go to Anthropic through your Claude Code login. A short self-test runs when you turn this on and after Claude Code updates. ${state}`}
+        control={
+          <Switch
+            checked={settings?.investigations ?? false}
+            disabled={!settings || checking}
+            onCheckedChange={(investigations) => {
+              void conductor.updateSettings({ investigations }).then(() => {
+                if (investigations) recheck();
+              });
+            }}
+          />
+        }
+      />
+      <SettingsRow
+        label="Model for code checks"
+        description="Haiku answered every test question correctly in 9 to 13 seconds."
+        control={
+          <Select.Root
+            value={model}
+            disabled={!settings}
+            onValueChange={(investigatorModel) => {
+              if (investigatorModel) void conductor.updateSettings({ investigatorModel });
+            }}
+          >
+            <Select.Trigger className="w-[180px]">
+              <Select.Value>
+                {INVESTIGATOR_MODELS[model as keyof typeof INVESTIGATOR_MODELS] ?? model}
+              </Select.Value>
+            </Select.Trigger>
+            <Select.Content align="end">
+              {Object.entries(INVESTIGATOR_MODELS).map(([id, label]) => (
+                <Select.Item key={id} value={id}>
+                  {label}
+                </Select.Item>
+              ))}
+            </Select.Content>
+          </Select.Root>
+        }
+      />
+      <SettingsRow
+        label="Seconds one question may take"
+        description="15 to 60. A check that runs longer is stopped."
+        control={
+          <CommitInput
+            value={String(settings?.investigationTimeoutSec ?? 45)}
+            ariaLabel="Seconds one question may take"
+            className="w-20"
+            onCommit={(value) => {
+              const investigationTimeoutSec = Number.parseInt(value, 10);
+              if (investigationTimeoutSec >= 15 && investigationTimeoutSec <= 60) {
+                void conductor.updateSettings({ investigationTimeoutSec });
+              }
+            }}
+          />
+        }
+      />
+      <SettingsRow
+        label="Questions a day"
+        description={
+          status
+            ? `Asked today: ${status.usageToday.investigations ?? 0}, about $${(status.usageToday.investigationCostUsd ?? 0).toFixed(2)}. 0 is no limit.`
+            : '0 is no limit.'
+        }
+        control={
+          <CommitInput
+            value={String(settings?.investigationsPerDay ?? 100)}
+            ariaLabel="Code check questions a day"
+            className="w-20"
+            onCommit={(value) => {
+              const investigationsPerDay = Number.parseInt(value, 10);
+              if (investigationsPerDay >= 0) {
+                void conductor.updateSettings({ investigationsPerDay });
+              }
+            }}
+          />
+        }
+      />
+      <SettingsRow
+        label="Daily cost limit (US dollars)"
+        description="What code checks may cost in a day, as Claude Code reports it. 0 is no limit."
+        control={
+          <CommitInput
+            value={String(settings?.investigationDailyUsd ?? 2)}
+            ariaLabel="Daily code check cost limit in US dollars"
+            className="w-20"
+            onCommit={(value) => {
+              const investigationDailyUsd = Number.parseFloat(value);
+              if (investigationDailyUsd >= 0) {
+                void conductor.updateSettings({ investigationDailyUsd });
+              }
+            }}
+          />
+        }
+      />
+      <SettingsRow
+        label="Check Claude Code again"
+        description="Runs the self-test: that the scout cannot read outside the project, cannot read secret files, and runs no project hooks."
+        control={
+          <Button variant="secondary" size="xs" disabled={checking} onClick={recheck}>
+            {checking ? 'Checking…' : 'Check again'}
+          </Button>
+        }
+      />
+    </SettingsSection>
+  );
+});
+
+const LINE_STATE_LABELS = {
+  off: 'Off',
+  connecting: 'Connecting…',
+  open: 'Open',
+  down: 'Not connected',
+} as const;
+
+/**
+ * The talk line: a realtime voice session for talking with Maestro. Experimental and off by
+ * default; with it off, nothing here contacts the provider or costs anything.
+ */
+const TalkLineSettings = observer(function TalkLineSettings() {
+  const talk = getTalkStore();
+  const status = talk.status;
+  const settings = status?.settings ?? null;
+  const usage = status?.usageToday;
+  const state = `${LINE_STATE_LABELS[talk.line]}${talk.error ? `: ${talk.error}` : ''}`;
+  return (
+    <SettingsSection title="Talk line (experimental)">
+      <SettingsRow
+        label="Talk with Maestro on a live line"
+        description={
+          status && !status.hasKey
+            ? 'Needs an OpenAI API key (API keys, above). A realtime voice model answers questions about your agents and speaks replies; it can read state and nothing else. Anything that acts still goes through the conductor and needs the talk key.'
+            : `A realtime voice model answers questions about your agents and speaks replies; it can read state and nothing else. Anything that acts still goes through the conductor and needs the talk key. Audio and the state it is told go to OpenAI while the line is open. Line: ${state}.`
+        }
+        control={
+          <Switch
+            checked={settings?.enabled ?? false}
+            disabled={!settings || !status?.hasKey}
+            onCheckedChange={(enabled) => void talk.updateSettings({ enabled })}
+          />
+        }
+      />
+      <SettingsRow
+        label="Voice model"
+        description="The full model reads state more reliably; mini costs about a quarter. Changing it reopens the line."
+        control={
+          <Select.Root
+            value={settings?.model ?? ''}
+            disabled={!settings}
+            onValueChange={(model) => {
+              if (model) void talk.updateSettings({ model });
+            }}
+          >
+            <Select.Trigger className="w-[220px]">
+              <Select.Value>{settings?.model ?? ''}</Select.Value>
+            </Select.Trigger>
+            <Select.Content align="end">
+              {TALK_MODELS.map((model) => (
+                <Select.Item key={model} value={model}>
+                  {model}
+                </Select.Item>
+              ))}
+            </Select.Content>
+          </Select.Root>
+        }
+      />
+      <SettingsRow
+        label="Seconds the microphone stays open after Maestro speaks"
+        description="For talk only: questions, “stop”, and steering calls. Nothing said in it can send, start, or approve anything. 0 never opens the microphone without the talk key."
+        control={
+          <CommitInput
+            value={String(settings?.windowSec ?? 6)}
+            ariaLabel="Seconds the microphone stays open after Maestro speaks"
+            className="w-20"
+            onCommit={(value) => {
+              const windowSec = Number.parseInt(value, 10);
+              if (windowSec >= 0 && windowSec <= 30) void talk.updateSettings({ windowSec });
+            }}
+          />
+        }
+      />
+      <SettingsRow
+        label="Speak over the voice to stop it"
+        description="Keeps the microphone open while the voice is speaking. Turn it on with headphones, or if this computer's echo cancellation keeps the voice out of the microphone; otherwise the voice may stop itself. Off: the talk key stops it."
+        control={
+          <Switch
+            checked={settings?.talkOver ?? false}
+            disabled={!settings}
+            onCheckedChange={(talkOver) => void talk.updateSettings({ talkOver })}
+          />
+        }
+      />
+      <SettingsRow
+        label="Daily limit (US dollars)"
+        description={
+          usage
+            ? `Spent today: $${usage.usd.toFixed(2)} over ${usage.responses} responses and ${usage.sessions} sessions. At the limit the line closes until tomorrow and everything works as it does without it. 0 is no limit.`
+            : '0 is no limit.'
+        }
+        control={
+          <CommitInput
+            value={String(settings?.dailyUsd ?? 5)}
+            ariaLabel="Daily limit in US dollars"
+            className="w-20"
+            onCommit={(value) => {
+              const dailyUsd = Number.parseFloat(value);
+              if (dailyUsd >= 0 && dailyUsd <= 1000) void talk.updateSettings({ dailyUsd });
+            }}
+          />
+        }
+      />
+    </SettingsSection>
   );
 });
 

@@ -27,8 +27,19 @@ export const PendingActionCard = observer(function PendingActionCard() {
           {countdown ? 'Now' : 'Confirm'} <span className="opacity-60">Enter</span>
         </button>
       </div>
-      {countdown ? (
-        <CountdownBar key={pending.id} durationMs={pending.durationMs} />
+      {pending.detail && (
+        // Everything the action carries, so a yes is given to all of it and not to one line.
+        <p className="max-h-24 overflow-y-auto rounded-md bg-background-secondary px-2 py-1 text-xs whitespace-pre-wrap text-foreground-muted">
+          {pending.detail}
+        </p>
+      )}
+      {pending.held ? (
+        <p className="text-xs text-foreground-muted">
+          Waiting while this is read out or you are speaking. Nothing runs until then.
+        </p>
+      ) : countdown ? (
+        // Keyed by its start too: a clock that was stopped starts over with what is left.
+        <CountdownBar key={`${pending.id}:${pending.startedAt}`} durationMs={pending.durationMs} />
       ) : (
         <p className="text-xs text-foreground-muted">
           Say “yes” or press Enter to confirm (Enter typed into a terminal or text field doesn’t

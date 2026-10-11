@@ -31,3 +31,7 @@
 {"utterance": "the website one", "focused": null, "context": {"reply": "Which project should the Codex agent work on?"}, "expect": {"kind": "llm"}, "tag": "answers-question"}
 {"utterance": "open it", "focused": null, "context": {"lastSpawned": {"conversationId": "x1", "name": "Codex 1", "providerId": "codex", "providerLabel": "Codex", "projectName": "Chorus", "prompt": "", "taskName": "api-tests", "worktree": false}}, "expect": {"kind": "act", "verb": "focus", "agent": "x1"}, "tag": "anaphora"}
 {"utterance": "put the Claude agents in a row on the left", "focused": null, "expect": {"kind": "llm"}, "tag": "layout"}
+{"utterance": "check whether we already have a retry helper", "focused": null, "expect": {"kind": "llm"}, "tag": "code-question"}
+{"utterance": "where is the upload code", "focused": null, "expect": {"kind": "llm"}, "tag": "code-question"}
+{"utterance": "does the project have a rate limiter", "focused": "c1", "expect": {"kind": "llm"}, "tag": "code-question"}
+{"utterance": "which tests cover the conductor tools", "focused": null, "expect": {"kind": "llm"}, "tag": "code-question"}

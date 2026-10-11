@@ -98,7 +98,8 @@ export const voiceEventSchema = z.discriminatedUnion('type', [
   /** Global hold-to-talk (the key was held or released while any app was focused). */
   z.object({
     type: z.literal('global-hold'),
-    action: z.enum(['start', 'stop', 'cancel']),
+    /** `tap`: a single quick press, which answers whatever is waiting for a spoken reply. */
+    action: z.enum(['start', 'stop', 'cancel', 'tap']),
     intent: z.enum(['command', 'dictation']).optional(),
   }),
   /** Live partial transcript of an open stream. */

@@ -63,8 +63,8 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     id: 'chorus-conductor',
     label: 'Conductor',
     tab: 'chorus',
-    description: 'Model, reasoning effort, plans, and the daily token budget.',
-    keywords: ['model', 'effort', 'plan', 'budget', 'tokens'],
+    description: 'Model, reasoning effort, plans, calls from agents, and the daily token budget.',
+    keywords: ['model', 'effort', 'plan', 'budget', 'tokens', 'calls', 'answer', 'pick up'],
   },
   {
     id: 'spawn-windows-in-a-project-sub-canvas',

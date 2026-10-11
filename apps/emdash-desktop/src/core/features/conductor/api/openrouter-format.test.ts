@@ -1,6 +1,11 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { describe, expect, it } from 'vitest';
-import { fromOpenAiChoice, toOpenAiMessages, toOpenAiTools } from './openrouter-format';
+import {
+  cachesByBreakpoint,
+  fromOpenAiChoice,
+  toOpenAiMessages,
+  toOpenAiTools,
+} from './openrouter-format';
 
 describe('toOpenAiMessages', () => {
   it('maps a tool round trip and drops thinking blocks', () => {
@@ -92,6 +97,23 @@ describe('fromOpenAiChoice', () => {
     expect(fromOpenAiChoice({ message: { content: null, refusal: 'no' } }).stopReason).toBe(
       'refusal'
     );
+  });
+});
+
+describe('toOpenAiMessages caching', () => {
+  it('marks the system prompt as a cache breakpoint only when asked', () => {
+    expect(toOpenAiMessages('SYS', [], { cacheSystem: true })).toEqual([
+      {
+        role: 'system',
+        content: [{ type: 'text', text: 'SYS', cache_control: { type: 'ephemeral' } }],
+      },
+    ]);
+    expect(toOpenAiMessages('SYS', [])).toEqual([{ role: 'system', content: 'SYS' }]);
+  });
+
+  it('asks for a breakpoint for Anthropic models only', () => {
+    expect(cachesByBreakpoint('anthropic/claude-haiku-5.5:nitro')).toBe(true);
+    expect(cachesByBreakpoint('openai/gpt-6')).toBe(false);
   });
 });
 

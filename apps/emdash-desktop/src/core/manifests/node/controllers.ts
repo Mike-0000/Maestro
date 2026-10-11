@@ -47,6 +47,7 @@ import { createPromptLibraryWireController } from '@core/features/library/node/w
 import type { LocalUpdateService } from '@core/features/local-updates/node/local-update-service';
 import { createLocalUpdatesWireController } from '@core/features/local-updates/node/wire-controller';
 import { createMachinesWireController } from '@core/features/machines/node/wire-controller';
+import { createMarkdownViewerWireController } from '@core/features/markdown-viewer/node/wire-controller';
 import { createMcpWireController } from '@core/features/mcp/node/wire-controller';
 import type { PreviewServerAccessOperations } from '@core/features/preview-servers/node/preview-server-access-service';
 import { createPreviewServersWireController } from '@core/features/preview-servers/node/wire-controller';
@@ -64,6 +65,7 @@ import type { SearchService } from '@core/features/search/node/search-service';
 import { createSearchWireController } from '@core/features/search/node/wire-controller';
 import { createSkillsWireController } from '@core/features/skills/node/wire-controller';
 import { createSourceControlWireController } from '@core/features/source-control/node/wire-controller';
+import { createTalkWireController } from '@core/features/talk/node/wire-controller';
 import type { TaskService } from '@core/features/tasks/api/node/task-service';
 import type { TaskSessionLaunchContextResolver } from '@core/features/tasks/api/node/task-session-launch-context';
 import type { TaskSessionManager } from '@core/features/tasks/api/node/task-session-manager';
@@ -493,8 +495,31 @@ export const desktopNodeControllers = {
       createVoiceWireController({ host: chorus, logger, scope }).controller,
   },
   conductor: {
-    create: ({ chorus, logger, scope }) =>
-      createConductorWireController({ host: chorus, logger, scope }),
+    create: ({ agentDependencies, chorus, logger, providerSettings, scope, workspaceIdentity }) =>
+      createConductorWireController({
+        host: chorus,
+        logger,
+        scope,
+        // Built here because a slice may not import another slice's node surface.
+        investigator: {
+          // The resolver alone, not a probe: probing would refresh every dependency.
+          resolveCli: async () => {
+            const manager = await agentDependencies.getDependencyManager();
+            if (!manager.success) return null;
+            const resolved = await manager.data.resolver.resolve({ id: 'claude' });
+            return resolved.success ? resolved.data.path : null;
+          },
+          providerEnv: async () => (await providerSettings.getItem('claude'))?.env ?? {},
+          // The object itself: its methods use `this`, so they are not passed detached.
+          identity: workspaceIdentity,
+        },
+      }),
+  },
+  talk: {
+    create: ({ chorus, logger }) => createTalkWireController({ host: chorus, logger }),
+  },
+  markdownViewer: {
+    create: ({ workspaceIdentity }) => createMarkdownViewerWireController({ workspaceIdentity }),
   },
 } satisfies {
   readonly [Domain in DesktopDomain]: DesktopNodeControllerContribution;

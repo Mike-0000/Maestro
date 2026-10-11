@@ -46,6 +46,7 @@ describe('conductorSnapshot', () => {
           kind: 'confirm',
           startedAt: 5,
           durationMs: 30_000,
+          armedAt: 5,
         },
       }),
       canvas

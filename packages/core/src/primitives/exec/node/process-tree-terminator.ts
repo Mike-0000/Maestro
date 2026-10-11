@@ -22,6 +22,12 @@ export type ProcessTreeTerminatorOptions = {
   graceMs?: number;
   logger?: Logger;
   taskkill?: TaskkillRunner;
+  /**
+   * How long one taskkill may run before it is given up on. A tree kill that is cut short kills
+   * only the wrapper and leaves the real process running, so a caller that must not leave one
+   * behind allows more than the default.
+   */
+  taskkillTimeoutMs?: number;
 };
 
 /**
@@ -47,7 +53,8 @@ export class ProcessTreeTerminator {
     this.processGroup = options.processGroup ?? false;
     this.graceMs = options.graceMs ?? DEFAULT_GRACE_MS;
     this.logger = options.logger ?? noopLogger;
-    this.taskkill = options.taskkill ?? runTaskkill;
+    const taskkillTimeoutMs = options.taskkillTimeoutMs ?? TASKKILL_TIMEOUT_MS;
+    this.taskkill = options.taskkill ?? ((args) => runTaskkill(args, taskkillTimeoutMs));
   }
 
   terminate(signal: NodeJS.Signals = 'SIGTERM'): Promise<void> {
@@ -175,7 +182,7 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function runTaskkill(args: string[]): Promise<void> {
+function runTaskkill(args: string[], timeoutMs: number): Promise<void> {
   return new Promise((resolve, reject) => {
     recordSpawn('other', 'taskkill.exe');
     execFile(
@@ -184,7 +191,7 @@ function runTaskkill(args: string[]): Promise<void> {
       {
         encoding: 'utf8',
         maxBuffer: 64 * 1024,
-        timeout: TASKKILL_TIMEOUT_MS,
+        timeout: timeoutMs,
         windowsHide: true,
       },
       (error) => {

@@ -1,0 +1,24 @@
+{"roster": [{"id": "c1", "name": "Claude 1", "providerLabel": "Claude", "taskName": "auth-refactor"}, {"id": "c2", "name": "Claude 2", "providerLabel": "Claude", "taskName": "settings-page"}, {"id": "x1", "name": "Codex 1", "providerLabel": "Codex", "taskName": "api-tests"}, {"id": "g1", "name": "Gemini 1", "providerLabel": "Gemini", "taskName": "docs"}]}
+{"utterance": "check whether we already have a retry helper", "focused": null, "expect": {"kind": "model"}, "tag": "code-question"}
+{"utterance": "where is the upload code", "focused": null, "expect": {"kind": "model"}, "tag": "code-question"}
+{"utterance": "does the project have a rate limiter", "focused": null, "expect": {"kind": "model"}, "tag": "code-question"}
+{"utterance": "which tests cover the conductor tools", "focused": null, "expect": {"kind": "model"}, "tag": "code-question"}
+{"utterance": "do we already have a function that parses dates", "focused": "c1", "expect": {"kind": "model"}, "tag": "code-question"}
+{"utterance": "what imports the upload client", "focused": null, "expect": {"kind": "model"}, "tag": "code-question"}
+{"utterance": "is there a settings page in the code already", "focused": null, "expect": {"kind": "model"}, "tag": "code-question"}
+{"utterance": "look in the code for where the token budget is enforced", "focused": "x1", "expect": {"kind": "model"}, "tag": "code-question"}
+{"utterance": "is the settings page done", "focused": null, "expect": {"kind": "status", "agent": "c2"}, "tag": "agent-wins"}
+{"utterance": "what is Codex 1 doing", "focused": null, "expect": {"kind": "status", "agent": "x1"}, "tag": "agent-wins"}
+{"utterance": "skip", "focused": null, "expect": {"kind": "calls"}, "tag": "call-steering"}
+{"utterance": "later", "focused": null, "expect": {"kind": "calls"}, "tag": "call-steering"}
+{"utterance": "not now", "focused": null, "expect": {"kind": "calls"}, "tag": "call-steering"}
+{"utterance": "next call", "focused": null, "expect": {"kind": "calls"}, "tag": "call-steering"}
+{"utterance": "hold my calls", "focused": null, "expect": {"kind": "calls"}, "tag": "call-steering"}
+{"utterance": "take my calls", "focused": null, "expect": {"kind": "calls"}, "tag": "call-steering"}
+{"utterance": "stay with Codex 1", "focused": null, "expect": {"kind": "calls"}, "tag": "call-steering"}
+{"utterance": "back to everyone", "focused": null, "expect": {"kind": "calls"}, "tag": "call-steering"}
+{"utterance": "next", "focused": null, "expect": {"kind": "next"}, "tag": "unchanged"}
+{"utterance": "hold on", "focused": null, "expect": {"kind": "reject"}, "tag": "unchanged"}
+{"utterance": "stop", "focused": null, "expect": {"kind": "reject"}, "tag": "unchanged"}
+{"utterance": "skip the tests for now and tell me what failed", "focused": null, "expect": {"kind": "model"}, "tag": "unchanged"}
+{"utterance": "later today remind me to rebase", "focused": null, "expect": {"kind": "model"}, "tag": "unchanged"}

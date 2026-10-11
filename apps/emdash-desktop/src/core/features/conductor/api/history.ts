@@ -42,6 +42,80 @@ export function dropStaleContexts(
   });
 }
 
+/** How a code check's result is fenced in a tool result (see investigation-format.ts). */
+const CODE_CHECK_OPEN = '<code-check ';
+/** Stands in for a code check's result once it is too old to plan from. */
+export const CODE_CHECK_REMOVED = '[code check result removed]';
+/** Marks a turn started by Maestro (a finished agent, an agent's request), not the developer. */
+export const MAESTRO_EVENT_MARK = '[Maestro event, not the developer speaking]';
+/** Developer turns a check's result stays in context for, after the turn that made it. */
+export const CODE_CHECK_TURNS = 2;
+
+function toolResultText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((part: { type?: string; text?: string }) =>
+      part.type === 'text' ? (part.text ?? '') : ''
+    )
+    .join('');
+}
+
+function holdsCodeCheck(message: Anthropic.Beta.BetaMessageParam): boolean {
+  if (message.role !== 'user' || typeof message.content === 'string') return false;
+  return message.content.some(
+    (block) =>
+      block.type === 'tool_result' && toolResultText(block.content).includes(CODE_CHECK_OPEN)
+  );
+}
+
+/**
+ * True when a code check's result is in these messages: text a scout read from the repository is
+ * then in front of the model, and what the model does next needs the developer's explicit yes.
+ */
+export function hasCodeCheck(messages: readonly Anthropic.Beta.BetaMessageParam[]): boolean {
+  return messages.some(holdsCodeCheck);
+}
+
+/**
+ * Replaces a code check's result with a one-line marker once the developer has made two more
+ * requests since the turn that ran it. They keep the answer for that turn and their next two;
+ * after that it is stale, and it no longer makes every action ask first. Turns Maestro started
+ * (an agent finishing) do not use up the count.
+ */
+export function compactCodeChecks(
+  messages: Anthropic.Beta.BetaMessageParam[],
+  keepTurns = CODE_CHECK_TURNS
+): Anthropic.Beta.BetaMessageParam[] {
+  if (!hasCodeCheck(messages)) return messages;
+  // For each message, how many developer turns start after it.
+  const laterTurns = new Array<number>(messages.length).fill(0);
+  let count = 0;
+  for (let index = messages.length - 1; index >= 0; index--) {
+    laterTurns[index] = count;
+    const message = messages[index];
+    if (
+      message?.role === 'user' &&
+      typeof message.content === 'string' &&
+      !message.content.includes(MAESTRO_EVENT_MARK)
+    ) {
+      count++;
+    }
+  }
+  return messages.map((message, index) => {
+    if ((laterTurns[index] ?? 0) < keepTurns || !holdsCodeCheck(message)) return message;
+    if (typeof message.content === 'string') return message;
+    return {
+      ...message,
+      content: message.content.map((block) =>
+        block.type === 'tool_result' && toolResultText(block.content).includes(CODE_CHECK_OPEN)
+          ? { ...block, content: CODE_CHECK_REMOVED }
+          : block
+      ),
+    };
+  });
+}
+
 /** Stands in for a screenshot dropped from context. */
 export const SCREENSHOT_OMITTED = '[screenshot omitted]';
 

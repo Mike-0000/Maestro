@@ -17,6 +17,7 @@ import { observer } from 'mobx-react-lite';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getCanvasStore } from '@core/features/canvas/contributions/browser/app-stores';
 import { settingsViewDef } from '@core/features/settings/contributions/views';
+import { getTalkStore } from '@core/features/talk/contributions/browser/app-stores';
 import { getVoiceStore } from '@core/features/voice/contributions/browser/app-stores';
 import { getNavigation } from '@core/primitives/navigation/browser/navigation-selectors';
 import { useLocalStorage } from '@core/primitives/react-hooks/browser/useLocalStorage';
@@ -27,7 +28,9 @@ import {
   type SuggestableProvider,
 } from '../../api/agent-suggestions';
 import { getConductorStore } from '../../contributions/browser/app-stores';
+import { CallCard } from './call-card';
 import { ConductorLogPanel } from './conductor-log-panel';
+import { InvestigationCard } from './investigation-card';
 import { LocalUpdateCard } from './local-update-card';
 import { PendingActionCard } from './pending-action-card';
 import { pendingKeyAction } from './pending-keys';
@@ -83,6 +86,9 @@ export const ConductorHud = observer(function ConductorHud() {
     transcribing ||
     conductor.busy ||
     conductor.pending !== null ||
+    conductor.calls.current !== null ||
+    conductor.investigation !== null ||
+    conductor.lastInvestigation !== null ||
     (replyVisible && conductor.reply !== '') ||
     error !== null ||
     showLog;
@@ -101,6 +107,7 @@ export const ConductorHud = observer(function ConductorHud() {
         <div className="flex items-center gap-2">
           <CommandBox />
           <MicButton />
+          <LineIndicator />
           <div role="status" aria-live="polite" className="min-w-0 flex-1 overflow-hidden text-sm">
             <StatusLine />
           </div>
@@ -154,6 +161,10 @@ export const ConductorHud = observer(function ConductorHud() {
             Ignored “{voice.ignoredUtterance}” (no wake phrase)
           </p>
         )}
+
+        <CallCard />
+
+        <InvestigationCard />
 
         {conductor.pending && <PendingActionCard />}
 
@@ -209,6 +220,42 @@ const MicButton = observer(function MicButton() {
         <Mic className="relative size-4" />
       )}
     </button>
+  );
+});
+
+/**
+ * The talk line, when one is wanted: whether it is open, and whether its microphone is open for
+ * talk right now. Shown only while the line is turned on.
+ */
+const LineIndicator = observer(function LineIndicator() {
+  const talk = getTalkStore();
+  if (talk.line === 'off') return null;
+  const label =
+    talk.line === 'open'
+      ? talk.windowOpen
+        ? 'Talk line: listening (talk only; tap the talk key to act)'
+        : talk.speaking
+          ? 'Talk line: speaking'
+          : 'Talk line: open'
+      : talk.line === 'connecting'
+        ? 'Talk line: connecting'
+        : `Talk line: not connected${talk.error ? ` (${talk.error})` : ''}`;
+  return (
+    <span
+      role="status"
+      aria-label={label}
+      title={label}
+      className={cn(
+        'size-2.5 shrink-0 rounded-full',
+        talk.line === 'open'
+          ? talk.windowOpen
+            ? 'bg-emerald-500 ring-2 ring-emerald-500/40'
+            : 'bg-emerald-500/70'
+          : talk.line === 'connecting'
+            ? 'animate-pulse bg-amber-500'
+            : 'bg-red-500/70'
+      )}
+    />
   );
 });
 

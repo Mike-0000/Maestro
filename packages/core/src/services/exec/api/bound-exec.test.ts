@@ -216,6 +216,212 @@ describe('BoundExec', () => {
   });
 });
 
+/** Prints what arrived on standard input once it closes. */
+const ECHO_STDIN = [
+  "process.stdin.setEncoding('utf8');",
+  "let input = '';",
+  "process.stdin.on('data', (chunk) => { input += chunk; });",
+  "process.stdin.on('end', () => console.log(JSON.stringify({ input })));",
+].join(' ');
+
+describe('BoundExec input', () => {
+  it('writes input to standard input and closes it', async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), 'emdash-shared-exec-input-'));
+
+    const result = await createBoundExec({ file: process.execPath, cwd }).exec(['-e', ECHO_STDIN], {
+      input: 'a question\nover two lines',
+      timeoutMs: 10_000,
+    });
+
+    expect(JSON.parse(result.stdout)).toEqual({ input: 'a question\nover two lines' });
+  });
+
+  it('closes standard input for an empty input', async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), 'emdash-shared-exec-input-empty-'));
+
+    // The child only exits when standard input ends; left open, this would time out.
+    const result = await createBoundExec({ file: process.execPath, cwd }).exec(['-e', ECHO_STDIN], {
+      input: '',
+      timeoutMs: 10_000,
+    });
+
+    expect(JSON.parse(result.stdout)).toEqual({ input: '' });
+  });
+
+  it('rejects a missing executable given input, with no unhandled stream error', async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), 'emdash-shared-exec-input-missing-'));
+    const file = path.join(cwd, 'missing-executable');
+    const unhandled: unknown[] = [];
+    const record = (error: unknown) => unhandled.push(error);
+    process.on('uncaughtException', record);
+    process.on('unhandledRejection', record);
+    try {
+      await expect(
+        createBoundExec({ file, cwd }).exec([], { input: 'never read' })
+      ).rejects.toMatchObject({
+        name: 'ExecError',
+        exitCode: null,
+        cause: { code: 'ENOENT' },
+      });
+      // A stream error surfaces on a later tick than the spawn error.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('uncaughtException', record);
+      process.off('unhandledRejection', record);
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('survives a child that exits without reading its input', async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), 'emdash-shared-exec-input-unread-'));
+    const unhandled: unknown[] = [];
+    const record = (error: unknown) => unhandled.push(error);
+    process.on('uncaughtException', record);
+    process.on('unhandledRejection', record);
+    try {
+      // More than a pipe buffer holds, so the write is still pending when the child is gone.
+      await expect(
+        createBoundExec({ file: process.execPath, cwd }).exec(['-e', 'process.exit(3)'], {
+          input: 'x'.repeat(4 * 1024 * 1024),
+          timeoutMs: 10_000,
+        })
+      ).rejects.toMatchObject({ name: 'ExecError', exitCode: 3 });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('uncaughtException', record);
+      process.off('unhandledRejection', record);
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * A `.cmd` shim is how several CLIs are installed on Windows. cmd.exe is then the child, and the
+ * program is its grandchild: the stop has to reach the grandchild, and the call has to return.
+ */
+describe.skipIf(process.platform !== 'win32')('BoundExec killSignal through a .cmd shim', () => {
+  const SETTLE_MS = 3_000;
+
+  async function shim(): Promise<string> {
+    const dir = await mkdtemp(path.join(tmpdir(), 'emdash-shared-exec-shim-'));
+    const script = path.join(dir, 'grandchild.js');
+    // It ends on its own after a while, so a run where the stop fails leaves nothing behind.
+    await writeFile(
+      script,
+      "process.stdout.write(String(process.pid) + '\\n'); setTimeout(() => {}, 30_000);\n",
+      'utf8'
+    );
+    const wrapper = path.join(dir, 'tool.cmd');
+    await writeFile(wrapper, `@echo off\r\n"${process.execPath}" "${script}" %*\r\n`, 'utf8');
+    return wrapper;
+  }
+
+  /** Fails with a reason instead of hanging when the stop never reaches the grandchild. */
+  function settled<T>(execution: Promise<T>, stop: string): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`The call did not settle within ${SETTLE_MS}ms of ${stop}.`)),
+        SETTLE_MS
+      );
+    });
+    return Promise.race([execution, deadline]).finally(() => clearTimeout(timer));
+  }
+
+  function grandchildPid(): { read: (chunk: string) => void; pid: Promise<number> } {
+    let resolve: (pid: number) => void = () => {};
+    const pid = new Promise<number>((done) => {
+      resolve = done;
+    });
+    let text = '';
+    return {
+      pid,
+      read: (chunk) => {
+        text += chunk;
+        const match = /^(\d+)\r?\n/.exec(text);
+        if (match) resolve(Number.parseInt(match[1] ?? '', 10));
+      },
+    };
+  }
+
+  it('kills the grandchild and settles after a timeout', { timeout: 15_000 }, async () => {
+    const wrapper = await shim();
+    const grandchild = grandchildPid();
+    const timeoutMs = 1_500;
+    // Observed at once, so the rejection is never unhandled while the test waits for the stop.
+    const outcome = createBoundExec({ file: wrapper, cwd: path.dirname(wrapper) })
+      .execStreaming([], grandchild.read, { timeoutMs, killSignal: 'SIGKILL', windowsHide: true })
+      .then(
+        () => 'resolved',
+        (error: unknown) => error
+      );
+    await new Promise((resolve) => setTimeout(resolve, timeoutMs));
+
+    await expect(settled(outcome, 'the timeout')).resolves.toMatchObject({
+      stderr: `Timed out after ${timeoutMs}ms`,
+    });
+    await expectGone(await grandchild.pid);
+  });
+
+  it('kills the grandchild and settles after an abort', { timeout: 15_000 }, async () => {
+    const wrapper = await shim();
+    const grandchild = grandchildPid();
+    const controller = new AbortController();
+    const outcome = createBoundExec({ file: wrapper, cwd: path.dirname(wrapper) })
+      .execStreaming([], grandchild.read, {
+        signal: controller.signal,
+        killSignal: 'SIGKILL',
+        windowsHide: true,
+      })
+      .then(
+        () => 'resolved',
+        (error: unknown) => error
+      );
+    const pid = await grandchild.pid;
+
+    controller.abort();
+
+    await expect(settled(outcome, 'the abort')).resolves.toMatchObject({ name: 'AbortError' });
+    await expectGone(pid);
+  });
+
+  it(
+    'kills the grandchild and settles after the stream handler returns false',
+    { timeout: 15_000 },
+    async () => {
+      const wrapper = await shim();
+      const grandchild = grandchildPid();
+      const execution = createBoundExec({
+        file: wrapper,
+        cwd: path.dirname(wrapper),
+      }).execStreaming(
+        [],
+        (chunk) => {
+          grandchild.read(chunk);
+          return false;
+        },
+        { killSignal: 'SIGKILL', windowsHide: true }
+      );
+      const pid = await grandchild.pid;
+
+      await expect(settled(execution, 'the stream handler returning false')).resolves.toBe(
+        undefined
+      );
+      await expectGone(pid);
+    }
+  );
+});
+
+/** The process table can trail the kill by a moment. */
+async function expectGone(pid: number): Promise<void> {
+  for (let attempt = 0; attempt < 50 && isProcessAlive(pid); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  expect(isProcessAlive(pid)).toBe(false);
+}
+
 function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);

@@ -25,8 +25,41 @@ export type VoiceErrorState = {
   kind: 'mic-permission' | 'mic-missing' | 'engine' | 'not-configured' | 'other';
 };
 
+/**
+ * The developer started speaking, or a capture ended without handing a transcript on (it was
+ * cancelled, too short, failed, or lacked the wake phrase). A capture that produced a transcript
+ * ends with the transcript handler, not with an event.
+ */
+export type CaptureEvent =
+  | {
+      readonly type: 'start';
+      readonly interactionId: string;
+      readonly origin: ListenOrigin;
+      readonly intent: TranscriptIntent;
+    }
+  | {
+      readonly type: 'end';
+      readonly interactionId: string;
+      readonly reason: 'cancelled' | 'too-short' | 'failed' | 'ignored';
+    };
+
+/** How a spoken sentence ended; `suppressed` when it was never started (muted, or listening). */
+export type SpeechResult = 'ended' | 'cancelled' | 'failed' | 'suppressed';
+
+export type SpeakOptions = {
+  /** `system` uses the computer's own voice: no network wait, and it never paraphrases. */
+  readonly voice?: 'main' | 'system';
+  /** An attention notice follows the speak-attention setting; anything else speak-replies. */
+  readonly attention?: boolean;
+  readonly interactionId?: string;
+};
+
 /** Utterances shorter than this are treated as accidental taps. */
 const MIN_UTTERANCE_MS = 300;
+/** A tap-started capture with no speech at all is dropped after this long. */
+const NO_SPEECH_MS = 6_000;
+/** A second report of a tap this soon after the one that opened the microphone is the same tap. */
+const TAP_REPEAT_MS = 600;
 /** A hands-free utterance (which ends on a pause) never records longer than this. */
 const MAX_HANDS_FREE_MS = 60_000;
 /**
@@ -63,6 +96,13 @@ export class VoiceStore {
   private maxTimer: ReturnType<typeof setTimeout> | null = null;
   private handler: TranscriptHandler | null = null;
   private traceHandler: ((event: TraceEvent) => void) | null = null;
+  private captureHandler: ((event: CaptureEvent) => void) | null = null;
+  /** Asked on a tap of the talk key: true when something is waiting for a spoken answer. */
+  private tapGate: (() => boolean) | null = null;
+  /** How long a tap-started capture has heard nothing, in ms. */
+  private quietMs = 0;
+  private endsOnPause = false;
+  private lastTapAt = 0;
   private interactionId: string | null = null;
   private vocabulary: () => string[] = () => [];
   private disposers: (() => void)[] = [];
@@ -70,6 +110,11 @@ export class VoiceStore {
   constructor() {
     makeAutoObservable<
       VoiceStore,
+      | 'captureHandler'
+      | 'tapGate'
+      | 'quietMs'
+      | 'endsOnPause'
+      | 'lastTapAt'
       | 'recorder'
       | 'silence'
       | 'maxTimer'
@@ -85,6 +130,11 @@ export class VoiceStore {
       | 'interactionId'
     >(this, {
       speech: false,
+      captureHandler: false,
+      tapGate: false,
+      quietMs: false,
+      endsOnPause: false,
+      lastTapAt: false,
       recorder: false,
       silence: false,
       onset: false,
@@ -147,6 +197,24 @@ export class VoiceStore {
     this.traceHandler = handler;
   }
 
+  setCaptureHandler(handler: (event: CaptureEvent) => void): void {
+    this.captureHandler = handler;
+  }
+
+  setTapGate(gate: () => boolean): void {
+    this.tapGate = gate;
+  }
+
+  /** True from the moment the microphone opens until the transcript is handed on. */
+  get capturing(): boolean {
+    return this.phase === 'listening' || this.phase === 'transcribing';
+  }
+
+  private captureEnded(reason: Extract<CaptureEvent, { type: 'end' }>['reason']): void {
+    const interactionId = this.interactionId;
+    if (interactionId) this.captureHandler?.({ type: 'end', interactionId, reason });
+  }
+
   private trace(
     kind: TraceEvent['kind'],
     text?: string,
@@ -180,12 +248,15 @@ export class VoiceStore {
   async startListening(
     mode: ListenMode,
     intent: TranscriptIntent = 'command',
-    origin: ListenOrigin = 'user'
+    origin: ListenOrigin = 'user',
+    options: { endOnPause?: boolean } = {}
   ): Promise<void> {
     if (this.phase === 'listening' || this.phase === 'transcribing') return;
     this.speech.stop(); // barge-in
-    this.interactionId = crypto.randomUUID();
+    const interactionId = crypto.randomUUID();
+    this.interactionId = interactionId;
     this.trace('capture', undefined, { mode, intent, origin });
+    this.captureHandler?.({ type: 'start', interactionId, origin, intent });
     this.mode = mode;
     this.intent = intent;
     this.origin = origin;
@@ -193,9 +264,11 @@ export class VoiceStore {
     this.ignoredUtterance = null;
     this.level = 0;
     this.partial = '';
-    // Only hands-free listening ends on a pause; otherwise the user ends it by releasing the hold
-    // key, pressing the toggle shortcut again, or clicking Send.
-    this.silence = origin === 'hands-free' ? new SilenceDetector() : null;
+    // Hands-free listening and a tap end on a pause; otherwise the user ends it by releasing the
+    // hold key, pressing the toggle shortcut again, or clicking Send.
+    this.endsOnPause = origin === 'hands-free' || options.endOnPause === true;
+    this.quietMs = 0;
+    this.silence = this.endsOnPause ? new SilenceDetector() : null;
     this.phase = 'listening';
     this.openStream();
     try {
@@ -207,12 +280,33 @@ export class VoiceStore {
         this.phase = 'error';
         this.error = describeMicError(error);
       });
+      this.captureEnded('failed');
       return;
     }
     if (mode === 'toggle') {
-      const maxMs = origin === 'hands-free' ? MAX_HANDS_FREE_MS : MAX_MANUAL_MS;
+      const maxMs = this.endsOnPause ? MAX_HANDS_FREE_MS : MAX_MANUAL_MS;
       this.maxTimer = setTimeout(() => void this.stopListening(), maxMs);
     }
+  }
+
+  /**
+   * One tap of the talk key. It answers whatever is waiting for a spoken reply: the capture it
+   * starts ends on a pause, and a second tap sends it at once. With nothing waiting it does
+   * nothing, so a stray tap never opens the microphone.
+   */
+  tap(): void {
+    const now = Date.now();
+    if (this.phase === 'listening') {
+      // The in-app key and the system-wide key hook can both report the tap that started this.
+      if (now - this.lastTapAt < TAP_REPEAT_MS) return;
+      if (this.mode === 'toggle' && this.endsOnPause && this.origin === 'user') {
+        void this.stopListening();
+      }
+      return;
+    }
+    if (this.phase !== 'idle' || !this.tapGate?.()) return;
+    this.lastTapAt = now;
+    void this.startListening('toggle', 'command', 'user', { endOnPause: true });
   }
 
   async stopListening(): Promise<void> {
@@ -226,6 +320,7 @@ export class VoiceStore {
         this.phase = 'idle';
         this.level = 0;
       });
+      this.captureEnded('too-short');
       return;
     }
     runInAction(() => {
@@ -267,6 +362,7 @@ export class VoiceStore {
             kind: result.error.type === 'not-configured' ? 'not-configured' : 'engine',
           };
         });
+        this.captureEnded('failed');
         return;
       }
       await this.finishTranscript(
@@ -283,6 +379,7 @@ export class VoiceStore {
         this.phase = 'error';
         this.error = { message: 'Transcription failed. See the log for details.', kind: 'other' };
       });
+      this.captureEnded('failed');
     }
   }
 
@@ -294,6 +391,8 @@ export class VoiceStore {
     this.recorder.cancel();
     this.phase = 'idle';
     this.level = 0;
+    // After the phase changed, so a listener sees the microphone closed.
+    this.captureEnded('cancelled');
   }
 
   async toggle(intent: TranscriptIntent = 'command'): Promise<void> {
@@ -319,7 +418,15 @@ export class VoiceStore {
       // Smooth for the HUD meter.
       this.level = this.level * 0.6 + Math.min(1, level * 6) * 0.4;
     });
-    if (this.silence?.push(level, durationMs)) void this.stopListening();
+    if (this.silence?.push(level, durationMs)) {
+      void this.stopListening();
+      return;
+    }
+    // A tap that nobody spoke after: close the microphone instead of waiting out the full limit.
+    if (this.origin === 'user' && this.endsOnPause && this.silence && !this.silence.hasSpeech) {
+      this.quietMs += durationMs;
+      if (this.quietMs >= NO_SPEECH_MS) this.cancelListening();
+    }
   }
 
   /** Applies the wake phrase to hands-free speech, records the transcript, and hands it off. */
@@ -353,10 +460,15 @@ export class VoiceStore {
     const capture = this.captureNext;
     if (capture) {
       this.captureNext = null;
+      this.captureEnded('ignored');
       capture(text);
       return;
     }
-    if (command) await this.handler?.(command, intent, this.interactionId ?? crypto.randomUUID());
+    if (!command) {
+      this.captureEnded('ignored');
+      return;
+    }
+    await this.handler?.(command, intent, this.interactionId ?? crypto.randomUUID());
   }
 
   /**
@@ -447,11 +559,12 @@ export class VoiceStore {
 
   /** Global hold-to-talk from the system-wide key hook (works while other apps are focused). */
   private onGlobalHold(
-    action: 'start' | 'stop' | 'cancel',
+    action: 'start' | 'stop' | 'cancel' | 'tap',
     intent: TranscriptIntent = 'command'
   ): void {
     if (action === 'start') void this.startListening('hold', intent);
     else if (action === 'stop') void this.stopListening();
+    else if (action === 'tap') this.tap();
     else this.cancelListening();
   }
 
@@ -484,8 +597,49 @@ export class VoiceStore {
       this.trace('speech', undefined, { status: 'suppressed' }, id);
       return;
     }
-    this.trace('speech', undefined, { status: 'requested' }, id);
-    this.speech.speak(text, (status) => this.trace('speech', undefined, { status }, id));
+    void this.play(text, id, false);
+  }
+
+  /**
+   * Speaks one sentence and resolves when it has ended, however it ended. It never talks over the
+   * developer: while the microphone is open the sentence is not started.
+   */
+  speak(text: string, options: SpeakOptions = {}): Promise<SpeechResult> {
+    const id = options.interactionId ?? this.interactionId;
+    const allowed = options.attention
+      ? this.settings?.speakAttention !== false
+      : this.settings?.speakReplies !== false;
+    if (this.muted || !allowed || this.isListening) {
+      this.trace('speech', undefined, { status: 'suppressed' }, id);
+      return Promise.resolve('suppressed');
+    }
+    return this.play(text, id, options.voice === 'system');
+  }
+
+  private play(text: string, id: string | null, system: boolean): Promise<SpeechResult> {
+    this.trace(
+      'speech',
+      undefined,
+      { status: 'requested', ...(system ? { voice: 'system' } : {}) },
+      id
+    );
+    const requestedAt = performance.now();
+    return new Promise<SpeechResult>((resolve) => {
+      this.speech.speak(
+        text,
+        (status) => {
+          if (status === 'started') {
+            // How long the developer waited for the first sound.
+            const ms = Math.round(performance.now() - requestedAt);
+            this.trace('speech', undefined, { status, ms }, id);
+            return;
+          }
+          this.trace('speech', undefined, { status }, id);
+          resolve(status);
+        },
+        { platform: system }
+      );
+    });
   }
 
   /** Speaks an attention event such as "Codex 1 needs permission". */

@@ -6,6 +6,9 @@
  *
  * A double tap latches instead: two quick taps start listening without holding the key, and one
  * more tap stops. Other keys do not cancel a latched utterance, since nothing is being held.
+ *
+ * A single tap that no second tap follows is reported as `tap`: it answers whatever is waiting
+ * for a spoken reply, and does nothing when nothing is.
  */
 
 export const HOLD_DELAY_MS = 180;
@@ -17,7 +20,8 @@ export const LATCH_MAX_MS = 5 * 60_000;
 export type HoldOutput =
   | { type: 'start'; intent: 'command' | 'dictation' }
   | { type: 'stop' }
-  | { type: 'cancel' };
+  | { type: 'cancel' }
+  | { type: 'tap' };
 
 export type HoldTimers = {
   set(callback: () => void, ms: number): unknown;
@@ -87,7 +91,9 @@ export class HoldToTalkMachine {
       this.state = 'tapped';
       this.timer = this.timers.set(() => {
         this.timer = null;
-        if (this.state === 'tapped') this.reset();
+        if (this.state !== 'tapped') return;
+        this.reset();
+        this.emit({ type: 'tap' });
       }, DOUBLE_TAP_MS);
       return;
     }

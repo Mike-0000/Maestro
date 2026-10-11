@@ -19,12 +19,14 @@ import {
   type ConductorTurnRecord,
   type ConductorTurnResult,
   type ConductorUsage,
+  type InvestigatorStatus,
   type JevDecision,
   type JevError,
   type TraceEvent,
 } from '../api/contract';
 import type { JevQuestions } from '../api/jev';
 import {
+  cachesByBreakpoint,
   fromOpenAiChoice,
   openRouterEffort,
   toOpenAiMessages,
@@ -57,21 +59,51 @@ function today(): string {
 }
 
 function emptyUsage(): ConductorUsage {
-  return { day: today(), inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 };
+  return {
+    day: today(),
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    investigations: 0,
+    investigationCostUsd: 0,
+  };
 }
 
 function startsWithAny(model: string, prefixes: readonly string[]): boolean {
   return prefixes.some((prefix) => model.startsWith(prefix));
 }
 
+/**
+ * Cache the stable prefix: tools render before the system prompt, so a breakpoint on the last
+ * tool plus one on the system prompt covers the whole static prefix.
+ */
+function withCacheBreakpoint(tools: Anthropic.Beta.BetaTool[]): Anthropic.Beta.BetaTool[] {
+  const lastTool = tools[tools.length - 1];
+  if (lastTool) lastTool.cache_control = { type: 'ephemeral' };
+  return tools;
+}
+
+/** The code-check tool is sent only while the setting is on. */
+const INVESTIGATE_TOOL = 'investigate';
+
 export class ConductorService {
   private readonly credentials: ChorusCredentials;
   private readonly settings: JsonSettingsFile<ConductorSettings>;
   private readonly usage: JsonSettingsFile<ConductorUsage>;
-  private readonly tools = conductorToolDefinitions();
+  /**
+   * Two tool lists, each built once from its own definitions so each carries the breakpoint on
+   * its own last tool: without the code-check tool, and with it. Switching the setting starts a
+   * new cached prefix, once.
+   */
+  private readonly tools = withCacheBreakpoint(
+    conductorToolDefinitions().filter((tool) => tool.name !== INVESTIGATE_TOOL)
+  );
+  private readonly toolsWithInvestigate = withCacheBreakpoint(conductorToolDefinitions());
   private client: { key: string; client: Anthropic } | null = null;
   private readonly diagnostics: InteractionDiagnostics;
   private logWrites: Promise<void> = Promise.resolve();
+  private usageWrites: Promise<void> = Promise.resolve();
+  private investigator: ((settings: ConductorSettings) => InvestigatorStatus) | null = null;
   private pruneTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
@@ -92,10 +124,6 @@ export class ConductorService {
       conductorUsageSchema,
       emptyUsage()
     );
-    // Cache the stable prefix: tools render before the system prompt, so a breakpoint on the
-    // last tool plus one on the system prompt covers the whole static prefix.
-    const lastTool = this.tools[this.tools.length - 1];
-    if (lastTool) lastTool.cache_control = { type: 'ephemeral' };
   }
 
   start(): void {
@@ -123,13 +151,44 @@ export class ConductorService {
   }
 
   async status(): Promise<ConductorStatus> {
+    const settings = await this.settings.read();
     return {
       configured: (await this.credentials.get(await this.providerCredential())) !== null,
       jevReady: (await this.jevRoute()) !== null,
       jevVia: (await this.jevRoute())?.via ?? null,
-      settings: await this.settings.read(),
+      settings,
       usageToday: await this.usageToday(),
+      investigator: this.investigator?.(settings) ?? { state: 'off', reason: null },
     };
+  }
+
+  /**
+   * Lets the code-check service report its state through `status()`. It needs settings from
+   * this class and this class needs its status, so it is attached after both exist. `read` runs
+   * after every model turn: it must answer from memory and never start a process.
+   */
+  attachInvestigator(read: (settings: ConductorSettings) => InvestigatorStatus): void {
+    this.investigator = read;
+  }
+
+  /** The current settings. This class is the only owner of the settings and usage files. */
+  readSettings(): Promise<ConductorSettings> {
+    return this.settings.read();
+  }
+
+  /** Today's code-check questions and what Claude Code reported they cost. */
+  async investigationsToday(): Promise<{ count: number; costUsd: number }> {
+    const usage = await this.usageToday();
+    return { count: usage.investigations, costUsd: usage.investigationCostUsd };
+  }
+
+  /** Adds code-check questions and their reported cost to today's usage. */
+  recordInvestigations(count: number, costUsd: number): Promise<void> {
+    return this.updateUsage((current) => ({
+      ...current,
+      investigations: current.investigations + count,
+      investigationCostUsd: current.investigationCostUsd + costUsd,
+    }));
   }
 
   async updateSettings(patch: Partial<ConductorSettings>): Promise<ConductorStatus> {
@@ -190,7 +249,7 @@ export class ConductorService {
         system: [
           { type: 'text', text: CONDUCTOR_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
         ],
-        tools: this.tools,
+        tools: this.toolsFor(settings),
         messages,
       });
       const turnUsage = {
@@ -243,6 +302,11 @@ export class ConductorService {
     return (await this.settings.read()).provider === 'openrouter' ? 'openrouter' : 'anthropic';
   }
 
+  /** The model sees the code-check tool only while the setting is on. */
+  private toolsFor(settings: ConductorSettings): Anthropic.Beta.BetaTool[] {
+    return settings.investigations ? this.toolsWithInvestigate : this.tools;
+  }
+
   /** The same turn through OpenRouter: translated to chat completions and back to content blocks. */
   private async runOpenRouterTurn(
     key: Secret<string>,
@@ -254,8 +318,10 @@ export class ConductorService {
       const response = await openRouterChat(key, {
         model: settings.openrouterModel,
         max_tokens: mode === 'plan' ? 16000 : 4096,
-        messages: toOpenAiMessages(CONDUCTOR_SYSTEM_PROMPT, messages),
-        tools: toOpenAiTools(this.tools),
+        messages: toOpenAiMessages(CONDUCTOR_SYSTEM_PROMPT, messages, {
+          cacheSystem: cachesByBreakpoint(settings.openrouterModel),
+        }),
+        tools: toOpenAiTools(this.toolsFor(settings)),
         reasoning: {
           effort: openRouterEffort(mode === 'plan' ? settings.planEffort : settings.commandEffort),
         },
@@ -442,14 +508,31 @@ export class ConductorService {
     return usage.day === today() ? usage : emptyUsage();
   }
 
-  private async recordUsage(turn: Omit<ConductorUsage, 'day'>): Promise<void> {
-    const current = await this.usageToday();
-    await this.usage.update({
-      day: current.day,
+  private recordUsage(
+    turn: Pick<ConductorUsage, 'inputTokens' | 'outputTokens' | 'cacheReadTokens'>
+  ): Promise<void> {
+    return this.updateUsage((current) => ({
+      ...current,
       inputTokens: current.inputTokens + turn.inputTokens,
       outputTokens: current.outputTokens + turn.outputTokens,
       cacheReadTokens: current.cacheReadTokens + turn.cacheReadTokens,
+    }));
+  }
+
+  /**
+   * One read-then-write of today's usage. Writers run one after another, so two that overlap
+   * cannot lose an update. Each writes the whole of today's record: a patch would be merged over
+   * the cached record, and carry yesterday's counts into a new day.
+   */
+  private updateUsage(change: (current: ConductorUsage) => ConductorUsage): Promise<void> {
+    const next = this.usageWrites.then(async () => {
+      await this.usage.update(change(await this.usageToday()));
     });
+    this.usageWrites = next.then(
+      () => {},
+      () => {}
+    );
+    return next;
   }
 
   private describeError(error: unknown): ConductorError {

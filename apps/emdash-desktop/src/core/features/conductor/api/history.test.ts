@@ -1,8 +1,12 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { describe, expect, it } from 'vitest';
 import {
+  CODE_CHECK_REMOVED,
+  compactCodeChecks,
   CONTEXT_OMITTED,
   dropStaleContexts,
+  hasCodeCheck,
+  MAESTRO_EVENT_MARK,
   pruneScreenshots,
   SCREENSHOT_OMITTED,
   trimHistory,
@@ -95,5 +99,66 @@ describe('dropStaleContexts', () => {
     expect(kept.slice(1)).toEqual(messages.slice(1));
     // Still a turn start for trimHistory.
     expect(trimHistory(kept, 1)).toEqual(kept.slice(3));
+  });
+});
+
+describe('code checks in history', () => {
+  const check = (id: string): Message[] => [
+    {
+      role: 'assistant',
+      content: [{ type: 'tool_use', id, name: 'investigate', input: { questions: ['q?'] } }],
+    },
+    {
+      role: 'user',
+      content: [
+        {
+          type: 'tool_result',
+          tool_use_id: id,
+          content:
+            'Results from a read-only code scout.\n\n<code-check question="q?">yes</code-check>',
+        },
+      ],
+    },
+    { role: 'assistant', content: [{ type: 'text', text: 'There is one.' }] },
+  ];
+  const developer = (text: string): Message[] => [
+    { role: 'user', content: text },
+    { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+  ];
+  const event: Message[] = [
+    { role: 'user', content: `${MAESTRO_EVENT_MARK} Atlas finished its turn.` },
+    { role: 'assistant', content: [{ type: 'text', text: 'Atlas is done.' }] },
+  ];
+
+  it('finds a check result, and only in a tool result', () => {
+    expect(hasCodeCheck([{ role: 'user', content: 'do we have a helper' }, ...check('c1')])).toBe(
+      true
+    );
+    expect(hasCodeCheck(developer('what does <code-check mean'))).toBe(false);
+    expect(hasCodeCheck([])).toBe(false);
+  });
+
+  it('keeps a result for the turn that made it and the next two requests', () => {
+    const made: Message[] = [{ role: 'user', content: 'do we have a helper' }, ...check('c1')];
+    expect(hasCodeCheck(compactCodeChecks(made))).toBe(true);
+    const one = [...made, ...developer('extend it')];
+    expect(hasCodeCheck(compactCodeChecks(one))).toBe(true);
+    const two = [...one, ...developer('and add a test')];
+    const compacted = compactCodeChecks(two);
+    expect(hasCodeCheck(compacted)).toBe(false);
+    expect(JSON.stringify(compacted)).toContain(CODE_CHECK_REMOVED);
+    // The tool call keeps its result, so the history is still a valid message sequence.
+    expect(compacted).toHaveLength(two.length);
+  });
+
+  it('does not count turns Maestro started', () => {
+    const made: Message[] = [{ role: 'user', content: 'do we have a helper' }, ...check('c1')];
+    const withEvents = [...made, ...event, ...event, ...developer('extend it')];
+    expect(hasCodeCheck(compactCodeChecks(withEvents))).toBe(true);
+  });
+
+  it('returns the same messages when there is no check in them', () => {
+    const plain = developer('focus Atlas');
+    expect(compactCodeChecks(plain)).toBe(plain);
   });
 });

@@ -128,6 +128,8 @@ function fakeCanvas(entries: AgentTileEntry[]): CanvasStore {
     noteDrop: null,
     insights: new Map(),
     spokenName: () => 'Zulu',
+    formerNamesOf: () => [],
+    departedNames: [],
     isOffBoard: () => false,
     waitingSince: () => undefined,
     regionOf: () => null,

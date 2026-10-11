@@ -15,6 +15,7 @@ import { legacyPortContract, legacyPortDomain } from '@core/features/legacy-port
 import { promptLibraryContract, promptLibraryDomain } from '@core/features/library/api';
 import { localUpdatesContract, localUpdatesDomain } from '@core/features/local-updates/api';
 import { machinesContract, machinesDomain } from '@core/features/machines/api';
+import { markdownViewerContract, markdownViewerDomain } from '@core/features/markdown-viewer/api';
 import { mcpContract, mcpDomain } from '@core/features/mcp/api';
 import { previewServersContract, previewServersDomain } from '@core/features/preview-servers/api';
 import { projectsDomain, projectsWireContract } from '@core/features/projects/api';
@@ -23,6 +24,7 @@ import { repositoryContract, repositoryDomain } from '@core/features/repository/
 import { searchContract, searchDomain } from '@core/features/search/api';
 import { skillsContract, skillsDomain } from '@core/features/skills/api';
 import { sourceControlContract, sourceControlDomain } from '@core/features/source-control/api';
+import { talkContract, talkDomain } from '@core/features/talk/api';
 import { tasksDomain, tasksWireContract } from '@core/features/tasks/api';
 import { terminalsContract, terminalsDomain } from '@core/features/terminals/api';
 import { updatesContract, updatesDomain } from '@core/features/updates/api';
@@ -96,4 +98,6 @@ export const desktopDomainContracts = {
   [desktopHostDomain]: desktopHostContract,
   [voiceDomain]: voiceContract,
   [conductorDomain]: conductorContract,
+  [talkDomain]: talkContract,
+  [markdownViewerDomain]: markdownViewerContract,
 } as const;

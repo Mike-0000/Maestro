@@ -18,6 +18,8 @@ import {
 } from './types';
 
 const DEFAULT_MAX_BUFFER = 10 * 1024 * 1024;
+/** How long a forced Windows tree kill may take; measured at 2.1 to 2.6 s on a loaded machine. */
+const FORCED_TASKKILL_TIMEOUT_MS = 10_000;
 
 export type CreateBoundExecOptions = {
   file: string;
@@ -122,12 +124,25 @@ class ProcessBoundExec implements BoundExec {
         env: composedEnv,
         detached: this.platform !== 'win32',
         windowsVerbatimArguments: launch.windowsVerbatimArguments,
+        ...(options.windowsHide === undefined ? {} : { windowsHide: options.windowsHide }),
       };
       recordSpawn(classifySpawnPurpose(this.file, args), launch.executable);
       const child = spawnProcess(launch.executable, launch.args, spawnOptions);
+      if (options.input !== undefined) {
+        // The stream exists even when the spawn failed, and a child that exits before reading
+        // fails the write. Without a listener that stream error is unhandled and takes the
+        // process down; the outcome is reported by the child's own `error` or `close` event.
+        child.stdin?.on('error', () => {});
+        child.stdin?.end(options.input);
+      }
       const terminator = createChildProcessTreeTerminator(child, {
         platform: this.platform,
         processGroup: this.platform !== 'win32',
+        // A caller that asks for a forced stop needs the whole tree gone. On Windows that tree
+        // kill can itself take over two seconds, and cut short it kills only a `.cmd` shim.
+        ...(options.killSignal === 'SIGKILL'
+          ? { taskkillTimeoutMs: FORCED_TASKKILL_TIMEOUT_MS }
+          : {}),
       });
       const maxBuffer = options.maxBuffer ?? DEFAULT_MAX_BUFFER;
       let stderr = '';
@@ -152,7 +167,7 @@ class ProcessBoundExec implements BoundExec {
       const startTermination = (error?: Error): void => {
         if (settled) return;
         terminationError ??= error;
-        terminationPromise ??= terminator.terminate();
+        terminationPromise ??= terminator.terminate(options.killSignal);
       };
       const timeout = options.timeoutMs
         ? setTimeout(() => {

@@ -4,10 +4,20 @@ import type { EnvSource } from '#primitives/exec/api';
 export type ExecOptions = {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  /** Written to the child's standard input, which is then closed. Unset leaves it open. */
+  input?: string;
+  /**
+   * The signal the stop sequence starts with on timeout, abort, a stream handler returning
+   * `false`, and buffer overflow. `SIGKILL` makes the Windows path a forced tree kill at once,
+   * which is what reaches a program started through a `.cmd` shim.
+   */
+  killSignal?: NodeJS.Signals;
   maxBuffer?: number;
   onStderr?: (chunk: string) => void;
   signal?: AbortSignal;
   timeoutMs?: number;
+  /** Keeps a console program started from the packaged app from opening a window on Windows. */
+  windowsHide?: boolean;
 };
 
 export type ExecSpawnOptions = Pick<ExecOptions, 'cwd' | 'env' | 'signal'>;

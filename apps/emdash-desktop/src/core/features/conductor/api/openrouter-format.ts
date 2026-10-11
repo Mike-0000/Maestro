@@ -16,8 +16,15 @@ export type OpenAiUserPart =
   | { type: 'text'; text: string }
   | { type: 'image_url'; image_url: { url: string } };
 
+/** A text part that marks the end of a prompt prefix the provider may cache. */
+export type OpenAiCachedTextPart = {
+  type: 'text';
+  text: string;
+  cache_control: { type: 'ephemeral' };
+};
+
 export type OpenAiMessage =
-  | { role: 'system'; content: string }
+  | { role: 'system'; content: string | OpenAiCachedTextPart[] }
   | { role: 'user'; content: string | OpenAiUserPart[] }
   | { role: 'assistant'; content: string | null; tool_calls?: OpenAiToolCall[] }
   | { role: 'tool'; tool_call_id: string; content: string };
@@ -49,11 +56,27 @@ function imagesOf(content: unknown): string[] {
   );
 }
 
+/**
+ * Anthropic models cache a prompt prefix through OpenRouter only when a breakpoint marks its end.
+ * Tools render before the system prompt, so one breakpoint on the system prompt covers both.
+ */
+export function cachesByBreakpoint(model: string): boolean {
+  return model.startsWith('anthropic/');
+}
+
 export function toOpenAiMessages(
   system: string,
-  messages: readonly Anthropic.Beta.BetaMessageParam[]
+  messages: readonly Anthropic.Beta.BetaMessageParam[],
+  options: { cacheSystem?: boolean } = {}
 ): OpenAiMessage[] {
-  const out: OpenAiMessage[] = [{ role: 'system', content: system }];
+  const out: OpenAiMessage[] = [
+    options.cacheSystem
+      ? {
+          role: 'system',
+          content: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
+        }
+      : { role: 'system', content: system },
+  ];
   for (const message of messages) {
     if (typeof message.content === 'string') {
       out.push({ role: message.role, content: message.content } as OpenAiMessage);

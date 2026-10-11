@@ -24,13 +24,14 @@ describe('HoldToTalkMachine', () => {
     expect(outputs).toEqual([{ type: 'start', intent: 'command' }, { type: 'stop' }]);
   });
 
-  it('ignores a quick tap', () => {
+  it('reports a lone quick tap once no second tap followed, and never starts listening', () => {
     const { machine, outputs } = setup();
     machine.talkDown(false);
     vi.advanceTimersByTime(HOLD_DELAY_MS - 50);
     machine.talkUp();
-    vi.advanceTimersByTime(500);
     expect(outputs).toEqual([]);
+    vi.advanceTimersByTime(DOUBLE_TAP_MS);
+    expect(outputs).toEqual([{ type: 'tap' }]);
   });
 
   it('lets chords through and cancels when typing starts mid-utterance', () => {
@@ -105,7 +106,8 @@ describe('HoldToTalkMachine', () => {
     machine.otherDown(false);
     tap(machine);
     vi.advanceTimersByTime(DOUBLE_TAP_MS + 1);
-    expect(outputs).toEqual([]);
+    // Three lone taps; the one a key was typed after was part of typing.
+    expect(outputs).toEqual([{ type: 'tap' }, { type: 'tap' }, { type: 'tap' }]);
   });
 
   it('dictates when Shift is pressed between the taps and stops a forgotten latch', () => {
