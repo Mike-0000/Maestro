@@ -1,4 +1,12 @@
-import { Button, Collapsible, Field, Input, Label, Tooltip } from '@emdash/ui/react/primitives';
+import {
+  Button,
+  Collapsible,
+  Field,
+  Input,
+  Label,
+  Switch,
+  Tooltip,
+} from '@emdash/ui/react/primitives';
 import { useForm } from '@tanstack/react-form';
 import { ChevronRight, Info, RotateCcw } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
@@ -42,11 +50,14 @@ export interface InstalledAgentContentProps {
     val?: undefined,
     opts?: { onSuccess?: () => void; onError?: (e: unknown) => void }
   ) => void;
+  /** Offer "Run in WSL2": a local Windows host, and an agent that supports it. */
+  showWsl?: boolean;
 }
 
 function makeDefaultValues(cfg: ProviderCustomConfig | undefined) {
   return {
     extraArgs: cfg?.extraArgs ?? '',
+    wsl: cfg?.wsl === true,
     envEntries: cfg?.env
       ? (Object.entries(cfg.env).map(([key, value]) => ({
           key,
@@ -62,6 +73,7 @@ export const InstalledAgentContent = observer(function InstalledAgentContent({
   isLoading,
   update,
   reset,
+  showWsl = false,
 }: InstalledAgentContentProps) {
   const [open, setOpen] = useState(false);
 
@@ -72,12 +84,13 @@ export const InstalledAgentContent = observer(function InstalledAgentContent({
     if (isLoading) return;
     const next = makeDefaultValues(storedConfig);
     form.setFieldValue('extraArgs', next.extraArgs);
+    form.setFieldValue('wsl', next.wsl);
     form.setFieldValue('envEntries', next.envEntries);
   }, [isLoading, storedConfig, isOverridden, form]);
 
   const commit = useCallback(
     (entries?: EnvironmentVariableEntry[]) => {
-      const { extraArgs, envEntries: currentEntries } = form.state.values;
+      const { extraArgs, wsl, envEntries: currentEntries } = form.state.values;
       const envEntries = entries ?? currentEntries;
       const envRecord: Record<string, string> = {};
       for (const { key, value } of envEntries) {
@@ -87,7 +100,8 @@ export const InstalledAgentContent = observer(function InstalledAgentContent({
         }
       }
 
-      const isAtDefaults = extraArgs.trim() === '' && envEntries.every((e) => !e.key.trim());
+      const isAtDefaults =
+        extraArgs.trim() === '' && !wsl && envEntries.every((e) => !e.key.trim());
 
       if (isAtDefaults) {
         reset(undefined, {
@@ -98,6 +112,7 @@ export const InstalledAgentContent = observer(function InstalledAgentContent({
           ...(storedConfig ?? {}),
           extraArgs: extraArgs.trim() || undefined,
           env: Object.keys(envRecord).length > 0 ? envRecord : undefined,
+          wsl: wsl || undefined,
         };
         update(config, {
           onError: (err) => log.error('Failed to save agent config:', err),
@@ -109,6 +124,7 @@ export const InstalledAgentContent = observer(function InstalledAgentContent({
 
   const handleResetToDefaults = useCallback(() => {
     form.setFieldValue('extraArgs', '');
+    form.setFieldValue('wsl', false);
     form.setFieldValue('envEntries', []);
     reset(undefined, {
       onError: (err) => log.error('Failed to reset agent config:', err),
@@ -166,6 +182,30 @@ export const InstalledAgentContent = observer(function InstalledAgentContent({
               </Field.Root>
             )}
           </form.Field>
+
+          {/* Run in WSL2 */}
+          {showWsl && (
+            <form.Field name="wsl">
+              {(field) => (
+                <Field.Root>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <Label htmlFor="sheet-wsl">Run in WSL2</Label>
+                      <FieldTooltip content="Starts this agent's terminal sessions inside your default WSL2 distro. The agent must be installed and signed in there. Without such a distro it runs on Windows as before. Chat sessions always run on Windows." />
+                    </div>
+                    <Switch
+                      id="sheet-wsl"
+                      checked={field.state.value}
+                      onCheckedChange={(checked) => {
+                        field.handleChange(checked);
+                        commit();
+                      }}
+                    />
+                  </div>
+                </Field.Root>
+              )}
+            </form.Field>
+          )}
 
           {/* Environment variables */}
           <form.Field name="envEntries">

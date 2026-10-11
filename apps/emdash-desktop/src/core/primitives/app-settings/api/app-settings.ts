@@ -61,6 +61,11 @@ export type InterfaceSettings = {
 export type ProviderCustomConfig = {
   extraArgs?: string;
   env?: Record<string, string>;
+  /**
+   * Windows only: run this agent's terminal sessions inside WSL2 when the default distro has
+   * its CLI. Without such a distro the agent runs natively, as if this were off.
+   */
+  wsl?: boolean;
 };
 export type ProviderCustomConfigs = Record<string, ProviderCustomConfig>;
 

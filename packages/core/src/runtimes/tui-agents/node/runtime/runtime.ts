@@ -64,8 +64,27 @@ import { createSessionLifecycle } from '#services/session-lifecycle/node';
 import { TuiAgentStates } from './agent-state';
 import { spillLargePrompt, type PromptSpillResult } from './prompt-spill';
 import type { TuiAgentsRuntimeDeps, TuiSessionConfig } from './types';
+import {
+  parseWslProbe,
+  toWslArg,
+  withWslEnv,
+  wslHomeShare,
+  wslProbeLine,
+  type WslTarget,
+} from './wsl-launch';
 
 const RESUME_FALLBACK_WINDOW_MS = 3_000;
+/** How long a look into WSL is believed, found or not. */
+const WSL_PROBE_TTL_MS = 60_000;
+/** A distro that has to boot first answers within this; one that does not is not used. */
+const WSL_PROBE_TIMEOUT_MS = 15_000;
+
+/** The CLI's name as it is called inside a distro: the host executable without path or extension. */
+function wslCliName(hostCommand: string): string | null {
+  const base = hostCommand.split(/[\\/]/).pop() ?? '';
+  const name = base.replace(/\.(?:exe|cmd|bat|ps1|com)$/i, '');
+  return /^[A-Za-z0-9._-]+$/.test(name) ? name : null;
+}
 const RESPAWN_DELAY_MS = 500;
 const MAX_UNEXPECTED_RESPAWNS = 1;
 const BUSY_OUTPUT_WINDOW_MS = 60_000;
@@ -104,6 +123,8 @@ export class TuiAgentsRuntime {
   private tmuxActivity = new Map<string, number>();
   private readonly unexpectedRespawns = new Map<string, number>();
   private readonly promptSpills = new Map<string, PromptSpillResult>();
+  /** What the last look into WSL found for each CLI name, kept for a minute. */
+  private readonly wslProbes = new Map<string, { at: number; target: WslTarget | null }>();
   /**
    * Latest grid size a viewer asked for, recorded even while no process is running. The
    * renderer attaches to the output log and sends its first resize before the spawn lands, so
@@ -538,13 +559,17 @@ export class TuiAgentsRuntime {
       return err({ type: 'spawn-failed', conversationId: config.input.conversationId, message });
     }
     const command = commandResult.data;
-    if (config.input.trustWorkspace === true) {
+    // Asked to run inside WSL2: only when a distro there has the CLI. Otherwise the agent
+    // starts natively, exactly as it would with the setting off.
+    const wsl = config.input.wsl ? await this.wslTarget(config.input, command) : null;
+    // The trust record is the host's; inside WSL the agent keeps its own and asks for itself.
+    if (config.input.trustWorkspace === true && !wsl) {
       await this.workspaceTrust.ensureTrusted({
         providerId: config.input.providerId,
         workspacePath: config.input.cwd,
       });
     }
-    const hookEnv = await this.prepareHookEnv(config.input, provider);
+    const hookEnv = await this.prepareHookEnv(config.input, provider, wsl);
     if (!this.isCurrentGeneration(config.input.conversationId, generation)) {
       return this.cancelledSpawn(config.input.conversationId);
     }
@@ -565,7 +590,7 @@ export class TuiAgentsRuntime {
       ),
       config.input.gitCredentials
     );
-    const spawnSpec = await this.spawnSpec(command, config.input, env);
+    const spawnSpec = await this.spawnSpec(command, config.input, env, wsl);
     if (!this.isCurrentGeneration(config.input.conversationId, generation)) {
       return this.cancelledSpawn(config.input.conversationId);
     }
@@ -576,7 +601,8 @@ export class TuiAgentsRuntime {
         {
           invocation: spawnSpec.invocation,
           cwd: config.input.cwd,
-          env,
+          // WSL hands the agent only the variables named in WSLENV.
+          env: spawnSpec.inWsl ? withWslEnv(env) : env,
           cols: spawnSize.cols,
           rows: spawnSize.rows,
         },
@@ -832,14 +858,25 @@ export class TuiAgentsRuntime {
 
   private async prepareHookEnv(
     input: TuiAgentStartInput,
-    provider: ResolvedTuiProvider
+    provider: ResolvedTuiProvider,
+    wsl: WslTarget | null = null
   ): Promise<Record<string, string>> {
     if (provider.hooks.kind === 'none') return {};
 
+    // Inside WSL the agent reads its configuration from the distro's home, so the hooks go
+    // there, through the distro's file share. They are the host's own hook commands: WSL runs
+    // Windows programs, and those reach the hook server on the host's loopback address, which
+    // a Linux program in the distro cannot. A configuration directory the user set themselves
+    // is left as they set it.
+    const configRoot = input.wsl?.configRoot;
+    const hookRootEnv =
+      wsl && configRoot && !input.providerVars?.[configRoot.env]
+        ? { [configRoot.env]: wslHomeShare(wsl, configRoot.directory) }
+        : {};
     const hooksAvailable = await this.hookInstaller.ensureHooksInstalled({
       providerId: input.providerId,
       workspacePath: input.cwd,
-      env: input.providerVars,
+      env: { ...input.providerVars, ...hookRootEnv },
     });
     if (!hooksAvailable) {
       this.deps.logger.warn(
@@ -972,11 +1009,93 @@ export class TuiAgentsRuntime {
     return peek(this.sessionsList.states.list)[conversationId]?.resume ?? null;
   }
 
-  private async spawnSpec(
+  /**
+   * The distro that will run this agent, or null to run it natively: not on Windows, no distro
+   * with the CLI, or WSL did not answer. Never throws; a failed look is remembered for a minute
+   * so a missing distro does not cost every launch its timeout.
+   */
+  private async wslTarget(
+    input: TuiAgentStartInput,
+    command: AgentCommand
+  ): Promise<WslTarget | null> {
+    if ((this.deps.platform ?? process.platform) !== 'win32') return null;
+    const cliName = wslCliName(command.command);
+    if (!cliName) return null;
+    const known = this.wslProbes.get(cliName);
+    if (known && this.clock.now() - known.at < WSL_PROBE_TTL_MS) return known.target;
+    let target: WslTarget | null = null;
+    try {
+      const { stdout } = await this.deps.exec.exec(
+        'wsl.exe',
+        ['--exec', 'sh', '-lc', wslProbeLine(cliName)],
+        { timeout: WSL_PROBE_TIMEOUT_MS }
+      );
+      target = parseWslProbe(stdout);
+    } catch (error) {
+      this.deps.logger.warn('TuiAgentsRuntime: WSL did not answer; launching natively', {
+        conversationId: input.conversationId,
+        error: String(error),
+      });
+    }
+    if (!target) {
+      this.deps.logger.warn(
+        'TuiAgentsRuntime: no WSL distro has the agent CLI; launching natively',
+        {
+          conversationId: input.conversationId,
+          cli: cliName,
+        }
+      );
+    }
+    this.wslProbes.set(cliName, { at: this.clock.now(), target });
+    return target;
+  }
+
+  /** The launch through `wsl.exe`, or null when its shell cannot be resolved on this host. */
+  private async wslSpawnSpec(
     command: AgentCommand,
     input: TuiAgentStartInput,
     env: Record<string, string>
-  ): Promise<Pick<PtySpawnSpec, 'invocation'>> {
+  ): Promise<{ invocation: PtySpawnSpec['invocation']; inWsl: true } | null> {
+    const cliName = wslCliName(command.command);
+    if (!cliName) return null;
+    try {
+      const shellProfile = await resolveTerminalShell({
+        intent: 'wsl',
+        platform: 'win32',
+        env: await this.deps.env(),
+      });
+      // `wsl.exe` maps the Windows working directory itself. The host's shell setup is a
+      // cmd.exe line and has no meaning in the distro, whose login shell sets up its own.
+      const resolved = resolveLocalPtySpawn({
+        intent: {
+          kind: 'run-command',
+          cwd: input.cwd,
+          command: { kind: 'argv', command: cliName, args: command.args.map(toWslArg) },
+          shellProfile,
+        },
+        platform: 'win32',
+        env,
+      });
+      return { invocation: resolved.invocation, inWsl: true };
+    } catch (error) {
+      this.deps.logger.warn('TuiAgentsRuntime: wsl.exe is not available; launching natively', {
+        conversationId: input.conversationId,
+        error: String(error),
+      });
+      return null;
+    }
+  }
+
+  private async spawnSpec(
+    command: AgentCommand,
+    input: TuiAgentStartInput,
+    env: Record<string, string>,
+    wsl: WslTarget | null = null
+  ): Promise<Pick<PtySpawnSpec, 'invocation'> & { inWsl?: boolean }> {
+    if (wsl) {
+      const inWsl = await this.wslSpawnSpec(command, input, env);
+      if (inWsl) return inWsl;
+    }
     const platform = this.deps.platform ?? process.platform;
     const shellProfile = await resolveTerminalShell({
       intent: 'system',

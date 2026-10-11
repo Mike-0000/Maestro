@@ -88,6 +88,7 @@ const AgentDetailSheetContent = observer(function AgentDetailSheetContent({
           isLoading={isLoading}
           update={update}
           reset={reset}
+          showWsl={agentId === 'claude' && !isRemote && navigator.userAgent.includes('Windows')}
         />
       )}
     </>

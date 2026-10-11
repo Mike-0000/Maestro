@@ -60,8 +60,8 @@ export type TuiConversationProviderDependencies = {
     host: HostRef;
   }): Promise<GitCredentialsSessionSpec | undefined>;
   /**
-   * Per-session loopback MCP servers (Chorus's browser tools). Only asked for local sessions,
-   * since loopback servers cannot reach agents on other hosts.
+   * Per-session loopback MCP servers (Maestro's browser tools and conductor requests). Only asked
+   * for local sessions, since loopback servers cannot reach agents on other hosts.
    */
   resolveSessionMcp?(context: {
     conversationId: string;
@@ -71,6 +71,16 @@ export type TuiConversationProviderDependencies = {
     title: string;
   }): Promise<TuiSessionMcp | undefined>;
 };
+
+/**
+ * What a provider needs to run inside WSL2: where its configuration directory is, so its hooks
+ * can be installed in the distro. Only Claude Code is offered the setting today.
+ */
+function wslLaunchFor(providerId: string): NonNullable<TuiAgentStartInput['wsl']> {
+  return providerId === 'claude'
+    ? { configRoot: { env: 'CLAUDE_CONFIG_DIR', directory: '.claude' } }
+    : {};
+}
 
 function parseExtraArgs(value: string | undefined): string[] {
   if (!value?.trim()) return [];
@@ -196,10 +206,13 @@ export class TuiConversationProvider implements ConversationProvider {
       rows: initialSize.rows,
       shellSetup: launchContext.data.shellSetup,
       tmux: launchContext.data.tmux ? { identity: sessionId } : undefined,
+      ...(providerConfig?.wsl === true && isLocalHostRef(this.host)
+        ? { wsl: wslLaunchFor(conversation.providerId) }
+        : {}),
     };
   }
 
-  /** Best effort: a session without browser tools beats a session that fails to start. */
+  /** Best effort: a session without Maestro's tools beats a session that fails to start. */
   private async resolveSessionMcp(conversation: Conversation): Promise<TuiSessionMcp | undefined> {
     const resolve = this.dependencies.resolveSessionMcp;
     if (!resolve || !this.workspaceId || !isLocalHostRef(this.host)) return undefined;

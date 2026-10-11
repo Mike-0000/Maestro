@@ -364,6 +364,92 @@ describe('TuiAgentsRuntime', () => {
     });
   });
 
+  describe('asked to run the agent inside WSL', () => {
+    const command = 'C:\\Program Files\\npm\\provider.cmd';
+    const windows = {
+      platform: 'win32' as const,
+      command,
+      args: ['--mcp-config=C:\\data\\mcp.json', 'hello world'],
+      commandEnv: { PATH: 'C:\\Program Files\\npm', ComSpec: 'C:\\Windows\\System32\\cmd.exe' },
+      userEnv: {
+        Path: 'C:\\Tools',
+        ComSpec: 'C:\\Windows\\System32\\cmd.exe',
+        SystemRoot: process.env.SystemRoot ?? 'C:\\Windows',
+      },
+    };
+    const input = () =>
+      startInput({ cwd: 'C:\\workspace', wsl: {}, providerVars: { MY_KEY: 'k' } });
+
+    // Needs the real wsl.exe to resolve the shell profile.
+    it.runIf(process.platform === 'win32')(
+      'launches through wsl.exe with translated paths and the variables named for WSL',
+      async () => {
+        const probe = vi.fn(() =>
+          Promise.resolve({
+            stdout: '/home/me/.local/bin/provider\nUbuntu\n/home/me\n',
+            stderr: '',
+          })
+        );
+        const trustWorkspace = vi.fn(async () => {});
+        const { runtime, spawner } = createRuntime({
+          ...windows,
+          trustWorkspace,
+          exec: { exec: probe },
+        });
+
+        await runtime.startSession({ ...input(), trustWorkspace: true });
+
+        expect(probe).toHaveBeenCalledWith(
+          'wsl.exe',
+          ['--exec', 'sh', '-lc', expect.stringContaining('command -v provider')],
+          expect.objectContaining({ timeout: expect.any(Number) })
+        );
+        const spec = spawner.specs[0]!;
+        const launched = JSON.stringify(spec.invocation);
+        expect(launched.toLowerCase()).toContain('wsl.exe');
+        expect(launched).toContain('--mcp-config=/mnt/c/data/mcp.json');
+        expect(launched).not.toContain('provider.cmd');
+        // The working directory stays the host's: wsl.exe maps it.
+        expect(spec.cwd).toBe('C:\\workspace');
+        expect(spec.env.WSLENV?.split(':')).toEqual(expect.arrayContaining(['MY_KEY', 'TERM']));
+        expect(spec.env.WSLENV?.split(':')).not.toContain('PATH');
+        // The host's trust record is not the distro's.
+        expect(trustWorkspace).not.toHaveBeenCalled();
+
+        // A second session within the minute does not look again.
+        await runtime.startSession({ ...input(), conversationId: 'conversation-2' });
+        expect(probe).toHaveBeenCalledTimes(1);
+      }
+    );
+
+    it('launches natively when no distro has the CLI', async () => {
+      for (const answer of [
+        () => Promise.resolve({ stdout: '', stderr: '' }),
+        () => Promise.resolve({ stdout: '/usr/bin/provider\ndocker-desktop\n/root\n', stderr: '' }),
+        () => Promise.reject(new Error('wsl.exe exited with code 1')),
+      ]) {
+        const { runtime, spawner } = createRuntime({ ...windows, exec: { exec: vi.fn(answer) } });
+        await runtime.startSession(input());
+        expect(spawner.specs[0]).toMatchObject({
+          invocation: {
+            kind: 'windows-command-line',
+            rawArguments: expect.stringContaining(command),
+          },
+        });
+        expect(spawner.specs[0]?.env.WSLENV).toBeUndefined();
+      }
+    });
+
+    it('never looks into WSL on another platform, or when not asked', async () => {
+      const probe = vi.fn((_file: string) => Promise.resolve({ stdout: '', stderr: '' }));
+      const posix = createRuntime({ platform: 'linux', exec: { exec: probe } });
+      await posix.runtime.startSession(startInput({ wsl: {} }));
+      const unasked = createRuntime({ ...windows, exec: { exec: probe } });
+      await unasked.runtime.startSession(startInput({ cwd: 'C:\\workspace' }));
+      expect(probe.mock.calls.filter(([file]) => file === 'wsl.exe')).toEqual([]);
+    });
+  });
+
   it('trusts the workspace only when the start input opts in', async () => {
     const trustWorkspace = vi.fn(async () => {});
     const { runtime } = createRuntime({ trustWorkspace });
