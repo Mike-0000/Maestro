@@ -285,7 +285,7 @@ const descriptions: Record<ConductorToolName, string> = {
   answer_permission:
     'Answer an agent that is waiting on a permission prompt. Only when the user explicitly said to allow or deny; the user confirms before it is sent.',
   spawn_agent:
-    'Start ONE new agent in a project with a prompt. By default it edits the project directory itself (no worktree); set worktree to true only when the user asks for its own worktree or branch. For goals that split into several independent parts, use propose_plan instead.',
+    'Start ONE new agent in a project with a prompt. An empty prompt starts it with no task, waiting for its first instruction. By default it edits the project directory itself (no worktree); set worktree to true only when the user asks for its own worktree or branch. For goals that split into several independent parts, use propose_plan instead.',
   propose_plan:
     'Propose splitting a goal into parallel agents. Each subtask gets its own worktree and branch, so owned_paths must not overlap between subtasks unless one runs sequential_after another. The user approves the plan on the canvas before anything starts.',
   check_conflicts:

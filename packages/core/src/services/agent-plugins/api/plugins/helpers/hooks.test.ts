@@ -1,4 +1,6 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { describe, expect, it } from 'vitest';
 import {
   EMDASH_MARKER,
@@ -106,4 +108,41 @@ describe('hook command helpers', () => {
     ).toBe(true);
     expect(filterUserHooks([{ command }])).toHaveLength(0);
   });
+
+  it.runIf(process.platform === 'win32')(
+    'posts a Windows stdin body byte for byte, so non-ASCII text arrives intact',
+    async () => {
+      const sent = JSON.stringify({
+        last_assistant_message: 'Done — it’s “ready”. ● café \u{1F680}',
+      });
+      const received = new Promise<string>((resolve) => {
+        const server = http.createServer((req, res) => {
+          const chunks: Buffer[] = [];
+          req.on('data', (chunk: Buffer) => chunks.push(chunk));
+          req.on('end', () => {
+            res.writeHead(200);
+            res.end();
+            server.close();
+            resolve(Buffer.concat(chunks).toString('utf8'));
+          });
+        });
+        server.listen(0, '127.0.0.1', () => {
+          const child = spawn(makeStdinHookCommand('stop', { platform: 'win32' }), {
+            shell: true,
+            stdio: ['pipe', 'ignore', 'ignore'],
+            env: {
+              ...process.env,
+              EMDASH_HOOK_PORT: String((server.address() as AddressInfo).port),
+              EMDASH_HOOK_NONCE: 'nonce',
+              EMDASH_PTY_ID: 'pty-1',
+            },
+          });
+          child.stdin.end(sent);
+        });
+      });
+
+      expect(await received).toBe(sent);
+    },
+    30_000
+  );
 });

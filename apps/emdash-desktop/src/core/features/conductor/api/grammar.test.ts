@@ -57,6 +57,11 @@ const cases: [utterance: string, focused: string | null, expected: Expected][] =
   // Send (tell / ask)
   ['Tell Codex to run the tests.', null, { kind: 'send', agent: 'x1', text: 'run the tests' }],
   [
+    'Ask Codex, is there anything left before manufacture?',
+    null,
+    { kind: 'send', agent: 'x1', text: 'is there anything left before manufacture?' },
+  ],
+  [
     'tell Claude 2 to add a dark mode toggle',
     null,
     { kind: 'send', agent: 'c2', text: 'add a dark mode toggle' },

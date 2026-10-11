@@ -55,4 +55,23 @@ describe('TuiHookPipeline', () => {
     expect(event).toMatchObject({ kind: 'status', type: 'stop' });
     expect(event.providerSessionId).toBeUndefined();
   });
+
+  it('records a stop whose body carried no final reply', async () => {
+    const { pipeline, applyCanonicalEvent } = createPipeline();
+    vi.mocked(logger.warn).mockClear();
+
+    await pipeline.handle({ ptyId: 'conv-1', type: 'stop', body: '{"session_id": "s", trunc' });
+    await pipeline.handle({
+      ptyId: 'conv-1',
+      type: 'stop',
+      body: '{"last_assistant_message":"Done."}',
+    });
+
+    expect(applyCanonicalEvent).toHaveBeenCalledTimes(2);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(
+      'TuiHookPipeline: stop hook carried no final reply',
+      expect.objectContaining({ conversationId: 'conv-1', parsed: false })
+    );
+  });
 });

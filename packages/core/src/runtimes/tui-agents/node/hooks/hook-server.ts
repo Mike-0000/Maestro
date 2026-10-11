@@ -32,15 +32,22 @@ export class TuiHookServer {
         return;
       }
 
-      let body = '';
+      // Decoded once at the end: a character split across two chunks must not be decoded apart.
+      const chunks: Buffer[] = [];
+      let received = 0;
       req.on('data', (chunk: Buffer) => {
-        body += chunk.toString();
-        if (body.length > 1_000_000) {
+        chunks.push(chunk);
+        received += chunk.length;
+        if (received > 1_000_000) {
+          this.logger.warn('TuiHookServer: dropped a hook body over the size limit', {
+            type: String(req.headers['x-emdash-event-type'] || ''),
+          });
           req.destroy();
         }
       });
 
       req.on('end', () => {
+        const body = Buffer.concat(chunks).toString('utf8');
         const ptyId = String(req.headers['x-emdash-pty-id'] || '');
         const type = String(req.headers['x-emdash-event-type'] || '');
         if (!ptyId || !type) {
