@@ -188,6 +188,21 @@ export class MachinesStore {
     });
   }
 
+  /** Copies a Windows repository into a WSL2 distro; see the contract. Can take minutes. */
+  async copyRepositoryToWsl(input: {
+    windowsPath: string;
+    name: string;
+  }): Promise<{ machine: SshConfig; path: string; reused: boolean; notes: string[] }> {
+    return await this.withMutation(async () => {
+      // Installing a distro or Claude Code takes longer than a call's usual deadline.
+      const result = await (
+        await this.getMachinesClient()
+      ).copyRepositoryToWsl(input, { timeoutMs: 0 });
+      this.connectionsResource.setValue(this.upsertConnection(result.machine));
+      return result;
+    });
+  }
+
   /** Asks a Maestro host's address who it is, without pairing or saving anything. */
   async inspectMaestroHost(
     input: InspectMaestroHostInput

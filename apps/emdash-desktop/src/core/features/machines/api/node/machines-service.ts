@@ -37,6 +37,7 @@ import {
 } from '@core/services/ssh/node/credentials/resolve-credential-draft';
 import type { SshCredentialService } from '@core/services/ssh/node/credentials/ssh-credential-service';
 import { listWslDistros } from '@core/services/ssh/node/local/wsl-distros';
+import { setUpRepositoryInWsl } from '@core/services/ssh/node/local/wsl-setup';
 import type { SaveMachineInput } from '..';
 import { captureMachineSave, persistMachine } from '../../node/machine-persistence';
 
@@ -327,6 +328,22 @@ export class MachinesService implements Hookable<MachinesServiceHooks> {
     await this.deps.db.insert(sshConnectionsTable).values(row);
     this.hooks.callHookBackground('machine:mutated', { type: 'saved', connectionId: row.id });
     return sshConfigFromRow(row);
+  }
+
+  /**
+   * Copies a repository on a Windows drive into a WSL2 distro and returns where a project for
+   * it can be created: the distro's machine (added when it was not one yet) and the copy's
+   * path. A distro is installed first when the computer has none. Nothing is registered here;
+   * the caller creates the project the usual way.
+   */
+  async copyRepositoryToWsl(input: {
+    windowsPath: string;
+    name: string;
+  }): Promise<{ machine: SshConfig; path: string; reused: boolean; notes: string[] }> {
+    if (process.platform !== 'win32') throw new Error('WSL exists only on Windows.');
+    const setup = await setUpRepositoryInWsl(input);
+    const machine = await this.addWslDistro(setup.distro);
+    return { machine, path: setup.path, reused: setup.reused, notes: [...setup.notes] };
   }
 
   async setSyncLocalSettings(id: string, enabled: boolean): Promise<SshConfig> {

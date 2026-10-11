@@ -1,10 +1,11 @@
-import { ContextMenu, Tooltip } from '@emdash/ui/react/primitives';
+import { ContextMenu, toast, Tooltip } from '@emdash/ui/react/primitives';
 import {
   ChevronRight,
   FolderClosed,
   FolderInput,
   FolderOpen,
   Loader2,
+  MonitorUp,
   Pencil,
   Plus,
   Trash2,
@@ -12,6 +13,7 @@ import {
 } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import React, { useCallback, useEffect } from 'react';
+import { getMachinesStore } from '@core/features/machines/contributions/app-stores';
 import { ConnectionStatusDot } from '@core/features/machines/contributions/browser/connection-status-dot';
 import {
   isUnregisteredProject,
@@ -19,6 +21,7 @@ import {
 } from '@core/features/projects/api/browser/stores/project';
 import {
   getProjectHostAccess,
+  getProjectManagerStore,
   getProjectStore,
   projectViewKind,
 } from '@core/features/projects/api/browser/stores/project-selectors';
@@ -64,6 +67,53 @@ export const SidebarProjectItem = observer(function SidebarProjectItem({
   const openRenameProject = useOpenModal('renameProjectModal');
 
   const project = getProjectStore(projectId);
+
+  // A project on a Windows drive can be copied into a WSL2 distro, where git and the agents
+  // work on the Linux filesystem. One action: the distro, its git settings and Claude Code are
+  // set up as needed, the repository is copied, and the copy opens as its own project.
+  const windowsPath =
+    project?.data?.type === 'local' && /^[A-Za-z]:[\\/]/.test(project.data.path)
+      ? project.data.path
+      : null;
+  const copyToWsl = useCallback(() => {
+    const name = project?.name ?? 'project';
+    if (!windowsPath) return;
+    const run = async () => {
+      const copy = await getMachinesStore().copyRepositoryToWsl({ windowsPath, name });
+      // A machine that was just added has to connect and start its workspace server first.
+      const machines = getMachinesStore();
+      await machines.connect(copy.machine.id).catch(() => undefined);
+      const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+      for (let waited = 0; waited < 90_000; waited += 1_000) {
+        if (machines.stateFor(copy.machine.id) === 'connected') break;
+        await pause(1_000);
+      }
+      let created: string | undefined;
+      for (let attempt = 0; attempt < 5 && !created; attempt += 1) {
+        if (attempt > 0) await pause(4_000);
+        created = await getProjectManagerStore().createProject(
+          { type: 'ssh', connectionId: copy.machine.id },
+          { mode: 'pick', name: `${name} (WSL)`, path: copy.path }
+        );
+      }
+      if (!created)
+        throw new Error('The copy is in the distro, but the project could not be opened.');
+      navigate(projectViewDef({ projectId: created }));
+      if (copy.notes.length > 0) {
+        toast.success('What was set up in WSL', {
+          description: copy.notes.join(' '),
+          duration: 30_000,
+        });
+      }
+      return copy;
+    };
+    void toast.promise(run(), {
+      loading: `Copying ${name} into WSL… The first time can take a few minutes.`,
+      success: (copy) => `${name} is now in WSL (${copy.machine.wsl?.distro ?? 'distro'})`,
+      error: (error) =>
+        `Could not copy the project into WSL: ${error instanceof Error ? error.message : String(error)}`,
+    });
+  }, [navigate, project, windowsPath]);
 
   const prefetchRepository = useCallback(() => {
     const repo = getGitRepositoryStore(projectId);
@@ -236,6 +286,12 @@ export const SidebarProjectItem = observer(function SidebarProjectItem({
           <Pencil className="size-4" />
           Rename Project
         </ContextMenu.Item>
+        {windowsPath && (
+          <ContextMenu.Item disabled={project.state === 'unregistered'} onClick={copyToWsl}>
+            <MonitorUp className="size-4" />
+            Copy to WSL
+          </ContextMenu.Item>
+        )}
         <ContextMenu.Separator />
         <ContextMenu.Item
           variant="destructive"
