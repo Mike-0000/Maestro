@@ -13,6 +13,13 @@ describe('redactSecrets', () => {
     expect(redacted).toContain('[REDACTED_CHORUS_TOKEN]');
   });
 
+  it('redacts bare Maestro conductor-request tokens', () => {
+    const token = 'maestro_at_0123456789abcdef0123456789abcdef';
+    const redacted = redactSecrets(`url http://127.0.0.1:4000/mcp with ${token}`);
+    expect(redacted).not.toContain(token);
+    expect(redacted).toContain('[REDACTED_MAESTRO_TOKEN]');
+  });
+
   it('redacts api_key= assignment', () => {
     expect(redactSecrets('api_key=super-secret-key')).toContain('[REDACTED]');
   });

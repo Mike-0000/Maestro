@@ -1,12 +1,7 @@
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 
-const paths = vi.hoisted(() => ({ userData: '' }));
 const settings = vi.hoisted(() => ({ enabled: true, agentControl: true }));
 
-vi.mock('electron', () => ({ app: { getPath: () => paths.userData } }));
 vi.mock('@main/bootstrap/core/service-instances', () => ({
   getAppSettingsService: () => ({ get: async () => ({ ...settings }) }),
 }));
@@ -22,7 +17,7 @@ vi.mock('./browser-webcontents-registry', () => ({
   },
 }));
 
-const { browserControlServer, resolveBrowserControlSessionMcp } =
+const { browserControlServer, resolveBrowserControlMcpServers } =
   await import('./browser-control-instance');
 
 const context = {
@@ -33,55 +28,30 @@ const context = {
   title: 'Nova',
 };
 
-describe('resolveBrowserControlSessionMcp', () => {
-  beforeAll(async () => {
-    paths.userData = await mkdtemp(join(tmpdir(), 'chorus-agent-mcp-'));
-  });
+describe('resolveBrowserControlMcpServers', () => {
+  afterAll(() => browserControlServer.stop());
 
-  afterAll(async () => {
-    browserControlServer.stop();
-    await rm(paths.userData, { recursive: true, force: true });
-  });
-
-  it('writes a private per-session MCP file and hands the token over by env var', async () => {
-    const resolved = await resolveBrowserControlSessionMcp(context);
-    if (!resolved) throw new Error('expected browser tools');
-    const { sessionMcp, env } = resolved;
-
-    expect(sessionMcp.configPath).toBe(join(paths.userData, 'chorus', 'agent-mcp', 'conv_1.json'));
-    expect(sessionMcp.servers).toEqual([
+  it('registers the conversation with the browser control server', async () => {
+    expect(await resolveBrowserControlMcpServers(context)).toEqual([
       {
         name: 'chorus-browser',
         url: `http://127.0.0.1:${browserControlServer.listeningPort}/mcp`,
-        tokenEnvVar: 'CHORUS_BROWSER_MCP_TOKEN',
+        headers: { Authorization: expect.stringMatching(/^Bearer chorus_bt_[a-f0-9]{48}$/) },
       },
     ]);
-    expect(env.CHORUS_BROWSER_MCP_TOKEN).toMatch(/^chorus_bt_[a-f0-9]{48}$/);
-
-    const config = JSON.parse(await readFile(sessionMcp.configPath, 'utf8'));
-    expect(config).toEqual({
-      mcpServers: {
-        'chorus-browser': {
-          type: 'http',
-          url: sessionMcp.servers[0]?.url,
-          headers: { Authorization: `Bearer ${env.CHORUS_BROWSER_MCP_TOKEN}` },
-        },
-      },
-    });
-    if (process.platform !== 'win32') {
-      expect((await stat(sessionMcp.configPath)).mode & 0o077).toBe(0);
-    }
   });
 
-  it('revokes the token and removes the file when agent control is turned off', async () => {
-    const first = await resolveBrowserControlSessionMcp(context);
+  it('offers no server and revokes the token when agent control is turned off', async () => {
+    const [first] = await resolveBrowserControlMcpServers(context);
     if (!first) throw new Error('expected browser tools');
     settings.agentControl = false;
     try {
-      expect(await resolveBrowserControlSessionMcp(context)).toBeUndefined();
-      await expect(stat(first.sessionMcp.configPath)).rejects.toThrow();
+      expect(await resolveBrowserControlMcpServers(context)).toEqual([]);
     } finally {
       settings.agentControl = true;
     }
+    // An unchanged scope reuses its token, so a new one means the old one was revoked.
+    const [second] = await resolveBrowserControlMcpServers(context);
+    expect(second?.headers).not.toEqual(first.headers);
   });
 });
