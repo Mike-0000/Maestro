@@ -529,6 +529,13 @@ audio leaves outside a held key or an open microphone. Each turn is billed for t
 so far; the state is replaced rather than appended before each turn, and a long session is
 replaced by a fresh one that starts from a short summary. The settings show today's spend.
 
+What the line remembers: a request stays in the conversation as you said it only while it is
+open (the model asked something, or only read and answered). Once a turn acts (starts or
+messages an agent, moves the canvas), that exchange is replaced by one line per turn saying what
+you asked, what was done, and what you were told. The text of a brief that was delivered is not
+kept there, so it cannot leak into the next brief; "send that to Echo instead" still works from
+the recent activity in the state.
+
 The line has been built against OpenAI's documentation and tested with a stand-in for the
 provider. It has not been run on a real session yet: the event names and fields, its latency,
 how well the model calls about forty tools, and echo cancellation on speakers are all unmeasured.

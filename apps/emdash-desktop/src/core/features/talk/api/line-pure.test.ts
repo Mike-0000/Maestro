@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { CONDUCTOR_SYSTEM_PROMPT } from '@core/features/conductor/api/system-prompt';
 import { conductorToolDefinitions } from '@core/features/conductor/api/tools';
-import { isLineInstantTool } from '@core/features/conductor/api/voice-line';
+import {
+  isLineInstantTool,
+  lineRecord,
+  lineTurnActed,
+} from '@core/features/conductor/api/voice-line';
 import { TALK_INSTRUCTIONS_MAX_CHARS, TALK_TOOLS_MAX } from './contract';
 import { ECHO_WINDOW_MS, isEcho, neverEcho, recentSpoken } from './echo-guard';
 import { LINE_INSTRUCTIONS, lineTools, sayExactly } from './voice-prompt';
@@ -125,5 +129,54 @@ describe('what the line is given', () => {
     // 16,384 tokens; about four characters to a token, with room to spare.
     const size = LINE_INSTRUCTIONS.length + JSON.stringify(lineTools({ codeChecks: true })).length;
     expect(size).toBeLessThan(56_000);
+  });
+});
+
+describe('the record of a finished turn', () => {
+  const spawn = {
+    tool: 'spawn_agent',
+    input: { prompt: 'Add a dictation button that uses Parakeet.' },
+    outcome: 'Created task "Dictation button". It will appear on the canvas as Echo.',
+  };
+
+  it('says what was asked, what was done and what was answered, and marks it over', () => {
+    const record = lineRecord({
+      asked: 'start an agent  on the dictation button',
+      actions: [{ tool: 'list_agents', outcome: 'Atlas, Bravo' }, spawn],
+      reply: 'Started Echo.',
+    });
+    expect(record).toBe(
+      '[Conductor] Earlier, and over: the developer said “start an agent on the dictation button”. ' +
+        'Done: spawn_agent: Created task "Dictation button". It will appear on the canvas as Echo.. ' +
+        'You answered: “Started Echo.”'
+    );
+    expect(LINE_INSTRUCTIONS).toContain('"[Conductor] Earlier, and over"');
+  });
+
+  it('never carries the brief that was delivered, and keeps long words short', () => {
+    const record = lineRecord({ asked: 'word '.repeat(400), actions: [spawn], reply: '' });
+    expect(record).not.toContain('Parakeet');
+    expect(record.length).toBeLessThan(800);
+    expect(lineRecord({ asked: '', actions: [], reply: '' })).toBe(
+      '[Conductor] Earlier, and over: the developer spoke.'
+    );
+  });
+
+  it('says an action that did not happen did not', () => {
+    const record = lineRecord({
+      asked: 'start it',
+      actions: [{ ...spawn, outcome: 'The user cancelled the new agent.', status: 'cancelled' }],
+      reply: '',
+    });
+    expect(record).toContain('spawn_agent (cancelled): The user cancelled the new agent.');
+  });
+
+  it('counts a turn as acting only when something changed', () => {
+    expect(lineTurnActed([])).toBe(false);
+    expect(lineTurnActed([{ tool: 'read_agent', outcome: 'x' }])).toBe(false);
+    expect(lineTurnActed([{ tool: 'read_clipboard', outcome: 'x' }])).toBe(false);
+    expect(lineTurnActed([{ ...spawn, status: 'cancelled' }])).toBe(false);
+    expect(lineTurnActed([{ ...spawn, status: 'failed' }])).toBe(false);
+    expect(lineTurnActed([{ tool: 'read_agent', outcome: 'x' }, spawn])).toBe(true);
   });
 });

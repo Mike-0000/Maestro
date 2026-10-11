@@ -430,6 +430,7 @@ describe('a check the voice line asks for', () => {
       stop: vi.fn(),
       say: vi.fn(async () => true),
       note: vi.fn(),
+      record: vi.fn(),
       spoke: vi.fn(),
     };
   }

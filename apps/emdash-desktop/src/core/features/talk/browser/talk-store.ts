@@ -160,6 +160,14 @@ type Turn = {
   rounds: number;
   stopped: boolean;
   watchdog: ReturnType<typeof setTimeout> | null;
+  /** The items of the developer's words it answers, when the line heard them itself. */
+  readonly heard: (() => readonly string[]) | null;
+  /** Everything it put into the conversation: the words, the calls, their results, the answer. */
+  readonly items: string[];
+  /** What it came to in one line, once the conductor has said. */
+  record: string | null;
+  /** Its items were taken out of the conversation, and its record stands for it. */
+  replaced: boolean;
 };
 
 /**
@@ -210,6 +218,13 @@ export class TalkStore {
   private readonly transcripts = new Map<string, string | null>();
   private readonly waiters = new Set<() => void>();
   private turn: Turn | null = null;
+  /** Turns that ended and still sit in the conversation as they happened, oldest first. */
+  private past: Turn[] = [];
+  /** How many of them belong to an exchange that is over, and wait to be replaced. */
+  private closed = 0;
+  /** Where the words the line just heard sit, until the turn that answers them takes them. */
+  private heard: (() => readonly string[]) | null = null;
+  private itemSeq = 0;
   private saying: Saying | null = null;
   private readonly handledCalls = new Set<string>();
   /** The message that holds the conductor's state, replaced before each turn. */
@@ -227,6 +242,7 @@ export class TalkStore {
     stop: () => this.stop(),
     say: (text) => this.say(text),
     note: (text) => this.note(text),
+    record: (text, over) => this.record(text, over),
     spoke: (text) => this.noteSpoken(text),
   };
 
@@ -265,6 +281,10 @@ export class TalkStore {
       | 'transcripts'
       | 'waiters'
       | 'turn'
+      | 'past'
+      | 'closed'
+      | 'heard'
+      | 'itemSeq'
       | 'saying'
       | 'handledCalls'
       | 'stateItem'
@@ -300,6 +320,10 @@ export class TalkStore {
       transcripts: false,
       waiters: false,
       turn: false,
+      past: false,
+      closed: false,
+      heard: false,
+      itemSeq: false,
       saying: false,
       handledCalls: false,
       stateItem: false,
@@ -525,6 +549,9 @@ export class TalkStore {
     this.loose.clear();
     this.transcripts.clear();
     this.handledCalls.clear();
+    this.past = [];
+    this.closed = 0;
+    this.heard = null;
     this.stateItem = null;
     this.endRollover();
     this.finishSaying(false);
@@ -608,11 +635,16 @@ export class TalkStore {
       for (const item of hold.items) this.forget(item);
     };
     if (!conductor.lineGuarded) {
+      const items = () => hold.items;
+      this.heard = items;
       void conductor.speechTurn({
         interactionId: hold.interactionId,
         saidAt: hold.startedAt,
         heard,
-        discard,
+        discard: () => {
+          if (this.heard === items) this.heard = null;
+          discard();
+        },
       });
       return true;
     }
@@ -692,16 +724,24 @@ export class TalkStore {
   /** Runs one turn of the model. Resolves when it has answered, or null if it cannot start. */
   private takeTurn(input: LineTurnInput): Promise<LineTurnResult | null> {
     if (!this.ready || this.turn) return Promise.resolve(null);
+    // Whatever is over is a record by the time the model is asked about anything new.
+    this.replacePast(true);
+    const heard = this.heard;
+    this.heard = null;
+    const items: string[] = [];
     if (input.text !== undefined) {
+      const id = `said_${++this.itemSeq}`;
       const sent = this.send({
         type: 'conversation.item.create',
         item: {
+          id,
           type: 'message',
           role: 'user',
           content: [{ type: 'input_text', text: input.text }],
         },
       });
       if (!sent) return Promise.resolve(null);
+      items.push(id);
     }
     this.setState(input.context);
     return new Promise<LineTurnResult | null>((resolve) => {
@@ -717,6 +757,10 @@ export class TalkStore {
         rounds: 0,
         stopped: false,
         watchdog: null,
+        heard,
+        items,
+        record: null,
+        replaced: false,
       };
       this.respond(this.turn);
     });
@@ -766,8 +810,40 @@ export class TalkStore {
     if (this.turn !== turn) return;
     this.turn = null;
     if (turn.watchdog) clearTimeout(turn.watchdog);
+    // It stays in the conversation as it happened until the conductor says its exchange is over.
+    if (this.session) {
+      turn.items.unshift(...(turn.heard?.() ?? []));
+      this.past.push(turn);
+    }
     turn.resolve({ ...result, tokens: turn.tokens });
     this.maybeRollOver();
+  }
+
+  /** The conductor says what the turn that just ended came to, and whether that closes it. */
+  private record(text: string, over: boolean): void {
+    const turn = this.past.at(-1);
+    if (!turn || turn.record !== null) return;
+    turn.record = text;
+    if (over) this.closed = this.past.length;
+    this.replacePast(false);
+  }
+
+  /**
+   * Replaces every turn of a finished exchange by its record. What the developer asked for and
+   * got is then in the conversation as something that happened, and only the exchange still
+   * open is there as it was said. It waits for the voice to finish, so an answer is never taken
+   * away while it is being said, unless `now`: the model is about to be asked again.
+   */
+  private replacePast(now: boolean): void {
+    if (this.closed === 0 || (this.speaking && !now)) return;
+    const turns = this.past.splice(0, this.closed);
+    this.closed = 0;
+    for (const turn of turns) {
+      // A turn nobody described stays as it is: without a record nothing would be left of it.
+      if (turn.record === null || !this.sendNote(turn.record)) continue;
+      turn.replaced = true;
+      for (const item of turn.items) this.forget(item);
+    }
   }
 
   /** The developer said stop: the turn ends where it is, and the voice goes quiet. */
@@ -843,8 +919,8 @@ export class TalkStore {
     if (this.line === 'open') this.sendNote(text);
   }
 
-  private sendNote(text: string): void {
-    this.send({
+  private sendNote(text: string): boolean {
+    return this.send({
       type: 'conversation.item.create',
       item: { type: 'message', role: 'system', content: [{ type: 'input_text', text }] },
     });
@@ -992,11 +1068,16 @@ export class TalkStore {
       conductor.hearOnLine(heard, { interactionId, saidAt, key: false });
       return;
     }
+    const items = () => [itemId];
+    this.heard = items;
     void conductor.speechTurn({
       interactionId,
       saidAt,
       heard: Promise.resolve(heard),
-      discard: () => this.forget(itemId),
+      discard: () => {
+        if (this.heard === items) this.heard = null;
+        this.forget(itemId);
+      },
     });
   }
 
@@ -1049,16 +1130,22 @@ export class TalkStore {
       }
       turn.toolsRunning = Math.max(0, turn.toolsRunning - 1);
     }
-    // The session was replaced while the tool ran: its answer belongs to nobody.
-    if (this.session !== session) return;
+    // The session was replaced while the tool ran: its answer belongs to nobody. So does the
+    // answer to a call whose turn is already a record.
+    if (this.session !== session || turn?.replaced) return;
+    const outputId = `out_${++this.itemSeq}`;
     this.send({
       type: 'conversation.item.create',
-      item: { type: 'function_call_output', call_id: callId, output: result.output },
+      item: { id: outputId, type: 'function_call_output', call_id: callId, output: result.output },
     });
+    turn?.items.push(outputId);
     for (const image of result.images ?? []) {
+      const imageId = `img_${++this.itemSeq}`;
+      turn?.items.push(imageId);
       this.send({
         type: 'conversation.item.create',
         item: {
+          id: imageId,
           type: 'message',
           role: 'user',
           content: [
@@ -1113,6 +1200,7 @@ export class TalkStore {
     if (this.voiceTimer) clearTimeout(this.voiceTimer);
     this.voiceTimer = null;
     runInAction(() => (this.speaking = false));
+    this.replacePast(false);
     // Another response stopping says nothing about the sentence that was asked for.
     if (this.saying?.started && this.isSaying(responseId)) this.finishSaying(true);
     if (!this.deps.voice.capturing && !this.deps.voice.muted) this.unhush();
@@ -1150,6 +1238,7 @@ export class TalkStore {
     // A response an earlier turn gave up on says nothing about this one.
     const id = str(done.id);
     if (turn.responseId && id && id !== turn.responseId) return;
+    turn.items.push(...itemIds(done.output));
     if (turn.watchdog) clearTimeout(turn.watchdog);
     turn.watchdog = null;
     turn.responding = false;
@@ -1353,6 +1442,14 @@ function callsTools(output: unknown): boolean {
   return (
     Array.isArray(output) &&
     (output as { type?: unknown }[]).some((item) => item?.type === 'function_call')
+  );
+}
+
+/** The ids of the items a response added to the conversation: its calls and what it said. */
+function itemIds(output: unknown): string[] {
+  if (!Array.isArray(output)) return [];
+  return (output as { id?: unknown }[]).flatMap((item) =>
+    typeof item?.id === 'string' && item.id ? [item.id] : []
   );
 }
 

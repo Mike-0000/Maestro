@@ -770,6 +770,152 @@ describe('a turn of the model', () => {
   });
 });
 
+describe('an exchange that is over', () => {
+  /** A response ending with the items it left in the conversation. */
+  function responseLeft(session: FakeSession, items: { id: string; type: string }[]): void {
+    session.emit({
+      type: 'response.done',
+      response: {
+        status: 'completed',
+        output: items,
+        usage: { input_tokens: 100, input_token_details: { text_tokens: 100 } },
+      },
+    });
+  }
+
+  function deleted(session: FakeSession): string[] {
+    return session.sent.flatMap((event) =>
+      event.type === 'conversation.item.delete' ? [String(event.item_id)] : []
+    );
+  }
+
+  function notes(session: FakeSession): string[] {
+    return session.sent.flatMap((event) => {
+      const item = event.item as { role?: string; id?: string; content?: { text: string }[] };
+      return event.type === 'conversation.item.create' && item.role === 'system' && !item.id
+        ? [item.content![0]!.text]
+        : [];
+    });
+  }
+
+  it('is replaced by its record: the words, the call, its result and the answer go', async () => {
+    const { store, open, line } = harness();
+    const session = await open();
+    const result = line().turn({ text: 'start an agent on X', context: 'c', spoken: false });
+    toolCall(session, 'c1', 'spawn_agent', '{"prompt":"a long brief about X"}');
+    responseLeft(session, [{ id: 'fc-1', type: 'function_call' }]);
+    await settle();
+    responseLeft(session, [{ id: 'msg-1', type: 'message' }]);
+    await result;
+    session.sent.length = 0;
+
+    line().record('[Conductor] Earlier, and over: started Echo.', true);
+
+    expect(notes(session)).toEqual(['[Conductor] Earlier, and over: started Echo.']);
+    expect(deleted(session)).toEqual(['said_1', 'fc-1', 'out_2', 'msg-1']);
+    // The record is in before anything is taken away.
+    expect(sentTypes(session)[0]).toBe('conversation.item.create');
+    store.dispose();
+  });
+
+  it('stays as it was said while it is open, and goes with the turn that closes it', async () => {
+    const { store, open, line } = harness();
+    const session = await open();
+    const asked = line().turn({ text: 'a brief with no project', context: 'c', spoken: false });
+    responseLeft(session, [{ id: 'msg-1', type: 'message' }]);
+    await asked;
+    session.sent.length = 0;
+    // The model asked which project: the developer has yet to answer.
+    line().record('[Conductor] Earlier, and over: asked which project.', false);
+    expect(session.sent).toEqual([]);
+
+    const answered = line().turn({ text: 'Maestro', context: 'c', spoken: false });
+    expect(deleted(session)).toEqual(['state_2']);
+    responseLeft(session, [{ id: 'msg-2', type: 'message' }]);
+    await answered;
+    session.sent.length = 0;
+    line().record('[Conductor] Earlier, and over: started Echo.', true);
+
+    expect(notes(session)).toEqual([
+      '[Conductor] Earlier, and over: asked which project.',
+      '[Conductor] Earlier, and over: started Echo.',
+    ]);
+    expect(deleted(session)).toEqual(['said_1', 'msg-1', 'said_2', 'msg-2']);
+    store.dispose();
+  });
+
+  it('takes the words the line heard itself with it', async () => {
+    const { store, open, line, capture, conductor } = harness();
+    const session = await open();
+    capture().begin('i-1');
+    session.emit({ type: 'input_audio_buffer.speech_started' });
+    committed(session, 'item-1');
+    await capture().end('i-1');
+    committed(session, 'item-2');
+    expect(conductor.speechTurn).toHaveBeenCalled();
+    const result = line().turn({ context: 'c', spoken: false });
+    responseLeft(session, [{ id: 'msg-1', type: 'message' }]);
+    await result;
+    session.sent.length = 0;
+
+    line().record('[Conductor] Earlier, and over: sent.', true);
+    expect(deleted(session)).toEqual(['item-1', 'item-2', 'msg-1']);
+    store.dispose();
+  });
+
+  it('waits for the voice to finish the answer, but not past the next request', async () => {
+    const { store, open, line } = harness();
+    const session = await open();
+    const first = line().turn({ text: 'one', context: 'c', spoken: true });
+    session.emit({ type: 'output_audio_buffer.started', response_id: 'r1' });
+    responseLeft(session, [{ id: 'msg-1', type: 'message' }]);
+    await first;
+    session.sent.length = 0;
+    line().record('[Conductor] Earlier, and over: one.', true);
+    expect(session.sent).toEqual([]);
+    session.emit({ type: 'output_audio_buffer.stopped', response_id: 'r1' });
+    expect(deleted(session)).toEqual(['said_1', 'msg-1']);
+
+    const second = line().turn({ text: 'two', context: 'c', spoken: true });
+    session.emit({ type: 'output_audio_buffer.started', response_id: 'r2' });
+    responseLeft(session, [{ id: 'msg-2', type: 'message' }]);
+    await second;
+    line().record('[Conductor] Earlier, and over: two.', true);
+    session.sent.length = 0;
+    // The voice is still speaking when the developer types the next request.
+    void line().turn({ text: 'three', context: 'c', spoken: true });
+    expect(notes(session)).toEqual(['[Conductor] Earlier, and over: two.']);
+    expect(deleted(session).slice(0, 2)).toEqual(['said_2', 'msg-2']);
+    // The record is there before the new request is.
+    expect(session.sent[0]).toMatchObject({ item: { role: 'system' } });
+    store.dispose();
+  });
+
+  it('answers no call of a turn that is already a record', async () => {
+    const { store, open, line, conductor } = harness();
+    const session = await open();
+    let finish: (result: LineToolResult) => void = () => {};
+    conductor.lineTool.mockImplementationOnce(
+      () => new Promise<LineToolResult>((resolve) => (finish = resolve))
+    );
+    const result = line().turn({ text: 'go', context: 'c', spoken: false });
+    toolCall(session, 'c1', 'send_to_agent');
+    await settle();
+    line().stop();
+    responseLeft(session, [{ id: 'fc-1', type: 'function_call' }]);
+    finish({ output: 'Sent.' });
+    await settle();
+    await result;
+    line().record('[Conductor] Earlier, and over: sent.', true);
+    session.sent.length = 0;
+
+    toolCall(session, 'c1', 'send_to_agent');
+    await settle();
+    expect(session.sent).toEqual([]);
+    store.dispose();
+  });
+});
+
 describe('the voice', () => {
   it('says a sentence as written, outside the conversation and with no tools', async () => {
     const { store, open, line } = harness();
