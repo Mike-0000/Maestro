@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CLAUDE_DELEGATION_POLICY } from './delegation';
+import { CLAUDE_SYSTEM_PROMPT_APPEND } from './delegation';
 import { provider } from './index';
 
 describe('claude provider delegation policy', () => {
@@ -10,10 +10,16 @@ describe('claude provider delegation policy', () => {
     providerSessionId: undefined,
     model: '',
   };
-  const policyArgs = ['--append-system-prompt', CLAUDE_DELEGATION_POLICY];
+  const policyArgs = ['--append-system-prompt', CLAUDE_SYSTEM_PROMPT_APPEND];
 
   it('is one line, so a Windows command line carries it whole', () => {
-    expect(CLAUDE_DELEGATION_POLICY).not.toMatch(/[\r\n"]/);
+    expect(CLAUDE_SYSTEM_PROMPT_APPEND).not.toMatch(/[\r\n"]/);
+  });
+
+  it('covers sub-agents, being stuck, and Codex for computer use', () => {
+    expect(CLAUDE_SYSTEM_PROMPT_APPEND).toMatch(/sub-agents/);
+    expect(CLAUDE_SYSTEM_PROMPT_APPEND).toMatch(/If you get stuck/);
+    expect(CLAUDE_SYSTEM_PROMPT_APPEND).toMatch(/computer use.*provider codex/);
   });
 
   it('is appended to the system prompt ahead of the prompt on a fresh session', () => {
@@ -38,14 +44,14 @@ describe('claude provider delegation policy', () => {
         isResuming: false,
         extraArgs,
       });
-      expect(args).not.toContain(CLAUDE_DELEGATION_POLICY);
+      expect(args).not.toContain(CLAUDE_SYSTEM_PROMPT_APPEND);
       expect(args.slice(-extraArgs.length)).toEqual(extraArgs);
     }
   );
 
   it('reaches ACP sessions through the adapter system prompt', () => {
     expect(provider.behavior.acp!.sessionMeta!()).toEqual({
-      systemPrompt: { append: CLAUDE_DELEGATION_POLICY },
+      systemPrompt: { append: CLAUDE_SYSTEM_PROMPT_APPEND },
     });
   });
 });

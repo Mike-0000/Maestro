@@ -63,6 +63,7 @@ vi.mock('./agent-io', () => ({
   readFinalChatReply: mocks.readFinalChatReply,
   readFinishedTerminal: mocks.readFinishedTerminal,
   sendToAgent: mocks.sendToAgent,
+  sendToLiveSession: vi.fn(async () => false),
   stopAgentSession: mocks.stopAgentSession,
   submitAgentInput: vi.fn(),
 }));
@@ -288,6 +289,31 @@ describe('completion follow-ups', () => {
     await announce();
     expect(mocks.runTurn).toHaveBeenCalledTimes(1);
     expect(speech.announce).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a later turn with nothing new on the HUD', async () => {
+    const first = agent();
+    const { store, speech, announce } = setup(first);
+    mocks.runTurn
+      .mockResolvedValueOnce(text('Zulu started the build loop; it is at step 28 of 31.'))
+      .mockResolvedValueOnce(text('NO_NEWS'));
+    await announce();
+    await announce([
+      agent({ completionReport: buildCompletionReport('Still running, step 28 of 31.') }),
+    ]);
+    expect(mocks.runTurn).toHaveBeenCalledTimes(2);
+    expect(speech.announce).toHaveBeenCalledTimes(1);
+    expect(store.reply).toBe('Zulu: finished a turn with nothing new.');
+  });
+
+  it("speaks the fixed sentence when an agent's first report is called nothing new", async () => {
+    const { speech, announce } = setup();
+    mocks.runTurn.mockResolvedValueOnce(text('NO_NEWS.'));
+    await announce();
+    expect(speech.announce).toHaveBeenCalledTimes(1);
+    expect(speech.announce).toHaveBeenCalledWith(
+      expect.stringContaining('It reported the app at localhost port 3000.')
+    );
   });
 
   it('uses the fixed sentence without a model call when follow-ups are off', async () => {

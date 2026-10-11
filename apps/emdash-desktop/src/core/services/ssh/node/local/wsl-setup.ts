@@ -250,7 +250,8 @@ export async function ensureWslDistro(
  * The copy holds what is committed: uncommitted changes stay in the Windows folder.
  */
 export async function setUpRepositoryInWsl(
-  input: { windowsPath: string; name: string; distro?: string },
+  /** `live`: the copy is about to be mirrored with the Windows folder, which the notes say. */
+  input: { windowsPath: string; name: string; distro?: string; live?: boolean },
   deps: WslSetupDeps = {}
 ): Promise<WslRepositorySetup> {
   const env = deps.env ?? process.env;
@@ -303,9 +304,16 @@ export async function setUpRepositoryInWsl(
           ]
         : []),
       ...parsed.notes,
-      ...(parsed.reused
-        ? ['A copy of this repository was already in the distro and was kept as it is.']
-        : ['The copy holds what is committed. Uncommitted changes stay in the Windows folder.']),
+      ...(input.live
+        ? [
+            parsed.reused
+              ? 'A copy of this repository was already in the distro. It is brought in line with the Windows folder; anything replaced there is kept in its .git/maestro-mirror/trash for a week.'
+              : 'The Windows folder and its copy in the distro are kept the same from now on, both ways, uncommitted work included.',
+            'Installed packages and build output are not mirrored: install dependencies in the distro once.',
+          ]
+        : parsed.reused
+          ? ['A copy of this repository was already in the distro and was kept as it is.']
+          : ['The copy holds what is committed. Uncommitted changes stay in the Windows folder.']),
     ],
   };
 }

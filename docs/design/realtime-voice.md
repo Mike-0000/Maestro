@@ -8,6 +8,13 @@ are under `apps/emdash-desktop/src/core/features/`. Line numbers are from the wo
 day; the conductor files were being edited while this was written (the tool count went from 40 to
 41), so treat them as approximate.
 
+> **Superseded on 2026-10-10.** The developer's intent was the opposite of this note's
+> recommendation: while the realtime line is on, its model is the conductor and calls the
+> conductor's tools itself (shape A below), with the text model only as the fallback. The gates
+> stayed in code, in `executeTool`. What is built is described in
+> [the voice guide](../chorus/voice.md#the-realtime-voice-conductor-experimental); the seam is
+> `conductor/api/voice-line.ts`.
+
 ## Recommendation
 
 **Go with conditions.** Add it as an opt-in **talk mode**: a realtime model does the listening and

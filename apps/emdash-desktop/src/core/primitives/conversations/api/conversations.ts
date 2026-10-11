@@ -78,9 +78,13 @@ export type ConversationEvent =
       projectId: string;
       status: AgentStatus;
       seen: boolean;
-      /** Few-word synopsis of what a completed agent did, from its final reply; null if unknown. */
+      /**
+       * Few-word synopsis of what the agent did in the turn it just ended, from its final reply;
+       * null if unknown. Sent with 'completed', and with 'awaiting-input' when the conductor
+       * decided that the finished turn needs the developer.
+       */
       completionSummary?: string | null;
-      /** The completed agent's final reply, redacted and bounded; null if it reported none. */
+      /** That turn's final reply, redacted and bounded; null if the agent reported none. */
       completionReport?: CompletionReport | null;
     };
 

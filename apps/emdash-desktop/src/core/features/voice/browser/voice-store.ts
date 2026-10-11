@@ -43,6 +43,18 @@ export type CaptureEvent =
       readonly reason: 'cancelled' | 'too-short' | 'failed' | 'ignored';
     };
 
+/**
+ * Something that hears the microphone itself (a live voice session) and takes a capture the
+ * developer starts with a key or a click, in place of the recorder and the transcription.
+ */
+export type LiveCapture = {
+  /** False when it cannot take the capture; the recorder then does. */
+  begin(interactionId: string): boolean;
+  /** The developer finished. Resolves false when nothing they said was handed on. */
+  end(interactionId: string): Promise<boolean>;
+  cancel(): void;
+};
+
 /** How a spoken sentence ended; `suppressed` when it was never started (muted, or listening). */
 export type SpeechResult = 'ended' | 'cancelled' | 'failed' | 'suppressed';
 
@@ -67,6 +79,12 @@ const MAX_HANDS_FREE_MS = 60_000;
  * (MAX_UTTERANCE_BYTES, ~5.4 minutes of 16 kHz PCM16) in case it is left open.
  */
 const MAX_MANUAL_MS = 5 * 60_000;
+/** A click-to-talk capture this long without speech was left open: it is sent, or dropped if empty. */
+const LEFT_OPEN_MS = 90_000;
+/** After a reply to a command, hands-free speech this soon needs no wake phrase. */
+const FOLLOW_UP_MS = 10_000;
+/** How long after a command a reply that finishes being spoken still opens that window. */
+const FOLLOW_UP_REPLY_MS = 30_000;
 
 export class VoiceStore {
   phase: VoicePhase = 'idle';
@@ -88,6 +106,14 @@ export class VoiceStore {
   readonly speech = new SpeechOutput();
   private readonly recorder = new MicRecorder();
   private silence: SilenceDetector | null = null;
+  /** Watches a capture the developer ends themselves for being left open. */
+  private leftOpen: SilenceDetector | null = null;
+  /**
+   * A command was just answered: until this time, the end of its spoken reply reopens the window
+   * in which the next hands-free utterance may skip the wake phrase.
+   */
+  private followUpArmed = 0;
+  private followUpUntil = 0;
   private readonly onset = new SpeechOnsetDetector();
   private streamId: string | null = null;
   private streamPending: string[] = [];
@@ -99,6 +125,9 @@ export class VoiceStore {
   private captureHandler: ((event: CaptureEvent) => void) | null = null;
   /** Asked on a tap of the talk key: true when something is waiting for a spoken answer. */
   private tapGate: (() => boolean) | null = null;
+  private liveCapture: LiveCapture | null = null;
+  /** The capture in progress is heard by the live session, since when. */
+  private live: { capture: LiveCapture; since: number } | null = null;
   /** How long a tap-started capture has heard nothing, in ms. */
   private quietMs = 0;
   private endsOnPause = false;
@@ -112,11 +141,16 @@ export class VoiceStore {
       VoiceStore,
       | 'captureHandler'
       | 'tapGate'
+      | 'liveCapture'
+      | 'live'
       | 'quietMs'
       | 'endsOnPause'
       | 'lastTapAt'
       | 'recorder'
       | 'silence'
+      | 'leftOpen'
+      | 'followUpArmed'
+      | 'followUpUntil'
       | 'maxTimer'
       | 'handler'
       | 'vocabulary'
@@ -132,11 +166,16 @@ export class VoiceStore {
       speech: false,
       captureHandler: false,
       tapGate: false,
+      liveCapture: false,
+      live: false,
       quietMs: false,
       endsOnPause: false,
       lastTapAt: false,
       recorder: false,
       silence: false,
+      leftOpen: false,
+      followUpArmed: false,
+      followUpUntil: false,
       onset: false,
       streamId: false,
       streamPending: false,
@@ -151,7 +190,14 @@ export class VoiceStore {
     });
     this.recorder.onChunk = (level, durationMs) => this.onChunk(level, durationMs);
     this.recorder.onPcm = (pcm) => this.onPcm(pcm);
-    this.speech.onSpeakingChange = (speaking) => runInAction(() => (this.speaking = speaking));
+    this.speech.onSpeakingChange = (speaking) => {
+      const wasSpeaking = this.speaking;
+      runInAction(() => (this.speaking = speaking));
+      // The follow-up window opens once the reply has been said, not while it plays.
+      if (wasSpeaking && !speaking && Date.now() < this.followUpArmed) {
+        this.followUpUntil = Date.now() + FOLLOW_UP_MS;
+      }
+    };
   }
 
   activate(): void {
@@ -203,6 +249,11 @@ export class VoiceStore {
 
   setTapGate(gate: () => boolean): void {
     this.tapGate = gate;
+  }
+
+  /** Hands captures to a live voice session while one is open; null takes them back. */
+  setLiveCapture(capture: LiveCapture | null): void {
+    this.liveCapture = capture;
   }
 
   /** True from the moment the microphone opens until the transcript is handed on. */
@@ -269,7 +320,25 @@ export class VoiceStore {
     this.endsOnPause = origin === 'hands-free' || options.endOnPause === true;
     this.quietMs = 0;
     this.silence = this.endsOnPause ? new SilenceDetector() : null;
+    this.leftOpen =
+      mode === 'toggle' && origin === 'user' && !this.endsOnPause
+        ? new SilenceDetector(LEFT_OPEN_MS)
+        : null;
     this.phase = 'listening';
+    // A command the developer ends themselves is heard by the live session when one is open.
+    // Dictation, a tap (which ends on a pause the recorder measures), the wake phrase and the
+    // voice test keep the recorder.
+    const live =
+      intent === 'command' && origin === 'user' && !this.endsOnPause && !this.captureNext
+        ? this.liveCapture
+        : null;
+    if (live?.begin(interactionId)) {
+      this.live = { capture: live, since: Date.now() };
+      if (mode === 'toggle') {
+        this.maxTimer = setTimeout(() => void this.stopListening(), MAX_MANUAL_MS);
+      }
+      return;
+    }
     this.openStream();
     try {
       await this.recorder.start({ withPreRoll: origin === 'hands-free' });
@@ -312,6 +381,10 @@ export class VoiceStore {
   async stopListening(): Promise<void> {
     if (this.phase !== 'listening') return;
     this.clearMaxTimer();
+    if (this.live) {
+      this.finishLive(this.live);
+      return;
+    }
     const { wav, durationMs } = this.recorder.stop();
     if (durationMs < MIN_UTTERANCE_MS) {
       this.abortStream();
@@ -383,12 +456,48 @@ export class VoiceStore {
     }
   }
 
+  /** The live session heard the capture: it answers, and no transcript is handed on here. */
+  private finishLive(live: { capture: LiveCapture; since: number }): void {
+    const interactionId = this.interactionId;
+    this.live = null;
+    if (!interactionId || Date.now() - live.since < MIN_UTTERANCE_MS) {
+      live.capture.cancel();
+      runInAction(() => {
+        this.phase = 'idle';
+        this.level = 0;
+      });
+      this.trace('ignored', undefined, { reason: 'too-short' });
+      this.captureEnded('too-short');
+      return;
+    }
+    // Until the session has taken the words the capture is not over, as with a transcription
+    // in progress: a cancel window that appears meanwhile waits for what was said.
+    runInAction(() => {
+      this.phase = 'transcribing';
+      this.level = 0;
+    });
+    void live.capture
+      .end(interactionId)
+      .catch(() => false)
+      .then((taken) => {
+        runInAction(() => {
+          if (this.phase === 'transcribing' && this.interactionId === interactionId) {
+            this.phase = 'idle';
+          }
+        });
+        if (!taken) this.captureHandler?.({ type: 'end', interactionId, reason: 'ignored' });
+      });
+  }
+
   cancelListening(): void {
     this.trace('ignored', undefined, { reason: 'cancelled' });
     this.clearMaxTimer();
     this.abortStream();
     this.partial = '';
-    this.recorder.cancel();
+    if (this.live) {
+      this.live.capture.cancel();
+      this.live = null;
+    } else this.recorder.cancel();
     this.phase = 'idle';
     this.level = 0;
     // After the phase changed, so a listener sees the microphone closed.
@@ -427,6 +536,15 @@ export class VoiceStore {
       this.quietMs += durationMs;
       if (this.quietMs >= NO_SPEECH_MS) this.cancelListening();
     }
+    // A click-to-talk capture nobody ended: send what was said, or drop one with no speech.
+    if (this.leftOpen?.push(level, durationMs)) {
+      void this.stopListening();
+      return;
+    }
+    if (this.leftOpen && !this.leftOpen.hasSpeech) {
+      this.quietMs += durationMs;
+      if (this.quietMs >= LEFT_OPEN_MS) this.cancelListening();
+    }
   }
 
   /** Applies the wake phrase to hands-free speech, records the transcript, and hands it off. */
@@ -439,9 +557,17 @@ export class VoiceStore {
   ): Promise<void> {
     const text = raw.trim();
     let command: string | null = text;
+    let followUp = false;
     if (origin === 'hands-free') {
       command = stripWakePhrase(text, this.settings?.wakePhrase ?? 'chorus');
+      // Right after a reply, the developer is still talking to the conductor.
+      if (command === null && text && intent === 'command' && Date.now() < this.followUpUntil) {
+        command = text;
+        followUp = true;
+      }
     }
+    this.followUpArmed = 0;
+    this.followUpUntil = 0;
     runInAction(() => {
       this.phase = 'idle';
       this.partial = '';
@@ -455,6 +581,7 @@ export class VoiceStore {
       latencyMs,
       engine: this.settings?.engine ?? 'unknown',
       ...(confidence !== undefined ? { confidence } : {}),
+      ...(followUp ? { followUp: true } : {}),
     });
     if (command === null) this.trace('ignored', text, { reason: 'wake-phrase' });
     const capture = this.captureNext;
@@ -469,6 +596,13 @@ export class VoiceStore {
       return;
     }
     await this.handler?.(command, intent, this.interactionId ?? crypto.randomUUID());
+    // One follow-up per command: a follow-up itself opens no window, so stray speech cannot
+    // keep a conversation going on its own.
+    if (intent === 'command' && !followUp && this.settings?.handsFree) {
+      // A reply that takes a moment to start is still this command's reply, for a while.
+      this.followUpArmed = Date.now() + FOLLOW_UP_REPLY_MS;
+      this.followUpUntil = Date.now() + FOLLOW_UP_MS;
+    }
   }
 
   /**

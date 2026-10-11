@@ -148,6 +148,110 @@ describe('capture events', () => {
   });
 });
 
+describe('a live voice session', () => {
+  function live(taken = true) {
+    return {
+      begin: vi.fn((_interactionId: string) => true),
+      end: vi.fn(async (_interactionId: string) => taken),
+      cancel: vi.fn(),
+    };
+  }
+
+  function clock() {
+    let now = 1_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    return (ms: number) => (now += ms);
+  }
+
+  it('hears a held command itself: no recorder, no transcription, no transcript handed on', async () => {
+    transcribe.mockClear();
+    const start = vi.spyOn(MicRecorder.prototype, 'start');
+    const pass = clock();
+    const store = readyStore();
+    const session = live();
+    const events: CaptureEvent[] = [];
+    const handled: string[] = [];
+    store.setLiveCapture(session);
+    store.setCaptureHandler((event) => events.push(event));
+    store.setTranscriptHandler((text) => {
+      handled.push(text);
+    });
+
+    await store.startListening('hold');
+    expect(store.capturing).toBe(true);
+    const id = events[0]!.interactionId;
+    expect(session.begin).toHaveBeenCalledWith(id);
+    expect(start).not.toHaveBeenCalled();
+
+    // Until the session has taken the words, the capture is not over.
+    let taken: (value: boolean) => void = () => {};
+    session.end.mockImplementationOnce(() => new Promise<boolean>((resolve) => (taken = resolve)));
+    pass(1_000);
+    await store.stopListening();
+    expect(store.capturing).toBe(true);
+    taken(true);
+    for (let round = 0; round < 5; round++) await Promise.resolve();
+    expect(store.capturing).toBe(false);
+    expect(session.end).toHaveBeenCalledWith(id);
+    expect(transcribe).not.toHaveBeenCalled();
+    expect(handled).toEqual([]);
+    // The session took the words: the capture ends with its answer, not with an event.
+    expect(events.map((event) => event.type)).toEqual(['start']);
+    store.dispose();
+  });
+
+  it('ends the capture when the session heard nothing, or the key was only tapped', async () => {
+    const pass = clock();
+    const store = readyStore();
+    const session = live(false);
+    const events: CaptureEvent[] = [];
+    store.setLiveCapture(session);
+    store.setCaptureHandler((event) => events.push(event));
+
+    await store.startListening('hold');
+    pass(1_000);
+    await store.stopListening();
+    for (let round = 0; round < 5; round++) await Promise.resolve();
+    expect(store.capturing).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: 'end', reason: 'ignored' });
+
+    await store.startListening('hold');
+    pass(100);
+    await store.stopListening();
+    expect(session.cancel).toHaveBeenCalledTimes(1);
+    expect(events.at(-1)).toMatchObject({ type: 'end', reason: 'too-short' });
+
+    await store.startListening('hold');
+    store.cancelListening();
+    expect(session.cancel).toHaveBeenCalledTimes(2);
+    expect(events.at(-1)).toMatchObject({ type: 'end', reason: 'cancelled' });
+    store.dispose();
+  });
+
+  it('leaves dictation, and a session that cannot take the capture, to the recorder', async () => {
+    const start = vi.spyOn(MicRecorder.prototype, 'start');
+    const store = readyStore();
+    const session = live();
+    store.setLiveCapture(session);
+
+    await store.startListening('hold', 'dictation');
+    expect(session.begin).not.toHaveBeenCalled();
+    expect(start).toHaveBeenCalledTimes(1);
+    store.cancelListening();
+
+    session.begin.mockReturnValueOnce(false);
+    await store.startListening('hold');
+    expect(start).toHaveBeenCalledTimes(2);
+    store.cancelListening();
+
+    store.setLiveCapture(null);
+    await store.startListening('hold');
+    expect(start).toHaveBeenCalledTimes(3);
+    store.cancelListening();
+    store.dispose();
+  });
+});
+
 describe('tap to answer', () => {
   it('opens the microphone only when something is waiting for a reply', async () => {
     const store = readyStore();
@@ -240,6 +344,102 @@ describe('speak', () => {
     await store.startListening('hold');
     await expect(store.speak('x', { interactionId: id })).resolves.toBe('suppressed');
     expect(speak).toHaveBeenCalledTimes(1);
+    store.cancelListening();
+    store.dispose();
+  });
+});
+
+describe('hands-free follow-up', () => {
+  function handsFreeStore() {
+    vi.spyOn(MicRecorder.prototype, 'stop').mockReturnValue({
+      wav: new Uint8Array(10000),
+      durationMs: 1000,
+    });
+    const store = readyStore();
+    store.status = {
+      ...store.status!,
+      settings: { ...store.status!.settings, handsFree: true },
+    };
+    const commands: string[] = [];
+    store.setTranscriptHandler((text) => {
+      commands.push(text);
+    });
+    const say = async (text: string) => {
+      transcribe.mockResolvedValueOnce({
+        success: true,
+        data: { text, latencyMs: 20, engine: 'whisper-local' },
+      });
+      await store.startListening('toggle', 'command', 'hands-free');
+      await store.stopListening();
+    };
+    return { store, commands, say };
+  }
+
+  it('takes one utterance without the wake phrase right after a command', async () => {
+    const { store, commands, say } = handsFreeStore();
+    await say('Maestro, switch to the chorus desk');
+    await say('go ahead and remove all of those');
+    expect(commands).toEqual(['switch to the chorus desk', 'go ahead and remove all of those']);
+
+    // The follow-up opened no window of its own.
+    await say('and one more thing');
+    expect(commands).toHaveLength(2);
+    expect(store.ignoredUtterance).toBe('and one more thing');
+    store.dispose();
+  });
+
+  it('ignores speech without the wake phrase once the window has passed', async () => {
+    const { store, commands, say } = handsFreeStore();
+    const now = vi.spyOn(Date, 'now');
+    now.mockReturnValue(1_000_000);
+    await say('Maestro, switch to the chorus desk');
+    now.mockReturnValue(1_000_000 + 11_000);
+    await say('of course');
+    expect(commands).toEqual(['switch to the chorus desk']);
+    store.dispose();
+  });
+});
+
+describe('a capture left open', () => {
+  it('drops a click-to-talk capture nobody spoke into', async () => {
+    const store = readyStore();
+    const events: CaptureEvent[] = [];
+    store.setCaptureHandler((event) => events.push(event));
+    await store.startListening('toggle');
+    for (let elapsed = 0; elapsed < 89_000; elapsed += 1_000) store['onChunk'](0.001, 1_000);
+    expect(store.isListening).toBe(true);
+    store['onChunk'](0.001, 1_000);
+    expect(store.isListening).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: 'end', reason: 'cancelled' });
+    store.dispose();
+  });
+
+  it('sends what was said once the developer has been quiet for a while', async () => {
+    vi.spyOn(MicRecorder.prototype, 'stop').mockReturnValue({
+      wav: new Uint8Array(10000),
+      durationMs: 1000,
+    });
+    const store = readyStore();
+    const handled: string[] = [];
+    store.setTranscriptHandler((text) => {
+      handled.push(text);
+    });
+    transcribe.mockResolvedValueOnce({
+      success: true,
+      data: { text: 'focus Atlas', latencyMs: 20, engine: 'whisper-local' },
+    });
+    await store.startListening('toggle');
+    store['onChunk'](0.5, 1_000);
+    for (let elapsed = 0; elapsed < 90_000; elapsed += 1_000) store['onChunk'](0.001, 1_000);
+    await vi.waitFor(() => expect(handled).toEqual(['focus Atlas']));
+    store.dispose();
+  });
+
+  it('leaves a held key alone', async () => {
+    const store = readyStore();
+    await store.startListening('hold');
+    for (let elapsed = 0; elapsed < 120_000; elapsed += 1_000) store['onChunk'](0.001, 1_000);
+    expect(store.isListening).toBe(true);
     store.cancelListening();
     store.dispose();
   });

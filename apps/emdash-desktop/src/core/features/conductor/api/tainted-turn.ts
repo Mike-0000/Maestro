@@ -170,6 +170,11 @@ const AGENT_TEXT_TOOLS: ReadonlySet<string> = new Set([
   'read_clipboard',
   'investigate',
 ]);
+/** True for a tool whose result is text an agent, an app, or a file wrote. */
+export function readsAgentText(name: string): boolean {
+  return AGENT_TEXT_TOOLS.has(name);
+}
+
 /** How many stored turns back a bare reply may still be about what an agent wrote. */
 export const AGENT_TEXT_REACH = 2;
 

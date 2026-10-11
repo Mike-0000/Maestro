@@ -2,7 +2,9 @@ import { defineContract, fallible, procedure } from '@emdash/wire/rpc';
 import { z } from 'zod';
 
 /**
- * The talk line: one realtime voice session between the developer and Maestro. The renderer owns
+ * The talk line: one realtime voice session between the developer and Maestro. While it is open
+ * its model is the conductor: it hears the developer and acts through the conductor's tools. The
+ * renderer owns
  * the WebRTC connection (it has the microphone and the speaker); the main process owns the API
  * key, sets the session up, and keeps count of what it costs. No key or token ever reaches the
  * renderer: it sends its connection offer here and gets the provider's answer back.
@@ -11,15 +13,22 @@ export const talkDomain = 'talk' as const;
 
 export const talkEffortSchema = z.enum(['minimal', 'low', 'medium', 'high']);
 
+/**
+ * When the line hears the developer. `key`: while the talk key is held, and for a moment after
+ * Maestro speaks. `open`: all the time, with no key.
+ */
+export const talkListeningSchema = z.enum(['key', 'open']);
+
 export const talkSettingsSchema = z.object({
   /** Off: no session is ever opened and nothing here costs anything. */
   enabled: z.boolean(),
   model: z.string().min(1).max(80),
   voice: z.string().min(1).max(40),
   effort: talkEffortSchema,
+  listening: talkListeningSchema,
   /**
-   * Seconds the microphone stays open after Maestro stops speaking, for talk only: questions,
-   * "stop", and steering the calls. 0 never opens it without a key.
+   * With `key` listening: seconds the microphone stays open after Maestro stops speaking, so an
+   * answer or a follow-up needs no key. 0 never opens it without a key.
    */
   windowSec: z.number().int().min(0).max(30),
   /**
@@ -29,7 +38,7 @@ export const talkSettingsSchema = z.object({
   talkOver: z.boolean(),
   /** Most the line may spend in a day, in US dollars; 0 is no limit. */
   dailyUsd: z.number().min(0).max(1000),
-  /** The model that writes the transcript the grammar and the router read. */
+  /** The model that writes the transcript of what the developer said. */
   transcriptionModel: z.string().min(1).max(80),
 });
 export type TalkSettings = z.infer<typeof talkSettingsSchema>;
@@ -39,6 +48,7 @@ export const DEFAULT_TALK_SETTINGS: TalkSettings = {
   model: 'gpt-realtime-2.1',
   voice: 'marin',
   effort: 'low',
+  listening: 'key',
   windowSec: 6,
   talkOver: false,
   dailyUsd: 5,
@@ -98,8 +108,8 @@ export const talkToolSchema = z.object({
 export type TalkTool = z.infer<typeof talkToolSchema>;
 
 /** Instructions plus tools are limited by the provider; this keeps a mistake from being sent. */
-export const TALK_INSTRUCTIONS_MAX_CHARS = 12_000;
-export const TALK_TOOLS_MAX = 12;
+export const TALK_INSTRUCTIONS_MAX_CHARS = 32_000;
+export const TALK_TOOLS_MAX = 64;
 
 export const talkContract = defineContract({
   getStatus: procedure({ input: z.void(), output: talkStatusSchema }),

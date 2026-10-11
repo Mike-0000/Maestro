@@ -212,7 +212,7 @@ export const conductorToolSchemas = {
       .max(2000)
       .optional()
       .describe(
-        "deny: the reason. answer: the developer's answer, in their words. approve: an optional note for the agent."
+        "deny: the reason. answer: the answer to the agent's question: the developer's own words in a turn they started, your own answer when Maestro gave you the question to decide. approve: an optional note for the agent."
       ),
   }),
   // Canvas Pro desks (appended; see the note above).
@@ -344,7 +344,7 @@ const descriptions: Record<ConductorToolName, string> = {
   filter_canvas:
     "Show only one project's windows on the canvas, or every project when project is omitted. Nothing is closed or stopped.",
   answer_request:
-    "Settle an open request an agent sent you (listed in the context, or delivered by a Maestro event). approve: Maestro carries out exactly what the agent asked and tells it. deny: tells the agent no, with message as the reason. answer: passes message to the agent as the developer's answer to its question. In a turn the developer started, approve or deny only what they said yes or no to.",
+    "Settle an open request an agent sent you (listed in the context, or delivered by a Maestro event). approve: Maestro carries out exactly what the agent asked and tells it. deny: tells the agent no, with message as the reason. answer: passes message to the agent as the answer to its question (the developer's answer in a turn they started, your own when a Maestro event gave you the question to decide). In a turn the developer started, approve or deny only what they said yes or no to.",
   stop_agent:
     "Stop an agent's session entirely (ends its process; the conversation is kept and can be resumed). Only when the user asks to stop, kill, or shut down an agent, not to interrupt its current step; the user confirms first.",
   canvas_desks:

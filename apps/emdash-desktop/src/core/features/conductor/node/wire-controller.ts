@@ -2,6 +2,7 @@ import { err, ok } from '@emdash/shared';
 import type { Scope } from '@emdash/shared/concurrency';
 import type { Logger } from '@emdash/shared/logger';
 import { createController, type Controller } from '@emdash/wire/rpc';
+import { setAttentionJudge } from '@core/primitives/agents/api/attention-judge';
 import type { ChorusHostServices } from '@core/primitives/chorus-host/api/host-services';
 import { conductorContract } from '../api/contract';
 import { agentRequestEvents, agentRequestHub } from './agent-request-hub';
@@ -24,6 +25,12 @@ export function createConductorWireController(options: {
   const service = new ConductorService(options.host, options.logger);
   service.start();
   options.scope.add(() => service.dispose());
+  // Agent status asks the conductor's model whether a finished turn needs the developer.
+  setAttentionJudge({
+    enabled: () => service.attentionEnabled(),
+    judge: (input) => service.judgeAttention(input),
+  });
+  options.scope.add(() => setAttentionJudge(null));
   // The two need each other: checks read settings and usage through the conductor service, and
   // its status reports on checks. Attaching afterwards breaks the circle.
   const investigations = new InvestigationService({

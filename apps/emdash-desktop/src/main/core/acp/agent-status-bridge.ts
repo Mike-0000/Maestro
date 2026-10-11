@@ -11,6 +11,7 @@ import { createScope, type Scope } from '@emdash/shared/concurrency';
 import { observe, remote, whenReady } from '@emdash/wire/state';
 import type { WireWorker } from '@emdash/wire/worker';
 import { z } from 'zod';
+import { finalAssistantReply } from '@core/primitives/agents/api/completion-report';
 import { agentStatusService } from '@main/core/agent-status/agent-status-service';
 import { log } from '@main/lib/logger';
 import {
@@ -44,6 +45,8 @@ export class AcpAgentStatusBridge {
   private workerStateUnsubscribe: Unsubscribe | null = null;
   private conversationCreatedUnsubscribe: Unsubscribe | null = null;
   private dependencies: AcpAgentStatusBridgeDependencies | undefined;
+  /** The transcript turn each conversation's last reply was read from. */
+  private readonly replyTurns = new Map<string, number>();
   private disposed = false;
 
   initialize(
@@ -133,6 +136,7 @@ export class AcpAgentStatusBridge {
     this.workerStateUnsubscribe = null;
     for (const attachment of this.attachments.values()) void attachment.scope.dispose();
     this.attachments.clear();
+    this.replyTurns.clear();
     this.dependencies = undefined;
   }
 
@@ -152,7 +156,7 @@ export class AcpAgentStatusBridge {
             (action): action is AcpAgentStatusAction => action !== null
           )
         : deriveAcpAgentStatusActions(previous, summary);
-      await this.applyActions(actions, { cache: bootstrap });
+      await this.applyActions(actions, { cache: bootstrap, host });
       if (!bootstrap) {
         const titleAction = deriveAcpSessionTitleAction(previous, summary);
         if (titleAction) this.applyTitleAction(titleAction);
@@ -170,12 +174,24 @@ export class AcpAgentStatusBridge {
 
   private async applyActions(
     actions: AcpAgentStatusAction[],
-    options: { cache?: boolean } = {}
+    options: { cache?: boolean; host?: HostRef } = {}
   ): Promise<void> {
+    const host = options.host;
     await Promise.all(
       actions.map(async (action) => {
         try {
-          if (action.kind === 'event') {
+          if (action.kind === 'event' && !options.cache && action.event.type === 'stop') {
+            // A turn end can wait seconds on the conductor's verdict. The service keeps each
+            // conversation's signals in order by itself, so nothing else waits behind it here.
+            const event = action.event;
+            void agentStatusService
+              .applySignal(event, {
+                ...(host
+                  ? { loadReply: () => this.loadFinalReply(host, event.conversationId) }
+                  : {}),
+              })
+              .catch((error: unknown) => this.logApplyError(action, error));
+          } else if (action.kind === 'event') {
             await (options.cache
               ? agentStatusService.cacheSignal(action.event)
               : agentStatusService.applySignal(action.event));
@@ -187,6 +203,34 @@ export class AcpAgentStatusBridge {
         }
       })
     );
+  }
+
+  /**
+   * The final reply of a chat agent's latest turn: the assistant text after its last tool call,
+   * never its thinking. Null when the transcript cannot be read.
+   */
+  private async loadFinalReply(host: HostRef, conversationId: string): Promise<string | null> {
+    const client = await this.dependencies?.runtimes.client(host);
+    if (!client?.success) return null;
+    // The transcript can trail the turn's end by a moment; one retry covers it.
+    const previous = this.replyTurns.get(conversationId);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 500));
+      const result = await client.data.acp.loadHistory(
+        { conversationId, limit: 1 },
+        { timeoutMs: 3_000 }
+      );
+      if (!result.success || result.data.unavailable) continue;
+      const turn = result.data.turns.at(-1);
+      // The turn that just ended may not be in the transcript yet: an earlier turn's reply is
+      // not this turn's.
+      if (!turn || (previous !== undefined && turn.seq <= previous)) continue;
+      const reply = finalAssistantReply(turn.items);
+      if (!reply) continue;
+      this.replyTurns.set(conversationId, turn.seq);
+      return reply;
+    }
+    return null;
   }
 
   private async resetMissingHostStatuses(host: HostRef, seen: ReadonlySet<string>): Promise<void> {

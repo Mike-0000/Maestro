@@ -414,7 +414,14 @@ export async function loadOverview(ports: RemoteControlPorts): Promise<RemoteOve
     if (!task || !projectIds.has(task.projectId)) continue;
     const { agent, session } = ports.sessions.describe(row.id);
     const kind = row.type === 'acp' ? 'chat' : 'terminal';
-    const status = agentStatus(agent?.status ?? row.agentStatus);
+    // Once a turn has ended, the stored status holds the conductor's verdict on it; the
+    // runtime's own state only knows the raw stop and idle reminder.
+    const turnOver =
+      agent?.status === 'completed' ||
+      (agent?.status === 'awaiting-input' && agent.notificationType === 'idle_prompt');
+    const status = agentStatus(
+      turnOver ? (row.agentStatus ?? agent?.status) : (agent?.status ?? row.agentStatus)
+    );
     agents.push({
       conversationId: row.id,
       taskId: task.id,

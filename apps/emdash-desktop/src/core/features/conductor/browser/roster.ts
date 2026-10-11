@@ -455,7 +455,18 @@ const CONTEXT_MAX_REPLIES = 4;
 export type ReportLookup = (entry: AgentTileEntry) => CompletionReport | null;
 
 export const reportFromEntry: ReportLookup = (entry) =>
-  entry.status === 'completed' ? entry.completionReport : null;
+  endedTurn(entry) ? entry.completionReport : null;
+
+/**
+ * True when the agent's turn is over: it completed, or it ended on something the developer must
+ * answer (the conductor's attention verdict), which arrives as awaiting-input with the reply.
+ */
+export function endedTurn(entry: Pick<AgentTileEntry, 'status' | 'completionReport'>): boolean {
+  return (
+    entry.status === 'completed' ||
+    (entry.status === 'awaiting-input' && entry.completionReport !== null)
+  );
+}
 
 /** Short previews of what finished agents told the developer, fenced as agent output. */
 export function finishedReplyLines(
@@ -464,7 +475,7 @@ export function finishedReplyLines(
   reportOf: ReportLookup
 ): string[] {
   const finished = entries
-    .map((entry) => ({ entry, report: entry.status === 'completed' ? reportOf(entry) : null }))
+    .map((entry) => ({ entry, report: endedTurn(entry) ? reportOf(entry) : null }))
     .filter((item): item is { entry: AgentTileEntry; report: CompletionReport } => !!item.report)
     .slice(0, CONTEXT_MAX_REPLIES);
   if (finished.length === 0) return [];

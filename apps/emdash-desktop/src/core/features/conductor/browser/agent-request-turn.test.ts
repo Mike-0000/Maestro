@@ -66,6 +66,7 @@ vi.mock('./agent-io', () => ({
   readFinalChatReply: vi.fn(async () => null),
   readFinishedTerminal: vi.fn(async () => null),
   sendToAgent: mocks.sendToAgent,
+  sendToLiveSession: vi.fn(async () => false),
   stopAgentSession: mocks.stopAgentSession,
   submitAgentInput: vi.fn(),
 }));
@@ -295,7 +296,7 @@ describe('agent requests in the conductor', () => {
     expect(store.busy).toBe(false);
   });
 
-  it('refuses every acting tool in the decision turn, then takes the developer’s yes', async () => {
+  it('refuses every acting tool in the decision turn, and does not wait for the developer', async () => {
     const { store, speech, receive } = setup();
     const asked = spawnRequest();
     mocks.runTurn
@@ -317,14 +318,18 @@ describe('agent requests in the conductor', () => {
       "not available while deciding an agent's request"
     );
     expect(mocks.spawnAgentTask).not.toHaveBeenCalled();
-    expect(mocks.sendToAgent).not.toHaveBeenCalled();
     expect(mocks.stopAgentSession).not.toHaveBeenCalled();
+    // The model asked the developer instead of deciding. Nobody may be there, so the asking
+    // agent is told nothing was done, and a later yes has nothing to approve.
     expect(speech.announce).toHaveBeenCalledWith(
-      'Zulu wants a Codex agent to check the PCB order. Okay?'
+      expect.stringContaining('I could not decide it, so nothing was done.')
     );
-    expect(store.requests.awaitingDeveloper).toBe(true);
+    expect(store.requests.awaitingDeveloper).toBe(false);
+    await vi.waitFor(() => expect(mocks.sendToAgent).toHaveBeenCalledTimes(1));
+    expect(mocks.sendToAgent.mock.calls[0]![1]).toContain(
+      'The conductor could not decide it just now'
+    );
 
-    // The question has stood long enough to be heard, and is the last thing the conductor said.
     const later = Date.now() + HEARD_MS + 1;
     const clock = vi.spyOn(Date, 'now').mockReturnValue(later);
     try {
@@ -332,12 +337,7 @@ describe('agent requests in the conductor', () => {
     } finally {
       clock.mockRestore();
     }
-
-    expect(mocks.spawnAgentTask).toHaveBeenCalledTimes(1);
-    expect(store.reply).toBe('Approved for Zulu.');
-    await vi.waitFor(() => expect(mocks.sendToAgent).toHaveBeenCalledTimes(1));
-    expect(mocks.sendToAgent.mock.calls[0]![1]).toContain('Approved by the developer.');
-    expect(store.requests.awaitingDeveloper).toBe(false);
+    expect(mocks.spawnAgentTask).not.toHaveBeenCalled();
   });
 
   it('does not take "stop" for a no, or a yes to something else for a yes', async () => {
