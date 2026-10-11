@@ -91,12 +91,25 @@ export const RegionNode = observer(function RegionNode({ data, selected }: NodeP
   if (store.proMode && region.parentId === null) {
     const gather = store.desks.find((desk) => desk.regionId === regionId)?.gather ?? null;
     const visited = store.visitors.length > 0;
+    // The desk's rect runs past the screen (its region chrome above, further pages below): what
+    // it says is placed on the page in view.
+    const page = store.deskFrame;
     return (
       <div
         className={cn(
-          'pointer-events-none relative h-full w-full rounded-3xl transition-shadow',
-          dropping && 'shadow-[0_0_0_6px_rgb(59_130_246/0.25)]'
+          'pointer-events-none absolute rounded-2xl transition-shadow',
+          dropping && 'shadow-[0_0_0_4px_rgb(59_130_246/0.25)]'
         )}
+        style={
+          page
+            ? {
+                left: page.x - region.rect.x,
+                top: page.y - region.rect.y,
+                width: page.w,
+                height: page.h,
+              }
+            : { inset: 0 }
+        }
       >
         {region.windowCount === 0 && !visited && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-6 text-center text-foreground-muted">

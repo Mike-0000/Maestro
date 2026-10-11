@@ -244,8 +244,54 @@ const DeskStrip = observer(function DeskStrip() {
           <Plus className="size-3.5" />
         </ToolbarButton>
       </div>
+      <DeskPager />
       <Divider />
     </>
+  );
+});
+
+/**
+ * Canvas Pro: the pages of a desk that holds more windows than fit one screen comfortably. Each
+ * page shows what is waiting on it, so nothing out of view goes unnoticed.
+ */
+const DeskPager = observer(function DeskPager() {
+  const store = getCanvasStore();
+  const pages = store.deskPager;
+  if (pages.length < 2) return null;
+  return (
+    <div role="tablist" aria-label="Pages of this desk" className="flex items-center gap-0.5 pl-1">
+      {pages.map((page) => {
+        const status =
+          page.waiting > 0
+            ? 'bg-amber-500 motion-safe:animate-pulse'
+            : page.failed > 0
+              ? 'bg-rose-500'
+              : page.working > 0
+                ? 'bg-blue-500'
+                : null;
+        const waiting =
+          page.waiting > 0 ? `, ${page.waiting} need${page.waiting === 1 ? 's' : ''} you` : '';
+        return (
+          <button
+            key={page.index}
+            type="button"
+            role="tab"
+            aria-selected={page.active}
+            title={`Page ${page.index + 1} of ${pages.length}: ${page.windowCount} window${page.windowCount === 1 ? '' : 's'}${waiting} (Alt+PageUp / PageDown)`}
+            onClick={() => store.setDeskPage(page.index)}
+            className={cn(
+              'flex h-7 min-w-6 shrink-0 items-center justify-center gap-1 rounded-md px-1.5 tabular-nums',
+              page.active
+                ? 'bg-background-secondary font-medium text-foreground'
+                : 'text-foreground-muted hover:bg-background-secondary hover:text-foreground'
+            )}
+          >
+            {page.index + 1}
+            {status && <span className={cn('size-1.5 shrink-0 rounded-full', status)} />}
+          </button>
+        );
+      })}
+    </div>
   );
 });
 

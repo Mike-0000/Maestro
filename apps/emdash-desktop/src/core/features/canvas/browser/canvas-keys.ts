@@ -37,6 +37,7 @@ function keyboardTargets(store: CanvasStore): string[] {
  * - Esc on the board: out of the sub-canvas you are in, one level at a time.
  * - Ctrl+Alt+Left/Right/Up: back, forward, and up a level; Ctrl+Alt+Home: the main canvas.
  * - Ctrl+Alt+PageDown/PageUp: the next or previous sub-canvas.
+ * - Alt+PageDown/PageUp: the next or previous page of a desk too full for one screen.
  * - Ctrl+Alt+1 to 4: that many views of the canvas side by side (1: the single canvas).
  */
 export function handleCanvasKey(store: CanvasStore, event: KeyboardEvent): boolean {
@@ -101,6 +102,11 @@ export function handleCanvasKey(store: CanvasStore, event: KeyboardEvent): boole
       store.setPaneCount(Number(views));
       return true;
     }
+  }
+
+  if (event.altKey && !mod && !store.stageActive && store.deskPageCount > 1) {
+    if (key === 'PageDown') return store.stepDeskPage(1);
+    if (key === 'PageUp') return store.stepDeskPage(-1);
   }
 
   const direction = ARROWS[key];

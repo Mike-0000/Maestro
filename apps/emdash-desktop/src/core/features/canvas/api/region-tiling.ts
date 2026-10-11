@@ -46,16 +46,19 @@ export function clampWeight(weight: number): number {
   return Math.min(MAX_TILE_WEIGHT, Math.max(MIN_TILE_WEIGHT, weight));
 }
 
-/** The region size that fills the canvas at zoom 1, leaving the workspace insets. */
-export function workspaceSize(screen: { width: number; height: number }): {
+/** The region size that fills the canvas at zoom 1, leaving `insets` (the workspace's by default). */
+export function workspaceSize(
+  screen: { width: number; height: number },
+  insets: { top: number; right: number; bottom: number; left: number } = WORKSPACE_INSETS
+): {
   w: number;
   h: number;
 } {
   const width = screen.width > 0 ? screen.width : FALLBACK_SCREEN.width;
   const height = screen.height > 0 ? screen.height : FALLBACK_SCREEN.height;
   return {
-    w: Math.max(320, Math.round(width - WORKSPACE_INSETS.left - WORKSPACE_INSETS.right)),
-    h: Math.max(160, Math.round(height - WORKSPACE_INSETS.top - WORKSPACE_INSETS.bottom)),
+    w: Math.max(320, Math.round(width - insets.left - insets.right)),
+    h: Math.max(160, Math.round(height - insets.top - insets.bottom)),
   };
 }
 

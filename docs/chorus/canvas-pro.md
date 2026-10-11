@@ -201,10 +201,66 @@ in view as they did.
   (`projectRegionId`). With the project setting on, Pro gives one desk per project.
 - **Removing a desk** moves its windows to the desk before it, or a named one. The last desk
   stays.
-- **A desk too full for one screen** grows past the screen, frames below zoom 1, and unlocks pan
-  and zoom. Splitting it is the better answer; the conductor can suggest it.
+- **A desk too full for one screen** pages (§4.3). It never shrinks its windows or zooms out.
 - **Multi-canvas** is one view in Pro. Each view already remembers its own scope, so "a different
   desk in each view" is a small later addition.
+
+### 4.3 A desk is always full
+
+Added 2026-10-11. Before this a desk was a screen-sized tiled region, and it stopped filling the
+screen as soon as a window was dragged, nudged, or resized by hand (the region went `free`), when
+it had been a free or hand-sized region on the classic canvas, or when it held more windows than
+fit (it grew past the screen and the camera zoomed out). It also kept the classic region's header
+band and 24 px gutters around windows it no longer drew a header for: about 79 % of a 1600×900
+canvas went to windows.
+
+A desk is now a column of **pages**. A page is exactly the part of the screen a desk may use (the
+screen less 56 px for the toolbar and 8 px elsewhere); pages sit one screen apart, and the camera
+only ever shows one whole page at zoom 1. The rules live in `canvas/api/desk-layout.ts`:
+
+1. **Fill.** The windows of a page cover it edge to edge, with an 8 px gap between panes (the
+   Stage's spacing; 44 px when task frames show, for their headers). About 92 % of the same canvas.
+2. **No overfill.** A page takes as many windows as fit at a comfortable size (an agent 480×280, a
+   browser 560×360, a doc 420×300, a note 220×180), up to 12. The rest go to the next page.
+   Earlier pages are full before a later one starts, so a new window never reshuffles them.
+   Shares still follow weights ("make Atlas bigger"), but no pane is taken below its comfortable
+   size, so growing one window never pushes another off the page.
+3. **Always tiled.** Nothing on a desk has a free arrangement or a size of its own, regions inside
+   it included. What used to break the tiling now changes order or shares:
+
+   | Gesture | On a desk |
+   | --- | --- |
+   | Drop a window on another | The two trade places |
+   | Drop it on nothing | It goes back to its pane |
+   | Nudge (Alt+Arrow, "move Atlas left") | Trades places with the neighbour on that side |
+   | Resize by a corner, or to a size | Changes its share of the page |
+   | "In a row", "in a column" | Tiles; the reply says a desk is always full |
+   | Resize the desk itself | Refused |
+
+4. **A page is a screen.** The camera is locked on the page in view. Focusing a window on another
+   page brings that page into view; the desk strip shows the pages with what is waiting on each,
+   Alt+PageUp/PageDown steps through them, and "next page" / "previous page" work by voice.
+   The page each desk was on is remembered for the session.
+
+**Where the rule is kept.** In two places, on purpose:
+
+- The planner. With `LayoutEnv.desks` set, `tileDesk` lays a desk out from its members' reading
+  order, and every op that used to free a region is reinterpreted as above. Every planned change
+  leaves every desk it touched full.
+- The store. `deskViolations` (a check that reads only the geometry, not the planner's intent) is
+  watched for the desk in view; whatever was not planned (an undo of stale geometry, a canvas
+  saved before this change, the window resized, task frames toggled) is laid out again by
+  `settleDesks`, which is not undoable. The repair is the same function the planner uses, and
+  laying a desk out twice changes nothing, so it cannot loop.
+
+**Still a region.** A desk's rect holds its members with the ordinary region insets, so the header
+band the classic canvas draws is simply above the page, out of view. Nothing about the memento
+changed. Desks no longer push each other around the hidden board when one grows a page; leaving
+Canvas Pro re-tiles each as a one-screen sub-canvas and sets them side by side again.
+
+**Three windows.** On a desk the first window takes the main pane, not the heaviest. The order is
+what the user sets by dragging, and it is what makes laying a page out again read back the same
+order.
 
 ---
 
@@ -383,6 +439,7 @@ Secondary. All route to the same store calls as voice.
 | Ctrl+Alt+Left / Right | Back / forward on the trail (covers "last desk") | Works |
 | Ctrl+Alt+Home | The first desk | Works |
 | Esc | Leaves a Stage, or a region inside a desk; never the desk | Works |
+| Alt+PageDown / PageUp | Next / previous page of a desk too full for one screen | Works (§4.3) |
 | Ctrl+Alt+Shift+PageDown / PageUp | Move the focused window to the next / previous desk and follow | Proposed, phase 3 |
 | Ctrl+Alt+N | New desk | Proposed, phase 3 |
 
@@ -429,7 +486,7 @@ Taken on the recommendations, at the developer's direction (2026-10-10).
 | 2 | What is glass? | The desk's backdrop, seen in gutters and empty space. Translucent windows are a later option |
 | 3 | Blur strength on glass | System acrylic as it is; adjustable blur is for image backgrounds |
 | 4 | Mode or separate canvas? | One arrangement, two presentations |
-| 5 | Desk shape | Screen-sized and tiled by default; free placement inside a desk still works |
+| 5 | Desk shape | Always full: screen-sized pages, everything tiled (§4.3). Reversed on 2026-10-11 from "free placement inside a desk still works", which is what let desks stop filling the screen |
 | 6 | Desks before glass? | Yes. Phase 1 ships on the color wash |
 | 7 | Backgrounds per desk? | One default, optional per-desk override |
 | 8 | One desk per project? | The existing "new windows open in the project's sub-canvas" setting does this; left as it is |
@@ -448,6 +505,7 @@ Still open:
 | Piece | Code |
 | --- | --- |
 | Desk rules: order, heir, homing, signals, visitor layout | `canvas/api/canvas-desks.ts` |
+| Desk layout: pages, fill, comfortable sizes, the validator (§4.3) | `canvas/api/desk-layout.ts` |
 | Planner: `gather`, `dissolveRegion.into`, `reorderDesk`, order on create | `canvas/api/canvas-layout.ts` |
 | Memento v5: `mode`, `order`, `gather` | `canvas/contributions/mementos.ts` |
 | Store: mode, desks, the on-a-desk invariant, visitors, gathering, strays | `canvas/api/browser/stores/canvas-store.ts` |
@@ -504,3 +562,21 @@ Still open:
   so sub-canvases on the classic canvas probably behave the same; that was not tested.
 - **Grammar gaps the model covers:** "remove Review into Ops" and numbered reorder ("make this
   desk third").
+
+### Always-full desks (§4.3), 2026-10-11
+
+- **Checked.** `desk-layout.test.ts`: the page geometry, sharing with minimums, paging, each op
+  that used to free a desk, and a seeded run of 150 random ops per seed (moves, drops, nudges,
+  resizes, arranges, swaps, closes, groups, dissolves, folds) on four screen shapes, asserting
+  after every step that no desk is in violation and that laying it out again changes nothing.
+  `canvas-store.desks.test.ts`: entering Pro with a hand-arranged region and undoing it, the
+  repair of an unplanned write, the window resize, task frames on and off, pages, visitors on
+  the page in view, undo after a resize, and leaving Pro. Typecheck, `oxlint`, `oxfmt --check`.
+- **Not checked.** Nothing was run in the built app: this was written where Electron is not
+  installed. `tooling/chorus/steps/desks.mjs` now also asserts zoom 1 and the share of the canvas
+  the windows cover, and should be run. In particular the pointer path is unseen: a window
+  dropped on a desk snapping into its pane (`boardSync` redraws from the layout after the
+  gesture), and the corner resize.
+- **Known.** The undo gap above is unchanged for the desk itself. For windows it is better: an
+  undo after a resize restores where each window lives, and the repair lays the desk out.
+  The conductor's prompt does not mention pages; "next page" goes through the grammar.

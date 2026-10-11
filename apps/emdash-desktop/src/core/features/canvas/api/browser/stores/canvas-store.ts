@@ -58,9 +58,11 @@ import {
   type LayoutSource,
 } from '../../canvas-history';
 import {
+  MAX_OPS_PER_BATCH,
   planLayout,
   readingOrder,
   regionAt,
+  settleDesks,
   type LayoutEnv,
   type LayoutOp,
   type LayoutPlan,
@@ -91,7 +93,6 @@ import {
   type PaneView,
 } from '../../canvas-panes';
 import {
-  contentBox,
   descendantTiles,
   frameAllowanceFor,
   isFoldedAway,
@@ -118,6 +119,16 @@ import {
   withProjectRegionTags,
   type NewWindowHome,
 } from '../../canvas-spawn';
+import {
+  DESK_INSETS,
+  deskGap,
+  deskPageBox,
+  deskPageCount,
+  deskPageOf,
+  deskTilesArea,
+  deskViolations,
+  type DeskViolation,
+} from '../../desk-layout';
 import { spokenProviderLabel } from '../../provider-names';
 import {
   adjacentRegion,
@@ -270,6 +281,16 @@ export type DeskEntry = {
   readonly gather: WindowStatus | null;
 };
 
+/** One page of the desk in view (Canvas Pro): a desk too full for one screen has several. */
+export type DeskPageEntry = {
+  readonly index: number;
+  readonly active: boolean;
+  readonly windowCount: number;
+  readonly waiting: number;
+  readonly working: number;
+  readonly failed: number;
+};
+
 export type CanvasLocation = CanvasLocationState;
 export type StageTarget = CanvasStageTarget;
 
@@ -343,6 +364,8 @@ const DEFAULT_MULTI_COUNT = 4;
 
 /** How long a board resize settles before a screen-sized workspace re-tiles to it. */
 const REFIT_DELAY_MS = 250;
+/** Repairs of a desk in a row before giving up (each one should leave it holding the rules). */
+const MAX_DESK_REPAIRS = 4;
 
 export function agentTileId(conversationId: string): string {
   return `agent:${conversationId}`;
@@ -442,6 +465,16 @@ export class CanvasStore {
   visitorIds: string[] = [];
   /** Canvas Pro: the desk that was in view before this one ("switch back", "the other desk"). */
   previousDeskId: string | null = null;
+  /** Canvas Pro: the page each desk was last on, this session (see `desk-layout.ts`). */
+  readonly deskPages = observable.map<string, number>();
+  /** Repairs of the desk in view since it last held the desk rules (a guard against looping). */
+  private deskRepairs = 0;
+  /**
+   * Bumped when a pointer gesture ends on a desk. The board then redraws every window from the
+   * layout: a drop or a resize there can leave the layout as it was (the window goes back to its
+   * pane), which no change to the layout would tell the board.
+   */
+  boardSync = 0;
   /** The undo entry of the last switch to Canvas Pro: undoing it switches back. */
   private proEntryId: number | null = null;
   backTrail: CanvasLocation[] = [];
@@ -499,7 +532,15 @@ export class CanvasStore {
       proMode: computed,
       desks: computed,
       activeDeskId: computed,
+      boardSync: observable,
       deskLocked: computed,
+      deskPageCount: computed,
+      deskPage: computed,
+      deskFrame: computed({ equals: comparer.structural }),
+      deskPager: computed({ equals: comparer.structural }),
+      deskViolations: computed({ equals: comparer.structural }),
+      setDeskPage: action,
+      stepDeskPage: action,
       deskSignals: computed,
       visitors: computed({ equals: comparer.structural }),
       visitorRects: computed,
@@ -668,18 +709,29 @@ export class CanvasStore {
         () => this.homeStrays(),
         { fireImmediately: true }
       ),
-      // Canvas Pro: the desk in view was re-tiled or resized under a camera that may be locked
-      // on it (a window closed, an undo), so it is framed again.
+      // Canvas Pro: the page in view moved under a camera that is locked on it (another page, a
+      // re-tile, the window resized), so it is framed again.
       reaction(
         () => {
           const desk = this.location.kind === 'board' ? this.activeDeskId : null;
-          const rect = desk ? this.state.regions[desk]?.rect : undefined;
-          return desk && rect ? { desk, x: rect.x, y: rect.y, w: rect.w, h: rect.h } : null;
+          const frame = desk ? this.deskFrame : null;
+          return desk && frame ? { desk, ...frame } : null;
         },
         (now, before) => {
           if (now && before && now.desk === before.desk) this.reframe();
         },
         { equals: comparer.structural }
+      ),
+      // Canvas Pro: the desk in view always holds the desk rules. Every planned change keeps
+      // them; this repairs what was not planned (an undo, a frame dragged, an older canvas).
+      reaction(
+        () => {
+          const desk = this.activeDeskId;
+          const found = desk ? this.deskViolations : [];
+          return desk && found.length > 0 ? `${desk}:${found.join(',')}` : null;
+        },
+        (drift) => this.repairDesk(drift),
+        { fireImmediately: true }
       ),
       // A gathering desk collects the windows with its status for as long as it shows.
       reaction(
@@ -838,9 +890,15 @@ export class CanvasStore {
     if (!this.state.showTaskFrames) return [];
     const layout = this.layoutState;
     const groups = new Map<string, { taskId: string; region: string | null }>();
+    const pro = this.proMode;
     const keyOf = (taskId: string, tileId: string) => {
       const region = parentOf(layout, tileId);
-      const key = region ? `${taskFrameId(taskId)}@${region}` : taskFrameId(taskId);
+      // A desk's pages are a screen apart: a frame holds the task's windows on one page.
+      const desk = pro && region && !parentOf(layout, region) ? layout.regions[region] : undefined;
+      const rect = desk ? layout.tiles[tileId] : undefined;
+      const page = desk && rect ? deskPageOf(desk.rect, this.boardSize, rect) : 0;
+      const where = region ? `@${region}${page > 0 ? `#${page}` : ''}` : '';
+      const key = `${taskFrameId(taskId)}${where}`;
       groups.set(key, { taskId, region });
       return key;
     };
@@ -907,6 +965,16 @@ export class CanvasStore {
   /** Moves several tiles by the same offset (dragging a task frame moves its agents). Undoable. */
   moveTiles(tileIds: readonly string[], dx: number, dy: number): void {
     if (dx === 0 && dy === 0) return;
+    if (this.proMode) {
+      // On a desk a drop is a change of order, which the planner makes while keeping it full.
+      this.dropNodes(
+        tileIds.map((id) => {
+          const rect = this.tileRect(id);
+          return { id, x: rect.x + dx, y: rect.y + dy };
+        })
+      );
+      return;
+    }
     const layout = this.layoutState;
     const tiles = { ...layout.tiles };
     for (const tileId of tileIds) {
@@ -1201,7 +1269,8 @@ export class CanvasStore {
     this.writeLayout(withProjectRegionTags(result.plan.state, tags));
     const created = result.plan.created.filter(isRegionId).at(-1);
     if (created) this.newestRegionId = created;
-    this.markChanged(result.plan.summary, result.plan.targets, 'command', []);
+    // A window born on another page of the desk does not pull the user off the one they are on.
+    this.markChanged(result.plan.summary, result.plan.targets, 'command', [], !this.proMode);
   }
 
   /** The region the user is looking at: the board scope or the stage's region. */
@@ -1414,7 +1483,10 @@ export class CanvasStore {
   /** Focuses a tile and asks the board to center it at interactive zoom. */
   requestFocus(tileId: string): void {
     // Canvas Pro: a window on another desk is not on screen, so its desk comes into view first.
-    if (this.proMode && !isRegionId(tileId)) this.revealOnDesk(tileId);
+    if (this.proMode && !isRegionId(tileId)) {
+      this.revealOnDesk(tileId);
+      this.showPageOf(tileId);
+    }
     this.focusTile(tileId);
     // A desk that fills the screen is already framed at zoom 1: the camera stays put.
     if (this.proMode && this.deskLocked) return;
@@ -1425,6 +1497,14 @@ export class CanvasStore {
     // Canvas Pro: the desk in view is the whole picture, so fitting means framing it again.
     const desk = this.activeDeskId;
     if (desk) {
+      // What was asked to be seen is on another page: that page comes into view.
+      const here = this.deskPage;
+      const pages = (tileIds ?? []).flatMap((id) => {
+        const page = this.pageOf(id);
+        return page === null ? [] : [page];
+      });
+      const [first] = pages;
+      if (first !== undefined && !pages.includes(here)) this.deskPages.set(desk, first);
       this.requestFrame(this.focusedRegionId ?? desk);
       return;
     }
@@ -1433,12 +1513,25 @@ export class CanvasStore {
 
   /** Asks the board to frame a region as the workspace (see `frameViewport`). */
   requestFrame(regionId: string, instant = false): void {
+    // Canvas Pro: the camera is cut to a page, never flown across a board nobody sees.
+    const cut = instant || this.proMode;
     this.viewportCommand = {
       id: ++this.commandSeq,
       kind: 'frame',
       regionId,
-      ...(instant ? { instant } : {}),
+      ...(cut ? { instant: cut } : {}),
     };
+  }
+
+  /**
+   * The camera for a `frame` command. Canvas Pro always frames the page in view of the desk in
+   * view, at zoom 1; the classic canvas frames the region as a workspace.
+   */
+  frameViewportFor(regionId: string): CanvasViewport | null {
+    const page = this.deskFrame;
+    if (page) return frameViewport(page, this.boardSize, DESK_INSETS);
+    const rect = this.regionEntry(regionId)?.rect;
+    return rect ? frameViewport(rect, this.boardSize) : null;
   }
 
   /** Frames the sub-canvas the user is in, else fits the board. */
@@ -1930,6 +2023,7 @@ export class CanvasStore {
       frameAllowance: frameAllowanceFor(this.state.showTaskFrames),
       now: Date.now(),
       newId: () => newRegionId(crypto.randomUUID()),
+      desks: this.proMode,
     };
   }
 
@@ -2077,7 +2171,8 @@ export class CanvasStore {
     label: string,
     targets: readonly string[],
     source: LayoutSource,
-    displaced: readonly string[]
+    displaced: readonly string[],
+    follow = true
   ): void {
     this.lastChange = {
       id: ++this.commandSeq,
@@ -2089,6 +2184,7 @@ export class CanvasStore {
     };
     // Changes asked for by voice or command stay in sight: fit them when all are off screen.
     if (source === 'pointer' || source === 'keyboard' || this.location.kind !== 'board') return;
+    if (!follow) return;
     const visible = this.visibleTileIds();
     const layout = this.layoutState;
     const shown = targets.filter(
@@ -2187,10 +2283,19 @@ export class CanvasStore {
     this.boardSize = { width, height };
     // A screen-sized workspace follows the window once the resize settles.
     if (this.refitTimer) clearTimeout(this.refitTimer);
-    if (!this.focusedRegionId) return;
+    this.refitTimer = null;
+    // Canvas Pro: the desk in view follows the window wherever the user is (the Stage included).
+    const desk = this.activeDeskId;
+    if (!this.focusedRegionId && !desk) return;
     this.refitTimer = setTimeout(() => {
       this.refitTimer = null;
-      if (!this.disposed) this.refitScope();
+      if (this.disposed) return;
+      if (this.proMode) {
+        const inView = this.activeDeskId;
+        if (inView) this.settleDesk(inView);
+      } else {
+        this.refitScope();
+      }
     }, REFIT_DELAY_MS);
   }
 
@@ -2212,6 +2317,12 @@ export class CanvasStore {
    * changed since and leave it behind.
    */
   private fitWorkspace(regionId: string, options: { ifResized?: boolean } = {}): void {
+    if (this.proMode) {
+      // A desk is laid out by the desk rules, for this screen, whatever it was before.
+      const desk = deskOf(this.layoutState, regionId);
+      if (desk) this.settleDesk(desk);
+      return;
+    }
     const layout = this.layoutState;
     const [root] = regionPath(layout, regionId);
     const top = root ? layout.regions[root] : undefined;
@@ -2277,6 +2388,7 @@ export class CanvasStore {
       });
     }
     if (ops.length > 0) this.runLayout(ops, { source: 'pointer' });
+    if (this.proMode) this.boardSync++;
   }
 
   /**
@@ -2296,6 +2408,7 @@ export class CanvasStore {
     this.runLayout([{ op: 'resize', targets: [tileId], size: { kind: 'exact', rect } }], {
       source: 'pointer',
     });
+    if (this.proMode) this.boardSync++;
   }
 
   /** Reserves a region for agents about to be created; they join it as their tiles appear. */
@@ -2780,12 +2893,128 @@ export class CanvasStore {
     return deskOf(this.layoutState, id);
   }
 
-  /** True when the desk in view fills the screen at zoom 1: the camera stays put on it. */
+  /**
+   * True on a desk: the camera stays on the page in view, at zoom 1. A desk always fills the
+   * screen (see `desk-layout.ts`), so there is nothing beside it to pan or zoom out to.
+   */
   get deskLocked(): boolean {
+    return this.deskFrame !== null;
+  }
+
+  /** Pages of the desk in view: 1 unless it holds more windows than fit one screen comfortably. */
+  get deskPageCount(): number {
     const desk = this.activeDeskId;
     const region = desk ? this.state.regions[desk] : undefined;
-    if (!region) return false;
-    return frameViewport(regionFootprint(region), this.boardSize).zoom >= 1;
+    return region ? deskPageCount(region.rect, this.boardSize) : 1;
+  }
+
+  /** The page in view of the desk in view. */
+  get deskPage(): number {
+    const desk = this.activeDeskId;
+    if (!desk) return 0;
+    return Math.min(this.deskPageCount - 1, Math.max(0, this.deskPages.get(desk) ?? 0));
+  }
+
+  /** The part of the board the camera shows in Canvas Pro: the page in view (null off a desk). */
+  get deskFrame(): TileRect | null {
+    const desk = this.activeDeskId;
+    const region = desk ? this.state.regions[desk] : undefined;
+    return region ? deskPageBox(region.rect, this.boardSize, this.deskPage) : null;
+  }
+
+  /** The page of the desk in view a window or region lies on (null when it is not on that desk). */
+  pageOf(id: string): number | null {
+    const desk = this.activeDeskId;
+    const layout = this.layoutState;
+    const region = desk ? layout.regions[desk] : undefined;
+    if (!desk || !region || id === desk || this.visitorRects.has(id)) return null;
+    if (deskOf(layout, id) !== desk) return null;
+    return deskPageOf(region.rect, this.boardSize, nodeRect(layout, id));
+  }
+
+  /** The pages of the desk in view with what is on each, for the pager. */
+  get deskPager(): DeskPageEntry[] {
+    const desk = this.activeDeskId;
+    if (!desk) return [];
+    const active = this.deskPage;
+    const pages = Array.from({ length: this.deskPageCount }, (_, index) => ({
+      index,
+      active: index === active,
+      windowCount: 0,
+      waiting: 0,
+      working: 0,
+      failed: 0,
+    }));
+    const statuses = new Map(
+      this.agentEntries.map((entry) => [entry.tileId, windowStatus(entry)] as const)
+    );
+    for (const id of this.visibleTileIds()) {
+      const page = pages[this.pageOf(id) ?? -1];
+      if (!page || this.isFolded(id)) continue;
+      page.windowCount++;
+      const status = statuses.get(id);
+      if (status === 'needs-you') page.waiting++;
+      else if (status === 'working') page.working++;
+      else if (status === 'error') page.failed++;
+    }
+    return pages;
+  }
+
+  /** Shows a page of the desk in view. Returns false when there is no such page. */
+  setDeskPage(page: number): boolean {
+    const desk = this.activeDeskId;
+    if (!desk || page < 0 || page >= this.deskPageCount) return false;
+    if (page !== this.deskPage) this.deskPages.set(desk, page);
+    return true;
+  }
+
+  /** The next (1) or previous (-1) page of the desk in view. */
+  stepDeskPage(step: 1 | -1): boolean {
+    return this.setDeskPage(this.deskPage + step);
+  }
+
+  /** Brings the page a window or region is on into view. */
+  private showPageOf(id: string): void {
+    const page = this.pageOf(id);
+    if (page !== null) this.setDeskPage(page);
+  }
+
+  /** How the desk in view breaks the desk rules right now (empty when it holds them). */
+  get deskViolations(): DeskViolation[] {
+    const desk = this.activeDeskId;
+    if (!desk) return [];
+    return deskViolations(this.layoutState, desk, {
+      screen: this.boardSize,
+      frameAllowance: frameAllowanceFor(this.state.showTaskFrames),
+      present: this.visibleTileIds(),
+    });
+  }
+
+  /** Lays a desk out again by the desk rules, for this screen. Not undoable. */
+  private settleDesk(deskId: string): void {
+    const layout = this.layoutState;
+    const next = settleDesks(layout, this.layoutEnv(), [deskId]);
+    if (diffLayout(layout, next)) this.writeLayout(next);
+  }
+
+  /**
+   * The desk in view stopped holding the desk rules without a planned change (`drift` says how;
+   * null: it holds them again). It is laid out again, at once unless the window is still being
+   * resized, in which case the refit that follows the resize does it.
+   */
+  private repairDesk(drift: string | null): void {
+    if (!drift) {
+      this.deskRepairs = 0;
+      return;
+    }
+    const desk = this.activeDeskId;
+    if (!desk || this.refitTimer) return;
+    if (this.deskRepairs >= MAX_DESK_REPAIRS) {
+      log.warn('Canvas: the desk in view keeps breaking the desk rules', { drift });
+      return;
+    }
+    this.deskRepairs++;
+    this.settleDesk(desk);
   }
 
   /** Desks out of view with agents waiting or failed, by the screen edge they lie toward. */
@@ -2827,14 +3056,19 @@ export class CanvasStore {
     this.visitorIds = [];
     if (mode === 'classic') {
       this.updateState((state) => ({ ...state, mode }));
+      this.boardFromDesks();
       return { changed: true, desks: deskIds(layout).length, gathered: 0 };
     }
     this.setPaneCount(1);
     const gathered = this.looseTileIds().length;
     const hadMain = mainDeskId(layout);
     const ops = homeLooseOps(layout, this.visibleTileIds());
-    const planned = ops.length > 0 ? this.planOps(ops) : null;
-    const settled = planned?.ok ? planned.plan.state : layout;
+    const env = { ...this.layoutEnv(), desks: true };
+    const planned = ops.length > 0 ? planLayout(layout, ops, env) : null;
+    const homed = planned?.ok ? planned.plan.state : layout;
+    // Every region that becomes a desk is laid out as one, whatever arrangement it had: part of
+    // the same undoable change, so undoing the switch gives the old arrangement back.
+    const settled = settleDesks(homed, env, deskIds(homed));
     // The order the board shows them in, unless they were ordered as desks before.
     const ordered = Object.values(layout.regions).some((region) => region.order !== undefined)
       ? deskIds(layout)
@@ -2853,6 +3087,27 @@ export class CanvasStore {
     this.proEntryId = committed ? (this.undoStack.at(-1)?.id ?? null) : null;
     this.showDesk(start);
     return { changed: true, desks: deskIds(next).length, gathered };
+  }
+
+  /**
+   * Back on the classic canvas the desks are sub-canvases again: each is re-tiled as one (a screen
+   * with its header, however many pages it had) and they are set side by side. Not undoable.
+   */
+  private boardFromDesks(): void {
+    const tiled = deskIds(this.layoutState).filter((id) => {
+      const region = this.state.regions[id];
+      return region && isTiled(region) && !region.collapsed;
+    });
+    for (let start = 0; start < tiled.length; start += MAX_OPS_PER_BATCH) {
+      const ops = tiled
+        .slice(start, start + MAX_OPS_PER_BATCH)
+        .map((region): LayoutOp => ({ op: 'fitRegion', region }));
+      const result = this.planOps(ops);
+      if (result.ok && diffLayout(this.layoutState, result.plan.state)) {
+        this.writeLayout(result.plan.state);
+      }
+    }
+    this.reframe();
   }
 
   /** Brings a desk into view at the screen's size (it may have been a region on the board). */
@@ -2950,8 +3205,16 @@ export class CanvasStore {
     const desk = this.activeDeskId;
     const region = desk ? this.state.regions[desk] : undefined;
     if (!desk || !region || ids.length === 0) return NO_VISITORS;
-    const content = contentBox(region, frameAllowanceFor(this.state.showTaskFrames));
-    return visitorLayout(content, ids, (this.regionEntry(desk)?.windowCount ?? 0) > 0);
+    const page = this.deskFrame;
+    if (!page) return NO_VISITORS;
+    // Visitors show on the page in view, spaced like the desk's own windows.
+    const frameAllowance = frameAllowanceFor(this.state.showTaskFrames);
+    return visitorLayout(
+      deskTilesArea(page, frameAllowance),
+      ids,
+      (this.regionEntry(desk)?.windowCount ?? 0) > 0,
+      deskGap(frameAllowance)
+    );
   }
 
   /** True when visitors float above the desk's own windows (the desk recedes behind them). */
