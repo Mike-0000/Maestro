@@ -35,6 +35,34 @@ const deskState = (page) =>
     };
   });
 
+/**
+ * How much of the canvas the windows on the desk in view cover, and the zoom they are drawn at.
+ * A desk always fills the screen: the share is everything but the toolbar band and the gaps.
+ */
+const deskFill = (page) =>
+  page.evaluate(() => {
+    const pane = document.querySelector('.react-flow')?.getBoundingClientRect();
+    if (!pane) return { share: 0, zoom: 0, windows: 0 };
+    const nodes = [
+      ...document.querySelectorAll(
+        '.react-flow__node-agent, .react-flow__node-note, .react-flow__node-browser, .react-flow__node-doc'
+      ),
+    ];
+    let covered = 0;
+    for (const node of nodes) {
+      const rect = node.getBoundingClientRect();
+      const w = Math.min(rect.right, pane.right) - Math.max(rect.left, pane.left);
+      const h = Math.min(rect.bottom, pane.bottom) - Math.max(rect.top, pane.top);
+      if (w > 0 && h > 0) covered += w * h;
+    }
+    const transform = document.querySelector('.react-flow__viewport')?.style.transform ?? '';
+    return {
+      share: covered / (pane.width * pane.height),
+      zoom: Number(/scale\(([\d.]+)\)/.exec(transform)?.[1] ?? 0),
+      windows: nodes.length,
+    };
+  });
+
 async function ensureTask(page, taskName, agentLabel) {
   if (
     await page
@@ -80,6 +108,12 @@ export default async function desks({ app, page, shot, log }) {
   const total = state.agents;
   expect(total >= 2, `expected the two agents on the first desk, saw ${total}`);
   await shot('pro-main');
+
+  // The desk fills the screen at zoom 1: no board around it, no empty band inside it.
+  const fill = await deskFill(page);
+  log('fill:', JSON.stringify(fill));
+  expect(fill.zoom === 1, `the desk is drawn at zoom ${fill.zoom}, not 1`);
+  expect(fill.share > 0.7, `the windows cover only ${Math.round(fill.share * 100)}% of the canvas`);
 
   // A new desk by pointer, named in the strip.
   await page.getByRole('button', { name: 'New desk', exact: true }).click();

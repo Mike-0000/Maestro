@@ -52,6 +52,7 @@ import {
   type RegionState,
   type WindowStatus,
 } from './canvas-regions';
+import { deskGap, deskMinSize, planDesk } from './desk-layout';
 import {
   baseTileWeight,
   clampWeight,
@@ -61,6 +62,7 @@ import {
   workspaceSize,
   type TilingItem,
 } from './region-tiling';
+import { paneInDirection } from './stage-layout';
 
 export type Slot =
   | 'top-left'
@@ -158,6 +160,11 @@ export type LayoutEnv = {
   readonly frameAllowance: number;
   readonly now: number;
   readonly newId: () => string;
+  /**
+   * Canvas Pro: every top-level region is a desk. A desk is always tiled into screen-sized pages
+   * (see `desk-layout.ts`), whatever an op asks of it.
+   */
+  readonly desks?: boolean;
 };
 
 export type LayoutTier = 'immediate' | 'preview';
@@ -355,12 +362,16 @@ function roundRect(rect: TileRect): TileRect {
 // ── Geometry helpers ─────────────────────────────────────────────────────────
 
 /** Reading order: row bands top to bottom, then left to right. */
-export function readingOrder(ids: readonly string[], rectOf: (id: string) => TileRect): string[] {
+export function readingOrder(
+  ids: readonly string[],
+  rectOf: (id: string) => TileRect,
+  band: number = ROW_BAND
+): string[] {
   const withRects = ids.map((id) => ({ id, rect: rectOf(id) }));
   withRects.sort((a, b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x);
   const rows: { top: number; items: typeof withRects }[] = [];
   for (const item of withRects) {
-    const row = rows.find((candidate) => Math.abs(candidate.top - item.rect.y) <= ROW_BAND);
+    const row = rows.find((candidate) => Math.abs(candidate.top - item.rect.y) <= band);
     if (row) row.items.push(item);
     else rows.push({ top: item.rect.y, items: [item] });
   }
@@ -752,6 +763,18 @@ function paneMinimum(draft: Draft, id: string, depth: number): { w: number; h: n
   return needed ? { w: needed.w, h: needed.h } : { ...MIN_REGION_SIZE };
 }
 
+/**
+ * The order a tiled region's members are laid out in. On a desk panes can be short (a region
+ * tiled into the pane it was given), so rows are told apart by half the shortest member rather
+ * than the fixed band: laying the region out again must read back the order it was laid out in.
+ */
+function tilingOrder(draft: Draft, ids: readonly string[]): string[] {
+  const rectOf = (id: string) => draft.rect(id);
+  if (!onDesk(draft) || ids.length === 0) return readingOrder(ids, rectOf);
+  const shortest = Math.min(...ids.map((id) => rectOf(id).h));
+  return readingOrder(ids, rectOf, Math.min(ROW_BAND, Math.max(1, shortest / 2)));
+}
+
 type TiledLayout = {
   readonly size: { w: number; h: number };
   /** Collapsed child regions, in a strip along the top. */
@@ -765,19 +788,33 @@ function tiledLayout(
   draft: Draft,
   regionId: string,
   outer: { w: number; h: number },
-  depth: number
+  depth: number,
+  exact = false
 ): TiledLayout {
-  const insets = regionInsets(draft.env.frameAllowance);
+  const chrome = regionInsets(draft.env.frameAllowance);
+  // `exact`: the region has the pane it was given and no more (it is on a desk, which never
+  // grows past the screen). In a pane too small for its own chrome the chrome gives way, so its
+  // members always stay inside it.
+  const insets = exact
+    ? {
+        side: Math.min(chrome.side, outer.w / 4),
+        top: Math.min(chrome.top, outer.h / 4),
+        bottom: Math.min(chrome.bottom, outer.h / 4),
+      }
+    : chrome;
   const gap = tilingGap(draft);
   const children = draft.children(regionId);
   const strip = children.filter((id) => isRegionId(id) && draft.regions[id]?.collapsed);
-  const members = readingOrder(
-    children.filter((id) => !strip.includes(id)),
-    (id) => draft.rect(id)
+  const members = tilingOrder(
+    draft,
+    children.filter((id) => !strip.includes(id))
   );
-  const stripWidth =
-    strip.reduce((total, id) => total + draft.rect(id).w, 0) + gap * Math.max(0, strip.length - 1);
-  const stripHeight = strip.length > 0 ? COLLAPSED_REGION_HEIGHT + gap : 0;
+  const stripWidth = exact
+    ? 0
+    : strip.reduce((total, id) => total + draft.rect(id).w, 0) +
+      gap * Math.max(0, strip.length - 1);
+  const stripRoom = strip.length > 0 ? COLLAPSED_REGION_HEIGHT + gap : 0;
+  const stripHeight = exact ? Math.min(stripRoom, outer.h / 4) : stripRoom;
   const items: TilingItem[] = members.map((id) => ({
     id,
     weight: tilingWeight(draft, regionId, id),
@@ -787,7 +824,12 @@ function tiledLayout(
     w: Math.max(stripWidth, outer.w - insets.side * 2),
     h: Math.max(1, outer.h - insets.top - insets.bottom - stripHeight),
   };
-  const tiling = planTiling(items, content, gap);
+  // An exact pane is shared whatever its members' minimums: it cannot grow.
+  const tiling = planTiling(
+    exact ? items.map((item) => ({ ...item, min: { w: 0, h: 0 } })) : items,
+    content,
+    gap
+  );
   return {
     size: {
       w: tiling.area.w + insets.side * 2,
@@ -796,6 +838,82 @@ function tiledLayout(
     strip,
     panes: placePanes(tiling.panes, { x: insets.side, y: insets.top + stripHeight }),
   };
+}
+
+/** Canvas Pro: every region is a desk or on one, and everything on a desk is tiled. */
+function onDesk(draft: Draft): boolean {
+  return draft.env.desks === true;
+}
+
+/** Canvas Pro: a top-level region is a desk, which always fills the screen. */
+function isDesk(draft: Draft, regionId: string | null): boolean {
+  return (
+    draft.env.desks === true &&
+    regionId !== null &&
+    Boolean(draft.regions[regionId]) &&
+    draft.parent(regionId) === null
+  );
+}
+
+/**
+ * Lays a desk out as full pages (see `desk-layout.ts`): its members in reading order, each page a
+ * screen, with whatever arrangement or size the region had before giving way. Nested regions tile
+ * or fill the pane they get, as in any tiled region.
+ */
+function tileDesk(draft: Draft, deskId: string): void {
+  const desk = draft.regions[deskId];
+  if (!desk || desk.collapsed) return;
+  const { frameAllowance, screen } = draft.env;
+  const children = draft.children(deskId);
+  const strip = children.filter((id) => isRegionId(id) && draft.regions[id]?.collapsed);
+  const members = tilingOrder(
+    draft,
+    children.filter((id) => !strip.includes(id))
+  );
+  const gap = deskGap(frameAllowance);
+  const plan = planDesk({
+    items: members.map((id) => ({
+      id,
+      weight: tilingWeight(draft, deskId, id),
+      min: isRegionId(id) ? paneMinimum(draft, id, 0) : deskMinSize(id),
+    })),
+    screen,
+    frameAllowance,
+    stripHeight: strip.length > 0 ? COLLAPSED_REGION_HEIGHT + gap : 0,
+  });
+  const origin = { x: desk.rect.x, y: desk.rect.y };
+  const weights = Object.fromEntries(
+    Object.entries(desk.weights ?? {}).filter(([id]) => plan.panes.has(id))
+  );
+  const next: Mutable<RegionState> = {
+    ...desk,
+    arrangement: 'tiled',
+    rect: roundRect({ ...origin, ...plan.size }),
+  };
+  if (next.screenSized === false) delete next.screenSized;
+  draft.regions[deskId] = withWeights(next, weights);
+  let x = origin.x + plan.strip.x;
+  for (const id of strip) {
+    draft.moveTo(id, x, origin.y + plan.strip.y);
+    x += draft.rect(id).w + gap;
+  }
+  for (const [id, pane] of plan.panes) {
+    const at = { x: origin.x + pane.x, y: origin.y + pane.y, w: pane.w, h: pane.h };
+    if (isRegionId(id)) tileNested(draft, id, at, 1);
+    else draft.setTile(id, at);
+  }
+  draft.retile.delete(deskId);
+}
+
+/**
+ * True when a desk, or a region on it, has an arrangement or a size of its own. Nothing on a desk
+ * keeps one: everything is tiled, all the way down.
+ */
+function deskIsLoose(state: LayoutState, deskId: string): boolean {
+  const desk = state.regions[deskId];
+  if (!desk || desk.collapsed) return false;
+  if (!isTiled(desk) || desk.screenSized === false) return true;
+  return descendantRegions(state, deskId).some((id) => !isTiled(state.regions[id]));
 }
 
 /**
@@ -807,6 +925,10 @@ function tiledLayout(
 function tileRegion(draft: Draft, regionId: string, fixed: TileRect | null, depth = 0): void {
   const region = draft.regions[regionId];
   if (!region || region.collapsed || depth > MAX_REGION_DEPTH + 1) return;
+  if (!fixed && isDesk(draft, regionId)) {
+    tileDesk(draft, regionId);
+    return;
+  }
   if (fixed) draft.moveTo(regionId, fixed.x, fixed.y);
   const outer = fixed
     ? { w: fixed.w, h: fixed.h }
@@ -814,7 +936,8 @@ function tileRegion(draft: Draft, regionId: string, fixed: TileRect | null, dept
       ? workspaceSize(draft.env.screen)
       : { w: region.rect.w, h: region.rect.h };
   const origin = (draft.regions[regionId] as RegionState).rect;
-  const layout = tiledLayout(draft, regionId, outer, depth);
+  // Canvas Pro: a region on a desk fills the pane it is given, exactly.
+  const layout = tiledLayout(draft, regionId, outer, depth, onDesk(draft) && fixed !== null);
   const members = new Set(layout.panes.keys());
   const weights = Object.fromEntries(
     Object.entries(region.weights ?? {}).filter(([id]) => members.has(id))
@@ -833,10 +956,16 @@ function tileRegion(draft: Draft, regionId: string, fixed: TileRect | null, dept
   for (const [id, pane] of layout.panes) {
     const at = { x: origin.x + pane.x, y: origin.y + pane.y, w: pane.w, h: pane.h };
     if (!isRegionId(id)) draft.setTile(id, at);
-    else if (isTiled(draft.regions[id])) tileRegion(draft, id, at, depth + 1);
+    else if (isTiled(draft.regions[id]) || onDesk(draft)) tileNested(draft, id, at, depth + 1);
     else fillPane(draft, id, at);
   }
   draft.retile.delete(regionId);
+}
+
+/** Tiles a region into the pane its parent gives it (on a desk, a free one is tiled first). */
+function tileNested(draft: Draft, regionId: string, pane: TileRect, depth: number): void {
+  if (!isTiled(draft.regions[regionId])) draft.setRegion(regionId, { arrangement: 'tiled' });
+  tileRegion(draft, regionId, pane, depth);
 }
 
 /** A free region in a tiled parent keeps its members' arrangement and fills its pane. */
@@ -878,6 +1007,16 @@ function childSignature(
  * then keeps its siblings clear of its new size.
  */
 function settleTiling(draft: Draft, before: LayoutState): void {
+  if (draft.env.desks) {
+    // A desk is always tiled: one that an op (or an older canvas) left free is laid out again.
+    for (const id of deskIds(draft.state)) {
+      // So is a region that has only now become a desk (its desk was dissolved around it).
+      const wasDesk = Boolean(before.regions[id]) && parentOf(before, id) === null;
+      if (wasDesk && !deskIsLoose(draft.state, id)) continue;
+      draft.setRegion(id, { arrangement: 'tiled' });
+      draft.retile.add(id);
+    }
+  }
   for (const [id, region] of Object.entries(draft.regions)) {
     if (!isTiled(region) || region.collapsed) continue;
     if (
@@ -903,7 +1042,9 @@ function settleTiling(draft: Draft, before: LayoutState): void {
     for (const root of roots) {
       if (!draft.regions[root]) continue;
       tileRegion(draft, root, null);
-      pushSiblings(draft, root);
+      // Desks are shown one at a time, so they hold their places instead of pushing each other
+      // around a board nobody sees (leaving Canvas Pro lays them out side by side again).
+      if (!isDesk(draft, root)) pushSiblings(draft, root);
       growToFit(draft, draft.parent(root));
     }
   }
@@ -912,6 +1053,11 @@ function settleTiling(draft: Draft, before: LayoutState): void {
 
 /** Switches a tiled region to free: the user placed or sized something in it by hand. */
 function freeRegion(draft: Draft, regionId: string | null): void {
+  if (regionId && onDesk(draft)) {
+    // On a desk everything stays tiled: a hand placement only changes the reading order.
+    draft.retile.add(regionId);
+    return;
+  }
   if (regionId && isTiled(draft.regions[regionId])) {
     draft.setRegion(regionId, { arrangement: 'free' });
   }
@@ -944,6 +1090,24 @@ function weightFor(draft: Draft, regionId: string, id: string, size: SizeSpec): 
     default:
       return null;
   }
+}
+
+/**
+ * On a desk every resize is a change of share: a size that is not one of the spoken steps (a
+ * drag on a corner, "half the screen") scales the window's share by how much its area would grow.
+ */
+function deskWeightFor(
+  draft: Draft,
+  deskId: string,
+  id: string,
+  size: SizeSpec,
+  like: TileRect | null
+): number {
+  const current = draft.regions[deskId]?.weights?.[id] ?? 1;
+  const rect = draft.rect(id);
+  const next = resizedRect(draft, id, rect, size, like);
+  const before = Math.max(1, rect.w * rect.h);
+  return current * ((next.w * next.h) / before);
 }
 
 /** Tiles windows at the board root into a workspace-sized block where they already are. */
@@ -1072,10 +1236,23 @@ function opMove(draft: Draft, targets: readonly string[], to: Destination): OpRe
       const step = NUDGE_STEPS[to.amount] * GRID;
       const dx = to.direction === 'left' ? -step : to.direction === 'right' ? step : 0;
       const dy = to.direction === 'up' ? -step : to.direction === 'down' ? step : 0;
-      const pinned = new Set(ids);
-      for (const id of ids) freeRegion(draft, draft.parent(id));
-      for (const id of ids) draft.translate(id, dx, dy);
-      for (const id of ids) {
+      // On a desk there is no free space to nudge into: the window trades places with its
+      // neighbour on that side.
+      const tiled = ids.filter((id) => onDesk(draft) && draft.parent(id) !== null);
+      let traded = 0;
+      for (const id of tiled) {
+        const neighbour = deskNeighbour(draft, id, to.direction);
+        if (neighbour) traded++;
+        swapOnDesk(draft, id, neighbour);
+      }
+      if (tiled.length === ids.length && traded === 0) {
+        return `${names} ${ids.length === 1 ? 'is' : 'are'} already at that edge.`;
+      }
+      const loose = ids.filter((id) => !tiled.includes(id));
+      const pinned = new Set(loose);
+      for (const id of loose) freeRegion(draft, draft.parent(id));
+      for (const id of loose) draft.translate(id, dx, dy);
+      for (const id of loose) {
         pushSiblings(draft, id, pinned);
         growToFit(draft, draft.parent(id));
       }
@@ -1087,6 +1264,21 @@ function opMove(draft: Draft, targets: readonly string[], to: Destination): OpRe
       const problem = canReparent(draft, id, to.region);
       const region = problem ? draft.parent(id) : to.region;
       const from = draft.parent(id);
+      if (region !== null && region === from && onDesk(draft)) {
+        // Dropped where it already lives on a desk: it trades places with the window it was
+        // dropped on, and the desk stays full. Dropped on nothing, it goes back where it was.
+        const rect = draft.rect(id);
+        const other = deskMemberAt(
+          draft,
+          region,
+          { x: to.x + rect.w / 2, y: to.y + rect.h / 2 },
+          id
+        );
+        swapOnDesk(draft, id, other);
+        return other
+          ? `Swapped ${names} and ${draft.name(other)}.`
+          : `${names} stays where it is: a desk is always full.`;
+      }
       // Dragging within a tiled region is a hand placement: the region stops tiling.
       if (region === from) freeRegion(draft, region);
       draft.setParent(id, region);
@@ -1097,6 +1289,53 @@ function opMove(draft: Draft, targets: readonly string[], to: Destination): OpRe
         : `Moved ${names}.`;
     }
   }
+}
+
+/** The other member of `id`'s region lying in `direction` (a desk's next page counts as below). */
+function deskNeighbour(draft: Draft, id: string, direction: Direction): string | null {
+  const deskId = draft.parent(id);
+  if (!deskId) return null;
+  const panes = draft
+    .children(deskId)
+    .filter((member) => !(isRegionId(member) && draft.regions[member]?.collapsed))
+    .map((member, index) => ({ tileId: member, rect: draft.rect(member), index }));
+  return paneInDirection(panes, id, direction);
+}
+
+/** The member of a desk, or of a region on one, under `point`, other than `exclude`. */
+function deskMemberAt(
+  draft: Draft,
+  deskId: string,
+  point: { x: number; y: number },
+  exclude: string
+): string | null {
+  return (
+    draft.children(deskId).find((member) => {
+      if (member === exclude) return false;
+      if (isRegionId(member) && draft.regions[member]?.collapsed) return false;
+      const rect = draft.rect(member);
+      return (
+        point.x >= rect.x &&
+        point.x <= rect.x + rect.w &&
+        point.y >= rect.y &&
+        point.y <= rect.y + rect.h
+      );
+    }) ?? null
+  );
+}
+
+/** Two members of a tiled region trade places in its reading order; it re-tiles (also with no `b`). */
+function swapOnDesk(draft: Draft, a: string, b: string | null): void {
+  const deskId = draft.parent(a);
+  if (!deskId) return;
+  if (b) {
+    const rectA = draft.rect(a);
+    const rectB = draft.rect(b);
+    draft.moveTo(a, rectB.x, rectB.y);
+    draft.moveTo(b, rectA.x, rectA.y);
+    draft.targets.add(b);
+  }
+  draft.retile.add(deskId);
 }
 
 function relativePosition(anchor: TileRect, rect: TileRect, side: Side): { x: number; y: number } {
@@ -1151,10 +1390,16 @@ function opResize(draft: Draft, targets: readonly string[], size: SizeSpec): OpR
   if (size.kind === 'match' && !draft.exists(size.like)) {
     return { error: 'The window to match is gone.' };
   }
+  if (ids.every((id) => isDesk(draft, id))) {
+    return { error: 'A desk always fills the screen. Resize the windows on it instead.' };
+  }
   for (const id of ids) {
+    if (isDesk(draft, id)) continue;
     const parentId = draft.parent(id);
     if (parentId && isTiled(draft.regions[parentId])) {
-      const weight = weightFor(draft, parentId, id, size);
+      const weight =
+        weightFor(draft, parentId, id, size) ??
+        (onDesk(draft) ? deskWeightFor(draft, parentId, id, size, like) : null);
       if (weight !== null) {
         const region = draft.regions[parentId] as RegionState;
         draft.regions[parentId] = withWeights(region, {
@@ -1299,7 +1544,12 @@ function opArrange(
   }
   const names0 = whole ? describeWhere(draft, scope) : listNames(ids.map((id) => draft.name(id)));
   const tiledParent = parentId !== null && isTiled(draft.regions[parentId]);
-  if (layout === 'tile' || (tiledParent && (layout === 'grid' || layout === 'tidy'))) {
+  const deskParent = parentId !== null && onDesk(draft);
+  if (
+    layout === 'tile' ||
+    deskParent ||
+    (tiledParent && (layout === 'grid' || layout === 'tidy'))
+  ) {
     if (parentId) {
       const region = draft.regions[parentId] as RegionState;
       // "Tile" starts over: every window at its default share.
@@ -1310,6 +1560,9 @@ function opArrange(
     } else {
       if (whole) draft.forcePreview = true;
       tileAtRoot(draft, ids);
+    }
+    if (layout === 'row' || layout === 'column') {
+      return `Tiled ${names0}: a desk is always full, so it has no single ${layout}.`;
     }
     if (layout !== 'tile')
       return layout === 'grid' ? `Put ${names0} in a grid.` : `Tidied ${names0}.`;
@@ -1959,6 +2212,25 @@ export function planLayout(
       touchedWindows,
     },
   };
+}
+
+/**
+ * Canvas Pro: `state` with every desk holding the desk rules (see `desk-layout.ts`). A desk left
+ * free or sized by hand is tiled, and those in `refit` are laid out again for this screen. Not an
+ * op and not undoable: the store uses it to follow the window, and to repair a board it did not
+ * plan (an undo, a canvas from before desks were always full).
+ */
+export function settleDesks(
+  state: LayoutState,
+  env: LayoutEnv,
+  refit: readonly string[] = []
+): LayoutState {
+  const draft = new Draft(pruneLayout(state), { ...env, desks: true });
+  for (const id of deskIds(draft.state)) {
+    const region = draft.regions[id];
+    if (region && (deskIsLoose(draft.state, id) || refit.includes(id))) tileDesk(draft, id);
+  }
+  return draft.snapshot();
 }
 
 /** Drops membership and region parents that point at regions that no longer exist. */

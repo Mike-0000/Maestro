@@ -773,3 +773,24 @@ describe('Canvas Pro desks', () => {
     );
   });
 });
+
+describe('desk pages', () => {
+  const desks = { order: ['region:r'], active: 'region:r', visitors: [], pages: 2 };
+
+  it('pages a desk that has more than one page', () => {
+    expect(parse('next page', { desks })).toEqual({
+      kind: 'canvas',
+      action: { type: 'page', delta: 1 },
+    });
+    expect(parse('previous page', { desks })).toEqual({
+      kind: 'canvas',
+      action: { type: 'page', delta: -1 },
+    });
+  });
+
+  it('leaves "next page" alone on a desk that fits one screen', () => {
+    expect(parse('next page', { desks: { ...desks, pages: 1 } })).not.toMatchObject({
+      action: { type: 'page' },
+    });
+  });
+});

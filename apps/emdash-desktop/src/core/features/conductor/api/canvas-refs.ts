@@ -44,6 +44,8 @@ export type CanvasDeskContext = {
   readonly previous?: string | null;
   /** Windows from other desks that are visiting the desk in view. */
   readonly visitors: readonly string[];
+  /** Pages of the desk in view: more than 1 when it holds more than fits one screen. */
+  readonly pages?: number;
 };
 
 export type CanvasRefContext = {

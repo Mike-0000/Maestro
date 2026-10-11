@@ -687,8 +687,10 @@ export function parseCanvasCommand(
     }
     return act({ type: 'back' });
   }
-  if (context.onStage && PAGE_NEXT.test(text)) return act({ type: 'page', delta: 1 });
-  if (context.onStage && PAGE_PREVIOUS.test(text)) return act({ type: 'page', delta: -1 });
+  // The Stage pages, and so does a desk that holds more windows than fit one screen.
+  const paged = context.onStage || (context.desks?.pages ?? 1) > 1;
+  if (paged && PAGE_NEXT.test(text)) return act({ type: 'page', delta: 1 });
+  if (paged && PAGE_PREVIOUS.test(text)) return act({ type: 'page', delta: -1 });
   if (IMMERSIVE.test(text)) return act({ type: 'stage', ids: null, immersive: true });
   if (LIST_REGIONS.test(text)) return act({ type: 'describe', regionId: null });
 

@@ -27,7 +27,6 @@ import {
   regionFootprint,
   type LayoutState,
 } from '../api/canvas-regions';
-import { frameViewport } from '../api/region-tiling';
 import { getCanvasStore } from '../contributions/browser/app-stores';
 import { handleCanvasKey } from './canvas-keys';
 import { CanvasPaneContext } from './canvas-pane-context';
@@ -258,12 +257,13 @@ function ghostNodes(store: CanvasStore): Node[] {
   return nodes;
 }
 
-function mergeNodes(previous: Node[], next: Node[]): Node[] {
+/** `settle`: a gesture has ended, so a node still marked as dragged or resized is placed too. */
+function mergeNodes(previous: Node[], next: Node[], settle = false): Node[] {
   const byId = new Map(previous.map((node) => [node.id, node]));
   return next.map((node) => {
     const existing = byId.get(node.id);
     if (!existing) return node;
-    if (existing.dragging || existing.resizing) return existing;
+    if (!settle && (existing.dragging || existing.resizing)) return existing;
     return {
       ...existing,
       position: node.position,
@@ -344,6 +344,25 @@ const Board = observer(function Board({
     [store, pane, setNodes]
   );
 
+  // Canvas Pro: a drag or a resize on a desk ended. Whatever the gesture left on screen, every
+  // window goes to the pane the layout gives it (after React Flow has let go of the node).
+  useEffect(() => {
+    let frame = 0;
+    const dispose = reaction(
+      () => store.boardSync,
+      () => {
+        cancelAnimationFrame(frame);
+        frame = requestAnimationFrame(() =>
+          setNodes((previous) => mergeNodes(previous, buildNodes(store, pane), true))
+        );
+      }
+    );
+    return () => {
+      dispose();
+      cancelAnimationFrame(frame);
+    };
+  }, [store, pane, setNodes]);
+
   // The view that becomes active brings its own selection with it.
   useEffect(
     () =>
@@ -386,9 +405,9 @@ const Board = observer(function Board({
               return;
             case 'frame': {
               // The sub-canvas fills the screen below the toolbar; screen-sized ones land at zoom 1.
-              const rect = store.regionEntry(command.regionId)?.rect;
-              if (!rect) return;
-              const viewport = frameViewport(rect, store.boardSize);
+              // Canvas Pro frames the page in view of the desk instead, always at zoom 1.
+              const viewport = store.frameViewportFor(command.regionId);
+              if (!viewport) return;
               store.setScopeFramedZoom(viewport.zoom);
               // A desk swap is a cut: nothing travels across a board the user never sees.
               void flow.setViewport(viewport, {
@@ -439,11 +458,12 @@ const Board = observer(function Board({
     };
   }, [store, setNodes]);
 
-  // Canvas Pro: another desk came into view. The swap is a cut, softened by a quick fade.
+  // Canvas Pro: another desk, or another page of this one, came into view. The swap is a cut,
+  // softened by a quick fade.
   useEffect(
     () =>
       reaction(
-        () => store.activeDeskId,
+        () => (store.activeDeskId ? `${store.activeDeskId}#${store.deskPage}` : null),
         (desk, previous) => {
           if (!desk || !previous || !container || prefersReducedMotion()) return;
           container

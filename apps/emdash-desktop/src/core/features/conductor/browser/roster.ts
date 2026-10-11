@@ -275,6 +275,7 @@ function deskContext(canvas: CanvasStore): CanvasDeskContext {
     newest,
     previous: canvas.previousDeskId,
     visitors: [...canvas.visitors],
+    pages: canvas.deskPageCount,
   };
 }
 

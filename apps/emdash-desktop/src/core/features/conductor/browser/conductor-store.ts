@@ -2475,7 +2475,13 @@ export class ConductorStore {
         return canvas.leaveStage() ? quiet('Back to the canvas.') : said('The stage is not open.');
       case 'page': {
         const location = canvas.location;
-        if (location.kind !== 'stage') return said('The stage is not open.');
+        if (location.kind !== 'stage') {
+          // A desk too full for one screen has pages of its own.
+          if (canvas.deskPageCount < 2) return said('The stage is not open.');
+          return canvas.stepDeskPage(action.delta)
+            ? quiet(`Page ${canvas.deskPage + 1} of ${canvas.deskPageCount}.`)
+            : said(action.delta > 0 ? 'That is the last page.' : 'That is the first page.');
+        }
         canvas.setStagePage(location.page + action.delta);
         return quiet(action.delta > 0 ? 'Next page.' : 'Previous page.');
       }

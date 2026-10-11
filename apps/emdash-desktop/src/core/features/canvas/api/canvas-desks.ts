@@ -235,7 +235,8 @@ const VISITOR_FLOAT = 0.78;
 export function visitorLayout(
   content: TileRect,
   visitors: readonly string[],
-  floating: boolean
+  floating: boolean,
+  gap: number = GRID
 ): Map<string, TileRect> {
   const out = new Map<string, TileRect>();
   if (visitors.length === 0 || content.w <= 0 || content.h <= 0) return out;
@@ -250,14 +251,14 @@ export function visitorLayout(
   // (a region's tiling would grow past the screen, where a locked desk cannot follow).
   const columns = Math.min(visitors.length, tilingColumns(visitors.length, box.w / box.h));
   const rows = Math.ceil(visitors.length / columns);
-  const height = (box.h - GRID * (rows - 1)) / rows;
+  const height = (box.h - gap * (rows - 1)) / rows;
   for (let row = 0; row < rows; row++) {
     const inRow = visitors.slice(row * columns, (row + 1) * columns);
     // A short last row shares the full width.
-    const width = (box.w - GRID * (inRow.length - 1)) / inRow.length;
+    const width = (box.w - gap * (inRow.length - 1)) / inRow.length;
     inRow.forEach((id, column) => {
-      const x = Math.round(box.x + column * (width + GRID));
-      const y = Math.round(box.y + row * (height + GRID));
+      const x = Math.round(box.x + column * (width + gap));
+      const y = Math.round(box.y + row * (height + gap));
       out.set(id, { x, y, w: Math.floor(width), h: Math.floor(height) });
     });
   }

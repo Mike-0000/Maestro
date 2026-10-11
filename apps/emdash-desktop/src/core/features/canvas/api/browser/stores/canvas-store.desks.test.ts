@@ -1,9 +1,10 @@
 import { observable, runInAction } from 'mobx';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ProjectManagerStore } from '@core/features/projects/api/browser/stores/project-manager';
 import type { MementoHandle } from '@core/primitives/mementos/browser';
 import { canvasBoardMemento, type CanvasBoardState } from '../../../contributions/mementos';
 import { rectContains } from '../../canvas-model';
+import { DESK_INSETS, deskPageBox, deskRectSize } from '../../desk-layout';
 import { CanvasStore, noteTileId } from './canvas-store';
 
 /** An in-memory memento, so the store runs with its layout tracking as it does in the app. */
@@ -277,7 +278,10 @@ describe('CanvasStore desks (Canvas Pro)', () => {
     // The window shrinks while Main is out of view.
     store.setBoardSize(1200, 700);
     store.switchDesk(main);
-    expect(store.regionEntry(main)?.rect).toMatchObject({ w: 1168, h: 628 });
+    expect(store.regionEntry(main)?.rect).toMatchObject(
+      deskRectSize({ width: 1200, height: 700 }, 1)
+    );
+    expect(store.deskViolations).toEqual([]);
     expect(store.deskLocked).toBe(true);
     store.dispose();
   });
@@ -291,7 +295,10 @@ describe('CanvasStore desks (Canvas Pro)', () => {
     store.setBoardSize(1200, 700);
     store.setMode('pro');
     const review = deskNamed(store, 'Review');
-    expect(store.regionEntry(review)?.rect).toMatchObject({ w: 1168, h: 628 });
+    expect(store.regionEntry(review)?.rect).toMatchObject(
+      deskRectSize({ width: 1200, height: 700 }, 1)
+    );
+    expect(store.deskViolations).toEqual([]);
     expect(store.deskLocked).toBe(true);
     store.dispose();
   });
@@ -346,7 +353,9 @@ describe('CanvasStore desks (Canvas Pro)', () => {
     // The window shrank; the desk is re-tiled to it by a layout change, not by navigation.
     store.setBoardSize(1200, 700);
     store.runLayout([{ op: 'fitRegion', region: main }], { source: 'command' });
-    expect(store.regionEntry(main)?.rect).toMatchObject({ w: 1168, h: 628 });
+    expect(store.regionEntry(main)?.rect).toMatchObject(
+      deskRectSize({ width: 1200, height: 700 }, 1)
+    );
     expect(store.viewportCommand).toMatchObject({ kind: 'frame', regionId: main });
     store.dispose();
   });
@@ -482,6 +491,254 @@ describe('CanvasStore desks (Canvas Pro)', () => {
     expect(store.paneCount).toBe(1);
     store.setPaneCount(2);
     expect(store.paneCount).toBe(1);
+    store.dispose();
+  });
+});
+
+/** A window small enough that six notes fill a page: more than that pages the desk. */
+function smallCanvas(): CanvasStore {
+  const store = canvas();
+  store.setBoardSize(700, 600);
+  // Task frames take room around each pane; without them six notes fit this page exactly.
+  store.setShowTaskFrames(false);
+  return store;
+}
+
+function notes(store: CanvasStore, count: number): string[] {
+  return Array.from({ length: count }, (_, index) => noteTileId(store.addNote(`note ${index}`)));
+}
+
+describe('CanvasStore desks are always full', () => {
+  it('tiles a hand-arranged region when it becomes a desk, and undo gives the arrangement back', () => {
+    const store = canvas();
+    const tiles = notes(store, 3);
+    store.runLayout([{ op: 'createRegion', name: 'Review', members: tiles }], {
+      source: 'command',
+    });
+    const review = Object.keys(store.state.regions)[0] as string;
+    // Dragged by hand on the classic canvas: the region stops tiling.
+    const first = store.layoutState.tiles[tiles[0] as string];
+    store.dropNodes([{ id: tiles[0] as string, x: (first?.x ?? 0) + 30, y: (first?.y ?? 0) + 40 }]);
+    expect(store.state.regions[review]?.arrangement).toBe('free');
+    const arranged = { ...store.layoutState.tiles };
+
+    store.setMode('pro');
+    expect(store.state.regions[review]?.arrangement).toBe('tiled');
+    expect(store.deskViolations).toEqual([]);
+
+    store.undo();
+    expect(store.proMode).toBe(false);
+    expect(store.state.regions[review]?.arrangement).toBe('free');
+    expect(store.layoutState.tiles).toEqual(arranged);
+    store.dispose();
+  });
+
+  it('frames the page at zoom 1, flush with the desk insets', () => {
+    const store = canvas();
+    notes(store, 2);
+    store.setMode('pro');
+    const main = deskNamed(store, 'Main');
+    const camera = store.frameViewportFor(main);
+    const page = store.deskFrame;
+    expect(camera?.zoom).toBe(1);
+    expect((page?.x ?? 0) + (camera?.x ?? 0)).toBe(DESK_INSETS.left);
+    expect((page?.y ?? 0) + (camera?.y ?? 0)).toBe(DESK_INSETS.top);
+    expect(page).toMatchObject({ w: 1600 - 16, h: 900 - 64 });
+    store.dispose();
+  });
+
+  it('a drop on the desk trades places and leaves it full', () => {
+    const store = canvas();
+    const [a, b] = notes(store, 2) as [string, string];
+    store.setMode('pro');
+    const main = deskNamed(store, 'Main');
+    const before = { a: store.tileRect(a), b: store.tileRect(b) };
+    store.dropNodes([{ id: a, x: before.b.x + 10, y: before.b.y + 10 }]);
+    expect(store.tileRect(a)).toEqual(before.b);
+    expect(store.tileRect(b)).toEqual(before.a);
+    expect(store.state.regions[main]?.arrangement).toBe('tiled');
+    expect(store.deskViolations).toEqual([]);
+    store.dispose();
+  });
+
+  it('a hand resize changes shares and leaves the desk full', () => {
+    const store = canvas();
+    const [a, b] = notes(store, 2) as [string, string];
+    store.setMode('pro');
+    const rect = store.tileRect(a);
+    store.resizeTile(a, { ...rect, w: rect.w * 1.5 });
+    expect(store.tileRect(a).w).toBeGreaterThan(store.tileRect(b).w);
+    expect(store.deskViolations).toEqual([]);
+    store.dispose();
+  });
+
+  it('repairs a desk that something other than the planner changed', () => {
+    const store = canvas();
+    const [a] = notes(store, 3) as [string];
+    store.setMode('pro');
+    // A raw write, as an older build or an undo of stale geometry would leave.
+    store.setTileRect(a, { w: 120, h: 90 });
+    expect(store.deskViolations).toEqual([]);
+    expect(store.tileRect(a).w).toBeGreaterThan(120);
+    store.dispose();
+  });
+
+  it('stays full when task frames are switched on and off', () => {
+    const store = canvas();
+    notes(store, 4);
+    store.setMode('pro');
+    store.setShowTaskFrames(true);
+    expect(store.deskViolations).toEqual([]);
+    store.setShowTaskFrames(false);
+    expect(store.deskViolations).toEqual([]);
+    store.dispose();
+  });
+
+  it('follows the window once a resize settles', () => {
+    vi.useFakeTimers();
+    try {
+      const store = canvas();
+      notes(store, 3);
+      store.setMode('pro');
+      const main = deskNamed(store, 'Main');
+      store.setBoardSize(1200, 700);
+      // Mid-resize the desk is left alone; the camera already follows the screen.
+      expect(store.deskViolations).toContain('wrong-size');
+      expect(store.frameViewportFor(main)?.zoom).toBe(1);
+      vi.advanceTimersByTime(400);
+      expect(store.deskViolations).toEqual([]);
+      expect(store.regionEntry(main)?.rect).toMatchObject(
+        deskRectSize({ width: 1200, height: 700 }, 1)
+      );
+      store.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('pages a desk too full for one screen and brings the page of a focused window into view', () => {
+    const store = smallCanvas();
+    const tiles = notes(store, 8);
+    store.setMode('pro');
+    const main = deskNamed(store, 'Main');
+    expect(store.deskPageCount).toBe(2);
+    expect(store.deskPage).toBe(0);
+    expect(store.deskPager.map((page) => page.windowCount)).toEqual([6, 2]);
+    expect(store.deskViolations).toEqual([]);
+
+    const onSecond = tiles.find((id) => store.pageOf(id) === 1) as string;
+    store.requestFocus(onSecond);
+    expect(store.deskPage).toBe(1);
+    const desk = store.regionEntry(main)?.rect;
+    expect(store.deskFrame).toEqual(deskPageBox(desk!, { width: 700, height: 600 }, 1));
+    // The camera is one screen further down, still at zoom 1.
+    expect(store.frameViewportFor(main)).toMatchObject({ zoom: 1 });
+    expect(store.viewportCommand).toMatchObject({ kind: 'frame', instant: true });
+    store.dispose();
+  });
+
+  it('steps through pages and falls back to the last one when windows close', () => {
+    const store = smallCanvas();
+    const ids = Array.from({ length: 8 }, (_, index) => store.addNote(`note ${index}`));
+    store.setMode('pro');
+    expect(store.stepDeskPage(-1)).toBe(false);
+    expect(store.stepDeskPage(1)).toBe(true);
+    expect(store.deskPage).toBe(1);
+    expect(store.stepDeskPage(1)).toBe(false);
+    // Two windows close: everything fits one page again, and that is the page in view.
+    store.removeNote(ids[0] as string);
+    store.removeNote(ids[1] as string);
+    expect(store.deskPageCount).toBe(1);
+    expect(store.deskPage).toBe(0);
+    expect(store.deskViolations).toEqual([]);
+    store.dispose();
+  });
+
+  it('remembers the page of each desk across a swap', () => {
+    const store = smallCanvas();
+    notes(store, 8);
+    store.setMode('pro');
+    const main = deskNamed(store, 'Main');
+    store.setDeskPage(1);
+    store.createDesk({ name: 'Review' });
+    expect(store.deskPage).toBe(0);
+    store.switchDesk(main);
+    expect(store.deskPage).toBe(1);
+    store.dispose();
+  });
+
+  it('shows visitors on the page in view', () => {
+    const store = smallCanvas();
+    const tiles = notes(store, 8);
+    store.setMode('pro');
+    const main = deskNamed(store, 'Main');
+    store.createDesk({ name: 'Review' });
+    store.switchDesk(main);
+    store.runLayout(
+      [
+        {
+          op: 'move',
+          targets: [tiles[0] as string],
+          to: { kind: 'region', region: deskNamed(store, 'Review') },
+        },
+      ],
+      { source: 'command' }
+    );
+    store.setDeskPage(1);
+    store.bringHere([tiles[0] as string]);
+    const page = store.deskFrame!;
+    expect(rectContains(page, store.tileRect(tiles[0] as string))).toBe(true);
+    store.dispose();
+  });
+
+  it('undo after the window was resized still moves the window back and leaves both desks full', () => {
+    vi.useFakeTimers();
+    try {
+      const store = canvas();
+      const [a] = notes(store, 3) as [string];
+      store.setMode('pro');
+      const main = deskNamed(store, 'Main');
+      const review = store.createDesk({ name: 'Review' }) as string;
+      store.switchDesk(main);
+      store.runLayout([{ op: 'move', targets: [a], to: { kind: 'region', region: review } }], {
+        source: 'command',
+      });
+      expect(store.deskOf(a)).toBe(review);
+      store.setBoardSize(1300, 800);
+      vi.advanceTimersByTime(400);
+
+      store.undo();
+      expect(store.deskOf(a)).toBe(main);
+      expect(store.deskViolations).toEqual([]);
+      store.switchDesk(review);
+      expect(store.deskViolations).toEqual([]);
+      store.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('leaving Pro makes desks one-screen sub-canvases again, side by side', () => {
+    const store = smallCanvas();
+    notes(store, 8);
+    store.setMode('pro');
+    const main = deskNamed(store, 'Main');
+    const review = store.createDesk({ name: 'Review' }) as string;
+    expect(store.deskPageCount).toBe(1);
+
+    store.setMode('classic');
+    const a = store.regionEntry(main)?.rect;
+    const b = store.regionEntry(review)?.rect;
+    expect(a && b).toBeTruthy();
+    const overlap =
+      Math.min(a!.x + a!.w, b!.x + b!.w) > Math.max(a!.x, b!.x) &&
+      Math.min(a!.y + a!.h, b!.y + b!.h) > Math.max(a!.y, b!.y);
+    expect(overlap).toBe(false);
+    // Every window sits inside its region, below the header the classic canvas draws.
+    for (const [id, rect] of Object.entries(store.layoutState.tiles)) {
+      const region = store.regionEntry(store.regionOf(id) ?? '')?.rect;
+      if (region) expect(rectContains(region, rect)).toBe(true);
+    }
     store.dispose();
   });
 });
