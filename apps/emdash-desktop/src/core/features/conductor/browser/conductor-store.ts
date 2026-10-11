@@ -143,6 +143,8 @@ import {
 import {
   isLineInstantTool,
   LINE_TOOL_MAX_CHARS,
+  lineRecord,
+  lineTurnActed,
   type ConductorTalkLine,
   type LineSpeech,
   type LineToolResult,
@@ -1870,6 +1872,18 @@ export class ConductorStore {
     if (this.lineAgentText === readBefore && readBefore > 0) this.lineAgentText--;
     const actions = this.lineActions;
     this.lineActions = [];
+    // What the turn came to takes its place on the line once its exchange is over, so a request
+    // that was carried out is never in front of the model as if it were still being made.
+    line.record(
+      redactReply(
+        lineRecord({
+          asked: this.lastUtterance,
+          actions,
+          reply: this.turnCancelled ? 'Cancelled.' : result.reply,
+        })
+      ),
+      lineTurnActed(actions)
+    );
     if (this.turnCancelled) {
       this.setReply('Cancelled.', source);
       this.log({ route: 'llm', actions, reply: 'Cancelled.', startedAt, tokens: result.tokens });

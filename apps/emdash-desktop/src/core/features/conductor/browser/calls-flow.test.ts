@@ -713,6 +713,7 @@ describe('the voice line as the conductor', () => {
       stop: vi.fn(),
       say: vi.fn(async () => true),
       note: vi.fn(),
+      record: vi.fn<ConductorTalkLine['record']>(),
       spoke: vi.fn(),
     };
   }
@@ -749,6 +750,27 @@ describe('the voice line as the conductor', () => {
     expect(mocks.runTurn).not.toHaveBeenCalled();
     expect(store.reply).toBe('Sent to Atlas.');
     expect(store.busy).toBe(false);
+    // The request was carried out: on the line it is a record from here on, without the text
+    // that was sent.
+    const [record, over] = talk.record.mock.calls[0]!;
+    expect(over).toBe(true);
+    expect(record).toContain(`the developer said “${REQUEST}”`);
+    expect(record).toContain('send_to_agent: ');
+    expect(record).not.toContain('rebase onto main');
+    store.dispose();
+  });
+
+  it('leaves a turn that only answered open on the line', async () => {
+    const { store } = setup();
+    const talk = line(async () => answer('Which agent, Atlas or Bravo?'));
+    store.setTalkLine(talk);
+
+    await store.handleUtterance(REQUEST, 'typed');
+
+    expect(talk.record).toHaveBeenCalledWith(
+      expect.stringContaining('You answered: “Which agent, Atlas or Bravo?”'),
+      false
+    );
     store.dispose();
   });
 
