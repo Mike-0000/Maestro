@@ -21,8 +21,7 @@ type CacheEntry = {
   refCount: number;
   lists: ProjectSessionLists;
   listeners: Set<Listener>;
-  disposeReaction: () => void;
-  disposeScope: () => void;
+  dispose: () => void;
 };
 
 const cache = new Map<string, CacheEntry>();
@@ -34,6 +33,11 @@ function cacheKey(projectId: string, host: SerializedHostRef): string {
 /**
  * One TUI/ACP session-list remote per project+host. Conversation managers subscribe
  * locally instead of each opening their own Wire remote of the same map.
+ *
+ * Each subscriber follows its own `sessionHost`: a task learns its host only once it is
+ * provisioned, so a subscriber starts on the local host and moves when its task does. Sharing one
+ * subscriber's host with the rest would show every agent of the project as stopped whenever that
+ * one task was asleep, archived, or gone.
  */
 export function acquireProjectSessionLists(
   projectId: string,
@@ -43,84 +47,113 @@ export function acquireProjectSessionLists(
 ): () => void {
   if (typeof window === 'undefined') return () => {};
 
-  const key = cacheKey(projectId, sessionHost());
-  let entry = cache.get(key);
-  if (!entry) {
-    const lists: ProjectSessionLists = {
-      tui: {},
-      acp: {},
-      hasObservedTui: false,
-      hasObservedAcp: false,
-    };
-    const listeners = new Set<Listener>();
-    let currentScope: Scope | undefined;
-    const disposeReaction = reaction(
-      () => ({ host: sessionHost(), accessKind: hostAccess?.state.kind }),
-      ({ host, accessKind }) => {
-        void currentScope?.dispose();
-        currentScope = undefined;
-        if (accessKind !== undefined && accessKind !== 'ready') return;
-        currentScope = createScope({ label: `project-session-lists:${projectId}` });
-        const scope = currentScope;
-        void (async () => {
-          const client = await getConversationsClient();
-          if (scope.disposed) return;
-          const tuiSessions = remote(conversationsContract.tui.sessions, client.tui.sessions, {
-            scope,
-            lingerMs: 15_000,
-          });
-          const acpSessions = remote(conversationsContract.acp.sessions, client.acp.sessions, {
-            scope,
-            lingerMs: 15_000,
-          });
-          observe(
-            tuiSessions({ host, projectId }).states.list,
-            (snapshot) => {
-              lists.tui = snapshot.value ?? {};
-              lists.hasObservedTui = true;
-              notify(listeners, lists);
-            },
-            { scope }
-          );
-          observe(
-            acpSessions({ host, projectId }).states.list,
-            (snapshot) => {
-              lists.acp = snapshot.value ?? {};
-              lists.hasObservedAcp = true;
-              notify(listeners, lists);
-            },
-            { scope }
-          );
-        })();
-      },
-      { fireImmediately: true }
-    );
-    entry = {
-      refCount: 0,
-      lists,
-      listeners,
-      disposeReaction,
-      disposeScope: () => {
-        void currentScope?.dispose();
-        currentScope = undefined;
-      },
-    };
-    cache.set(key, entry);
-  }
-
-  entry.refCount += 1;
-  entry.listeners.add(listener);
-  listener(entry.lists);
+  let detach: (() => void) | undefined;
+  const disposeHostReaction = reaction(
+    () => sessionHost(),
+    (host) => {
+      detach?.();
+      detach = attach(projectId, host, hostAccess, listener);
+    },
+    { fireImmediately: true }
+  );
 
   return () => {
-    const current = cache.get(key);
-    if (!current) return;
-    current.listeners.delete(listener);
-    current.refCount -= 1;
-    if (current.refCount > 0) return;
-    current.disposeReaction();
-    current.disposeScope();
-    cache.delete(key);
+    disposeHostReaction();
+    detach?.();
+    detach = undefined;
+  };
+}
+
+function attach(
+  projectId: string,
+  host: SerializedHostRef,
+  hostAccess: ProjectHostAccess | undefined,
+  listener: Listener
+): () => void {
+  const key = cacheKey(projectId, host);
+  let entry = cache.get(key);
+  if (!entry) {
+    entry = openEntry(projectId, host, hostAccess);
+    cache.set(key, entry);
+  }
+  const attached = entry;
+  attached.refCount += 1;
+  attached.listeners.add(listener);
+  listener(attached.lists);
+
+  return () => {
+    attached.listeners.delete(listener);
+    attached.refCount -= 1;
+    if (attached.refCount > 0) return;
+    attached.dispose();
+    if (cache.get(key) === attached) cache.delete(key);
+  };
+}
+
+/** Observes one host's session lists for a project while that project's host is reachable. */
+function openEntry(
+  projectId: string,
+  host: SerializedHostRef,
+  hostAccess: ProjectHostAccess | undefined
+): CacheEntry {
+  const lists: ProjectSessionLists = {
+    tui: {},
+    acp: {},
+    hasObservedTui: false,
+    hasObservedAcp: false,
+  };
+  const listeners = new Set<Listener>();
+  let currentScope: Scope | undefined;
+  const disposeReaction = reaction(
+    () => hostAccess?.state.kind,
+    (accessKind) => {
+      void currentScope?.dispose();
+      currentScope = undefined;
+      if (accessKind !== undefined && accessKind !== 'ready') return;
+      currentScope = createScope({ label: `project-session-lists:${projectId}` });
+      const scope = currentScope;
+      void (async () => {
+        const client = await getConversationsClient();
+        if (scope.disposed) return;
+        const tuiSessions = remote(conversationsContract.tui.sessions, client.tui.sessions, {
+          scope,
+          lingerMs: 15_000,
+        });
+        const acpSessions = remote(conversationsContract.acp.sessions, client.acp.sessions, {
+          scope,
+          lingerMs: 15_000,
+        });
+        observe(
+          tuiSessions({ host, projectId }).states.list,
+          (snapshot) => {
+            lists.tui = snapshot.value ?? {};
+            lists.hasObservedTui = true;
+            notify(listeners, lists);
+          },
+          { scope }
+        );
+        observe(
+          acpSessions({ host, projectId }).states.list,
+          (snapshot) => {
+            lists.acp = snapshot.value ?? {};
+            lists.hasObservedAcp = true;
+            notify(listeners, lists);
+          },
+          { scope }
+        );
+      })();
+    },
+    { fireImmediately: true }
+  );
+  return {
+    refCount: 0,
+    lists,
+    listeners,
+    dispose: () => {
+      disposeReaction();
+      void currentScope?.dispose();
+      currentScope = undefined;
+    },
   };
 }
 
@@ -129,9 +162,6 @@ function notify(listeners: Set<Listener>, lists: ProjectSessionLists): void {
 }
 
 export function resetProjectSessionListsForTests(): void {
-  for (const entry of cache.values()) {
-    entry.disposeReaction();
-    entry.disposeScope();
-  }
+  for (const entry of cache.values()) entry.dispose();
   cache.clear();
 }
