@@ -36,6 +36,7 @@ import {
   type ResolvedCredentialDraft,
 } from '@core/services/ssh/node/credentials/resolve-credential-draft';
 import type { SshCredentialService } from '@core/services/ssh/node/credentials/ssh-credential-service';
+import { listWslDistros } from '@core/services/ssh/node/local/wsl-distros';
 import type { SaveMachineInput } from '..';
 import { captureMachineSave, persistMachine } from '../../node/machine-persistence';
 
@@ -163,6 +164,9 @@ export class MachinesService implements Hookable<MachinesServiceHooks> {
     if (before.connection?.metadata?.transport === 'maestro') {
       throw new Error(maestroHostUnsupportedMessage('ssh-settings'));
     }
+    if (before.connection?.metadata?.transport === 'wsl') {
+      throw new Error('A WSL distro connects without SSH, so it has no SSH settings to edit.');
+    }
     const existingMetadata: SshConnectionMetadata = before.connection?.metadata ?? {};
 
     const metadataUpdate: SshConnectionMetadata = {};
@@ -267,7 +271,58 @@ export class MachinesService implements Hookable<MachinesServiceHooks> {
       authType: 'agent',
       privateKeyPath: null,
       useAgent: 0,
-      metadata: { version: '6', transport: 'local' } satisfies SshConnectionMetadata,
+      metadata: { version: '7', transport: 'local' } satisfies SshConnectionMetadata,
+    } satisfies SshConnectionInsert;
+    await this.deps.db.insert(sshConnectionsTable).values(row);
+    this.hooks.callHookBackground('machine:mutated', { type: 'saved', connectionId: row.id });
+    return sshConfigFromRow(row);
+  }
+
+  /**
+   * Adds a WSL2 distro on this computer as a Host, or returns the one already added. With no
+   * name it takes the first usable distro that is not a machine yet. The Host's workspace
+   * server, repositories and agents live on the distro's own filesystem.
+   */
+  async addWslDistro(requested?: string): Promise<SshConfig> {
+    if (process.platform !== 'win32') throw new Error('WSL distros exist only on Windows.');
+    const distros = await listWslDistros();
+    if (distros.length === 0) {
+      throw new Error(
+        'No WSL2 Linux distro was found. Install one first, for example with "wsl --install -d Ubuntu".'
+      );
+    }
+    const rows = await this.deps.db.select().from(sshConnectionsTable);
+    const added = new Map(
+      rows
+        .filter((row) => row.metadata?.transport === 'wsl' && row.metadata.wsl)
+        .map((row) => [row.metadata?.wsl?.distro.toLowerCase() ?? '', row] as const)
+    );
+    const wanted = requested
+      ? distros.find((distro) => distro.name.toLowerCase() === requested.toLowerCase())
+      : (distros.find((distro) => !added.has(distro.name.toLowerCase())) ?? distros[0]);
+    if (!wanted) throw new Error(`No WSL2 distro is called "${requested}".`);
+    const existing = added.get(wanted.name.toLowerCase());
+    if (existing) return sshConfigFromRow(existing);
+
+    const names = new Set(rows.map((row) => row.name));
+    const baseName = `${wanted.name} (WSL)`;
+    let name = baseName;
+    for (let suffix = 2; names.has(name); suffix += 1) name = `${baseName} ${suffix}`;
+
+    const row = {
+      id: this.createId(),
+      name,
+      host: 'localhost',
+      port: 0,
+      username: userInfo().username,
+      authType: 'agent',
+      privateKeyPath: null,
+      useAgent: 0,
+      metadata: {
+        version: '7',
+        transport: 'wsl',
+        wsl: { distro: wanted.name },
+      } satisfies SshConnectionMetadata,
     } satisfies SshConnectionInsert;
     await this.deps.db.insert(sshConnectionsTable).values(row);
     this.hooks.callHookBackground('machine:mutated', { type: 'saved', connectionId: row.id });
@@ -283,7 +338,7 @@ export class MachinesService implements Hookable<MachinesServiceHooks> {
 
     const metadata: SshConnectionMetadata = {
       ...(row.metadata ?? {}),
-      version: '6',
+      version: '7',
       syncLocalSettings: enabled,
     };
     await this.deps.db

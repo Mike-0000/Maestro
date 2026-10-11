@@ -15,6 +15,7 @@ const STATUS_TEXT: Record<MachineStatusKind, string> = {
 function machineEndpoint(machine: SshConfig): string {
   if (machine.transport === 'local') return 'This computer, shared without SSH';
   if (machine.transport === 'maestro') return `Maestro host · ${maestroHostEndpointLabel(machine)}`;
+  if (machine.transport === 'wsl') return `WSL2 distro · ${machine.wsl?.distro ?? 'unknown'}`;
   const host = machine.sshConfigAlias?.trim() || machine.host;
   const target = machine.username ? `${machine.username}@${host}` : host;
   return machine.port !== 22 ? `${target}:${machine.port}` : target;

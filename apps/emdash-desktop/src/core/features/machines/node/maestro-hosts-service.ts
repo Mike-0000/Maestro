@@ -121,7 +121,7 @@ export class MaestroHostsService {
       privateKeyPath: null,
       useAgent: 0,
       metadata: {
-        version: '6',
+        version: '7',
         transport: 'maestro',
         maestro: {
           url: url.data,
@@ -168,7 +168,7 @@ export class MaestroHostsService {
 
     const metadata: SshConnectionMetadata = {
       ...existing.row.metadata,
-      version: '6',
+      version: '7',
       transport: 'maestro',
       maestro: { ...existing.maestro, hostId: pairing.data.hostId },
     };
@@ -197,7 +197,7 @@ export class MaestroHostsService {
     const address = maestroHostAddress(url.data);
     const metadata: SshConnectionMetadata = {
       ...existing.row.metadata,
-      version: '6',
+      version: '7',
       transport: 'maestro',
       maestro: {
         url: url.data,

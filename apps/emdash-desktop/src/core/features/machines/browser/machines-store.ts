@@ -180,6 +180,14 @@ export class MachinesStore {
     });
   }
 
+  async addWslDistro(distro?: string): Promise<SshConfig> {
+    return await this.withMutation(async () => {
+      const machine = await (await this.getMachinesClient()).addWslDistro(distro ? { distro } : {});
+      this.connectionsResource.setValue(this.upsertConnection(machine));
+      return machine;
+    });
+  }
+
   /** Asks a Maestro host's address who it is, without pairing or saving anything. */
   async inspectMaestroHost(
     input: InspectMaestroHostInput

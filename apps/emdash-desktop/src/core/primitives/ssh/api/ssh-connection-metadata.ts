@@ -137,6 +137,26 @@ const v6Schema = v5Schema.extend({
 });
 
 // ---------------------------------------------------------------------------
+// v7 schema — adds the 'wsl' transport and its distro
+// ---------------------------------------------------------------------------
+
+const wslHostMetadataSchema = z.object({
+  /** The distro's name, as `wsl.exe --list` prints it. */
+  distro: z.string(),
+});
+
+const v7Schema = v6Schema.extend({
+  version: z.literal('7').optional(),
+  /**
+   * 'wsl' runs this Host inside a WSL2 distro on the machine the desktop runs on: commands go
+   * through `wsl.exe`, and the workspace server, the repositories and the agents live on the
+   * distro's own filesystem. Absent still means SSH.
+   */
+  transport: z.enum(['local', 'maestro', 'wsl']).optional(),
+  wsl: wslHostMetadataSchema.optional(),
+});
+
+// ---------------------------------------------------------------------------
 // Versioned schema
 // ---------------------------------------------------------------------------
 
@@ -153,6 +173,7 @@ const v6Schema = v5Schema.extend({
  * v4: adds syncLocalSettings (absent = false; pass-through)
  * v5: adds transport (absent = SSH; pass-through)
  * v6: adds the 'maestro' transport and its endpoint (pass-through)
+ * v7: adds the 'wsl' transport and its distro (pass-through)
  */
 export const sshConnectionMetadata = defineVersionedSchema()
   .unversioned(v0Schema)
@@ -197,6 +218,11 @@ export const sshConnectionMetadata = defineVersionedSchema()
     // Pass-through: existing machines keep their transport; none is a Maestro host.
     ...prev,
     version: '6' as const,
+  }))
+  .version('7', v7Schema, (prev) => ({
+    // Pass-through: existing machines keep their transport; none is a WSL distro.
+    ...prev,
+    version: '7' as const,
   }))
   .build();
 
@@ -321,5 +347,6 @@ export function sshConfigFromRow(row: SshConnectionConfigRow): SshConfig {
     syncLocalSettings: metadata.syncLocalSettings,
     ...(metadata.transport ? { transport: metadata.transport } : {}),
     ...(metadata.maestro ? { maestro: metadata.maestro } : {}),
+    ...(metadata.wsl ? { wsl: metadata.wsl } : {}),
   };
 }

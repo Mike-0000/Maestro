@@ -25,8 +25,13 @@ export interface SshConnectResult {
   config: ConnectConfig;
   cleanup: () => void;
   debugLogs: string[];
-  /** 'local' runs the connection on this machine without SSH; see LocalShellClient. */
-  transport?: 'local';
+  /**
+   * 'local' runs the connection on this machine without SSH, and 'wsl' inside one of its WSL2
+   * distros; see LocalShellClient.
+   */
+  transport?: 'local' | 'wsl';
+  /** The distro of a 'wsl' connection. */
+  wslDistro?: string;
 }
 
 export type PersistedConnectInput = { kind: 'persisted'; row: SshConnectionRow };
@@ -92,6 +97,17 @@ export async function resolveSshConnectConfig(
       cleanup: () => {},
       debugLogs: [],
       transport: 'local',
+    };
+  }
+  if (base.transport === 'wsl') {
+    if (!base.wsl?.distro) throw new Error('This WSL machine has no distro recorded.');
+    return {
+      // A distro that has to boot first takes a few seconds to answer.
+      config: { readyTimeout: 30_000 },
+      cleanup: () => {},
+      debugLogs: [],
+      transport: 'wsl',
+      wslDistro: base.wsl.distro,
     };
   }
   // A Maestro host is reached over the Maestro app's listener and has nothing to SSH into. Its
