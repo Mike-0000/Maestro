@@ -1,5 +1,5 @@
 import { JEV_MAX_CHOICE_OPTIONS, type JevQuestions, type JevRubric } from '../jev';
-import type { RosterAgent } from '../resolver';
+import { normalizeSpoken, type RosterAgent } from '../resolver';
 import {
   buildCatalog,
   FOCUSED_PROJECT,
@@ -128,9 +128,15 @@ export function buildRouterRequest(input: RouterInput): RouterRequest {
   const sentinels = liveSentinels(input);
   const targets = new Map<string, RosterAgent | string>();
   const targetCriteria: Record<string, JevRubric> = {};
-  const visibleFirst = [...input.roster].sort(
-    (a, b) => Number(a.hidden ?? false) - Number(b.hidden ?? false)
-  );
+  // Options are keyed by name: agents that share one cannot be told apart here, so Jev is not
+  // offered either and Claude asks which was meant.
+  const holders = new Map<string, number>();
+  const keyed = input.roster.map((agent) => ({ agent, key: normalizeSpoken(agent.name) }));
+  for (const { key } of keyed) holders.set(key, (holders.get(key) ?? 0) + 1);
+  const visibleFirst = keyed
+    .filter(({ key }) => holders.get(key) === 1)
+    .map(({ agent }) => agent)
+    .sort((a, b) => Number(a.hidden ?? false) - Number(b.hidden ?? false));
   for (const agent of visibleFirst.slice(0, JEV_MAX_CHOICE_OPTIONS - sentinels.length)) {
     targets.set(agent.name, agent);
     targetCriteria[agent.name] = agentRubric(agent, confusable.get(agent.name));

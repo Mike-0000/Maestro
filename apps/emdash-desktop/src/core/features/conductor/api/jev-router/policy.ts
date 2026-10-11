@@ -1,7 +1,7 @@
 import type { ConductorMode } from '../contract';
 import type { CloseScope } from '../grammar';
 import { choiceOf, noulOf, type JevAnswer, type JevAnswers } from '../jev';
-import type { RosterAgent } from '../resolver';
+import { unknownSpokenNames, type RosterAgent } from '../resolver';
 import {
   catalogKey,
   DESTRUCTIVE_INTENTS,
@@ -453,6 +453,11 @@ export function decideRoute(
   // the question and decides.
   if (context.awaitingAnswer && intent.confidence < PENDING_QUESTION_CONFIDENCE) {
     return llm('pending-question');
+  }
+  // A numbered name nobody has ("Atlas 3" with only Atlas and Atlas 2) is never bound to the
+  // agent that sounds nearest, in a command or a correction: Claude asks which one was meant.
+  if (unknownSpokenNames(plan.input.utterance, plan.input.roster).length > 0) {
+    return llm('unknown-agent-name');
   }
   if (addressee?.choice === ADDRESSEE.correction) {
     return correction(answers, plan, options) ?? llm('correction');

@@ -360,6 +360,46 @@ describe('decideRoute', () => {
   });
 });
 
+describe('names nobody has', () => {
+  it('hands a numbered name that matches no agent to Claude, however sure Jev is', () => {
+    const request = buildRouterRequest(input('show me Maple 3'));
+    const decision = decideRoute(
+      answers({
+        intent: choice('focus', 0.97),
+        target: choice('Maple 2', 0.97),
+        action: choice(catalogKey.agent('focus', 'Maple 2'), 0.97),
+      }),
+      request.plan,
+      options
+    );
+    expect(decision).toMatchObject({ kind: 'llm', reason: 'unknown-agent-name' });
+  });
+
+  it('does not rebind a correction to the nearest agent', () => {
+    const context = new ConversationContext(() => 1_000);
+    context.noteSend({ conversationId: TANGO.id, name: 'Tango', text: 'run the tests' });
+    const request = buildRouterRequest(input('no, send that to Maple 3', context));
+    const decision = decideRoute(
+      answers({
+        addressee: choice(ADDRESSEE.correction),
+        correction_slot: choice('target', 0.97),
+        intent: choice('send_verbatim', 0.97),
+        target: choice('Maple 2', 0.97),
+      }),
+      request.plan,
+      options
+    );
+    expect(decision).toMatchObject({ kind: 'llm', reason: 'unknown-agent-name' });
+  });
+
+  it('does not offer Jev agents that share a name', () => {
+    const twins = [MAPLE, { ...MAPLE, id: 'maple-b', taskName: 'other' }, TANGO];
+    const request = buildRouterRequest({ ...input('show me Maple'), roster: twins });
+    expect([...request.plan.targets.keys()]).not.toContain('Maple');
+    expect([...request.plan.targets.keys()]).toContain('Tango');
+  });
+});
+
 describe('planMode and hints', () => {
   it('needs plan wording to act on a weak multi-agent signal', () => {
     const weak = answers({

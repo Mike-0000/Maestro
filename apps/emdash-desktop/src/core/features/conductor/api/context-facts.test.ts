@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   agentLine,
+  desksLine,
   epoch,
   newestFirst,
   newestPerProject,
   nowLine,
+  soundAlikeLine,
   waitingLine,
   type AgentFact,
+  type DeskFact,
 } from './context-facts';
 
 const MINUTE = 60_000;
@@ -22,6 +25,19 @@ function fact(name: string, projectName: string, extra: Partial<AgentFact> = {})
     ...extra,
   };
 }
+
+describe('agentLine names', () => {
+  it('gives the other names an agent answers to', () => {
+    const line = agentLine(
+      fact('Backend', 'chorus', { title: 'API work', formerly: ['Atlas 3', 'Atlas'] }),
+      NOW
+    );
+    expect(line).toContain(
+      '- Backend (Claude, also titled "API work", until just now called "Atlas 3" and "Atlas")'
+    );
+    expect(agentLine(fact('Backend', 'chorus'), NOW)).toContain('- Backend (Claude)');
+  });
+});
 
 describe('agentLine', () => {
   it('states when the agent started, was messaged, and where it is', () => {
@@ -89,6 +105,58 @@ describe('waitingLine', () => {
     ];
     expect(waitingLine(agents, NOW)).toBe('Jasper 3 (3 h), Iris 3 (4 min)');
     expect(waitingLine(agents.slice(0, 1), NOW)).toBeNull();
+  });
+});
+
+describe('soundAlikeLine', () => {
+  it('lists names that differ only by their number', () => {
+    const agents = [
+      fact('Atlas', 'chorus'),
+      fact('Atlas 3', 'website'),
+      fact('Vesper 2', 'chorus'),
+      fact('vesper', 'chorus'),
+      fact('Lima 3', 'ACE COMBAT 8'),
+    ];
+    expect(soundAlikeLine(agents)).toBe('Atlas / Atlas 3; Vesper 2 / vesper');
+    expect(soundAlikeLine([fact('Atlas', 'chorus'), fact('Bravo', 'chorus')])).toBeNull();
+  });
+});
+
+describe('desks in the context (Canvas Pro)', () => {
+  const desk = (name: string, extra: Partial<DeskFact> = {}): DeskFact => ({
+    name,
+    active: false,
+    windowCount: 0,
+    status: '',
+    gathers: null,
+    ...extra,
+  });
+
+  it('lists the desks in order, starring the one in view', () => {
+    expect(
+      desksLine([
+        desk('Main', { windowCount: 3 }),
+        desk('Review', { active: true, windowCount: 2, status: '1 needs you' }),
+        desk('Triage', { gathers: 'needs you' }),
+      ])
+    ).toBe('Main (3), Review* (2, 1 needs you), Triage (gathers needs you)');
+    expect(desksLine([])).toBe('none');
+  });
+
+  it('stays bounded, and still names the desk in view', () => {
+    const many = Array.from({ length: 15 }, (_, index) =>
+      desk(`D${index + 1}`, { windowCount: 1, active: index === 13 })
+    );
+    const line = desksLine(many, 3);
+    expect(line).toBe('D1 (1), D2 (1), D3 (1), and 12 more, including D14* (1)');
+    expect(desksLine(many.slice(0, 4), 3)).toBe('D1 (1), D2 (1), D3 (1), and 1 more');
+  });
+
+  it("says which desk an agent's window is on", () => {
+    expect(agentLine(fact('Atlas', 'chorus', { desk: 'Review' }), NOW)).toContain('on desk Review');
+    expect(agentLine(fact('Atlas', 'chorus', { desk: 'Review', region: 'Pair' }), NOW)).toContain(
+      'in region Pair; on desk Review'
+    );
   });
 });
 
