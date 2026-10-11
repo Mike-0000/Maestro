@@ -5,6 +5,30 @@ worktree, git, the terminals and the agents all live and run on the distro's Lin
 That is where WSL2 is fast, and parallel agents gain the most, because nothing they read,
 search or install crosses the Windows boundary.
 
+## The quick way: Copy to WSL
+
+Right-click a project in the sidebar and choose **Copy to WSL**. It is offered for projects on
+a Windows drive. One click does all of this, and a message afterwards lists what was done:
+
+- **A distro.** If the computer has no WSL2 Linux distro, Ubuntu is installed, with a user
+  named after your Windows user. This needs WSL itself to be enabled already; if it is not,
+  the message says to run `wsl --install` once.
+- **git in the distro.** git and tmux are installed if missing (Ubuntu and Debian). Your git
+  name and email are copied from Windows if the distro has none. If Git for Windows is
+  installed, git in the distro signs in through its Credential Manager, so HTTPS remotes use
+  the logins you already have. Nothing you set yourself in the distro is changed.
+- **Claude Code in the distro.** Installed if missing.
+- **The repository.** Copied from the Windows folder into `~/emdash/repositories/<name>` in the
+  distro, with its remote set to the same URL. The copy holds what is committed, on every
+  branch; uncommitted changes stay in the Windows folder. Running it again keeps the copy.
+- **The project.** The distro is added as a machine and the copy opens as `<name> (WSL)`. The
+  Windows project is left as it is.
+
+What is left for you, when it applies, is in the message: signing in to Claude in the distro
+once (open a terminal on the WSL machine and run `claude`), and adding an SSH key when the
+remote uses SSH. Your Claude sign-in on Windows is not copied: two installs sharing one
+sign-in can log each other out.
+
 ## Add the distro as a machine
 
 Settings → Machines → **Add WSL distro**. The button is shown on Windows. It adds the next WSL2

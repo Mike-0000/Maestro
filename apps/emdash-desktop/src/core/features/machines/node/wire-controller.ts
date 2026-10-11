@@ -82,6 +82,7 @@ export function createMachinesWireController(
     saveMachine: (input) => service.saveMachine(input),
     addThisComputer: () => service.addThisComputer(),
     addWslDistro: ({ distro }) => service.addWslDistro(distro),
+    copyRepositoryToWsl: (input) => service.copyRepositoryToWsl(input),
     inspectMaestroHost: (input) => maestro((hosts) => hosts.inspect(input)),
     addMaestroHost: (input) => maestro((hosts) => hosts.add(input)),
     repairMaestroHost: (input) => maestro((hosts) => hosts.repair(input)),
