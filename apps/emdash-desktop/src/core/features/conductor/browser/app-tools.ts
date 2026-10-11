@@ -15,6 +15,7 @@ import {
   type BrowserAction,
 } from '@core/primitives/browser/api';
 import type { ConductorToolInput, ToolOutcome } from '../api/tools';
+import { endedTurn } from './roster';
 
 /** The task a conductor app tool acts on. */
 export type AppTask = {
@@ -155,7 +156,7 @@ export class ConductorAppTools {
   /** A local app URL that one of the task's agents reported in its latest final reply. */
   private reportedAppUrl(taskId: string): string | undefined {
     for (const entry of this.deps.canvas.agentEntries) {
-      if (entry.taskId !== taskId || entry.status !== 'completed') continue;
+      if (entry.taskId !== taskId || !endedTurn(entry)) continue;
       const url = entry.completionReport?.appUrls[0];
       if (url) return url;
     }

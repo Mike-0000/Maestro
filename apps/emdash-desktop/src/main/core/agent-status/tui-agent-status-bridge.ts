@@ -246,7 +246,19 @@ export class TuiAgentStatusBridge {
       return;
     }
     const event = eventFromTuiAgentState(state);
-    if (event) await agentStatusService.applySignal(event);
+    if (!event) return;
+    if (event.type !== 'stop') {
+      await agentStatusService.applySignal(event);
+      return;
+    }
+    // A turn end can wait seconds on the conductor's verdict. The service keeps each
+    // conversation's signals in order by itself, so other agents do not wait behind it here.
+    void agentStatusService.applySignal(event).catch((error: unknown) => {
+      log.warn('TUI agent status bridge failed to apply a turn end', {
+        conversationId: state.conversationId,
+        error: String(error),
+      });
+    });
   }
 
   private async resetMissingHostStatuses(host: HostRef, seen: ReadonlySet<string>): Promise<void> {

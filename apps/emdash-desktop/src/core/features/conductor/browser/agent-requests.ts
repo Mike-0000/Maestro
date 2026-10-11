@@ -4,6 +4,7 @@ import { log } from '@core/primitives/logging/browser/logger';
 import {
   plainText,
   relayedReplyText,
+  REQUEST_TURN_ANSWER_CHARS,
   REQUEST_TURN_NOTE_CHARS,
   requestContextLines,
   requestReplyText,
@@ -92,6 +93,9 @@ export const DEVELOPER_ANSWER_MS = 10 * 60_000;
 export const HEARD_MS = 2_000;
 /** How long an agent's work for another agent may take before its reply is no longer passed on. */
 export const WATCH_MS = 2 * 60 * 60_000;
+/** How long an unanswered question is still worth telling the developer about. */
+const MISSED_QUESTION_MS = 24 * 60 * 60_000;
+const MAX_MISSED_QUESTIONS = 6;
 const MAX_WATCHED_AGENTS = 50;
 const MAX_WATCHES_PER_AGENT = 4;
 
@@ -134,10 +138,11 @@ export function newlyCompleted(
 /**
  * Holds the requests agents sent the conductor until they are settled. Every request is checked
  * and accepted or refused the moment it arrives; what happens next depends on who decides its
- * kind. A report is spoken and closed. A question is spoken and waits for the developer. Anything
- * the conductor may decide gets one model turn when the conductor is free, and waits for the
- * developer's yes or no when the model leaves it open or cannot run. Whatever the ending, the
- * asking agent gets one reply typed into its terminal.
+ * kind. A report is spoken and closed. A question for the developer is spoken and waits for them.
+ * Anything the conductor may decide gets one model turn when the conductor is free, and that turn
+ * settles it: the developer is not asked, because they are often away. Only when no model is
+ * configured does such a request wait for the developer. Whatever the ending, the asking agent
+ * gets one reply typed into its terminal.
  */
 export class AgentRequestDesk {
   private readonly open = new Map<string, OpenRequest>();
@@ -148,6 +153,8 @@ export class AgentRequestDesk {
   /** Requests past the limits whose verdict is still on its way to the agent. */
   private readonly admitting = new Map<string, number>();
   private draining = false;
+  /** What agents asked the developer that ran out unanswered, newest per agent, for their return. */
+  private readonly missed = new Map<string, { readonly sentence: string; readonly at: number }>();
   /** The request a model turn is deciding right now; that turn may settle no other. */
   private decidingId: string | null = null;
 
@@ -361,8 +368,20 @@ export class AgentRequestDesk {
       this.host.say(closing || `${view.spoken} ${open.verdict}`.trim());
       return;
     }
-    // Left open: by the model on purpose (it asked the developer), or because no model ran.
-    this.ask(open, closing || `${view.spoken} Say yes to allow it, or no.`);
+    if (!this.host.canDecide()) {
+      // No model to decide it, so only the developer can.
+      this.ask(
+        open,
+        open.valid.spec.action
+          ? `${view.spoken} Say yes to allow it, or no.`
+          : `${view.spoken} What should I tell it?`
+      );
+      return;
+    }
+    // The turn failed or ended without a decision. The developer may be away, so the agent is
+    // not left waiting for them: it is told nothing was done and carries on.
+    this.settle(open, { status: 'undecided' });
+    this.host.say(`${view.spoken} I could not decide it, so nothing was done.`);
   }
 
   /**
@@ -401,7 +420,7 @@ export class AgentRequestDesk {
     if (latest.asked.sentence !== lastReply || said - latest.asked.at < HEARD_MS) {
       return null;
     }
-    const question = latest.valid.spec.decidedBy === 'developer';
+    const question = !latest.valid.spec.action;
     return this.resolve(
       latest.valid.request.id,
       question ? 'answer' : decision,
@@ -444,9 +463,24 @@ export class AgentRequestDesk {
     const sender = this.host.sender(entry);
     const by = inRequestTurn ? 'conductor' : 'developer';
     const words = plainText(message ?? '').trim();
-    // A model deciding on agent output gets one short line to the agent, not a channel.
-    const note = inRequestTurn ? words.slice(0, REQUEST_TURN_NOTE_CHARS) : words;
+    const asksConductor = spec.decidedBy === 'conductor' && !spec.action;
+    // A model deciding on agent output gets one short line to the agent, not a channel; a
+    // question put to it gets room for an answer the agent can act on.
+    const note = inRequestTurn
+      ? words.slice(0, asksConductor ? REQUEST_TURN_ANSWER_CHARS : REQUEST_TURN_NOTE_CHARS)
+      : words;
 
+    if (asksConductor) {
+      if (!note) {
+        return refused(`${request.id} is a question: use answer, with the answer as message.`);
+      }
+      open.verdict = 'I answered it.';
+      this.settle(open, { status: 'answered', by, detail: note });
+      return {
+        outcome: { content: `Passed the answer to ${sender.name}.` },
+        spoken: `Told ${sender.name}.`,
+      };
+    }
     if (spec.decidedBy === 'developer') {
       if (decision !== 'answer' || !note) {
         return refused(
@@ -548,6 +582,7 @@ export class AgentRequestDesk {
 
   /** The developer wrote to this agent themselves: its open questions are answered. */
   noteDeveloperSend(conversationId: string): void {
+    this.missed.delete(conversationId);
     for (const open of [...this.open.values()]) {
       if (
         open.valid.request.from.conversationId === conversationId &&
@@ -556,6 +591,26 @@ export class AgentRequestDesk {
         this.close(open);
       }
     }
+  }
+
+  /**
+   * One sentence for the developer's return: what agents asked that nobody answered. Each is told
+   * once, and only while its agent is still on the canvas. Null when there is nothing to tell.
+   */
+  takeMissed(): string | null {
+    const cutoff = this.now() - MISSED_QUESTION_MS;
+    const sentences = [...this.missed]
+      .filter(
+        ([conversationId, missed]) => missed.at > cutoff && this.host.entryFor(conversationId)
+      )
+      .map(([, missed]) => missed.sentence);
+    this.missed.clear();
+    if (sentences.length === 0) return null;
+    const lead =
+      sentences.length === 1
+        ? 'One question went unanswered while you were away.'
+        : `${sentences.length} questions went unanswered while you were away.`;
+    return `${lead} ${sentences.join(' ')}`;
   }
 
   /** Whether this agent's next final reply is owed to an agent that asked for its work. */
@@ -631,7 +686,7 @@ export class AgentRequestDesk {
     this.host.say(sentence, {
       conversationId: open.valid.request.from.conversationId,
       requestId: open.valid.request.id,
-      asks: open.valid.spec.decidedBy === 'developer' ? 'question' : 'request',
+      asks: open.valid.spec.action ? 'request' : 'question',
     });
   }
 
@@ -641,8 +696,22 @@ export class AgentRequestDesk {
     open.timer = setTimeout(() => {
       if (this.open.get(open.valid.request.id) !== open) return;
       // A decision in progress ends by settling the request or by asking, which re-arms it.
-      if (open.state === 'deciding') this.arm(open);
-      else this.settle(open, { status: 'expired' });
+      if (open.state === 'deciding') {
+        this.arm(open);
+        return;
+      }
+      if (open.asked) {
+        const from = open.valid.request.from.conversationId;
+        // Re-inserted so the newest question is told last.
+        this.missed.delete(from);
+        this.missed.set(from, { sentence: open.asked.sentence, at: this.now() });
+        while (this.missed.size > MAX_MISSED_QUESTIONS) {
+          const oldest = this.missed.keys().next().value;
+          if (oldest === undefined) break;
+          this.missed.delete(oldest);
+        }
+      }
+      this.settle(open, { status: 'expired' });
     }, DEVELOPER_ANSWER_MS);
   }
 

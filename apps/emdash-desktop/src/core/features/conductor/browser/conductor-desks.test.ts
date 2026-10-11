@@ -48,6 +48,7 @@ vi.mock('./agent-io', () => ({
   readFinalChatReply: vi.fn(async () => null),
   readFinishedTerminal: vi.fn(async () => null),
   sendToAgent: vi.fn(),
+  sendToLiveSession: vi.fn(async () => false),
   stopAgentSession: vi.fn(),
   submitAgentInput: vi.fn(),
 }));

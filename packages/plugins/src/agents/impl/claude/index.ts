@@ -12,7 +12,7 @@ import { resolveAdapterAsset } from '../../helpers/adapter-assets';
 import { enrichClaudeUpdate } from './acp-transform';
 import { claudeAdapter } from './adapter';
 import { claudeAuthStatus } from './auth';
-import { CLAUDE_DELEGATION_POLICY, withDelegationPolicy } from './delegation';
+import { CLAUDE_SYSTEM_PROMPT_APPEND, withDelegationPolicy } from './delegation';
 import { buildClaudeHookConfig } from './hooks';
 import { icon } from './icon';
 import { buildClaudeTrustBehavior } from './trust';
@@ -155,7 +155,7 @@ export const provider = registerPluginBehavior(plugin, {
       return connectStdioAcp(io, toClient);
     },
     enrich: enrichClaudeUpdate,
-    sessionMeta: () => ({ systemPrompt: { append: CLAUDE_DELEGATION_POLICY } }),
+    sessionMeta: () => ({ systemPrompt: { append: CLAUDE_SYSTEM_PROMPT_APPEND } }),
   },
   auth: {
     checkStatus: claudeAuthStatus,

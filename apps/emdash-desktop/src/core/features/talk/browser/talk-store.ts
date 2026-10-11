@@ -1,10 +1,11 @@
-import { comparer, makeAutoObservable, reaction, runInAction } from 'mobx';
+import { makeAutoObservable, reaction, runInAction } from 'mobx';
 import { looksLikeSttArtifact } from '@core/features/conductor/api/jev-router/trace';
-import {
-  VOICE_HAND_OFF_TOOL,
-  type ConductorTalkLine,
-  type LineAgent,
-  type LineHearing,
+import type {
+  ConductorTalkLine,
+  LineSpeech,
+  LineToolResult,
+  LineTurnInput,
+  LineTurnResult,
 } from '@core/features/conductor/api/voice-line';
 import { log } from '@core/primitives/logging/browser/logger';
 import type { TalkClient } from '../api/browser/client';
@@ -12,50 +13,57 @@ import type { TalkSettings, TalkStatus } from '../api/contract';
 import { isEcho, neverEcho, recentSpoken, type Spoken } from '../api/echo-guard';
 import { inputSize, tokensFromUsage } from '../api/usage';
 import {
-  NEEDS_KEY_REPLY,
-  NEEDS_KEY_RESULT,
+  LINE_INSTRUCTIONS,
+  lineTools,
   ROLLOVER_INSTRUCTIONS,
   sayExactly,
-  VOICE_INSTRUCTIONS,
-  voiceTools,
 } from '../api/voice-prompt';
-import {
-  agentChanges,
-  carriedOver,
-  feedSnapshot,
-  feedUpdate,
-  needsRollover,
-} from '../api/world-feed';
+import { carriedOver, feedSnapshot, needsRollover } from '../api/world-feed';
 import type { RealtimeEvent, SessionDeps, SessionState } from './realtime-session';
 
 /** What the line needs from the conductor (kept structural so it tests without one). */
 export interface TalkConductorPort {
   setTalkLine(line: ConductorTalkLine | null): void;
-  /** One read-only tool call from the voice model, as text for it. */
-  voiceRead(name: string, input: unknown): Promise<string>;
   /** Everything the conductor knows right now, for the start of a session. */
-  voiceSnapshot(): Promise<string>;
-  lineAgents(): LineAgent[];
-  /** Words heard with no key pressed: they may steer or cancel, never act. */
-  hearOnLine(text: string): LineHearing;
-  /** The voice model asked for an action; the developer's own words go to the conductor. */
-  handOffFromVoice(text: string): Promise<string>;
-  /** Shows what the voice said. */
+  lineContext(): Promise<string>;
+  /**
+   * True while words must be read before anything answers them: the conductor is in the middle
+   * of something, an action waits for a yes or a stop, or a call from an agent is on the line.
+   */
+  readonly lineGuarded: boolean;
+  /** The line heard the developer and nothing is in the way: the conductor runs the turn. */
+  speechTurn(speech: LineSpeech): Promise<void>;
+  /** Words the line heard and read first. They are handled like any other transcript. */
+  hearOnLine(text: string, heard: { interactionId: string; saidAt: number; key: boolean }): void;
+  /** One tool call from the line's model, run behind the conductor's gates. */
+  lineTool(name: string, input: unknown): Promise<LineToolResult>;
+  /** Shows what the voice is saying. */
   showVoiceReply(text: string): void;
   traceLine(status: string, detail?: Record<string, string | number | boolean>): void;
   /** True while a call from an agent can be picked up. */
   readonly callOnLine: boolean;
-  /** True when a code check can run, so the voice may be offered that tool. */
+  /** True when a code check can run, so the model may be offered that tool. */
   readonly codeChecksReady: boolean;
 }
+
+/** A capture the line takes in place of the recorder: it hears the microphone itself. */
+export type LineCapture = {
+  /** False when the line cannot take the capture; the recorder then does. */
+  begin(interactionId: string): boolean;
+  /** The developer finished. Resolves false when nothing they said was handed on. */
+  end(interactionId: string): Promise<boolean>;
+  cancel(): void;
+};
 
 /** What the line needs from the voice slice. */
 export interface TalkVoicePort {
   /** A local voice (a reply, a read-back) is playing. */
   readonly speaking: boolean;
-  /** The developer holds the microphone through a key. */
+  /** The developer holds the microphone through a key or a click. */
   readonly capturing: boolean;
   readonly muted: boolean;
+  /** Hands key and click captures to the line while it is open; null takes them back. */
+  setLiveCapture(capture: LineCapture | null): void;
 }
 
 export interface SessionLike {
@@ -86,18 +94,30 @@ const SAY_START_MS = 4_000;
 const VOICE_MAX_MS = 60_000;
 /** The room is given this long to go quiet after a voice stops, before the microphone opens. */
 const ECHO_TAIL_MS = 300;
-/** The microphone stays open this long at most without words that were meant for Maestro. */
+/** A window after Maestro speaks stays open this long at most without words meant for it. */
 const MAX_WINDOW_MS = 60_000;
 /** A line shut for the day's limit looks again this often: the limit starts over with the day. */
 const BUDGET_RECHECK_MS = 30 * 60_000;
 /** A summary for a fresh session that has not come back after this long is given up. */
 const ROLLOVER_MS = 30_000;
-/** A hand-off is honoured only this soon after the key-started words it belongs to. */
-const KEY_TURN_MS = 60_000;
-/** Changes to agents are gathered this long before they are sent as one update. */
-const FEED_DELAY_MS = 500;
+/** A short word may be let go before the provider reports hearing it: it gets this long. */
+const HEAR_GRACE_MS = 400;
+/** The provider gets this long to confirm the last words of a capture. */
+const SEAL_MS = 1_500;
+/** Nothing waits longer than this for the transcript of what was said. */
+const TRANSCRIPT_WAIT_MS = 4_000;
+/** A response that has not finished after this long is given up. */
+const RESPONSE_MAX_MS = 60_000;
+/** A turn may go back to the model with tool results this many times. */
+const MAX_ROUNDS = 12;
 const RETRY_MS = 30_000;
 const MAX_RETRIES = 3;
+
+const DROPPED_REPLY = 'The voice line dropped before that was finished.';
+const NO_ANSWER_REPLY = 'The voice line did not answer.';
+const TOO_MANY_STEPS_REPLY = 'I stopped after several steps. Check the canvas.';
+const STOPPED_RESULT = 'The developer said stop. Nothing more was done.';
+const NO_TURN_RESULT = 'Nothing was done: no request from the developer is open.';
 
 type Saying = {
   resolve(said: boolean): void;
@@ -109,16 +129,53 @@ type Saying = {
   responseId: string | null;
 };
 
+/** One capture the developer started with a key or a click. */
+type Hold = {
+  readonly interactionId: string;
+  readonly startedAt: number;
+  /** What the provider made of it so far: one item per stretch of speech. */
+  readonly items: string[];
+  /** The provider reported speech. */
+  spoke: boolean;
+  /** The developer let go. */
+  released: boolean;
+  /** The last words were sent to be committed. */
+  committing: boolean;
+  /** No more items will join it. */
+  sealed: boolean;
+};
+
+/** One turn of the model: responses and tool calls until it has answered. */
+type Turn = {
+  resolve(result: LineTurnResult): void;
+  readonly spoken: boolean;
+  readonly said: string[];
+  tokens: number;
+  toolsRunning: number;
+  /** A response of this turn is in flight, and the provider's id for it once known. */
+  responding: boolean;
+  responseId: string | null;
+  /** Tool results were sent that the model has not answered yet. */
+  owed: boolean;
+  rounds: number;
+  stopped: boolean;
+  watchdog: ReturnType<typeof setTimeout> | null;
+};
+
 /**
- * The talk line: a realtime voice session that lets the developer talk with Maestro without
- * pressing a key for every sentence. It reads the transcript of each turn before anything
- * answers, lets the voice model answer only talk, and passes every action back to the conductor.
- * When the line is not open, everything works as it did without it.
+ * The talk line: a realtime voice session that is the conductor while it is open. It hears the
+ * developer (while they hold the talk key, for a moment after Maestro speaks, or all the time),
+ * asks its model to answer, and runs every tool the model calls through the conductor store,
+ * which keeps its cancel windows and confirmations. Words that could be a yes or a stop to
+ * something in progress are read before anything answers them. When the line is not open,
+ * everything works as it does without it.
  */
 export class TalkStore {
   line: LineState = 'off';
-  /** The microphone is open for talk (no key held). */
-  windowOpen = false;
+  /** The microphone is open with no key held. */
+  micOpen = false;
+  /** The developer holds the talk key, and the line is what hears them. */
+  holding = false;
   /** The provider's voice is playing. */
   speaking = false;
   status: TalkStatus | null = null;
@@ -126,6 +183,9 @@ export class TalkStore {
 
   private session: SessionLike | null = null;
   private track: MediaStreamTrack | null = null;
+  private remote: MediaStream | null = null;
+  /** The voice is not played: the developer is speaking, or muted Maestro. */
+  private hushed = false;
   private spoken: Spoken[] = [];
   private windowTimer: ReturnType<typeof setTimeout> | null = null;
   private tailTimer: ReturnType<typeof setTimeout> | null = null;
@@ -136,16 +196,25 @@ export class TalkStore {
   private windowSince = 0;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private retries = 0;
-  /** The provider hears speech right now. */
+  /** The provider hears speech right now, and since when. */
   private hearing = false;
-  private known = new Map<string, LineAgent>();
+  private speechAt = 0;
   private openedAt = 0;
   private inputTokens = 0;
-  /** The key-started words the voice is answering, and when: a hand-off is theirs alone. */
-  private keyTurn: { text: string; at: number } | null = null;
+  private hold: Hold | null = null;
+  /** Captures whose words are still being read: the model is not asked again until they are. */
+  private readonly reading = new Set<Hold>();
+  /** Speech heard with no key, by item, with when it began: read before it is answered. */
+  private readonly loose = new Map<string, number>();
+  /** What the provider wrote for each item it heard; null when it could not. */
+  private readonly transcripts = new Map<string, string | null>();
+  private readonly waiters = new Set<() => void>();
+  private turn: Turn | null = null;
   private saying: Saying | null = null;
-  private toolsRunning = 0;
   private readonly handledCalls = new Set<string>();
+  /** The message that holds the conductor's state, replaced before each turn. */
+  private stateItem: string | null = null;
+  private stateSeq = 0;
   private rolling = false;
   private carry: string | null = null;
   private disposers: (() => void)[] = [];
@@ -154,10 +223,18 @@ export class TalkStore {
   /** What the conductor sees of the line. */
   private readonly port: ConductorTalkLine = {
     ready: () => this.ready,
-    answer: (text) => this.answer(text),
+    turn: (input) => this.takeTurn(input),
+    stop: () => this.stop(),
     say: (text) => this.say(text),
     note: (text) => this.note(text),
     spoke: (text) => this.noteSpoken(text),
+  };
+
+  /** What the voice slice sees of the line. */
+  private readonly capture: LineCapture = {
+    begin: (interactionId) => this.beginHold(interactionId),
+    end: (interactionId) => this.endHold(interactionId),
+    cancel: () => this.cancelHold(),
   };
 
   constructor(private readonly deps: TalkDeps) {
@@ -167,6 +244,8 @@ export class TalkStore {
       | 'deps'
       | 'session'
       | 'track'
+      | 'remote'
+      | 'hushed'
       | 'spoken'
       | 'windowTimer'
       | 'tailTimer'
@@ -177,22 +256,31 @@ export class TalkStore {
       | 'retryTimer'
       | 'retries'
       | 'hearing'
-      | 'known'
+      | 'speechAt'
       | 'openedAt'
       | 'inputTokens'
-      | 'keyTurn'
+      | 'hold'
+      | 'reading'
+      | 'loose'
+      | 'transcripts'
+      | 'waiters'
+      | 'turn'
       | 'saying'
-      | 'toolsRunning'
       | 'handledCalls'
+      | 'stateItem'
+      | 'stateSeq'
       | 'rolling'
       | 'carry'
       | 'disposers'
       | 'now'
       | 'port'
+      | 'capture'
     >(this, {
       deps: false,
       session: false,
       track: false,
+      remote: false,
+      hushed: false,
       spoken: false,
       windowTimer: false,
       tailTimer: false,
@@ -203,18 +291,25 @@ export class TalkStore {
       retryTimer: false,
       retries: false,
       hearing: false,
-      known: false,
+      speechAt: false,
       openedAt: false,
       inputTokens: false,
-      keyTurn: false,
+      hold: false,
+      reading: false,
+      loose: false,
+      transcripts: false,
+      waiters: false,
+      turn: false,
       saying: false,
-      toolsRunning: false,
       handledCalls: false,
+      stateItem: false,
+      stateSeq: false,
       rolling: false,
       carry: false,
       disposers: false,
       now: false,
       port: false,
+      capture: false,
     });
   }
 
@@ -231,18 +326,21 @@ export class TalkStore {
     void this.refreshStatus().then(() => this.reconcile());
     const { voice, conductor } = this.deps;
     this.disposers.push(
-      // A key was pressed, or a local voice started: the line's microphone closes at once, so
-      // the same words are never heard twice and a read-back is never heard at all.
+      // The developer took the microphone, or a local voice started: nothing of the line's plays
+      // into what they say, and the open microphone never hears a read-back.
       reaction(
         () => voice.capturing || voice.speaking,
         (busy) => {
           if (busy) {
-            if (voice.capturing) this.stopVoice();
+            if (voice.capturing) this.hush();
             this.closeWindow();
-          } else if (conductor.callOnLine) this.openWindowSoon();
+            return;
+          }
+          if (!this.speaking) this.unhush();
+          this.reopen();
         }
       ),
-      // A call went on the line: steering it ("skip", "later") needs no key.
+      // A call went on the line: answering or steering it ("skip", "later") needs no key.
       reaction(
         () => conductor.callOnLine,
         (onLine) => {
@@ -250,17 +348,11 @@ export class TalkStore {
         }
       ),
       reaction(
-        () => conductor.lineAgents(),
-        (agents) => this.onAgents(agents),
-        { delay: FEED_DELAY_MS, equals: comparer.structural }
-      ),
-      reaction(
         () => voice.muted,
         (muted) => {
-          // Muted, the line neither speaks nor listens for talk it could not answer aloud.
-          if (!muted) return;
-          this.stopVoice();
-          this.closeWindow();
+          // Muted, Maestro still listens and acts; its answers are shown instead of said.
+          if (muted) this.hush();
+          else if (!voice.capturing) this.unhush();
         }
       )
     );
@@ -300,6 +392,11 @@ export class TalkStore {
     if (reshaped && this.line !== 'off') this.shut('off');
     this.retries = 0;
     this.reconcile();
+    // When the microphone is open changed: it takes effect now, not after the next sentence.
+    if (!reshaped && this.line === 'open') {
+      this.closeWindow();
+      this.reopen();
+    }
   }
 
   /** Opens or closes the line to match what the settings ask for. */
@@ -333,35 +430,36 @@ export class TalkStore {
     let track: MediaStreamTrack | null = null;
     try {
       track = await this.deps.microphone();
-      // Nothing is heard until a window opens.
+      // Nothing is heard until the developer takes the key or the microphone is opened.
       track.enabled = false;
+      this.hushed = this.deps.voice.capturing || this.deps.voice.muted;
       const session = this.deps.createSession({
         track,
         exchange: (sdp) => this.exchange(sdp),
         onEvent: (event) => this.onEvent(event),
         onState: (state) => this.onSessionState(session, state),
-        // Never attached muted: a muted line does not speak at all (see `say`, `onHeard`), and
-        // a player muted here would stay silent after the developer unmutes.
-        onRemoteStream: (stream) => this.deps.play(stream, false),
+        onRemoteStream: (stream) => {
+          this.remote = stream;
+          this.deps.play(stream, this.hushed);
+        },
       });
       this.session = session;
       this.track = track;
       await session.open();
       if (this.session !== session) return;
-      const snapshot = feedSnapshot(
-        await this.deps.conductor.voiceSnapshot(),
-        new Date(this.now())
-      );
-      this.known = new Map(this.deps.conductor.lineAgents().map((agent) => [agent.id, agent]));
+      const context = await this.deps.conductor.lineContext();
+      if (this.session !== session) return;
       this.openedAt = this.now();
       this.inputTokens = 0;
       this.retries = 0;
-      this.sendNote(snapshot);
+      this.setState(context);
       if (this.carry) this.sendNote(this.carry);
       this.carry = null;
       runInAction(() => (this.line = 'open'));
       this.deps.conductor.setTalkLine(this.port);
+      this.deps.voice.setLiveCapture(this.capture);
       this.deps.conductor.traceLine('opened', { model: this.settings?.model ?? '' });
+      this.reopen();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'The talk line could not open.';
       log.warn('talk: the line could not open', { error });
@@ -376,8 +474,8 @@ export class TalkStore {
     const client = await this.deps.client();
     const result = await client.openCall({
       sdp,
-      instructions: VOICE_INSTRUCTIONS,
-      tools: voiceTools({ codeChecks: this.deps.conductor.codeChecksReady }),
+      instructions: LINE_INSTRUCTIONS,
+      tools: lineTools({ codeChecks: this.deps.conductor.codeChecksReady }),
     });
     if (!result.success) throw new TalkOpenError(result.error.type, result.error.message);
     return result.data.sdp;
@@ -414,6 +512,7 @@ export class TalkStore {
     session?.close();
     this.track?.stop();
     this.track = null;
+    this.remote = null;
     if (this.windowTimer) clearTimeout(this.windowTimer);
     this.windowTimer = null;
     if (this.tailTimer) clearTimeout(this.tailTimer);
@@ -421,47 +520,280 @@ export class TalkStore {
     if (this.voiceTimer) clearTimeout(this.voiceTimer);
     this.voiceTimer = null;
     this.hearing = false;
-    this.keyTurn = null;
-    this.toolsRunning = 0;
+    this.hold = null;
+    this.reading.clear();
+    this.loose.clear();
+    this.transcripts.clear();
     this.handledCalls.clear();
+    this.stateItem = null;
     this.endRollover();
     this.finishSaying(false);
     this.deps.play(null, false);
+    this.deps.voice.setLiveCapture(null);
     this.deps.conductor.setTalkLine(null);
     if (wasOpen) this.deps.conductor.traceLine(next === 'off' ? 'closed' : 'dropped');
     runInAction(() => {
       this.line = next;
-      this.windowOpen = false;
+      this.micOpen = false;
+      this.holding = false;
       this.speaking = false;
       this.error = message;
     });
+    // Whoever waits on the line (a capture, a turn) is let go.
+    this.poke();
+    if (this.turn) this.endTurn(this.turn, { reply: DROPPED_REPLY, completed: false });
+  }
+
+  // ── The developer holds the key ─────────────────────────────────────────────
+
+  /** The developer took the microphone with a key or a click: the line hears them itself. */
+  private beginHold(interactionId: string): boolean {
+    if (!this.ready || !this.track) return false;
+    this.hush();
+    // A capture still waiting for its last words to be confirmed is complete as it is.
+    if (this.hold) this.seal(this.hold);
+    // Whatever the microphone picked up before now is not part of what they are about to say.
+    this.send({ type: 'input_audio_buffer.clear' });
+    this.hold = {
+      interactionId,
+      startedAt: this.now(),
+      items: [],
+      spoke: false,
+      released: false,
+      committing: false,
+      sealed: false,
+    };
+    this.reading.add(this.hold);
+    runInAction(() => (this.holding = true));
+    this.applyMic();
+    return true;
+  }
+
+  /**
+   * The developer let go. What they said is answered at once when nothing is in the way; when
+   * it could be a yes or a stop to something, it is read first.
+   */
+  private async endHold(interactionId: string): Promise<boolean> {
+    const hold = this.hold;
+    if (!hold || hold.interactionId !== interactionId || hold.released) return false;
+    hold.released = true;
+    runInAction(() => (this.holding = false));
+    this.applyMic();
+    try {
+      return await this.settleHold(hold);
+    } finally {
+      // Read, or given to the model: a turn that waited for it goes on.
+      this.reading.delete(hold);
+      this.advance();
+    }
+  }
+
+  private async settleHold(hold: Hold): Promise<boolean> {
+    const { conductor } = this.deps;
+    const nothing = () => !hold.spoke && hold.items.length === 0;
+    if (nothing()) await this.waitFor(() => !nothing() || this.hold !== hold, HEAR_GRACE_MS);
+    if (this.hold !== hold) return false;
+    if (nothing()) {
+      this.hold = null;
+      this.send({ type: 'input_audio_buffer.clear' });
+      conductor.traceLine('ignored', { reason: 'no-speech' });
+      return false;
+    }
+    // The provider commits at each pause by itself; this takes what was said since the last.
+    hold.committing = true;
+    this.send({ type: 'input_audio_buffer.commit' });
+    setTimeout(() => this.seal(hold), SEAL_MS);
+    const heard = this.heardOf(hold);
+    const discard = () => {
+      for (const item of hold.items) this.forget(item);
+    };
+    if (!conductor.lineGuarded) {
+      void conductor.speechTurn({
+        interactionId: hold.interactionId,
+        saidAt: hold.startedAt,
+        heard,
+        discard,
+      });
+      return true;
+    }
+    const text = await heard;
+    // Read here, so the model must not answer the same words a second time.
+    discard();
+    if (!text || looksLikeSttArtifact(text)) {
+      conductor.traceLine('ignored', { reason: text ? 'noise' : 'unread' });
+      return false;
+    }
+    conductor.hearOnLine(text, {
+      interactionId: hold.interactionId,
+      saidAt: hold.startedAt,
+      key: true,
+    });
+    return true;
+  }
+
+  private cancelHold(): void {
+    const hold = this.hold;
+    if (!hold) return;
+    this.hold = null;
+    this.reading.delete(hold);
+    this.send({ type: 'input_audio_buffer.clear' });
+    runInAction(() => (this.holding = false));
+    this.applyMic();
+    this.poke();
+    this.advance();
+  }
+
+  /** No more speech joins this capture: later words are a capture of their own. */
+  private seal(hold: Hold): void {
+    if (hold.sealed) return;
+    hold.sealed = true;
+    if (this.hold === hold) this.hold = null;
+    this.poke();
+  }
+
+  /**
+   * Everything a capture said, once the provider has written all of it. Part of it is not the
+   * developer's words: when some never came in time, the capture counts as unread.
+   */
+  private async heardOf(hold: Hold): Promise<string> {
+    const written = () => hold.sealed && hold.items.every((item) => this.transcripts.has(item));
+    await this.waitFor(() => written() || this.session === null, TRANSCRIPT_WAIT_MS);
+    if (!written() || hold.items.some((item) => this.transcripts.get(item) === null)) return '';
+    return hold.items
+      .map((item) => this.transcripts.get(item) ?? '')
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  /** Resolves once `done` holds, looked at whenever something arrives, or after `ms`. */
+  private waitFor(done: () => boolean, ms: number): Promise<void> {
+    if (done()) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const finish = () => {
+        clearTimeout(timer);
+        this.waiters.delete(check);
+        resolve();
+      };
+      const check = () => {
+        if (done()) finish();
+      };
+      const timer = setTimeout(finish, ms);
+      this.waiters.add(check);
+    });
+  }
+
+  private poke(): void {
+    for (const check of [...this.waiters]) check();
   }
 
   // ── What the conductor asks of the line ─────────────────────────────────────
 
-  /** Answers words the developer said with a key, which the router read as talk. */
-  private async answer(text: string): Promise<boolean> {
-    if (!this.ready || this.deps.voice.muted) return false;
-    const sent = this.send({
-      type: 'conversation.item.create',
-      item: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] },
+  /** Runs one turn of the model. Resolves when it has answered, or null if it cannot start. */
+  private takeTurn(input: LineTurnInput): Promise<LineTurnResult | null> {
+    if (!this.ready || this.turn) return Promise.resolve(null);
+    if (input.text !== undefined) {
+      const sent = this.send({
+        type: 'conversation.item.create',
+        item: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: input.text }],
+        },
+      });
+      if (!sent) return Promise.resolve(null);
+    }
+    this.setState(input.context);
+    return new Promise<LineTurnResult | null>((resolve) => {
+      this.turn = {
+        resolve,
+        spoken: input.spoken,
+        said: [],
+        tokens: 0,
+        toolsRunning: 0,
+        responding: false,
+        responseId: null,
+        owed: false,
+        rounds: 0,
+        stopped: false,
+        watchdog: null,
+      };
+      this.respond(this.turn);
     });
-    if (!sent) return false;
-    this.keyTurn = { text, at: this.now() };
-    return this.send({ type: 'response.create' });
+  }
+
+  /** Asks the model for the next response of a turn. */
+  private respond(turn: Turn): void {
+    // One voice at a time: a sentence being said as written is finished first. And words the
+    // developer is saying over the turn are read as words (a stop, a yes, a new request of its
+    // own): the model is not asked again while they sit in the conversation.
+    if (this.saying || this.reading.size > 0 || this.loose.size > 0) {
+      turn.owed = true;
+      return;
+    }
+    turn.owed = false;
+    const aloud = turn.spoken && !this.deps.voice.muted;
+    const sent = this.send({
+      type: 'response.create',
+      response: { output_modalities: [aloud ? 'audio' : 'text'] },
+    });
+    if (!sent) {
+      this.endTurn(turn, { reply: DROPPED_REPLY, completed: false });
+      return;
+    }
+    turn.responding = true;
+    turn.responseId = null;
+    turn.rounds++;
+    turn.watchdog = setTimeout(() => {
+      turn.watchdog = null;
+      if (this.turn !== turn || !turn.responding) return;
+      this.send({ type: 'response.cancel' });
+      this.endTurn(turn, { reply: NO_ANSWER_REPLY, completed: false });
+    }, RESPONSE_MAX_MS);
+  }
+
+  /** Goes back to the model once every tool of its last response has answered. */
+  private advance(): void {
+    const turn = this.turn;
+    if (!turn || turn.responding || turn.toolsRunning > 0 || !turn.owed) return;
+    if (turn.stopped) this.endTurn(turn, { reply: '', completed: false });
+    else if (turn.rounds >= MAX_ROUNDS) {
+      this.endTurn(turn, { reply: TOO_MANY_STEPS_REPLY, completed: false });
+    } else this.respond(turn);
+  }
+
+  private endTurn(turn: Turn, result: { reply: string; completed: boolean }): void {
+    if (this.turn !== turn) return;
+    this.turn = null;
+    if (turn.watchdog) clearTimeout(turn.watchdog);
+    turn.resolve({ ...result, tokens: turn.tokens });
+    this.maybeRollOver();
+  }
+
+  /** The developer said stop: the turn ends where it is, and the voice goes quiet. */
+  private stop(): void {
+    const turn = this.turn;
+    if (turn) turn.stopped = true;
+    if (turn?.responding) this.send({ type: 'response.cancel' });
+    this.stopVoice();
+    // A response in flight ends the turn when it reports back; so do tools still running.
+    if (turn && !turn.responding && turn.toolsRunning === 0) {
+      this.endTurn(turn, { reply: '', completed: false });
+    }
   }
 
   /** Says one sentence as written; resolves once it has been said, or false if it was not. */
   private say(text: string): Promise<boolean> {
     const { voice } = this.deps;
-    // While the developer holds the key, nothing of Maestro's may play into what they say.
-    if (!this.ready || this.saying || voice.muted || voice.capturing) {
+    // While the developer holds the key, nothing of Maestro's may play into what they say; and
+    // a sentence never talks over the model's own answer.
+    if (!this.ready || this.saying || this.turn?.responding || voice.muted || voice.capturing) {
       return Promise.resolve(false);
     }
     const sent = this.send({
       type: 'response.create',
       response: {
-        // Outside the conversation: the sentence is the conductor's, not the voice model's.
+        // Outside the conversation: the sentence is Maestro's, not the model's own answer.
         conversation: 'none',
         input: [],
         output_modalities: ['audio'],
@@ -478,7 +810,7 @@ export class TalkStore {
       const timer = setTimeout(() => {
         // Nothing was heard in time: stop it, and let the caller say it another way.
         if (this.saying && !this.saying.started) {
-          this.send({ type: 'response.cancel' });
+          this.cancelSaying();
           this.finishSaying(false);
         }
       }, SAY_START_MS);
@@ -490,6 +822,11 @@ export class TalkStore {
     });
   }
 
+  private cancelSaying(): void {
+    const id = this.saying?.responseId;
+    this.send({ type: 'response.cancel', ...(id ? { response_id: id } : {}) });
+  }
+
   private finishSaying(said: boolean): void {
     const saying = this.saying;
     if (!saying) return;
@@ -497,6 +834,8 @@ export class TalkStore {
     clearTimeout(saying.timer);
     clearTimeout(saying.maxTimer);
     saying.resolve(said);
+    // A turn that waited for the sentence goes on.
+    this.advance();
   }
 
   /** Tells the voice model something, without making it speak. */
@@ -511,6 +850,24 @@ export class TalkStore {
     });
   }
 
+  /** Replaces what the model was told about the agents and the canvas with how things are now. */
+  private setState(context: string): void {
+    const previous = this.stateItem;
+    const id = `state_${++this.stateSeq}`;
+    const sent = this.send({
+      type: 'conversation.item.create',
+      item: {
+        id,
+        type: 'message',
+        role: 'system',
+        content: [{ type: 'input_text', text: feedSnapshot(context, new Date(this.now())) }],
+      },
+    });
+    if (!sent) return;
+    this.stateItem = id;
+    if (previous) this.forget(previous);
+  }
+
   private send(event: RealtimeEvent): boolean {
     return this.session?.send(event) ?? false;
   }
@@ -521,20 +878,27 @@ export class TalkStore {
     switch (event.type) {
       case 'input_audio_buffer.speech_started':
         this.hearing = true;
+        this.speechAt = this.now();
+        if (this.hold) this.hold.spoke = true;
+        this.poke();
         break;
       case 'input_audio_buffer.speech_stopped':
         this.hearing = false;
         break;
+      case 'input_audio_buffer.committed':
+        this.onCommitted(str(event.item_id));
+        break;
       case 'conversation.item.input_audio_transcription.completed':
-        this.onHeard(str(event.item_id), str(event.transcript));
+        this.onTranscript(str(event.item_id), str(event.transcript));
         break;
       case 'conversation.item.input_audio_transcription.failed':
-        // Nothing to read, so nothing may answer it; like noise, it does not keep the
-        // microphone open either.
-        this.forget(str(event.item_id));
+        this.onTranscript(str(event.item_id), null);
         break;
       case 'response.output_audio_transcript.done':
         this.onSaid(str(event.transcript));
+        break;
+      case 'response.output_text.done':
+        this.onWritten(str(event.text));
         break;
       case 'response.function_call_arguments.done':
         void this.onToolCall(str(event.call_id), str(event.name), str(event.arguments));
@@ -553,53 +917,92 @@ export class TalkStore {
         this.onResponseDone(event.response);
         break;
       case 'error':
-        log.warn('talk: the provider reported an error', { error: event.error });
-        // Whatever was asked for may never come: a sentence that has not started is not said,
-        // and a summary that was refused must not keep the line shut.
-        if (this.saying && !this.saying.started) this.finishSaying(false);
-        this.endRollover();
+        this.onError(event.error);
         break;
       default:
         break;
     }
   }
 
+  private onError(error: unknown): void {
+    // Letting go right after a pause leaves nothing to commit: the capture is complete as it is.
+    if (str((error as { code?: unknown } | null)?.code) === 'input_audio_buffer_commit_empty') {
+      if (this.hold?.committing) this.seal(this.hold);
+      return;
+    }
+    log.warn('talk: the provider reported an error', { error });
+    // Whatever was asked for may never come: a sentence that has not started is not said, and
+    // a summary that was refused must not keep the line shut.
+    if (this.saying && !this.saying.started) this.finishSaying(false);
+    this.endRollover();
+  }
+
+  /** The provider turned a stretch of speech into an item of the conversation. */
+  private onCommitted(itemId: string): void {
+    if (!itemId) return;
+    const hold = this.hold;
+    if (hold) {
+      hold.items.push(itemId);
+      // The commit asked for when the developer let go: these were their last words.
+      if (hold.committing) this.seal(hold);
+      else this.poke();
+      return;
+    }
+    this.loose.set(itemId, this.speechAt || this.now());
+  }
+
+  private onTranscript(itemId: string, transcript: string | null): void {
+    if (!itemId) return;
+    const saidAt = this.loose.get(itemId);
+    if (saidAt === undefined) {
+      this.transcripts.set(itemId, transcript);
+      this.poke();
+      return;
+    }
+    this.loose.delete(itemId);
+    this.onHeard(itemId, transcript ?? '', saidAt);
+    this.advance();
+  }
+
   /**
-   * The transcript of a turn heard with no key pressed. It is read before anything answers:
-   * an echo or noise is dropped, a steering word runs, a command is refused until a key is
-   * pressed, and only talk reaches the voice model.
+   * The transcript of words heard with no key held. They are read before anything answers: an
+   * echo of Maestro's own voice or noise is dropped, and the rest is the developer's turn.
    */
-  private onHeard(itemId: string, transcript: string): void {
+  private onHeard(itemId: string, transcript: string, saidAt: number): void {
+    const { conductor, voice } = this.deps;
     const heard = transcript.trim();
     this.spoken = recentSpoken(this.spoken, this.now());
     const echo = !neverEcho(heard) && isEcho(heard, this.spoken, this.now());
     if (!heard || looksLikeSttArtifact(heard) || echo) {
       // Noise does not keep the microphone open: the window runs out as it would have.
       this.forget(itemId);
-      this.deps.conductor.traceLine('ignored', { reason: heard ? 'echo-or-noise' : 'empty' });
+      conductor.traceLine('ignored', { reason: heard ? 'echo-or-noise' : 'empty' });
       return;
     }
-    // Words spoken with no key are never the key-started request a hand-off may carry.
-    this.keyTurn = null;
+    // The developer took the key meanwhile: what they say with it is what counts now.
+    if (voice.capturing) {
+      this.forget(itemId);
+      return;
+    }
     this.windowSince = this.now();
-    const hearing = this.deps.conductor.hearOnLine(heard);
-    this.deps.conductor.traceLine('heard', { owner: hearing });
-    // The developer took the key meanwhile, or muted Maestro: no voice of Maestro's may play.
-    // What they say with the key is what counts now.
-    const silent = this.deps.voice.capturing || this.deps.voice.muted;
-    if (hearing === 'talk' && !silent) {
-      this.send({ type: 'response.create' });
+    const interactionId = crypto.randomUUID();
+    conductor.traceLine('heard', { guarded: conductor.lineGuarded });
+    if (conductor.lineGuarded) {
+      this.forget(itemId);
+      conductor.hearOnLine(heard, { interactionId, saidAt, key: false });
       return;
     }
-    // A command is not conversation: the voice model should not answer it later.
-    this.forget(itemId);
-    if (silent) return;
-    if (hearing === 'needs-key') void this.say(NEEDS_KEY_REPLY).then(() => this.openWindow());
-    else this.openWindow();
+    void conductor.speechTurn({
+      interactionId,
+      saidAt,
+      heard: Promise.resolve(heard),
+      discard: () => this.forget(itemId),
+    });
   }
 
-  /** Removes a turn the voice model must not see as something said to it. */
+  /** Removes an item the model must not see, or see twice. */
   private forget(itemId: string): void {
+    this.transcripts.delete(itemId);
     if (itemId) this.send({ type: 'conversation.item.delete', item_id: itemId });
   }
 
@@ -608,7 +1011,17 @@ export class TalkStore {
     if (!said) return;
     this.noteSpoken(said);
     // A sentence said as written was shown by whoever asked for it.
-    if (!this.saying) this.deps.conductor.showVoiceReply(said);
+    if (this.saying) return;
+    this.onWritten(said);
+  }
+
+  /** A part of the model's own answer, said or written. */
+  private onWritten(text: string): void {
+    const part = text.trim();
+    const turn = this.turn;
+    if (!part || !turn) return;
+    turn.said.push(part);
+    this.deps.conductor.showVoiceReply(turn.said.join(' '));
   }
 
   private noteSpoken(said: string): void {
@@ -619,43 +1032,54 @@ export class TalkStore {
     if (!callId || this.handledCalls.has(callId)) return;
     this.handledCalls.add(callId);
     const session = this.session;
-    this.toolsRunning++;
-    let output: string;
-    try {
-      output =
-        name === VOICE_HAND_OFF_TOOL
-          ? await this.handOff()
-          : await this.deps.conductor.voiceRead(name, parseArguments(rawArguments));
-    } catch (error) {
-      output = error instanceof Error ? error.message : 'That could not be read.';
+    const turn = this.turn;
+    let result: LineToolResult;
+    if (!turn) {
+      // A call that belongs to no request of the developer's: answered, so the conversation
+      // stays whole, and never run.
+      result = { output: NO_TURN_RESULT };
+    } else if (turn.stopped) {
+      result = { output: STOPPED_RESULT };
+    } else {
+      turn.toolsRunning++;
+      try {
+        result = await this.deps.conductor.lineTool(name, parseArguments(rawArguments));
+      } catch (error) {
+        result = { output: error instanceof Error ? error.message : 'That could not be done.' };
+      }
+      turn.toolsRunning = Math.max(0, turn.toolsRunning - 1);
     }
     // The session was replaced while the tool ran: its answer belongs to nobody.
     if (this.session !== session) return;
-    this.toolsRunning = Math.max(0, this.toolsRunning - 1);
     this.send({
       type: 'conversation.item.create',
-      item: { type: 'function_call_output', call_id: callId, output },
+      item: { type: 'function_call_output', call_id: callId, output: result.output },
     });
-    // One answer for all the calls of a response, once the last result is in. Not while the
-    // developer holds the key: they have moved on, and the result waits for their next words.
-    if (this.toolsRunning === 0 && !this.deps.voice.capturing && !this.deps.voice.muted) {
-      this.send({ type: 'response.create' });
+    for (const image of result.images ?? []) {
+      this.send({
+        type: 'conversation.item.create',
+        item: {
+          type: 'message',
+          role: 'user',
+          content: [
+            { type: 'input_image', image_url: `data:${image.mediaType};base64,${image.data}` },
+          ],
+        },
+      });
     }
-  }
-
-  /** The voice model wants something done. Only key-started words may ask for that. */
-  private async handOff(): Promise<string> {
-    const turn = this.keyTurn;
-    this.keyTurn = null;
-    if (!turn || this.now() - turn.at > KEY_TURN_MS) return NEEDS_KEY_RESULT;
-    this.deps.conductor.traceLine('hand-off');
-    return this.deps.conductor.handOffFromVoice(turn.text);
+    if (!turn || this.turn !== turn) return;
+    turn.owed = true;
+    this.advance();
   }
 
   private onResponseCreated(response: unknown): void {
     const created = (response ?? {}) as { id?: unknown; metadata?: { purpose?: unknown } | null };
-    if (created.metadata?.purpose === 'say' && this.saying && typeof created.id === 'string') {
-      this.saying.responseId = created.id;
+    if (typeof created.id !== 'string') return;
+    const purpose = created.metadata?.purpose;
+    if (purpose === 'say') {
+      if (this.saying) this.saying.responseId = created.id;
+    } else if (purpose === undefined && this.turn?.responding && !this.turn.responseId) {
+      this.turn.responseId = created.id;
     }
   }
 
@@ -675,11 +1099,12 @@ export class TalkStore {
       this.voiceTimer = null;
       this.onVoiceStopped('');
     }, VOICE_MAX_MS);
-    // The developer is holding the key: nothing of Maestro's plays into what they are saying.
-    if (this.deps.voice.capturing) {
-      this.stopVoice();
+    // The developer is speaking: nothing of Maestro's plays into it. The turn itself goes on.
+    if (this.deps.voice.capturing || this.deps.voice.muted) {
+      this.hush();
       return;
     }
+    this.unhush();
     // Without talk-over the microphone is shut while the voice speaks, so it never hears itself.
     if (!this.settings?.talkOver) this.closeWindow();
   }
@@ -690,12 +1115,14 @@ export class TalkStore {
     runInAction(() => (this.speaking = false));
     // Another response stopping says nothing about the sentence that was asked for.
     if (this.saying?.started && this.isSaying(responseId)) this.finishSaying(true);
+    if (!this.deps.voice.capturing && !this.deps.voice.muted) this.unhush();
     this.openWindowSoon();
     this.maybeRollOver();
   }
 
   private onResponseDone(response: unknown): void {
     const done = (response ?? {}) as {
+      id?: unknown;
       status?: unknown;
       usage?: unknown;
       metadata?: { purpose?: unknown } | null;
@@ -703,22 +1130,41 @@ export class TalkStore {
     };
     const purpose = done.metadata?.purpose;
     const tokens = tokensFromUsage(done.usage);
-    // Only a response in the conversation says how full the session is.
-    if (purpose === undefined) {
-      this.inputTokens = inputSize(tokens);
-      // The answer to the key-started words is finished: a later response cannot hand them
-      // off. A response that only called tools is not finished yet.
-      if (!callsTools(done.output)) this.keyTurn = null;
-    }
     void this.recordUsage(tokens);
-    if (purpose === 'say' && done.status !== 'completed') this.finishSaying(false);
+    if (purpose === 'say') {
+      if (done.status !== 'completed') this.finishSaying(false);
+      return;
+    }
     if (purpose === 'rollover') {
       // A summary that comes after the line gave up waiting belongs to nothing: the session
       // has been taking turns again.
       if (!this.rolling) return;
       if (done.status === 'completed') void this.replace(responseText(done.output));
       else this.endRollover();
+      return;
     }
+    // Only a response in the conversation says how full the session is.
+    this.inputTokens = inputSize(tokens);
+    const turn = this.turn;
+    if (!turn) return;
+    // A response an earlier turn gave up on says nothing about this one.
+    const id = str(done.id);
+    if (turn.responseId && id && id !== turn.responseId) return;
+    if (turn.watchdog) clearTimeout(turn.watchdog);
+    turn.watchdog = null;
+    turn.responding = false;
+    turn.tokens += inputSize(tokens) + tokens.textOut + tokens.audioOut;
+    // A response that called tools is answered in a later one, once their results are in.
+    if (turn.toolsRunning > 0 || turn.owed) {
+      this.advance();
+      return;
+    }
+    // Nothing is running and nothing is owed: the turn is over, whatever the response lists
+    // (a call cut off by "stop" is listed, and never arrives).
+    this.endTurn(turn, {
+      reply: turn.said.join(' '),
+      completed: done.status === 'completed' && !callsTools(done.output),
+    });
   }
 
   private async recordUsage(tokens: ReturnType<typeof tokensFromUsage>): Promise<void> {
@@ -737,28 +1183,35 @@ export class TalkStore {
     }
   }
 
-  // ── The microphone window ───────────────────────────────────────────────────
+  // ── The microphone ──────────────────────────────────────────────────────────
+
+  /** The track carries sound while the developer holds the key or the microphone is open. */
+  private applyMic(): void {
+    if (this.track) this.track.enabled = this.holding || this.micOpen;
+  }
 
   /**
-   * Opens the microphone for talk. It stays shut while a key is held, while any voice the
-   * microphone could hear is playing, and when the setting asks for no window at all.
+   * Opens the microphone with no key held: for good when the line listens all the time, else
+   * for a moment after Maestro speaks. It stays shut while a local capture or a local voice has
+   * the room, and while the line's own voice speaks unless talking over it is allowed.
    */
   private openWindow(): void {
     const settings = this.settings;
-    const track = this.track;
-    if (this.line !== 'open' || !track || !settings || settings.windowSec <= 0) return;
+    if (this.line !== 'open' || !this.track || !settings || this.rolling) return;
+    const always = settings.listening === 'open';
+    if (!always && settings.windowSec <= 0) return;
     const { voice } = this.deps;
-    if (voice.capturing || voice.speaking || voice.muted) return;
-    // A session about to be replaced takes no more talk.
-    if (this.rolling) return;
+    if (voice.capturing || voice.speaking) return;
     if (this.speaking && !settings.talkOver) return;
-    if (!this.windowOpen) this.windowSince = this.now();
-    track.enabled = true;
-    runInAction(() => (this.windowOpen = true));
-    this.armWindow(settings.windowSec * 1000);
+    if (!this.micOpen) this.windowSince = this.now();
+    runInAction(() => (this.micOpen = true));
+    this.applyMic();
+    if (this.windowTimer) clearTimeout(this.windowTimer);
+    this.windowTimer = null;
+    if (!always) this.armWindow(settings.windowSec * 1000);
   }
 
-  /** Opens the window once the room has had a moment to go quiet after a voice. */
+  /** Opens the microphone once the room has had a moment to go quiet after a voice. */
   private openWindowSoon(): void {
     if (this.tailTimer) clearTimeout(this.tailTimer);
     this.tailTimer = setTimeout(() => {
@@ -767,8 +1220,14 @@ export class TalkStore {
     }, ECHO_TAIL_MS);
   }
 
+  /** The room is the developer's again: the microphone opens if the line listens without a key. */
+  private reopen(): void {
+    if (this.settings?.listening === 'open' || this.deps.conductor.callOnLine) {
+      this.openWindowSoon();
+    }
+  }
+
   private armWindow(ms: number): void {
-    if (this.windowTimer) clearTimeout(this.windowTimer);
     this.windowTimer = setTimeout(() => {
       this.windowTimer = null;
       // Mid-sentence: the window waits for the developer to finish. Sound that never turns
@@ -784,33 +1243,45 @@ export class TalkStore {
     this.windowTimer = null;
     if (this.tailTimer) clearTimeout(this.tailTimer);
     this.tailTimer = null;
-    if (this.track) this.track.enabled = false;
-    this.hearing = false;
-    if (this.windowOpen) runInAction(() => (this.windowOpen = false));
-    // Nobody is talking now: the moment to swap a full session for a fresh one.
-    if (!this.speaking && !this.deps.voice.capturing) this.maybeRollOver();
+    if (this.micOpen) runInAction(() => (this.micOpen = false));
+    this.applyMic();
+    if (!this.holding) this.hearing = false;
+    this.maybeRollOver();
   }
 
-  /** Stops the voice mid-sentence (the developer pressed a key or muted). */
+  /** Stops the voice mid-sentence. */
   private stopVoice(): void {
-    if (!this.speaking && !this.saying) return;
-    this.send({ type: 'response.cancel' });
-    this.send({ type: 'output_audio_buffer.clear' });
-    this.finishSaying(false);
+    if (this.saying) {
+      this.cancelSaying();
+      this.finishSaying(false);
+    }
+    if (this.speaking) this.send({ type: 'output_audio_buffer.clear' });
   }
 
-  // ── Keeping the voice model's picture current ───────────────────────────────
-
-  private onAgents(agents: readonly LineAgent[]): void {
-    if (this.line !== 'open') return;
-    const update = feedUpdate(agentChanges(this.known, agents), new Date(this.now()));
-    this.known = new Map(agents.map((agent) => [agent.id, agent]));
-    if (update) this.sendNote(update);
+  /**
+   * The developer is speaking, or muted Maestro: its voice is cut off and not played. A turn
+   * in progress keeps working; only what it says aloud is dropped, and its answer is shown.
+   */
+  private hush(): void {
+    this.stopVoice();
+    if (this.hushed) return;
+    this.hushed = true;
+    if (this.remote) this.deps.play(this.remote, true);
   }
+
+  private unhush(): void {
+    if (!this.hushed) return;
+    this.hushed = false;
+    if (this.remote) this.deps.play(this.remote, false);
+  }
+
+  // ── A long session is replaced ──────────────────────────────────────────────
 
   /** A long or full session is replaced by a fresh one, at a moment nobody is talking. */
   private maybeRollOver(): void {
-    if (this.rolling || this.line !== 'open' || this.windowOpen || this.toolsRunning > 0) return;
+    if (this.rolling || this.line !== 'open') return;
+    if (this.turn || this.hold || this.holding || this.hearing || this.speaking) return;
+    if (this.saying || this.loose.size > 0 || this.deps.voice.capturing) return;
     if (!needsRollover(this.inputTokens, this.now() - this.openedAt)) return;
     this.rolling = true;
     const asked = this.send({
@@ -827,10 +1298,13 @@ export class TalkStore {
       this.rolling = false;
       return;
     }
+    // A session about to be replaced takes no more words.
+    this.closeWindow();
     // The line takes no turn while it waits for the summary; it must not wait for ever.
     this.rollTimer = setTimeout(() => {
       this.rollTimer = null;
       this.rolling = false;
+      this.reopen();
     }, ROLLOVER_MS);
   }
 

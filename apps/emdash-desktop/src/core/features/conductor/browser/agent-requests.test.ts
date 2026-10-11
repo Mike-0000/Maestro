@@ -303,12 +303,11 @@ describe('ask_developer', () => {
   });
 
   it('answers the request that was asked last, not the one that arrived last', async () => {
-    const { receive, desk, decideWith, say, sent, state } = setup({ free: false });
+    const { receive, desk, say, sent, state } = setup({ free: false, canDecide: false });
     // Atlas's request arrives first and waits for a free conductor. Bravo's question arrives
-    // and is spoken. Then the conductor decides Atlas's request and asks about it.
+    // and is spoken. Then the conductor, with no model to decide, asks about Atlas's request.
     await receive(spawn());
     await receive(question('bravo', 'Which database?'));
-    decideWith(async () => 'Atlas wants a Codex agent to wipe the build cache. Okay?');
     state.now += 5_000;
     state.free = true;
     await desk.drain();
@@ -338,6 +337,29 @@ describe('ask_developer', () => {
     expect(sent[0]!.text).toContain('did not respond in time');
     expect(desk.awaitingDeveloper).toBe(false);
     expect(host.decide).not.toHaveBeenCalled();
+  });
+
+  it('keeps an unanswered question for the developer’s return, and tells it once', async () => {
+    vi.useFakeTimers();
+    const { desk, said } = setup();
+    await desk.receive(question('atlas', 'Upload the five STEP files?'), async () => true);
+    await desk.receive(question('bravo', 'Sign in to PCBWay?'), async () => true);
+    expect(desk.takeMissed()).toBeNull();
+    await vi.advanceTimersByTimeAsync(DEVELOPER_ANSWER_MS + 1);
+
+    expect(desk.takeMissed()).toBe(
+      `2 questions went unanswered while you were away. ${said[0]} ${said[1]}`
+    );
+    expect(desk.takeMissed()).toBeNull();
+  });
+
+  it('drops an unanswered question once the developer has written to that agent', async () => {
+    vi.useFakeTimers();
+    const { desk } = setup();
+    await desk.receive(question(), async () => true);
+    await vi.advanceTimersByTimeAsync(DEVELOPER_ANSWER_MS + 1);
+    desk.noteDeveloperSend('atlas');
+    expect(desk.takeMissed()).toBeNull();
   });
 
   it('is answered only with words, never with a bare approve or deny', async () => {
@@ -457,14 +479,36 @@ describe('spawn_agent', () => {
     expect(sent[0]!.text).not.toContain('\u001b');
   });
 
-  it('puts the request to the developer when the model leaves it open, then takes their yes', async () => {
+  it('never waits for the developer when the model leaves the request open', async () => {
     const { receive, desk, decideWith, said, sent, acts, say } = setup();
     decideWith(async () => 'Atlas wants a Codex agent to drive the order form. Okay?');
     const asked = spawn();
     await receive(asked);
 
-    expect(said).toEqual(['Atlas wants a Codex agent to drive the order form. Okay?']);
-    expect(sent).toEqual([]);
+    expect(said).toEqual([
+      'Atlas asks to start a codex agent on “Order check”. I could not decide it, so nothing was done.',
+    ]);
+    expect(desk.awaitingDeveloper).toBe(false);
+    expect(acts).toEqual([]);
+    expect(sent).toEqual([
+      {
+        to: 'atlas',
+        text: expect.stringContaining(
+          `[Maestro reply ${asked.id} to your spawn_agent request] The conductor could not decide it just now`
+        ),
+      },
+    ]);
+    expect(await say('approve', 'yes')).toBeNull();
+  });
+
+  it('asks the developer itself only when no model can decide, and takes their yes', async () => {
+    const { receive, desk, said, sent, acts, host, say } = setup({ canDecide: false });
+    const asked = spawn();
+    await receive(asked);
+    expect(host.decide).not.toHaveBeenCalled();
+    expect(said).toEqual([
+      'Atlas asks to start a codex agent on “Order check”. Say yes to allow it, or no.',
+    ]);
     expect(desk.awaitingDeveloper).toBe(true);
     expect(desk.contextLines().join('\n')).toContain("waiting for the developer's yes or no");
 
@@ -476,25 +520,54 @@ describe('spawn_agent', () => {
     );
   });
 
-  it('asks the developer itself when no model can decide', async () => {
-    const { receive, said, host, say } = setup({ canDecide: false });
+  it('takes the developer’s no when no model can decide', async () => {
+    const { receive, say } = setup({ canDecide: false });
     await receive(spawn());
-    expect(host.decide).not.toHaveBeenCalled();
-    expect(said).toEqual([
-      'Atlas asks to start a codex agent on “Order check”. Say yes to allow it, or no.',
-    ]);
     const result = await say('deny', 'no');
     expect(result?.spoken).toBe('Told Atlas no.');
   });
 
-  it('asks the developer when the model turn fails', async () => {
-    const { receive, said, desk, decideWith } = setup();
+  it('does not wait for the developer when the model turn fails', async () => {
+    const { receive, said, sent, desk, decideWith } = setup();
     decideWith(async () => {
       throw new Error('api down');
     });
     await receive(spawn());
-    expect(said[0]).toContain('Say yes to allow it, or no.');
-    expect(desk.awaitingDeveloper).toBe(true);
+    expect(said[0]).toContain('I could not decide it, so nothing was done.');
+    expect(sent[0]!.text).toContain('Carry on with what you can');
+    expect(desk.awaitingDeveloper).toBe(false);
+  });
+
+  it('answers a question put to the conductor in its own name, with room to explain', async () => {
+    const { receive, desk, decideWith, said, sent } = setup();
+    const answer = `Keep the schema and add a nullable column. ${'x'.repeat(2_000)}`;
+    decideWith(async (open) => {
+      expect(open).toMatchObject({ kind: 'ask_conductor', awaitingDeveloper: false });
+      expect((await desk.answer(open.id, 'approve', '', true)).isError).toBe(true);
+      expect((await desk.answer(open.id, 'answer', answer, true)).isError).toBeUndefined();
+      return 'I told Atlas to add a nullable column.';
+    });
+    const asked = request('ask_conductor', {
+      question: 'The migration fails twice on the old rows. Change the schema or backfill first?',
+    });
+    await receive(asked);
+
+    expect(said).toEqual(['I told Atlas to add a nullable column.']);
+    expect(desk.awaitingDeveloper).toBe(false);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text).toContain(
+      `[Maestro reply ${asked.id} to your ask_conductor request] The conductor answered, deciding on the developer's behalf: Keep the schema`
+    );
+    expect(sent[0]!.text).not.toContain('The developer answered');
+    expect(sent[0]!.text.length).toBeLessThan(1_700);
+  });
+
+  it('puts a question for the conductor to the developer when no model can answer it', async () => {
+    const { receive, said, sent, say } = setup({ canDecide: false });
+    await receive(request('ask_conductor', { question: 'Backfill first?' }));
+    expect(said).toEqual(['Atlas asked me: Backfill first? What should I tell it?']);
+    await say('approve', 'yes, backfill first');
+    expect(sent[0]!.text).toContain('The developer answered: yes, backfill first');
   });
 
   it('reports a cancelled or failed action to the agent instead of approving', async () => {
@@ -586,7 +659,7 @@ describe('spawn_agent', () => {
     });
     await receive(spawn());
     expect(answered?.isError).toBeUndefined();
-    expect(sent).toEqual([
+    expect(sent.filter((message) => message.to === 'bravo')).toEqual([
       { to: 'bravo', text: expect.stringContaining('The developer answered: Postgres.') },
     ]);
   });

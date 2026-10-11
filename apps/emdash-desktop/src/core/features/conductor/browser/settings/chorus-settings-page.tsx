@@ -711,6 +711,19 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
           }
         />
         <SettingsRow
+          label="Let the conductor decide who needs you"
+          description="When an agent ends a turn, the conductor's model reads its final reply and decides whether the agent is waiting for you or is done. An agent that ends on a question it cannot go on without shows as Needs you at once; one that only offers next steps shows as Done and stays that way. Permission prompts are not affected. Off, or when the model cannot be reached: the agent's own events decide."
+          control={
+            <Switch
+              checked={conductorSettings?.attentionVerdicts ?? true}
+              disabled={!conductorSettings}
+              onCheckedChange={(attentionVerdicts) =>
+                void conductor.updateSettings({ attentionVerdicts })
+              }
+            />
+          }
+        />
+        <SettingsRow
           label="Let agents ask the conductor"
           description="Claude Code and Codex agents on this computer can ask the conductor to start another agent, pass a message to one, ask you a question, or tell you something by voice. The conductor decides requests to start or message an agent, or asks you when it is unsure; you can cancel each one as it starts. Off: every request is refused."
           control={
@@ -947,8 +960,9 @@ const LINE_STATE_LABELS = {
 } as const;
 
 /**
- * The talk line: a realtime voice session for talking with Maestro. Experimental and off by
- * default; with it off, nothing here contacts the provider or costs anything.
+ * The talk line: a realtime voice session that takes the conductor's place while it is open.
+ * Experimental and off by default; with it off, nothing here contacts the provider or costs
+ * anything.
  */
 const TalkLineSettings = observer(function TalkLineSettings() {
   const talk = getTalkStore();
@@ -957,13 +971,13 @@ const TalkLineSettings = observer(function TalkLineSettings() {
   const usage = status?.usageToday;
   const state = `${LINE_STATE_LABELS[talk.line]}${talk.error ? `: ${talk.error}` : ''}`;
   return (
-    <SettingsSection title="Talk line (experimental)">
+    <SettingsSection title="Realtime voice conductor (experimental)">
       <SettingsRow
-        label="Talk with Maestro on a live line"
+        label="Use a realtime voice model as the conductor"
         description={
           status && !status.hasKey
-            ? 'Needs an OpenAI API key (API keys, above). A realtime voice model answers questions about your agents and speaks replies; it can read state and nothing else. Anything that acts still goes through the conductor and needs the talk key.'
-            : `A realtime voice model answers questions about your agents and speaks replies; it can read state and nothing else. Anything that acts still goes through the conductor and needs the talk key. Audio and the state it is told go to OpenAI while the line is open. Line: ${state}.`
+            ? 'Needs an OpenAI API key (API keys, above). While it is on, a realtime voice model is the conductor: it hears you directly, answers aloud, and messages, starts and manages agents itself. Cancel windows and confirmations stay as they are.'
+            : `While it is on, a realtime voice model is the conductor: it hears you directly, answers aloud, and messages, starts and manages agents itself. Cancel windows and confirmations stay as they are, and typed commands go to it too. If the line is down or over its limit, the text conductor answers. Audio and the state it is told go to OpenAI while the line is open. Line: ${state}.`
         }
         control={
           <Switch
@@ -998,8 +1012,21 @@ const TalkLineSettings = observer(function TalkLineSettings() {
         }
       />
       <SettingsRow
+        label="Listen without the talk key"
+        description="Off: Maestro hears you while you hold the talk key, and for a moment after it speaks. On: the microphone stays open and Maestro answers whatever you say to it. Best with headphones, or in a quiet room."
+        control={
+          <Switch
+            checked={settings?.listening === 'open'}
+            disabled={!settings}
+            onCheckedChange={(open) =>
+              void talk.updateSettings({ listening: open ? 'open' : 'key' })
+            }
+          />
+        }
+      />
+      <SettingsRow
         label="Seconds the microphone stays open after Maestro speaks"
-        description="For talk only: questions, “stop”, and steering calls. Nothing said in it can send, start, or approve anything. 0 never opens the microphone without the talk key."
+        description="So an answer or a follow-up needs no key. What you say in it is acted on like anything else. 0 never opens the microphone without the talk key. Not used when Maestro listens without the key."
         control={
           <CommitInput
             value={String(settings?.windowSec ?? 6)}
@@ -1027,7 +1054,7 @@ const TalkLineSettings = observer(function TalkLineSettings() {
         label="Daily limit (US dollars)"
         description={
           usage
-            ? `Spent today: $${usage.usd.toFixed(2)} over ${usage.responses} responses and ${usage.sessions} sessions. At the limit the line closes until tomorrow and everything works as it does without it. 0 is no limit.`
+            ? `Spent today: $${usage.usd.toFixed(2)} over ${usage.responses} responses and ${usage.sessions} sessions. At the limit the line closes until tomorrow and the text conductor takes over. 0 is no limit.`
             : '0 is no limit.'
         }
         control={

@@ -29,6 +29,16 @@ installed by the `tui-agents` runtime in `packages/core/src/runtimes/tui-agents/
 does not infer agent status from terminal output. If a provider has no hook/plugin integration
 for an event, the renderer should not show or notify an inferred status for that event.
 
+A turn end is the one event whose meaning the conductor decides. When the conductor has a model
+key and "Let the conductor decide who needs you" is on, `AgentStatusService` asks the conductor's
+model (`ConductorService.judgeAttention`, registered through
+`src/core/primitives/agents/api/attention-judge.ts`) whether the agent's final reply needs the
+developer. A yes makes the conversation `awaiting-input` instead of `completed`; the status stays
+`working` until the verdict lands, and the provider's `idle_prompt` reminder for that turn is then
+ignored. Chat agents' replies are read from their transcript. With no reply, no key, the setting
+off, or no answer within ten seconds, the hook rules below apply unchanged. Permission and
+elicitation prompts never go through the model.
+
 A provider's turn-end hook is not always completion. A plugin's `parseHookEvent` may report
 `backgroundWork` on a `stop` event: the ids of in-flight work (background shells, subagents,
 one-shot scheduled wakeups) that will wake the session when it settles. The runtime then keeps the

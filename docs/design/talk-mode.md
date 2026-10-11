@@ -11,6 +11,13 @@ this text, and what is unverified. Nothing here has been run against the Realtim
 This is the second version. An independent review of the first found five blocking safety defects;
 the last section lists what it changed.
 
+> **Superseded on 2026-10-10.** The developer's intent was the opposite of this note's
+> recommendation: while the realtime line is on, its model is the conductor and calls the
+> conductor's tools itself (shape A below), with the text model only as the fallback. The gates
+> stayed in code, in `executeTool`. What is built is described in
+> [the voice guide](../chorus/voice.md#the-realtime-voice-conductor-experimental); the seam is
+> `conductor/api/voice-line.ts`.
+
 ## Summary
 
 Today the voice is a remote control: hold a key, name an agent, speak, wait. Agents can only

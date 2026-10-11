@@ -104,4 +104,17 @@ describe('spawn_agent routing', () => {
     expect(outcome.content).toContain('in a new worktree');
     expect(requestPending.mock.calls[0]![0]).toContain('in a new worktree');
   });
+
+  it('starts an agent with no task when the prompt is empty', async () => {
+    const { store, requestPending } = setup();
+    const outcome = await store['executeTool']('spawn_agent', {
+      provider: 'claude',
+      task_name: 'New task',
+      prompt: '',
+    });
+
+    expect(mocks.spawnAgentTask).toHaveBeenCalledWith(expect.objectContaining({ prompt: '' }));
+    expect(outcome.content).toContain('with no prompt, so it waits for its first instruction');
+    expect(requestPending.mock.calls[0]![0]).toContain('no prompt');
+  });
 });

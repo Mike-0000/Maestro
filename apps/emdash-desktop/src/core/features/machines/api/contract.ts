@@ -29,6 +29,7 @@ import {
 } from '@emdash/wire/rpc';
 import { z } from 'zod';
 import type { SshConfig, SshConnectionUsage } from '@core/primitives/ssh/api';
+import type { WslMirrorInfo } from '@core/services/wsl-mirror/api/types';
 import {
   addMaestroHostInputSchema,
   inspectMaestroHostInputSchema,
@@ -156,14 +157,39 @@ export const machinesContract = defineContract({
     output: z.custom<SshConfig>(),
   }),
   /**
-   * Copies a repository on a Windows drive into a WSL2 distro (installing a distro, git
-   * settings and Claude Code there as needed) and returns the machine and path to create the
-   * project on. `notes` says what was done and what is left for the user.
+   * Puts a repository on a Windows drive into a WSL2 distro (installing a distro, git settings
+   * and Claude Code there as needed), starts the live mirror that keeps the two the same, and
+   * returns the machine and path to create the project on. `notes` says what was done and
+   * what is left for the user.
    */
-  copyRepositoryToWsl: procedure({
+  mirrorRepositoryToWsl: procedure({
     input: z.object({ windowsPath: z.string().min(1), name: z.string().min(1) }),
-    output: z.custom<{ machine: SshConfig; path: string; reused: boolean; notes: string[] }>(),
+    output: z.custom<{
+      machine: SshConfig;
+      path: string;
+      reused: boolean;
+      notes: string[];
+      mirror: WslMirrorInfo;
+    }>(),
   }),
+  /** The live mirrors between Windows folders and their copies in WSL2 distros. */
+  getWslMirrors: procedure({ input: voidInput, output: z.array(z.custom<WslMirrorInfo>()) }),
+  /** Resolves once the mirror's two sides agree; for a new mirror, after its first full run. */
+  waitForWslMirror: procedure({
+    input: z.object({ id: z.string().min(1), timeoutMs: z.number().int().positive() }),
+    output: z.custom<WslMirrorInfo>(),
+  }),
+  setWslMirrorPaused: procedure({
+    input: z.object({ id: z.string().min(1), paused: z.boolean() }),
+    output: z.custom<WslMirrorInfo>(),
+  }),
+  /** Reads both sides in full now instead of waiting for the next change. */
+  syncWslMirror: procedure({
+    input: z.object({ id: z.string().min(1) }),
+    output: z.custom<WslMirrorInfo>(),
+  }),
+  /** Stops mirroring for good; both folders stay as they are. */
+  removeWslMirror: procedure({ input: z.object({ id: z.string().min(1) }), output: z.void() }),
   /**
    * Maestro hosts: the Maestro app on another computer, reached over its own WebSocket listener
    * instead of SSH. The requests to the host run in the main process; see ./maestro-host.

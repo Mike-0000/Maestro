@@ -47,6 +47,34 @@ agent ──MCP tool──▶ main process ──event──▶ conductor (rende
    never typed into an agent that is not running, and it never starts one. When an answer cannot
    be delivered, the conductor tells the developer.
 
+## What agents are told
+
+Nothing reaches the conductor unless the agent decides to call the tool, so the wording is the
+trigger. Three texts carry it, strongest first:
+
+| Text | Reaches | Source |
+| --- | --- | --- |
+| Appended system prompt | Claude Code (terminal and chat) | `CLAUDE_CONDUCTOR_POLICY` in `packages/plugins/src/agents/impl/claude/delegation.ts` |
+| MCP server instructions | Any client that shows them to its model | `AGENT_REQUEST_INSTRUCTIONS` |
+| Tool description and each kind's `usage` | Every agent that has the tool | `agentRequestToolDefinition()` |
+
+All three give the same rules, to be followed without being told:
+
+- **Hands-free.** The developer is often away. The conductor decides requests on their behalf,
+  so an agent sends the request and acts on the conductor's decision. It does not stop to ask
+  the developer for permission or confirmation, in a request or in its reply.
+- **Stuck.** The same approach failed twice, a tool or information is missing, a choice cannot
+  be settled, or the turn would end with the work unfinished: send `ask_conductor` and follow
+  the answer. `ask_developer` is only for what the developer alone can supply (a password, a
+  payment), and the agent does not wait on it.
+- **Other work.** A separate investigation, a parallel piece, a specialised task, or a follow-up
+  outside the task: send `spawn_agent`. Sub-agents stay for pieces of the agent's own task.
+- **Computer use.** Control of the desktop, another application, or a real browser always goes to
+  a Codex agent: `spawn_agent` with provider `codex`. The canvas browser tools do not count.
+
+The conductor's decision turn is told the developer wants the last two, so it approves them
+unless something else is wrong.
+
 ## Request format
 
 ```json
@@ -66,7 +94,7 @@ Each kind names who decides it:
 | --- | --- |
 | Nobody | The conductor says one sentence to the developer. No reply follows. |
 | The developer | The conductor asks aloud. The request waits up to 10 minutes for the answer. |
-| The conductor | One short model turn (up to four round trips) approves, denies, or passes it to the developer. |
+| The conductor | One short model turn (up to four round trips) approves, denies, or answers. The developer is not asked. |
 
 Built:
 
@@ -74,7 +102,8 @@ Built:
 | --- | --- | --- | --- |
 | `spawn_agent` | `provider`, `task_name`, `brief`, `worktree?`, `report_back?` | Conductor | `spawn_agent` |
 | `message_agent` | `agent`, `text`, `report_back?` | Conductor | `send_to_agent` |
-| `ask_developer` | `question`, `options?` | Developer | (the answer is the reply) |
+| `ask_conductor` | `question`, `options?` | Conductor | (the conductor's answer is the reply) |
+| `ask_developer` | `question`, `options?` | Developer | (the developer's answer is the reply) |
 | `report` | `status` (`progress`, `done`, `blocked`), `message` | Nobody | (spoken) |
 
 Designed, not built. Each is one registry entry that maps to a conductor tool that already
@@ -98,15 +127,18 @@ A request is **agent output**. It is a proposal, never an instruction and never 
 permission. Four rules follow from that:
 
 - **The model judges; Maestro acts.** In the decision turn the model can only read state and call
-  `answer_request` with `approve` or `deny`. Every other tool is refused, whatever the request
+  `answer_request` with `approve` or `deny` (or `answer`, for a question put to it). Every other
+  tool is refused, whatever the request
   says. An approved request runs one conductor tool with input built from the validated payload,
   so a brief reaches the new agent unchanged and the model cannot be talked into a different
   action. The new agent starts in the asking agent's project, by id. A message goes to the agent
   that carries exactly the name the request gave, resolved when the request was accepted; "it"
   and near matches are refused with the list of names.
-- **Unsure means the developer.** If the model does not settle the request, it asks the
-  developer in one spoken sentence and the request stays open. With no model configured, or when
-  the turn fails, the conductor asks with a fixed sentence instead.
+- **The conductor decides alone.** The developer is often away, so the decision turn is told to
+  settle the request itself and never to ask them: approve what is reversible and in scope, deny
+  the rest, and answer a question in its own name. If the turn fails or ends without a decision,
+  the agent is told at once that nothing was done and to carry on, and the conductor says so
+  aloud. Only with no model configured does a request wait for the developer's yes or no.
 - **A bare yes or no counts only for the question just asked.** It settles a request only when
   that request's question is the last thing the conductor said and has stood for two seconds.
   Among several, the one asked last wins. "No", "nope", and "deny" refuse; "stop" and "wait" do
@@ -119,9 +151,10 @@ Open requests are listed in the conductor's context, so a later answer ("make th
 reaches the right agent through `answer_request`. While a request waits for the developer, the
 fast router is skipped: it would type the answer into whichever agent is focused.
 
-A decision turn can settle only the request it was started for, and can tell the asking agent at
-most one short line. A developer's turn can settle only a request that was put to the developer.
-A question can be answered only with the developer's words.
+A decision turn can settle only the request it was started for. Its note to the asking agent is
+one short line (300 characters); its answer to an `ask_conductor` question may run to 1,500. A
+developer's turn can settle only a request that was put to the developer. An answer always says
+whose it is: the conductor never speaks as the developer.
 
 ### Text an agent wrote
 
@@ -143,7 +176,8 @@ Whatever an agent puts in a request is handled as data everywhere it goes:
 | --- | --- |
 | Approved | `Approved by the conductor.` (or `the developer`), then what happened, such as the new agent's name |
 | Denied | `Denied by the conductor: <reason>. Continue without it.` |
-| Answered | `The developer answered: <their words>` |
+| Answered | `The conductor answered, deciding on the developer's behalf: <answer>`, or `The developer answered: <their words>` |
+| Undecided | `The conductor could not decide it just now, so nothing was done.` |
 | Cancelled | `The developer cancelled it.` |
 | Failed | `Approved, but it could not be carried out: <error>` |
 | No answer | `No answer: the developer did not respond in time.` |
@@ -163,7 +197,10 @@ message) can keep a conversation going with `message_agent`.
 - Three open requests per agent, and eight requests per agent in ten minutes, counted when each
   arrives (refused ones too), so sending many at once does not get around them.
 - No request stays open for more than ten minutes without an answer; the agent is then told to
-  carry on.
+  carry on with what does not depend on the answer, and not to ask the same question again unless
+  it is blocked. The conductor keeps the newest unanswered question per agent (up to six, for a
+  day) and tells the developer once, after their next command: "2 questions went unanswered while
+  you were away. Atlas asks: …". Writing to that agent first drops its question from the list.
 - One setting turns the channel off: **Settings → Voice & Conductor → Let agents ask the
   conductor**. New requests are refused, and the ones still open are closed with a denial.
 - A conductor-decided request costs one model turn against the daily token budget.
@@ -171,7 +208,9 @@ message) can keep a conversation going with `message_agent`.
 ## Out of scope
 
 - **Remote and other-provider agents.** Session MCP servers reach local Claude Code, Codex, and
-  chat sessions only. Other CLIs would need the hook server (`EMDASH_HOOK_PORT`) as a second
+  chat sessions only. A project attached as a machine is remote even when that machine is this
+  computer: its agents run under the workspace server and get no `maestro` server, so they
+  cannot send requests at all. Other CLIs would need the hook server (`EMDASH_HOOK_PORT`) as a second
   transport; the request format does not depend on the transport.
 - **Waiting inside the tool call.** The tool returns when the request is accepted, and the
   answer arrives as a new message. Holding the call open for fast answers is a later change.

@@ -181,8 +181,9 @@ export function sessionConfig(
     audio: {
       input: {
         transcription: { model: settings.transcriptionModel },
-        // The provider detects the end of a turn, but never answers by itself: Maestro reads the
-        // transcript first and decides who the turn belongs to.
+        // The provider detects the end of a turn, but never answers by itself: Maestro decides
+        // when a turn is the developer's (the talk key was released, or the words were read and
+        // are neither an echo nor noise) and asks for the answer then.
         turn_detection: {
           type: 'semantic_vad',
           create_response: false,

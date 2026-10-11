@@ -9,6 +9,7 @@ import {
   type ConductorStatus,
   type InvestigationResult,
 } from '../api/contract';
+import type { ConductorTalkLine, LineTurnResult } from '../api/voice-line';
 import { CANCEL_WINDOW_MS, ConductorStore, type ConductorVoicePort } from './conductor-store';
 import type { InvestigationRun } from './investigation-client';
 import type * as Roster from './roster';
@@ -67,6 +68,7 @@ vi.mock('./agent-io', () => ({
   readFinalChatReply: vi.fn(async () => null),
   readFinishedTerminal: vi.fn(async () => null),
   sendToAgent: mocks.sendToAgent,
+  sendToLiveSession: vi.fn(async () => false),
   stopAgentSession: vi.fn(async () => {}),
   submitAgentInput: vi.fn(),
 }));
@@ -421,29 +423,50 @@ describe('after a check, the model asks before it acts', () => {
 });
 
 describe('a check the voice line asks for', () => {
-  it('answers the voice, and goes with the next request to the conductor as fenced data', async () => {
-    const store = setup();
-    const read = await store.voiceRead('investigate', { questions: [QUESTION] });
-    expect(read).toContain('<code-check ');
-    expect(mocks.runTurn).not.toHaveBeenCalled();
+  function line(run: () => Promise<LineTurnResult | null>): ConductorTalkLine {
+    return {
+      ready: () => true,
+      turn: run,
+      stop: vi.fn(),
+      say: vi.fn(async () => true),
+      note: vi.fn(),
+      spoke: vi.fn(),
+    };
+  }
 
-    mocks.runTurn
-      .mockResolvedValueOnce(toolUse('send_to_agent', { agent: 'Atlas', text: 'use it' }))
-      .mockResolvedValueOnce(text('ok'));
+  it('answers the line, and what the line does next in that turn asks first', async () => {
+    const store = setup();
+    let check = '';
+    store.setTalkLine(
+      line(async () => {
+        check = (await store.lineTool('investigate', { questions: [QUESTION] })).output;
+        await store.lineTool('send_to_agent', { agent: 'Atlas', text: 'use it' });
+        return { reply: 'Not sent.', completed: true, tokens: 1 };
+      })
+    );
+
     const done = store.handleUtterance('have Atlas use that helper in the export path', 'typed');
     await settle();
-    expect(JSON.stringify(sentMessages(0))).toContain('<code-check ');
+    await settle();
+    expect(check).toContain('<code-check ');
     expect(store.pending?.kind).toBe('confirm');
     store.cancelPending();
     await done;
+    expect(mocks.runTurn).not.toHaveBeenCalled();
     store.dispose();
   });
 
   it('is refused when checks are not available', async () => {
     const store = setup({ investigator: 'unavailable' });
-    expect(await store.voiceRead('investigate', { questions: [QUESTION] })).toBe(
-      'Code checks are not available right now.'
+    let check = '';
+    store.setTalkLine(
+      line(async () => {
+        check = (await store.lineTool('investigate', { questions: [QUESTION] })).output;
+        return { reply: 'No.', completed: true, tokens: 1 };
+      })
     );
+    await store.handleUtterance('is there a retry helper for uploads in this project', 'typed');
+    expect(check).toBe('Code checks are not available right now.');
     expect(mocks.runInvestigation).not.toHaveBeenCalled();
     store.dispose();
   });

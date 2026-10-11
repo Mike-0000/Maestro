@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AGENT_REQUEST_INSTRUCTIONS,
   agentRequestKindNames,
   agentRequestKinds,
   agentRequestToolDefinition,
@@ -76,7 +77,9 @@ describe('agent request validation', () => {
     const result = validateAgentRequest(request('launch_rocket', {}));
     expect(result).toEqual({
       ok: false,
-      error: expect.stringContaining('spawn_agent, message_agent, ask_developer, report'),
+      error: expect.stringContaining(
+        'spawn_agent, message_agent, ask_conductor, ask_developer, report'
+      ),
     });
   });
 
@@ -147,6 +150,14 @@ describe('agent request kinds', () => {
       required: ['kind', 'payload'],
       properties: { kind: { enum: agentRequestKindNames } },
     });
+  });
+
+  it('tells agents when to ask without being told, in the tool and in the instructions', () => {
+    for (const text of [agentRequestToolDefinition().description, AGENT_REQUEST_INSTRUCTIONS]) {
+      expect(text).toMatch(/stuck/);
+      expect(text).toMatch(/computer use/);
+      expect(text).toContain('provider "codex"');
+    }
   });
 
   it('maps every action to a real conductor tool whose schema accepts the input', () => {
@@ -256,6 +267,20 @@ describe('what the conductor reads and writes', () => {
     expect(text).toContain(BRIEF);
     expect(text).toContain("The agent's reason: The order needs a browser");
     expect(text).toContain('answer_request and request_id "r-7k2q01"');
+  });
+
+  it('has the conductor settle every request itself, never the developer', () => {
+    const action = requestTurnText(open);
+    const asked = requestTurnText({ ...open, kind: 'ask_conductor', body: 'Backfill first?' });
+    for (const text of [action, asked]) {
+      expect(text).toContain('settle it yourself in this turn');
+      expect(text).toContain('Do not ask the developer and do not leave it open');
+      expect(text).toContain('never tell Atlas the developer said or approved anything');
+    }
+    expect(action).toContain('Approve when it is a sensible next step');
+    expect(action).toContain('computer use to a Codex agent');
+    expect(asked).toContain('Use decision "answer" with message as your answer');
+    expect(asked).not.toContain('Approve when');
   });
 
   it('does not let a request close its own fence or the context block', () => {

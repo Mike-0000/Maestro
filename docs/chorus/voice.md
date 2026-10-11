@@ -19,7 +19,9 @@ model that can read, message, start, and plan across your agents.
 | Jump to the agent that has waited longest | **Ctrl + Shift + J** |
 
 Pausing never ends a recording: it runs until you release the hold key, press the toggle shortcut
-again, or click **Send** (up to 5 minutes). Only hands-free listening stops on a pause.
+again, or click **Send** (up to 5 minutes). Only hands-free listening stops on a pause. A toggled
+recording that was left open closes on its own: after 90 seconds with no speech at all it is
+dropped, and 90 seconds of quiet after you spoke sends what you said.
 
 ## From your phone
 
@@ -290,6 +292,12 @@ starting, stopping, or approving anything still needs you, with the usual countd
 confirmations. Later, "open it" or "what did Zulu say?" works: the conductor's context carries a
 short preview of each finished agent's reply, and `read_agent` returns the whole reply.
 
+An agent with background work ends its turn many times per task. When a later turn adds nothing to
+what you already heard about that agent in the last 30 minutes, the conductor shows "Zulu: finished
+a turn with nothing new." on the HUD and says nothing. An agent's first report is always spoken. The
+conductor offers only a step it can take when you say yes, and treats lines you typed into an
+agent's terminal as yours, not as something to pass on.
+
 You hear each completion once. If there is no reply, the follow-up is off, the conductor is busy with
 your request, or the model call fails, you get the fixed sentence instead, which still names the
 reported app URL. Turn it off with **Report what finished agents said** in Settings → Voice &
@@ -453,64 +461,78 @@ Always on, with or without calls:
 - A message is not typed into an agent that reached a permission prompt while the countdown ran,
   and "send it" is refused there too: Enter would answer the prompt.
 
-### The talk line (experimental)
+### The realtime voice conductor (experimental)
 
-Off by default. Turn it on with **Talk with Maestro on a live line** in Settings → Voice &
-Conductor → Talk line. It needs an OpenAI API key (API keys, in the same settings); OpenRouter
-does not carry realtime sessions.
+Off by default. Turn it on with **Use a realtime voice model as the conductor** in Settings →
+Voice & Conductor → Realtime voice conductor. It needs an OpenAI API key (API keys, in the same
+settings); OpenRouter does not carry realtime sessions.
 
-The talk line is one realtime voice session (OpenAI's Realtime API, over WebRTC) between you and
-Maestro. A small dot next to the microphone button shows it: green when open, with a ring while
-its microphone is open, amber while connecting, red when it is wanted but not connected.
+While it is on, one realtime voice session (OpenAI's Realtime API, over WebRTC) takes the
+conductor's place. The voice model hears you directly, answers aloud, and acts on your agents
+with the conductor's own tools: it messages, starts, stops and reads agents, makes plans, and
+arranges the canvas. It is not a voice in front of the text conductor; it is the conductor. A
+small dot next to the microphone button shows it: green when open, with a ring while it hears
+you, amber while connecting, red when it is wanted but not connected.
 
-What it adds:
+What changes while it is on:
 
-- **Questions get a spoken answer in about a second or two.** "What's everyone doing?", "what
-  did Maple change?", "why did Bravo stop?" are answered by a voice model that is kept up to
-  date with your agents and can read their output.
-- **Follow-ups need no key.** After Maestro speaks, the line's microphone stays open for a few
-  seconds (6 by default, 0 to turn this off). In that window you can ask the next question, say
-  "stop", or steer calls ("skip", "later").
-- **One voice.** With the line open, replies and calls are spoken by it. Consent prompts and
-  read-backs still use the computer's own voice, which reads exactly what it is given.
+- **Speech goes straight to the model.** Hold the talk key, speak, let go. The model answers
+  what it heard at once; there is no separate transcription step, no fast router, and no text
+  model in between. Typed commands go to it too, and it answers those in text.
+- **Follow-ups need no key.** After Maestro speaks, the microphone stays open for a few seconds
+  (6 by default, 0 to turn this off), so you can answer its question or go on.
+- **It can listen all the time.** With **Listen without the talk key** on, the microphone stays
+  open and Maestro answers whatever you say to it. Use it with headphones or in a quiet room.
+- **One voice.** Replies, calls and read-backs are spoken by the line. Consent prompts for an
+  agent's permission still use the computer's own voice, which reads exactly what it is given.
 
-What it cannot do, by design:
+What stays as it was:
 
-- **It cannot act.** The voice model's tools only read (an agent's output and details, recent
-  activity, conversations off the canvas, the canvas layout). It cannot message, start, stop, or
-  approve anything, focus a window, or move the canvas.
-- **Nothing said with no key can change anything.** In the open window a command ("tell Atlas to
-  rebase", "focus Bravo", "yes") is not run; Maestro tells you to tap the talk key and say it
-  again. Only "no"/"stop" (which cancel), call steering, and "mute" (which silences) work without
-  a key. "No" and "stop" are never mistaken for Maestro's own voice coming back.
-- **It writes nothing that is acted on.** When you ask for something with the key and the voice
-  model decides it needs the conductor, the conductor gets your own words, and each action in
-  that turn asks for an explicit yes.
+- **Every gate.** The model's tool calls run through the same code as the text conductor's:
+  the cancel window before a message is sent or an agent started, the explicit yes before
+  stopping or archiving an agent or answering a permission prompt, and the rule that a bare
+  "yes" to something an agent suggested asks first.
+- **Your own words.** A long dictated brief still reaches the agent with your verbatim words
+  attached. The model's tool call waits for the transcript of what you said before anything that
+  changes something runs; reading and looking do not wait.
+- **Exact commands.** Words that are read before they are answered (see below) still go through
+  the grammar first, so "stop", "yes", "skip" and "later" do exactly what they did.
+- **Dictation, the tap that answers a call, the wake phrase** use the recorder as before.
 
-How turns are taken: the provider detects when you stop speaking but never answers on its own.
-Maestro reads the transcript first, drops noise and its own voice coming back through the
-microphone, and only then lets the voice answer. While you hold the talk key the line says
-nothing, and a sentence it had started is cut off. Muted, the line neither speaks nor listens:
-its microphone closes and its answers are shown. The microphone opens a moment after a voice
-stops, and closes after a minute of sound that never turns into words for Maestro (a meeting, a
-radio).
+How turns are taken:
+
+- With the key, the model answers the moment you let go. A press nobody spoke into is dropped.
+- When something is in progress (a turn is running, an action waits for a yes or a stop, a call
+  from an agent is on the line, a plan waits for approval), what you say is transcribed first
+  and handled as words: it can confirm, cancel, answer the call, or wait its turn.
+- Speech heard with no key is always transcribed first. Noise and Maestro's own voice coming
+  back through the microphone are dropped before anything answers.
+- While you hold the key, nothing of Maestro's plays. A turn that was working keeps working; its
+  answer is shown instead of said. "Stop" ends the turn where it is.
+- Muted, Maestro still listens and acts; its answers are shown instead of said.
+
+What still uses the text conductor: turns Maestro starts by itself (an agent finished, an agent
+sent a request) and every turn while the line is down, connecting, being replaced by a fresh
+session, or over its daily limit. Those need an Anthropic or OpenRouter key, as before.
 
 | Setting | What it does |
 | --- | --- |
 | Voice model | `gpt-realtime-2.1` (default), `gpt-realtime-2.1-mini` (about a quarter of the cost), or `gpt-realtime-1.5` |
-| Seconds the microphone stays open | The follow-up window; 0 means the microphone opens only with the talk key |
+| Listen without the talk key | Keeps the microphone open all the time. Off, Maestro hears you while you hold the key and for a moment after it speaks |
+| Seconds the microphone stays open | The follow-up window after Maestro speaks; 0 means the microphone opens only with the talk key |
 | Speak over the voice to stop it | Keeps the microphone open while the voice speaks. Use it with headphones, or if echo cancellation holds on your speakers. Off, the talk key stops the voice |
-| Daily limit | In US dollars ($5 by default). At the limit the line closes; it opens again by itself within half an hour of the next day starting |
+| Daily limit | In US dollars ($5 by default). At the limit the line closes and the text conductor takes over; it opens again by itself within half an hour of the next day starting |
 
-Privacy and cost: while the line is open, what you say in its window, the state of your agents,
-and what the voice reads (redacted like diagnostics) go to OpenAI. No audio leaves outside the
-window or a held key. A spoken reply costs roughly two cents on the full model and half a cent on
-mini; the settings show today's spend. If the line drops, cannot open, or hits its limit,
-everything works as it does without it.
+Privacy and cost: while the line is open, what you say with the key held or the microphone open,
+the state of your agents, and what the model reads (redacted like diagnostics) go to OpenAI. No
+audio leaves outside a held key or an open microphone. Each turn is billed for the conversation
+so far; the state is replaced rather than appended before each turn, and a long session is
+replaced by a fresh one that starts from a short summary. The settings show today's spend.
 
 The line has been built against OpenAI's documentation and tested with a stand-in for the
-provider. Its latency, its echo cancellation on speakers, and its answers have not been measured
-on a real session yet; see [the design](../design/talk-mode.md) for what to check.
+provider. It has not been run on a real session yet: the event names and fields, its latency,
+how well the model calls about forty tools, and echo cancellation on speakers are all unmeasured.
+See [the design](../design/talk-mode.md) for what to check.
 
 ## Spoken replies (text-to-speech)
 
@@ -592,6 +614,11 @@ speaking, Chorus records (including the moment before you started) until you pau
 utterances that begin with the wake phrase run: "Chorus, focus Claude 1" (a greeting first is
 fine: "hey Chorus, close Atlas"; common mishearings such as "courses" also count, but only as a
 whole word). Everything else is ignored (the HUD shows what it ignored). Every utterance is transcribed, so this uses more STT.
+
+For 10 seconds after the conductor answers a command, your next utterance runs without the wake
+phrase, so "Chorus, switch to the chorus desk" can be followed by "now close the finished ones".
+The 10 seconds start when the spoken reply ends. Only one utterance is taken this way: the one
+after it needs the wake phrase again.
 
 ## Live transcript
 

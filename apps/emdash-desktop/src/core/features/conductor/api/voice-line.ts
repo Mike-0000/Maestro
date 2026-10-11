@@ -1,61 +1,83 @@
-import type { ConductorToolName } from './tools';
+import type { BrowserImage } from '@core/primitives/browser/api';
 
 /**
- * The seam between the conductor and the talk line (a realtime voice session). The line's model
- * listens and speaks; it can look at state and nothing else. Everything that changes something
- * stays with the conductor, behind the gates it already has.
+ * The seam between the conductor and the realtime voice line. While the line is open its model
+ * is the conductor: it hears the developer, decides, and calls the conductor's tools. The
+ * conductor store still runs every tool, behind the same cancel windows and confirmations as
+ * always, and falls back to the text model when the line is not open.
  */
 
+/** How much of one tool result reaches the voice model. */
+export const LINE_TOOL_MAX_CHARS = 6_000;
+
 /**
- * The only conductor tools the voice model may call. Each one reads. None focuses a window,
- * moves the camera, or records who was last addressed, so nothing the voice does (or is talked
- * into doing by text it read) can change where the developer's next words go.
+ * Tools the line's model may run before the developer's words have been transcribed: they only
+ * read. Every other tool waits for the transcript, because a confirmation rule, a name check,
+ * a plan's approval, or the verbatim copy of a long request goes by those words.
  */
-export const VOICE_READ_TOOLS: readonly ConductorToolName[] = [
+const LINE_INSTANT_TOOLS: ReadonlySet<string> = new Set([
+  'list_agents',
   'read_agent',
   'agent_details',
   'recent_activity',
   'find_conversations',
   'describe_canvas',
-];
+  'delivery_status',
+  'check_conflicts',
+  'look_at_app',
+  'investigate',
+]);
 
-export function isVoiceReadTool(name: string): name is ConductorToolName {
-  return (VOICE_READ_TOOLS as readonly string[]).includes(name);
+export function isLineInstantTool(name: string): boolean {
+  return LINE_INSTANT_TOOLS.has(name);
 }
 
-/** How much of one read reaches the voice model. */
-export const VOICE_READ_MAX_CHARS = 6_000;
-
-/**
- * The voice model's way to say "this needs the conductor". It carries no content: the conductor
- * is handed the developer's own latest words, never text the voice model wrote.
- */
-export const VOICE_HAND_OFF_TOOL = 'hand_off';
-
-/** One agent as the line's state feed describes it. */
-export type LineAgent = {
-  readonly id: string;
-  readonly name: string;
-  readonly provider: string;
-  readonly project: string;
-  readonly status: string;
+/** One turn the conductor asks the line to take. */
+export type LineTurnInput = {
+  /** The developer's words when they were typed or transcribed here; absent when the line heard them. */
+  readonly text?: string;
+  /** Everything the conductor knows right now. It replaces what the line was told before. */
+  readonly context: string;
+  /** Answer aloud. Off, the answer is text only (typed words, or Maestro is muted). */
+  readonly spoken: boolean;
 };
 
-/** What the line heard with no key pressed, and what may become of it. */
-export type LineHearing =
-  /** It steered the calls or cancelled something; nothing more to do. */
-  | 'handled'
-  /** A question or remark: the voice may answer it. */
-  | 'talk'
-  /** A command. Nothing runs without a key, so the developer is told to press one. */
-  | 'needs-key';
+export type LineTurnResult = {
+  /** What the model answered, as text. */
+  readonly reply: string;
+  /** False when the turn was stopped, dropped, or cut off. */
+  readonly completed: boolean;
+  readonly tokens: number;
+};
+
+/** A tool's result as the line hands it to its model. */
+export type LineToolResult = {
+  readonly output: string;
+  readonly images?: readonly BrowserImage[];
+};
+
+/** Words the line heard itself and is about to answer. */
+export type LineSpeech = {
+  readonly interactionId: string;
+  /** When the developer began to speak. */
+  readonly saidAt: number;
+  /** The transcript, once the provider has written all of it; '' when it could not. */
+  readonly heard: Promise<string>;
+  /** The turn could not run: the model must not hear these words later. */
+  discard(): void;
+};
 
 /** What the conductor asks of an open line. */
 export interface ConductorTalkLine {
   /** True when the line can take a turn right now. */
   ready(): boolean;
-  /** Answers the developer's words by voice. Resolves false when the line could not take them. */
-  answer(text: string): Promise<boolean>;
+  /**
+   * Runs one turn: the model answers, calling tools through the conductor until it is done.
+   * Resolves null when the line could not take the turn, and the caller handles it another way.
+   */
+  turn(input: LineTurnInput): Promise<LineTurnResult | null>;
+  /** Stops the turn in progress and whatever the voice is saying. */
+  stop(): void;
   /**
    * Says a sentence as written, and resolves once it has been said (true) or could not be
    * (false, and the caller speaks it some other way).

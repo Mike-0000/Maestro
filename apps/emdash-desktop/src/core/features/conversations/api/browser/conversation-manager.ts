@@ -277,10 +277,10 @@ export class ConversationManagerStore implements Disposable {
       if (payload.status !== 'awaiting-input') {
         conversationStore.lastNotificationType = null;
       }
-      conversationStore.completionSummary =
-        payload.status === 'completed' ? (payload.completionSummary ?? null) : null;
-      conversationStore.completionReport =
-        payload.status === 'completed' ? (payload.completionReport ?? null) : null;
+      // 'awaiting-input' carries them when the turn ended on something the developer must answer.
+      const turnEnded = payload.status === 'completed' || payload.status === 'awaiting-input';
+      conversationStore.completionSummary = turnEnded ? (payload.completionSummary ?? null) : null;
+      conversationStore.completionReport = turnEnded ? (payload.completionReport ?? null) : null;
     });
   }
 
@@ -633,9 +633,9 @@ export class ConversationStore {
   status: AgentStatus;
   seen: boolean;
   lastNotificationType: NotificationType | null = null;
-  /** What the agent last finished, in a few words; set only while status is 'completed'. */
+  /** What the agent did in the turn it last ended, in a few words; null once it moves on. */
   completionSummary: string | null = null;
-  /** The agent's final reply, redacted and bounded; set only while status is 'completed'. */
+  /** That turn's final reply, redacted and bounded; null once the agent moves on. */
   completionReport: CompletionReport | null = null;
 
   constructor(conversation: Conversation) {

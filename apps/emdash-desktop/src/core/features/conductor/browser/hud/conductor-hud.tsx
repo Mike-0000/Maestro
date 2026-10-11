@@ -224,22 +224,23 @@ const MicButton = observer(function MicButton() {
 });
 
 /**
- * The talk line, when one is wanted: whether it is open, and whether its microphone is open for
- * talk right now. Shown only while the line is turned on.
+ * The voice line, when one is wanted: whether it is open (it is the conductor then), and
+ * whether it hears the developer right now. Shown only while the line is turned on.
  */
 const LineIndicator = observer(function LineIndicator() {
   const talk = getTalkStore();
   if (talk.line === 'off') return null;
+  const hears = talk.holding || talk.micOpen;
   const label =
     talk.line === 'open'
-      ? talk.windowOpen
-        ? 'Talk line: listening (talk only; tap the talk key to act)'
+      ? hears
+        ? 'Voice conductor: listening'
         : talk.speaking
-          ? 'Talk line: speaking'
-          : 'Talk line: open'
+          ? 'Voice conductor: speaking'
+          : 'Voice conductor: ready (hold the talk key to speak)'
       : talk.line === 'connecting'
-        ? 'Talk line: connecting'
-        : `Talk line: not connected${talk.error ? ` (${talk.error})` : ''}`;
+        ? 'Voice conductor: connecting'
+        : `Voice conductor: not connected${talk.error ? ` (${talk.error})` : ''}; the text conductor answers`;
   return (
     <span
       role="status"
@@ -248,7 +249,7 @@ const LineIndicator = observer(function LineIndicator() {
       className={cn(
         'size-2.5 shrink-0 rounded-full',
         talk.line === 'open'
-          ? talk.windowOpen
+          ? hears
             ? 'bg-emerald-500 ring-2 ring-emerald-500/40'
             : 'bg-emerald-500/70'
           : talk.line === 'connecting'

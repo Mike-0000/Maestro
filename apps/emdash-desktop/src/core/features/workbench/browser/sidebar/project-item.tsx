@@ -6,10 +6,14 @@ import {
   FolderOpen,
   Loader2,
   MonitorUp,
+  Pause,
   Pencil,
+  Play,
   Plus,
+  RefreshCw,
   Trash2,
   TriangleAlert,
+  Unlink,
 } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import React, { useCallback, useEffect } from 'react';
@@ -40,6 +44,7 @@ import {
   useWorkspaceSlots,
 } from '@core/primitives/navigation/browser/navigation-hooks';
 import { cn } from '@core/primitives/styling/browser/cn';
+import { describeMirror } from '@core/services/wsl-mirror/api/types';
 import {
   SidebarItemMiniButton,
   SidebarMenuAction,
@@ -68,26 +73,30 @@ export const SidebarProjectItem = observer(function SidebarProjectItem({
 
   const project = getProjectStore(projectId);
 
-  // A project on a Windows drive can be copied into a WSL2 distro, where git and the agents
-  // work on the Linux filesystem. One action: the distro, its git settings and Claude Code are
-  // set up as needed, the repository is copied, and the copy opens as its own project.
+  // A project on a Windows drive can run inside a WSL2 distro, where git and the agents work
+  // on the Linux filesystem, while its folder on Windows stays where it is: a live mirror
+  // keeps the two the same. One action sets up the distro, its git settings and Claude Code
+  // as needed, makes the copy, starts the mirror, and opens the copy as its own project.
   const windowsPath =
     project?.data?.type === 'local' && /^[A-Za-z]:[\\/]/.test(project.data.path)
       ? project.data.path
       : null;
-  const copyToWsl = useCallback(() => {
+  const wslMirror = project?.data ? getMachinesStore().wslMirrorFor(project.data) : undefined;
+  const runInWsl = useCallback(() => {
     const name = project?.name ?? 'project';
     if (!windowsPath) return;
     const run = async () => {
-      const copy = await getMachinesStore().copyRepositoryToWsl({ windowsPath, name });
-      // A machine that was just added has to connect and start its workspace server first.
       const machines = getMachinesStore();
+      const copy = await machines.mirrorRepositoryToWsl({ windowsPath, name });
+      // A machine that was just added has to connect and start its workspace server first.
       await machines.connect(copy.machine.id).catch(() => undefined);
       const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
       for (let waited = 0; waited < 90_000; waited += 1_000) {
         if (machines.stateFor(copy.machine.id) === 'connected') break;
         await pause(1_000);
       }
+      // The project opens once the copy holds everything the Windows folder does.
+      await machines.waitForWslMirror(copy.mirror.id, 15 * 60_000);
       let created: string | undefined;
       for (let attempt = 0; attempt < 5 && !created; attempt += 1) {
         if (attempt > 0) await pause(4_000);
@@ -108,12 +117,42 @@ export const SidebarProjectItem = observer(function SidebarProjectItem({
       return copy;
     };
     void toast.promise(run(), {
-      loading: `Copying ${name} into WSL… The first time can take a few minutes.`,
-      success: (copy) => `${name} is now in WSL (${copy.machine.wsl?.distro ?? 'distro'})`,
+      loading: `Setting ${name} up in WSL… The first time can take a few minutes.`,
+      success: (copy) =>
+        `${name} now runs in WSL (${copy.machine.wsl?.distro ?? 'distro'}), mirrored with its Windows folder`,
       error: (error) =>
-        `Could not copy the project into WSL: ${error instanceof Error ? error.message : String(error)}`,
+        `Could not set the project up in WSL: ${error instanceof Error ? error.message : String(error)}`,
     });
   }, [navigate, project, windowsPath]);
+
+  const toggleWslMirror = useCallback(() => {
+    if (!wslMirror) return;
+    const pausing = !wslMirror.paused;
+    void getMachinesStore()
+      .setWslMirrorPaused(wslMirror.id, pausing)
+      .catch((error: unknown) => {
+        toast.error(
+          `Could not ${pausing ? 'pause' : 'resume'} the WSL mirror: ${error instanceof Error ? error.message : String(error)}`
+        );
+      });
+  }, [wslMirror]);
+
+  const stopWslMirror = useCallback(() => {
+    if (!wslMirror) return;
+    void getMachinesStore()
+      .removeWslMirror(wslMirror.id)
+      .then(
+        () =>
+          toast.success('WSL mirror stopped', {
+            description:
+              'The Windows folder and the copy in the distro both stay as they are, and no longer follow each other.',
+          }),
+        (error: unknown) =>
+          toast.error(
+            `Could not stop the WSL mirror: ${error instanceof Error ? error.message : String(error)}`
+          )
+      );
+  }, [wslMirror]);
 
   const prefetchRepository = useCallback(() => {
     const repo = getGitRepositoryStore(projectId);
@@ -287,10 +326,27 @@ export const SidebarProjectItem = observer(function SidebarProjectItem({
           Rename Project
         </ContextMenu.Item>
         {windowsPath && (
-          <ContextMenu.Item disabled={project.state === 'unregistered'} onClick={copyToWsl}>
+          <ContextMenu.Item disabled={project.state === 'unregistered'} onClick={runInWsl}>
             <MonitorUp className="size-4" />
-            Copy to WSL
+            {wslMirror ? 'Open in WSL' : 'Run in WSL'}
           </ContextMenu.Item>
+        )}
+        {wslMirror && (
+          <>
+            <ContextMenu.Separator />
+            <ContextMenu.Item disabled>
+              <RefreshCw className="size-4" />
+              WSL mirror: {describeMirror(wslMirror.status)}
+            </ContextMenu.Item>
+            <ContextMenu.Item onClick={toggleWslMirror}>
+              {wslMirror.paused ? <Play className="size-4" /> : <Pause className="size-4" />}
+              {wslMirror.paused ? 'Resume WSL mirror' : 'Pause WSL mirror'}
+            </ContextMenu.Item>
+            <ContextMenu.Item onClick={stopWslMirror}>
+              <Unlink className="size-4" />
+              Stop WSL mirror
+            </ContextMenu.Item>
+          </>
         )}
         <ContextMenu.Separator />
         <ContextMenu.Item

@@ -42,6 +42,7 @@ export async function bootInfrastructure(database: DatabaseBundle): Promise<Infr
     prepareMaestroSecrets: (changes) => encryptedAppSecretsStore.prepareChanges(changes),
     logger: log,
     telemetry: telemetryService,
+    wslMirrorDirectory: join(app.getPath('userData'), 'wsl-mirror'),
   });
   const hostSettings = await database.appSettings.get('remoteMachine');
   const clientId = await getDesktopClientId();

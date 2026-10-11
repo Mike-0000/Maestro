@@ -1,12 +1,23 @@
+import { randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, rm, rename, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import Anthropic from '@anthropic-ai/sdk';
 import { err, ok, type Result, type Secret } from '@emdash/shared';
 import { redactAll, type Logger } from '@emdash/shared/logger';
+import type {
+  AttentionJudgeInput,
+  AttentionVerdict,
+} from '@core/primitives/agents/api/attention-judge';
 import type { ChorusHostServices } from '@core/primitives/chorus-host/api/host-services';
 import { ChorusCredentials } from '@core/primitives/chorus-host/node/credentials';
 import { JsonSettingsFile } from '@core/primitives/chorus-host/node/json-settings-file';
 import { openRouterChat, OpenRouterError } from '@core/primitives/chorus-host/node/openrouter';
+import {
+  ATTENTION_MAX_OUTPUT_TOKENS,
+  ATTENTION_SYSTEM_PROMPT,
+  attentionVerdictPrompt,
+  parseAttentionVerdict,
+} from '../api/attention-verdict';
 import {
   conductorSettingsSchema,
   conductorTurnRecordSchema,
@@ -85,6 +96,8 @@ function withCacheBreakpoint(tools: Anthropic.Beta.BetaTool[]): Anthropic.Beta.B
 
 /** The code-check tool is sent only while the setting is on. */
 const INVESTIGATE_TOOL = 'investigate';
+/** A verdict holds an agent's status back while it runs, so it gets seconds, not the usual 90. */
+const ATTENTION_TIMEOUT_MS = 8_000;
 
 export class ConductorService {
   private readonly credentials: ChorusCredentials;
@@ -271,6 +284,101 @@ export class ConductorService {
     } catch (error) {
       return err(this.describeError(error));
     }
+  }
+
+  /** True when finished turns get a verdict: the setting is on and the model has a key. */
+  async attentionEnabled(): Promise<boolean> {
+    const settings = await this.settings.read();
+    if (!settings.attentionVerdicts) return false;
+    return (await this.credentials.get(await this.providerCredential())) !== null;
+  }
+
+  /**
+   * One short call on the conductor's own provider and model: does the agent that wrote this
+   * final reply need the developer? No tools, no history, no conductor prompt. Never throws and
+   * resolves null when it cannot answer (off, no key, over budget, an error, an unreadable
+   * answer), so the caller keeps its rule-based status.
+   */
+  async judgeAttention(input: AttentionJudgeInput): Promise<AttentionVerdict | null> {
+    const settings = await this.settings.read();
+    if (!settings.attentionVerdicts) return null;
+    const key = await this.credentials.get(
+      settings.provider === 'openrouter' ? 'openrouter' : 'anthropic'
+    );
+    if (!key) return null;
+    const usage = await this.usageToday();
+    if (
+      settings.dailyTokenBudget > 0 &&
+      usage.inputTokens + usage.outputTokens >= settings.dailyTokenBudget
+    ) {
+      return null;
+    }
+    const messages: Anthropic.Beta.BetaMessageParam[] = [
+      { role: 'user', content: attentionVerdictPrompt(input) },
+    ];
+    const startedAt = performance.now();
+    let verdict: AttentionVerdict | null = null;
+    let status = 'answered';
+    try {
+      let content: Anthropic.Beta.BetaContentBlock[];
+      if (settings.provider === 'openrouter') {
+        const response = await openRouterChat(
+          key,
+          {
+            model: settings.openrouterModel,
+            max_tokens: ATTENTION_MAX_OUTPUT_TOKENS,
+            messages: toOpenAiMessages(ATTENTION_SYSTEM_PROMPT, messages),
+            // A model that reasons by default must not spend the answer's tokens thinking.
+            reasoning: { effort: openRouterEffort('low') },
+          },
+          { timeoutMs: ATTENTION_TIMEOUT_MS }
+        );
+        const choice = response.choices?.[0];
+        content = choice ? fromOpenAiChoice(choice).content : [];
+        await this.recordUsage({
+          inputTokens: response.usage?.prompt_tokens ?? 0,
+          outputTokens: response.usage?.completion_tokens ?? 0,
+          cacheReadTokens: response.usage?.prompt_tokens_details?.cached_tokens ?? 0,
+        });
+      } else {
+        const response = await this.clientFor(key).beta.messages.create(
+          {
+            model: settings.model,
+            max_tokens: ATTENTION_MAX_OUTPUT_TOKENS,
+            system: ATTENTION_SYSTEM_PROMPT,
+            messages,
+          },
+          { timeout: ATTENTION_TIMEOUT_MS, maxRetries: 0 }
+        );
+        content = response.content;
+        await this.recordUsage({
+          inputTokens:
+            response.usage.input_tokens + (response.usage.cache_creation_input_tokens ?? 0),
+          outputTokens: response.usage.output_tokens,
+          cacheReadTokens: response.usage.cache_read_input_tokens ?? 0,
+        });
+      }
+      const text = content.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('');
+      verdict = parseAttentionVerdict(text);
+      if (!verdict) status = 'unreadable';
+    } catch (error) {
+      status = 'failed';
+      this.logger.warn('conductor: attention verdict failed', { error });
+    }
+    void this.appendTrace({
+      interactionId: randomUUID(),
+      at: new Date().toISOString(),
+      kind: 'model',
+      ...(verdict?.reason ? { text: verdict.reason } : {}),
+      detail: {
+        purpose: 'attention',
+        status,
+        ms: Math.round(performance.now() - startedAt),
+        conversationId: input.conversationId,
+        needsDeveloper: verdict?.needsDeveloper ?? null,
+      },
+    }).catch(() => {});
+    return verdict;
   }
 
   /**

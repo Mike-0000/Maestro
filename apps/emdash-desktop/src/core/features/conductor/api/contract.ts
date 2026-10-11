@@ -41,6 +41,11 @@ export const conductorSettingsSchema = z.object({
    */
   agentRequests: z.boolean(),
   /**
+   * When an agent ends a turn, the conductor's model reads its final reply and decides whether
+   * the agent needs the developer or is done. Off: hook events alone decide, as before.
+   */
+  attentionVerdicts: z.boolean(),
+  /**
    * Calls: what agents need reaches the developer one caller at a time, and what the developer
    * says after picking a call up goes to that caller. off keeps the batched announcements,
    * quiet shows calls without speaking them, spoken reads them aloud.
@@ -100,6 +105,7 @@ export const DEFAULT_CONDUCTOR_SETTINGS: ConductorSettings = {
   autoApprovePlans: false,
   completionFollowUp: true,
   agentRequests: true,
+  attentionVerdicts: true,
   calls: 'off',
   callWindowSec: DEFAULT_CALL_WINDOW_SEC,
   maxAgentsPerPlan: 4,

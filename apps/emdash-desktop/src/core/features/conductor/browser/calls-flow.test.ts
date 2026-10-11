@@ -7,6 +7,7 @@ import type {
 } from '@core/features/canvas/api/browser/stores/canvas-store';
 import { DEFAULT_CONDUCTOR_SETTINGS, type ConductorStatus } from '../api/contract';
 import { MAESTRO_EVENT_MARK } from '../api/history';
+import type { ConductorTalkLine, LineTurnResult } from '../api/voice-line';
 import {
   CANCEL_WINDOW_MS,
   ConductorStore,
@@ -68,6 +69,7 @@ vi.mock('./agent-io', () => ({
   readFinalChatReply: vi.fn(async () => null),
   readFinishedTerminal: vi.fn(async () => null),
   sendToAgent: mocks.sendToAgent,
+  sendToLiveSession: vi.fn(async () => false),
   stopAgentSession: vi.fn(async () => {}),
   submitAgentInput: mocks.submitAgentInput,
 }));
@@ -700,110 +702,283 @@ describe('a yes to something an agent suggested', () => {
   });
 });
 
-describe('the talk line', () => {
-  function line(said = true) {
+describe('the voice line as the conductor', () => {
+  const answer = (reply: string): LineTurnResult => ({ reply, completed: true, tokens: 12 });
+  const REQUEST = 'can you get Atlas to rebase';
+
+  function line(run: () => Promise<LineTurnResult | null> = async () => answer('Done.')) {
     return {
       ready: vi.fn(() => true),
-      answer: vi.fn(async () => true),
-      say: vi.fn(async () => said),
+      turn: vi.fn<ConductorTalkLine['turn']>(run),
+      stop: vi.fn(),
+      say: vi.fn(async () => true),
       note: vi.fn(),
       spoke: vi.fn(),
     };
   }
 
-  it('lets the voice model read, and nothing else', async () => {
+  function speech(interactionId: string) {
+    let heard: (text: string) => void = () => {};
+    const transcript = new Promise<string>((resolve) => (heard = resolve));
+    const discard = vi.fn();
+    return {
+      turn: { interactionId, saidAt: Date.now(), heard: transcript, discard },
+      heard,
+      discard,
+    };
+  }
+
+  it('runs a typed request on the line, behind the same cancel window, with no text model', async () => {
     const { store } = setup();
-    const addressed = vi.spyOn(store['context'], 'noteAddressed');
-    mocks.readAgentOutput.mockResolvedValueOnce('running tests with token sk-ant-abcdefghijklmnop');
+    const talk = line(async () => {
+      await store.lineTool('send_to_agent', { agent: 'Atlas', text: 'rebase onto main' });
+      return answer('Sent to Atlas.');
+    });
+    store.setTalkLine(talk);
 
-    const read = await store.voiceRead('read_agent', { agent: 'Atlas' });
-    expect(read).toContain('running tests');
-    expect(read).not.toContain('sk-ant-abcdefghijklmnop');
-    // Reading does not make Atlas "it".
-    expect(addressed).not.toHaveBeenCalled();
-
-    expect(await store.voiceRead('send_to_agent', { agent: 'Atlas', text: 'hi' })).toContain(
-      'not something you can do'
+    const done = store.handleUtterance(REQUEST, 'typed');
+    await settle();
+    expect(talk.turn).toHaveBeenCalledWith(
+      expect.objectContaining({ text: REQUEST, spoken: false })
     );
-    expect(await store.voiceRead('focus_agent', { agent: 'Atlas' })).toContain(
-      'not something you can do'
-    );
-    expect(mocks.sendToAgent).not.toHaveBeenCalled();
+    expect(store.pending?.kind).toBe('countdown');
+    await vi.advanceTimersByTimeAsync(CANCEL_WINDOW_MS);
+    await done;
+
+    expect(mocks.sendToAgent).toHaveBeenCalledTimes(1);
+    expect(mocks.runTurn).not.toHaveBeenCalled();
+    expect(store.reply).toBe('Sent to Atlas.');
+    expect(store.busy).toBe(false);
     store.dispose();
   });
 
-  it('takes steering and cancel words with no key, and refuses everything that acts', async () => {
-    const [atlas, bravo] = [agent('atlas'), agent('bravo')];
-    const { store, speech, announce } = setup([atlas, bravo]);
-    await announce([atlas, bravo]);
-    await speech.endSpeech();
-
-    expect(store.hearOnLine("what's everyone doing")).toBe('talk');
-    expect(store.hearOnLine('tell Atlas to rebase onto main')).toBe('needs-key');
-    expect(store.hearOnLine('focus Bravo')).toBe('needs-key');
-    expect(mocks.sendToAgent).not.toHaveBeenCalled();
-
-    expect(store.hearOnLine('skip')).toBe('handled');
-    expect(store.calls.current?.call.agentName).toBe('Bravo');
-    store.dispose();
-  });
-
-  it('lets a spoken no cancel what is pending, and never lets a yes confirm it', async () => {
+  it('goes back to the text model when the line cannot take the turn', async () => {
     const { store } = setup();
-    const first = store.requestPending("Stop Atlas's session", 'confirm');
-    expect(store.hearOnLine('yes')).toBe('needs-key');
-    expect(store.pending).not.toBeNull();
-    expect(store.hearOnLine('no')).toBe('handled');
-    await expect(first).resolves.toBe(false);
+    const talk = line();
+    talk.ready.mockReturnValue(false);
+    store.setTalkLine(talk);
+    mocks.runTurn.mockResolvedValueOnce(text('Nothing to do.'));
+
+    await store.handleUtterance(REQUEST, 'typed');
+    expect(talk.turn).not.toHaveBeenCalled();
+    expect(mocks.runTurn).toHaveBeenCalledTimes(1);
     store.dispose();
   });
 
-  it('asks before every action when the voice model hands a request off', async () => {
+  it('answers speech at once: reading does not wait for the transcript, acting does', async () => {
     const { store } = setup();
-    mocks.runTurn
-      .mockResolvedValueOnce(toolUse('send_to_agent', { agent: 'Atlas', text: 'rebase' }))
-      .mockResolvedValueOnce(text('Not sent.'));
+    const said = speech('i-1');
+    const talk = line(async () => {
+      const read = await store.lineTool('read_agent', { agent: 'Atlas' });
+      expect(read.output).toContain('(terminal)');
+      await store.lineTool('send_to_agent', { agent: 'Atlas', text: 'rebase onto main' });
+      return answer('Sent.');
+    });
+    store.setTalkLine(talk);
 
-    const handed = store.handOffFromVoice('can you get Atlas to rebase');
+    const done = store.speechTurn(said.turn);
+    await settle();
+    const input = talk.turn.mock.calls[0]![0];
+    expect(input.text).toBeUndefined();
+    expect(input.spoken).toBe(true);
+    expect(mocks.readAgentOutput).toHaveBeenCalled();
+    // The words are not read yet, so nothing that acts has been offered.
+    expect(store.pending).toBeNull();
+
+    said.heard('tell Atlas to rebase onto main');
+    await settle();
+    expect(store.lastUtterance).toBe('tell Atlas to rebase onto main');
+    expect(store.pending?.kind).toBe('countdown');
+    await vi.advanceTimersByTimeAsync(CANCEL_WINDOW_MS);
+    await done;
+    expect(mocks.sendToAgent).toHaveBeenCalledTimes(1);
+    expect(store.busy).toBe(false);
+    store.dispose();
+  });
+
+  it('asks first when a bare yes follows agent text the line read', async () => {
+    const { store } = setup();
+    const first = speech('i-1');
+    const asking = line(async () => {
+      await store.lineTool('read_agent', { agent: 'Atlas' });
+      return answer('Atlas suggests a rebase.');
+    });
+    store.setTalkLine(asking);
+    const read = store.speechTurn(first.turn);
+    first.heard('what is Atlas doing');
+    await read;
+
+    const second = speech('i-2');
+    const acting = line(async () => {
+      await store.lineTool('send_to_agent', { agent: 'Atlas', text: 'rebase' });
+      return answer('Not sent.');
+    });
+    store.setTalkLine(acting);
+    const done = store.speechTurn(second.turn);
+    second.heard('yes, do that');
     await settle();
     expect(store.pending?.kind).toBe('confirm');
     await vi.advanceTimersByTimeAsync(CANCEL_WINDOW_MS * 2);
     expect(mocks.sendToAgent).not.toHaveBeenCalled();
     store.cancelPending();
+    await done;
+    store.dispose();
+  });
 
-    await expect(handed).resolves.toBe('Not sent.');
-    // What the model was given is the developer's sentence, word for word.
-    expect(lastUserText(0)).toContain('can you get Atlas to rebase');
+  it('asks first when the words behind an action could not be read', async () => {
+    const { store } = setup();
+    const said = speech('i-1');
+    const talk = line(async () => {
+      await store.lineTool('send_to_agent', { agent: 'Atlas', text: 'rebase' });
+      return answer('Not sent.');
+    });
+    store.setTalkLine(talk);
+    const done = store.speechTurn(said.turn);
+    said.heard('');
+    await settle();
+    expect(store.pending?.kind).toBe('confirm');
+    store.cancelPending();
+    await done;
+    expect(mocks.sendToAgent).not.toHaveBeenCalled();
+    store.dispose();
+  });
+
+  it('stops a turn on the line when the developer says stop', async () => {
+    const { store } = setup();
+    let release: (result: LineTurnResult) => void = () => {};
+    const talk = line(() => new Promise<LineTurnResult>((resolve) => (release = resolve)));
+    store.setTalkLine(talk);
+
+    const done = store.handleUtterance(REQUEST, 'typed');
+    await settle();
+    // Words said now are read before anything answers them.
+    expect(store.lineGuarded).toBe(true);
+    store.hearOnLine('stop', { interactionId: 'i-2', saidAt: Date.now(), key: true });
+    await settle();
+    expect(talk.stop).toHaveBeenCalledTimes(1);
+
+    const refused = await store.lineTool('send_to_agent', { agent: 'Atlas', text: 'rebase' });
+    expect(refused.output).toContain('said stop');
+    release({ reply: '', completed: false, tokens: 0 });
+    await done;
+    expect(store.reply).toBe('Cancelled.');
+    expect(mocks.sendToAgent).not.toHaveBeenCalled();
+    store.dispose();
+  });
+
+  it('runs nothing that was still waiting when the line dropped, and is free again', async () => {
+    const { store } = setup();
+    const talk = line(async () => {
+      // The cancel window is open when the connection goes.
+      void store.lineTool('send_to_agent', { agent: 'Atlas', text: 'rebase onto main' });
+      await settle();
+      return { reply: 'The voice line dropped.', completed: false, tokens: 0 };
+    });
+    store.setTalkLine(talk);
+
+    await store.handleUtterance(REQUEST, 'typed');
+    expect(store.pending).toBeNull();
+    await vi.advanceTimersByTimeAsync(CANCEL_WINDOW_MS * 2);
+    await settle();
+    expect(mocks.sendToAgent).not.toHaveBeenCalled();
     expect(store.busy).toBe(false);
     store.dispose();
   });
 
-  it('hands key-started talk to the line, and typed talk to the model as before', async () => {
+  it('runs two actions of one answer one after the other, each behind its own window', async () => {
     const { store } = setup();
+    const talk = line(async () => {
+      await Promise.all([
+        store.lineTool('send_to_agent', { agent: 'Atlas', text: 'rebase onto main' }),
+        store.lineTool('send_to_agent', { agent: 'Bravo', text: 'run the tests' }),
+      ]);
+      return answer('Sent both.');
+    });
+    store.setTalkLine(talk);
+
+    const done = store.handleUtterance(REQUEST, 'typed');
+    await settle();
+    await vi.advanceTimersByTimeAsync(CANCEL_WINDOW_MS);
+    await settle();
+    expect(mocks.sendToAgent).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(CANCEL_WINDOW_MS);
+    await done;
+    expect(mocks.sendToAgent).toHaveBeenCalledTimes(2);
+    store.dispose();
+  });
+
+  it('drops words the line could not answer, so the model does not hear them later', async () => {
+    const { store } = setup();
+    const talk = line(async () => null);
+    store.setTalkLine(talk);
+    const said = speech('i-1');
+    const done = store.speechTurn(said.turn);
+    said.heard('tell Atlas to rebase');
+    await done;
+    expect(said.discard).toHaveBeenCalledTimes(1);
+    expect(store.busy).toBe(false);
+    store.dispose();
+  });
+
+  it('lets words the line read first confirm what is pending', async () => {
+    const { store } = setup();
+    store.setTalkLine(line());
+    const decision = store.requestPending("Stop Atlas's session", 'confirm');
+    vi.advanceTimersByTime(50);
+    expect(store.lineGuarded).toBe(true);
+    store.hearOnLine('yes', { interactionId: 'i-1', saidAt: Date.now(), key: true });
+    await expect(decision).resolves.toBe(true);
+    store.dispose();
+  });
+
+  it('runs no tool outside a turn of the developer', async () => {
+    const { store } = setup();
+    store.setTalkLine(line());
+    const result = await store.lineTool('send_to_agent', { agent: 'Atlas', text: 'hi' });
+    expect(result.output).toContain('Nothing was done');
+    expect(mocks.sendToAgent).not.toHaveBeenCalled();
+    store.dispose();
+  });
+
+  it('keeps secrets an agent printed out of what the model is told', async () => {
+    const { store } = setup();
+    mocks.readAgentOutput.mockResolvedValueOnce('running tests with token sk-ant-abcdefghijklmnop');
+    let read = '';
+    const talk = line(async () => {
+      read = (await store.lineTool('read_agent', { agent: 'Atlas' })).output;
+      return answer('It is running tests.');
+    });
+    store.setTalkLine(talk);
+    await store.handleUtterance(REQUEST, 'typed');
+    expect(read).toContain('running tests');
+    expect(read).not.toContain('sk-ant-abcdefghijklmnop');
+    store.dispose();
+  });
+
+  it('answers a muted developer in text', async () => {
+    const { store, speech: spoken } = setup();
     const talk = line();
     store.setTalkLine(talk);
-    await expect(store['answerOnLine']('how is it going', 'voice')).resolves.toBe(true);
-    expect(talk.answer).toHaveBeenCalledWith('how is it going');
-    await expect(store['answerOnLine']('how is it going', 'typed')).resolves.toBe(false);
-    store.setTalkLine(null);
-    await expect(store['answerOnLine']('how is it going', 'voice')).resolves.toBe(false);
+    (spoken as { muted: boolean }).muted = true;
+    await store.handleUtterance(REQUEST, 'voice');
+    expect(talk.turn).toHaveBeenCalledWith(expect.objectContaining({ spoken: false }));
     store.dispose();
   });
 
   it('says replies and calls with the line, and falls back when the line cannot', async () => {
     const atlas = agent('atlas');
-    const { store, speech, announce } = setup([atlas]);
+    const { store, speech: spoken, announce } = setup([atlas]);
     const talk = line();
     store.setTalkLine(talk);
     await announce([atlas]);
     await settle();
     expect(talk.say).toHaveBeenCalledTimes(1);
-    expect(speech.spoken).toEqual([]);
+    expect(spoken.spoken).toEqual([]);
 
     talk.say.mockResolvedValue(false);
     await store.handleUtterance('hold my calls', 'voice');
     await settle();
-    expect(speech.spoken.at(-1)?.text).toBe('Holding your calls.');
+    expect(spoken.spoken.at(-1)?.text).toBe('Holding your calls.');
     store.dispose();
   });
 
@@ -812,13 +987,13 @@ describe('the talk line', () => {
       status: 'awaiting-input',
       notificationType: 'permission_prompt',
     });
-    const { store, speech, announce } = setup([bravo]);
+    const { store, speech: spoken, announce } = setup([bravo]);
     const talk = line();
     store.setTalkLine(talk);
     await announce([bravo]);
     await settle();
     expect(talk.say).not.toHaveBeenCalled();
-    expect(speech.spoken.at(-1)).toMatchObject({ voice: 'system' });
+    expect(spoken.spoken.at(-1)).toMatchObject({ voice: 'system' });
     expect(store.calls.current?.call.kind).toBe('permission');
     store.dispose();
   });
@@ -1430,27 +1605,6 @@ describe('an agent that leaves the canvas', () => {
     runInAction(() => entries.clear());
     expect(store.calls.current).toBeNull();
     expect(store['pickup']).toBeNull();
-    store.dispose();
-  });
-});
-
-describe('muted', () => {
-  it('keeps the line from answering aloud', async () => {
-    const { store, speech } = setup();
-    const talk = {
-      ready: vi.fn(() => true),
-      answer: vi.fn(async () => true),
-      say: vi.fn(async () => true),
-      note: vi.fn(),
-      spoke: vi.fn(),
-    };
-    store.setTalkLine(talk);
-    (speech as { muted: boolean }).muted = true;
-    await expect(store['answerOnLine']('how is it going', 'voice')).resolves.toBe(false);
-    expect(talk.answer).not.toHaveBeenCalled();
-
-    (speech as { muted: boolean }).muted = false;
-    await expect(store['answerOnLine']('how is it going', 'voice')).resolves.toBe(true);
     store.dispose();
   });
 });

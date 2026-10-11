@@ -38,6 +38,8 @@ import {
 import type { SshCredentialService } from '@core/services/ssh/node/credentials/ssh-credential-service';
 import { listWslDistros } from '@core/services/ssh/node/local/wsl-distros';
 import { setUpRepositoryInWsl } from '@core/services/ssh/node/local/wsl-setup';
+import type { WslMirrorInfo } from '@core/services/wsl-mirror/api/types';
+import type { WslMirrorService } from '@core/services/wsl-mirror/node/wsl-mirror-service';
 import type { SaveMachineInput } from '..';
 import { captureMachineSave, persistMachine } from '../../node/machine-persistence';
 
@@ -64,6 +66,8 @@ export interface MachinesServiceDeps {
   resolveSshConfig?: typeof resolveSshConfig;
   readFile?: (path: string, encoding: BufferEncoding) => Promise<string>;
   ssh: MachinesSshRuntime;
+  /** Live mirrors between Windows folders and WSL2 distros; absent where there is no WSL. */
+  wslMirrors?: WslMirrorService;
   log: MachinesLog;
   createId?: () => string;
   now?: () => number;
@@ -331,19 +335,60 @@ export class MachinesService implements Hookable<MachinesServiceHooks> {
   }
 
   /**
-   * Copies a repository on a Windows drive into a WSL2 distro and returns where a project for
-   * it can be created: the distro's machine (added when it was not one yet) and the copy's
-   * path. A distro is installed first when the computer has none. Nothing is registered here;
-   * the caller creates the project the usual way.
+   * Puts a repository on a Windows drive into a WSL2 distro and keeps the two the same from
+   * then on: the copy lives on the distro's own disk, where the agents run, and a live mirror
+   * carries every change both ways. Returns where a project for it can be created: the
+   * distro's machine (added when it was not one yet), the copy's path, and the mirror. A
+   * distro is installed first when the computer has none. No project is registered here; the
+   * caller creates it the usual way, once the mirror's first run is through.
    */
-  async copyRepositoryToWsl(input: {
-    windowsPath: string;
-    name: string;
-  }): Promise<{ machine: SshConfig; path: string; reused: boolean; notes: string[] }> {
+  async mirrorRepositoryToWsl(input: { windowsPath: string; name: string }): Promise<{
+    machine: SshConfig;
+    path: string;
+    reused: boolean;
+    notes: string[];
+    mirror: WslMirrorInfo;
+  }> {
     if (process.platform !== 'win32') throw new Error('WSL exists only on Windows.');
-    const setup = await setUpRepositoryInWsl(input);
+    const mirrors = this.requireWslMirrors();
+    const setup = await setUpRepositoryInWsl({ ...input, live: true });
     const machine = await this.addWslDistro(setup.distro);
-    return { machine, path: setup.path, reused: setup.reused, notes: [...setup.notes] };
+    const mirror = await mirrors.create({
+      name: input.name,
+      windowsPath: input.windowsPath,
+      distro: setup.distro,
+      linuxPath: setup.path,
+      machineId: machine.id,
+    });
+    return { machine, path: setup.path, reused: setup.reused, notes: [...setup.notes], mirror };
+  }
+
+  /** The live mirrors between Windows folders and their copies in WSL2 distros. */
+  async getWslMirrors(): Promise<WslMirrorInfo[]> {
+    return (await this.deps.wslMirrors?.list()) ?? [];
+  }
+
+  /** Resolves when the mirror's two sides agree, which for a new one is its first full run. */
+  waitForWslMirror(id: string, timeoutMs: number): Promise<WslMirrorInfo> {
+    return this.requireWslMirrors().waitUntilSynced(id, timeoutMs);
+  }
+
+  setWslMirrorPaused(id: string, paused: boolean): Promise<WslMirrorInfo> {
+    return this.requireWslMirrors().setPaused(id, paused);
+  }
+
+  syncWslMirror(id: string): Promise<WslMirrorInfo> {
+    return this.requireWslMirrors().syncNow(id);
+  }
+
+  /** Stops mirroring for good. The Windows folder and the copy both stay as they are. */
+  removeWslMirror(id: string): Promise<void> {
+    return this.requireWslMirrors().remove(id);
+  }
+
+  private requireWslMirrors(): WslMirrorService {
+    if (!this.deps.wslMirrors) throw new Error('WSL mirrors are not available in this build.');
+    return this.deps.wslMirrors;
   }
 
   async setSyncLocalSettings(id: string, enabled: boolean): Promise<SshConfig> {
