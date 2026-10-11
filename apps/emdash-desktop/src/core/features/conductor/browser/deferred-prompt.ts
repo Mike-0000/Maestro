@@ -1,6 +1,6 @@
 import type { CanvasStore } from '@core/features/canvas/api/browser/stores/canvas-store';
 import { log } from '@core/primitives/logging/browser/logger';
-import { sendToAgent } from './agent-io';
+import { sendToAgent, sendToLiveSession } from './agent-io';
 import { entryForConversation } from './roster';
 
 const POLL_MS = 500;
@@ -34,5 +34,13 @@ export async function deliverPromptWhenReady(
     }
     await new Promise((resolve) => setTimeout(resolve, POLL_MS));
   }
-  return false;
+  // The session list can trail the host: before giving up, ask the host itself.
+  const entry = entryForConversation(canvas, conversationId);
+  if (!entry) return false;
+  try {
+    return await sendToLiveSession(entry, prompt, submit);
+  } catch (error) {
+    log.warn('conductor: deferred prompt failed', { error, conversationId });
+    return false;
+  }
 }

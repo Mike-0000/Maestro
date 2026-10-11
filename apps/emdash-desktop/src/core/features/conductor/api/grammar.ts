@@ -134,6 +134,11 @@ function clean(utterance: string): string {
     .trim();
 }
 
+/** A message keeps the question mark the developer ended on, which clean() takes off. */
+function asSaid(text: string, utterance: string): string {
+  return /\?[\s.!]*$/.test(utterance) && !text.endsWith('?') ? `${text}?` : text;
+}
+
 function key(text: string): string {
   return text
     .toLowerCase()
@@ -389,7 +394,7 @@ export function parseCommand(
   if (tell?.[1]) {
     const split = splitAddressed(tell[1], roster, focusedId);
     if (split && 'question' in split) return { kind: 'clarify', question: split.question };
-    if (split) return { kind: 'send', agent: split.agent, text: split.text };
+    if (split) return { kind: 'send', agent: split.agent, text: asSaid(split.text, utterance) };
     return null;
   }
 
@@ -399,7 +404,7 @@ export function parseCommand(
     // Names only: any opening clause could match a task ("Sure, please…" against "Make sure…").
     const resolution = resolveAgent(vocative[1], roster, focusedId, 'name');
     if (resolution.kind === 'match' && !resolution.fuzzy) {
-      return { kind: 'send', agent: resolution.agent, text: vocative[2].trim() };
+      return { kind: 'send', agent: resolution.agent, text: asSaid(vocative[2].trim(), utterance) };
     }
   }
   return null;

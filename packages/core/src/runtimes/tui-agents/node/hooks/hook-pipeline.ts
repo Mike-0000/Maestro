@@ -39,6 +39,16 @@ export class TuiHookPipeline {
     }
 
     const body = parseHookBody(raw.body);
+    // A stop with no reply is announced from the agent's terminal instead: record why.
+    if (raw.type === 'stop' && raw.body && typeof body.last_assistant_message !== 'string') {
+      this.options.logger.warn('TuiHookPipeline: stop hook carried no final reply', {
+        conversationId: config.conversationId,
+        providerId: config.providerId,
+        bodyChars: raw.body.length,
+        parsed: Object.keys(body).length > 0,
+        keys: Object.keys(body).slice(0, 20),
+      });
+    }
     let event = provider.parseHookEvent?.(raw.type, body) ?? defaultHookEventParser(raw.type, body);
     const validateSessionId = provider.validateSessionId;
     if (event.kind === 'session') {

@@ -45,9 +45,12 @@ function makeWindowsHookPostCommand(
   payload: HookPostPayload,
   stdoutJson?: Record<string, unknown>
 ): string {
+  // The agent writes UTF-8, which Windows PowerShell decodes with the console code page and would
+  // post as Latin-1, garbling every non-ASCII character. Encoding the text back with the code
+  // page it was decoded with restores the agent's own bytes, and a byte body is posted as it is.
   const bodyLine =
     payload === 'stdin'
-      ? '$payload = [Console]::In.ReadToEnd()'
+      ? '$payload = [Console]::InputEncoding.GetBytes([Console]::In.ReadToEnd())'
       : `$payload = ${quotePowerShellString(JSON.stringify((payload as { json: Record<string, string> }).json))}`;
   const script = [
     "$ErrorActionPreference = 'SilentlyContinue'",
