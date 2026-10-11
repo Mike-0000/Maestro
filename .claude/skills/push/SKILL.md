@@ -1,6 +1,6 @@
 ---
 name: push
-description: Ship finished Maestro (Chorus) work by publishing one signed release to the Azure auto-update feed, so every install, including this computer, gets it through Download and Restart. Use when the user says /push, or asks to push, push the install, ship, release, deploy, or update their installed Maestro or Chorus. Works from the project directory (C:\Github\chorus, the default agent workspace) or from a task worktree. One script checks the change, builds the installer, promotes chorus/main, and publishes, in about four minutes.
+description: Ship finished Maestro (Chorus) work by publishing one signed release to the Azure auto-update feed, so every install, including this computer, gets it through Download and Restart. Use when the user says /push, or asks to push, push the install, ship, release, deploy, or update their installed Maestro or Chorus. Works from the project directory (C:\Github\chorus, the default agent workspace) or from a task worktree. One script checks the change, builds the installer, promotes chorus/main, and publishes, in four to five minutes.
 compatibility: Windows, C:\Github\chorus, Node 24 and pnpm, Azure CLI signed in
 ---
 
@@ -83,7 +83,7 @@ republishes.
 
 ## What the script does
 
-Run it with `run_in_background`. It takes about four minutes and prints each step with its
+Run it with `run_in_background`. It takes four to five minutes (about a minute more when the lockfile changed) and prints each step with its
 duration. It runs as one process on purpose:
 
 1. It checks the signing key and starts the Azure sign-in check, then takes the push lock. A

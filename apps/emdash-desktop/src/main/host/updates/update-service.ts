@@ -68,8 +68,8 @@ export class UpdateService implements Disposable {
   private notificationPublisher?: UpdateNotificationPublisher;
 
   /**
-   * electron-builder writes resources/app-update.yml only for installer targets. Unpacked builds
-   * (such as local /push installs) have no feed and are updated by their own delivery flow.
+   * electron-builder writes resources/app-update.yml only for installer targets. Legacy unpacked
+   * builds from the local delivery coordinator have no feed; reinstall them once from the feed.
    */
   constructor(
     private readonly hasUpdateFeed: () => boolean = () =>

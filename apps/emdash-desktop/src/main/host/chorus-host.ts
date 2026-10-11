@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { app, globalShortcut, shell } from 'electron';
 import { uIOhook } from 'uiohook-napi';
@@ -12,8 +13,12 @@ export function createChorusHostServices(): ChorusHostServices {
     delivery: {
       installRoot:
         app.isPackaged && process.platform === 'win32' ? dirname(process.execPath) : null,
+      // An installer build (it ships resources/app-update.yml) updates from the Azure feed like
+      // every other Maestro client, so the local delivery worker must never swap it in place.
       installWorkerPath:
-        app.isPackaged && process.platform === 'win32'
+        app.isPackaged &&
+        process.platform === 'win32' &&
+        !existsSync(join(process.resourcesPath, 'app-update.yml'))
           ? join(process.resourcesPath, 'chorus-delivery', 'install-chorus-update.ps1')
           : null,
       profileRoot: app.getPath('userData'),
