@@ -48,11 +48,17 @@ export const BrowserTileNode = observer(function BrowserTileNode({ data, selecte
   // after every render: drags, resizes, and viewport moves all re-render this node.
   const stageActive = store.stageActive;
   const staged = browserId ? store.isStaged(tileId) : false;
+  // Canvas Pro: windows visiting this desk float above its own, and a live page would cover them.
+  const eclipsed = store.visitorsFloating && !store.visitorRects.has(tileId);
   useLayoutEffect(() => {
     if (!browserId || !owner) return;
     // The stage owns a staged browser's surface; other board browsers hide behind the stage.
     if (stageActive) {
       if (!staged) host.placeSurface(browserId, null);
+      return;
+    }
+    if (eclipsed) {
+      host.placeSurface(browserId, null);
       return;
     }
     const page = pageRef.current;

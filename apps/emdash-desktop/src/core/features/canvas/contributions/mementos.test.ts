@@ -26,7 +26,7 @@ describe('canvasBoardSchema', () => {
   it('upgrades v2 boards with no app browsers and no regions', () => {
     expect(canvasBoardSchema.safeParse(v2)).toEqual({
       status: 'ok',
-      data: { ...v2, ...v4Defaults, version: '4', browsers: {} },
+      data: { ...v2, ...v4Defaults, version: '5', mode: 'classic', browsers: {} },
     });
   });
 
@@ -71,7 +71,35 @@ describe('canvasBoardSchema', () => {
         immersive: false,
       },
     };
-    expect(canvasBoardSchema.safeParse(v4)).toEqual({ status: 'ok', data: v4 });
+    expect(canvasBoardSchema.safeParse(v4)).toEqual({
+      status: 'ok',
+      data: { ...v4, version: '5', mode: 'classic' },
+    });
+  });
+
+  it('keeps the canvas mode, desk order, and gathering desks', () => {
+    const v5 = {
+      ...v2,
+      ...v4Defaults,
+      version: '5',
+      mode: 'pro',
+      browsers: {},
+      regions: {
+        'region:r1': {
+          name: 'Triage',
+          parentId: null,
+          rect: { x: 0, y: 0, w: 800, h: 600 },
+          collapsed: false,
+          createdAt: 1,
+          order: 2,
+          gather: 'needs-you',
+        },
+      },
+      location: { kind: 'board', regionScope: 'region:r1' },
+    };
+    expect(canvasBoardSchema.safeParse(v5)).toEqual({ status: 'ok', data: v5 });
+    const badMode = { ...v5, mode: 'spaces' };
+    expect(canvasBoardSchema.safeParse(badMode).status).not.toBe('ok');
   });
 
   it('keeps v3 browsers', () => {
@@ -89,7 +117,7 @@ describe('canvasBoardSchema', () => {
     };
     expect(canvasBoardSchema.safeParse(v3)).toEqual({
       status: 'ok',
-      data: { ...v3, ...v4Defaults, version: '4' },
+      data: { ...v3, ...v4Defaults, version: '5', mode: 'classic' },
     });
   });
 
@@ -128,7 +156,10 @@ describe('canvasBoardSchema', () => {
         ],
       },
     };
-    expect(canvasBoardSchema.safeParse(v4)).toEqual({ status: 'ok', data: v4 });
+    expect(canvasBoardSchema.safeParse(v4)).toEqual({
+      status: 'ok',
+      data: { ...v4, version: '5', mode: 'classic' },
+    });
     const tooMany = { ...v4, panes: { ...v4.panes, count: 5 } };
     expect(canvasBoardSchema.safeParse(tooMany).status).not.toBe('ok');
   });

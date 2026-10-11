@@ -7,6 +7,11 @@ import {
   reaction,
   runInAction,
 } from 'mobx';
+import {
+  AGENT_WINDOW_NAMES,
+  agentWindowName,
+  parseAgentWindowNameSlot,
+} from '@core/features/conversations/api/agent-window-names';
 import type { ConversationStore } from '@core/features/conversations/api/browser/conversation-manager';
 import { conversationRegistry } from '@core/features/conversations/api/browser/stores/conversation-registry';
 import type { ProjectManagerStore } from '@core/features/projects/api/browser/stores/project-manager';
@@ -24,10 +29,26 @@ import {
   DEFAULT_LAYOUT_SETTINGS,
   type CanvasBoardState,
   type CanvasBrowserState,
+  type CanvasDocState,
   type CanvasLayoutSettings,
   type CanvasLocationState,
   type CanvasStageTarget,
 } from '../../../contributions/mementos';
+import {
+  adjacentDesk,
+  deskIds,
+  deskOf,
+  deskSignals,
+  gatherMatches,
+  homeLooseOps,
+  mainDeskId,
+  removeDeskOps,
+  stampDeskOrder,
+  visitorLayout,
+  type CanvasMode,
+  type DeskPosition,
+  type DeskSignal,
+} from '../../canvas-desks';
 import {
   diffLayout,
   pushHistory,
@@ -48,13 +69,16 @@ import {
 import {
   AGENT_TILE_SIZE,
   BROWSER_TILE_SIZE,
+  DOC_TILE_SIZE,
   assignSpokenName,
+  duplicateSpokenNames,
   frameRect,
   isLegacySpokenName,
   NOTE_TILE_SIZE,
   nextFreeAnchor,
   placeTiles,
   rectsOverlap,
+  spokenNameKey,
   viewportRect,
   type CanvasViewport,
   type TileRect,
@@ -67,11 +91,13 @@ import {
   type PaneView,
 } from '../../canvas-panes';
 import {
+  contentBox,
   descendantTiles,
   frameAllowanceFor,
   isFoldedAway,
   isRegionId,
   isTiled,
+  isWithin,
   newRegionId,
   nodeRect,
   parentOf,
@@ -96,6 +122,9 @@ import { spokenProviderLabel } from '../../provider-names';
 import {
   adjacentRegion,
   cameraLeftRegion,
+  frameViewport,
+  peerRegions,
+  workspaceSize,
   promotedTiles,
   PROMOTED_LIVE_CAP,
 } from '../../region-tiling';
@@ -153,6 +182,14 @@ export type BrowserTileEntry = {
   readonly control: CanvasBrowserState['control'];
 };
 
+/** A Markdown file shown as a window, with the task whose agent it came from. */
+export type DocTileEntry = CanvasDocState & {
+  readonly tileId: string;
+  readonly docId: string;
+  readonly projectName: string;
+  readonly taskName: string;
+};
+
 /** A note dropped onto an agent tile: its text is offered to that agent (the conductor sends it). */
 export type NoteDrop = {
   readonly id: number;
@@ -190,6 +227,8 @@ export type AgentInsight = {
   readonly riskLevel?: 'low' | 'moderate' | 'elevated' | 'high';
   /** 0 (can wait) to 1 (needs the user now). */
   readonly urgency?: number;
+  /** The conductor is delivering this agent's call: its window is marked, never focused. */
+  readonly onLine?: boolean;
 };
 
 /** A region as the board and the conductor see it. */
@@ -206,11 +245,29 @@ export type RegionEntry = {
   readonly windowCount: number;
   readonly waiting: number;
   readonly working: number;
+  readonly failed: number;
   /** "2 need you, 1 working". */
   readonly summary: string;
   readonly auto: boolean;
   /** Members fill it as a weighted split (quadrants for four) and re-tile as they change. */
   readonly tiled: boolean;
+};
+
+/** A desk (Canvas Pro): a top-level region shown alone, in its place in the desk order. */
+export type DeskEntry = {
+  readonly regionId: string;
+  readonly name: string;
+  /** Place in the order, from 0. */
+  readonly index: number;
+  readonly color: RegionColor | undefined;
+  readonly active: boolean;
+  readonly windowCount: number;
+  readonly waiting: number;
+  readonly working: number;
+  readonly failed: number;
+  readonly summary: string;
+  /** A gathering desk: windows with this status visit it while it shows. */
+  readonly gather: WindowStatus | null;
 };
 
 export type CanvasLocation = CanvasLocationState;
@@ -254,13 +311,30 @@ type StageHistoryEntry = {
 
 const TRANSIENT_STAGE_KEY = '';
 const MAX_TRAIL = 50;
+/** How many earlier names an agent still answers to after renames. */
+const FORMER_NAMES_KEPT = 3;
+/** How many names of agents that left this session are remembered as gone. */
+const DEPARTED_NAMES_KEPT = 30;
+/** How long a departed agent's name still means that agent to the conductor. */
+const DEPARTED_NAME_TTL_MS = 10 * 60_000;
+/** How long an agent must stay gone before its name is free: longer than a refused removal. */
+const DEPARTURE_GRACE_MS = 60_000;
+/** How often a conversation's host is asked to take the spoken name as title. */
+const TITLE_SYNC_ATTEMPTS = 3;
 const BOARD_ROOT: CanvasLocation = { kind: 'board', regionScope: null };
+const NO_VISITORS: ReadonlyMap<string, TileRect> = new Map();
 
 export type ViewportCommand =
   | { readonly id: number; readonly kind: 'focus'; readonly tileId: string }
   | { readonly id: number; readonly kind: 'fit'; readonly tileIds?: readonly string[] }
   /** Frame a region as the workspace: filling the screen, at zoom 1 when it is screen-sized. */
-  | { readonly id: number; readonly kind: 'frame'; readonly regionId: string }
+  | {
+      readonly id: number;
+      readonly kind: 'frame';
+      readonly regionId: string;
+      /** Canvas Pro swaps desks: the camera jumps instead of travelling across the board. */
+      readonly instant?: boolean;
+    }
   /** Put the camera back where it was (the main canvas the user left for a region). */
   | { readonly id: number; readonly kind: 'restore'; readonly viewport: CanvasViewport };
 
@@ -280,6 +354,10 @@ export function noteTileId(noteId: string): string {
 
 export function browserTileId(taskId: string): string {
   return `browser:${taskId}`;
+}
+
+export function docTileId(docId: string): string {
+  return `doc:${docId}`;
 }
 
 export function canvasBrowserId(taskId: string): string {
@@ -312,6 +390,30 @@ export class CanvasStore {
   noteDrop: NoteDrop | null = null;
   /** Conversations the user explicitly asked to start or resume from the canvas. */
   readonly startRequested = observable.set<string>();
+  /** Conversations whose spoken names were claimed before they existed, this session. */
+  private readonly claimedNames = new Set<string>();
+  /** Where each agent was last seen on the roster this session, by conversation id. */
+  private readonly seenAgents = new Map<string, { projectId: string; taskId: string }>();
+  /** Names agents were renamed from this session, newest first, by conversation id. */
+  private readonly formerNames = new Map<string, string[]>();
+  /** When each agent seen this session was first found gone, by conversation id. */
+  private readonly goneSince = new Map<string, number>();
+  /** Names of agents that left the roster this session and when, newest first. */
+  private readonly leftNames: { name: string; at: number }[] = [];
+  /** Conversations whose leftover titles were looked at this session. */
+  private readonly titlesChecked = new Set<string>();
+  /** Conversations whose title still has to become their spoken name, by conversation id. */
+  private readonly titlesOwed = new Map<
+    string,
+    {
+      /** The spoken name before a rename: a title equal to it follows the rename. */
+      previous?: string;
+      attempts: number;
+      /** The title the first try set out to replace, as a name key. */
+      replacing?: string;
+      inFlight?: boolean;
+    }
+  >();
   /** Jev triage per conversation id (risk, urgency). */
   readonly insights = observable.map<string, AgentInsight>();
   /** First time each tile was observed needing attention, for oldest-first cycling. */
@@ -333,6 +435,15 @@ export class CanvasStore {
   dropHint: string | null = null;
   /** Region whose name field is open for editing (new regions open it). */
   renamingRegionId: string | null = null;
+  /**
+   * Canvas Pro: windows brought to the desk in view from other desks. They are drawn there without
+   * leaving their own desk, and go home when the desk changes.
+   */
+  visitorIds: string[] = [];
+  /** Canvas Pro: the desk that was in view before this one ("switch back", "the other desk"). */
+  previousDeskId: string | null = null;
+  /** The undo entry of the last switch to Canvas Pro: undoing it switches back. */
+  private proEntryId: number | null = null;
   backTrail: CanvasLocation[] = [];
   forwardTrail: CanvasLocation[] = [];
   /** Region the user was in before the current one ("switch back", "the other one"). */
@@ -382,6 +493,28 @@ export class CanvasStore {
       listening: observable,
       dropHint: observable,
       renamingRegionId: observable,
+      visitorIds: observable.ref,
+      previousDeskId: observable,
+      mode: computed,
+      proMode: computed,
+      desks: computed,
+      activeDeskId: computed,
+      deskLocked: computed,
+      deskSignals: computed,
+      visitors: computed({ equals: comparer.structural }),
+      visitorRects: computed,
+      visitorsFloating: computed,
+      setMode: action,
+      switchDesk: action,
+      answerDesk: action,
+      createDesk: action,
+      removeDesk: action,
+      reorderDesk: action,
+      bringHere: action,
+      sendBack: action,
+      keepVisitors: action,
+      gatherVisitors: action,
+      homeStrays: action,
       setDropHint: action,
       setRenamingRegion: action,
       groupSelection: action,
@@ -409,6 +542,7 @@ export class CanvasStore {
       leaveScope: action,
       cameraMoved: action,
       goToAdjacentRegion: action,
+      stepDesk: action,
       refitScope: action,
       transientStage: observable.ref,
       layoutState: computed,
@@ -471,6 +605,10 @@ export class CanvasStore {
       taskFrames: computed,
       openBrowser: action,
       closeBrowser: action,
+      docEntries: computed,
+      visibleDocEntries: computed,
+      openDoc: action,
+      closeDoc: action,
       setBrowserUrl: action,
       setBrowserControl: action,
       setOpenOnLaunch: action,
@@ -519,6 +657,36 @@ export class CanvasStore {
             .map((entry) => entry.tileId)
             .join('|'),
         () => this.trackAttention(),
+        { fireImmediately: true }
+      ),
+      // Canvas Pro: a window on no desk would never be seen, so it joins one.
+      reaction(
+        () =>
+          this.proMode
+            ? [deskIds(this.layoutState).length, ...this.looseTileIds()].join('|')
+            : 'classic',
+        () => this.homeStrays(),
+        { fireImmediately: true }
+      ),
+      // Canvas Pro: the desk in view was re-tiled or resized under a camera that may be locked
+      // on it (a window closed, an undo), so it is framed again.
+      reaction(
+        () => {
+          const desk = this.location.kind === 'board' ? this.activeDeskId : null;
+          const rect = desk ? this.state.regions[desk]?.rect : undefined;
+          return desk && rect ? { desk, x: rect.x, y: rect.y, w: rect.w, h: rect.h } : null;
+        },
+        (now, before) => {
+          if (now && before && now.desk === before.desk) this.reframe();
+        },
+        { equals: comparer.structural }
+      ),
+      // A gathering desk collects the windows with its status for as long as it shows.
+      reaction(
+        () => this.gatherKey(),
+        (key) => {
+          if (key) this.gatherVisitors();
+        },
         { fireImmediately: true }
       )
     );
@@ -632,6 +800,34 @@ export class CanvasStore {
 
   browserForTask(taskId: string): BrowserTileEntry | undefined {
     return this.browserEntries.find((entry) => entry.taskId === taskId);
+  }
+
+  /** Document windows whose task is still on the board, in document order. */
+  get docEntries(): DocTileEntry[] {
+    const entries: DocTileEntry[] = [];
+    for (const [docId, doc] of Object.entries(this.state.docs ?? {})) {
+      const project = this.projectManager.projects.get(doc.projectId);
+      const task = asAvailableProject(project)?.get(taskManagerStoreToken).tasks.get(doc.taskId);
+      if (!project || !task || !isCanvasTask(task)) continue;
+      entries.push({
+        ...doc,
+        tileId: docTileId(docId),
+        docId,
+        projectName: project.name ?? 'Project',
+        taskName: task.displayName,
+      });
+    }
+    entries.sort((a, b) => a.docId.localeCompare(b.docId));
+    return entries;
+  }
+
+  /** Document entries after the project filter. */
+  get visibleDocEntries(): DocTileEntry[] {
+    const filter = this.state.projectFilter;
+    const hidden = new Set(this.state.hiddenTiles);
+    return this.docEntries.filter(
+      (entry) => !hidden.has(entry.tileId) && (!filter || entry.projectId === filter)
+    );
   }
 
   /**
@@ -764,13 +960,18 @@ export class CanvasStore {
   }
 
   tileRect(tileId: string): TileRect {
+    // A visitor is drawn on the desk in view; its own place on its desk is untouched.
+    const visiting = this.visitorRects.get(tileId);
+    if (visiting) return visiting;
     const stored = this.state.tiles[tileId];
     if (stored) return stored;
     const size = tileId.startsWith('note:')
       ? NOTE_TILE_SIZE
       : tileId.startsWith('browser:')
         ? BROWSER_TILE_SIZE
-        : AGENT_TILE_SIZE;
+        : tileId.startsWith('doc:')
+          ? DOC_TILE_SIZE
+          : AGENT_TILE_SIZE;
     return { x: 0, y: 0, ...size };
   }
 
@@ -824,13 +1025,18 @@ export class CanvasStore {
    * focused, most recently focused first up to the cap.
    */
   get promotedTileIds(): string[] {
-    return promotedTiles(
+    const promoted = promotedTiles(
       this.layoutState,
       this.focusedRegionId,
       this.visibleTileIds(),
       (id) => this.focusRank(id),
       PROMOTED_LIVE_CAP
     );
+    // Canvas Pro: windows visiting the desk in view are in view too, ahead of its own.
+    const visiting = this.visitors;
+    if (visiting.length === 0) return promoted;
+    const rest = promoted.filter((id) => !visiting.includes(id));
+    return [...visiting, ...rest].slice(0, PROMOTED_LIVE_CAP);
   }
 
   get promotedSet(): ReadonlySet<string> {
@@ -847,7 +1053,46 @@ export class CanvasStore {
       const name = state.spokenNames[entry.conversationId];
       return !name || isLegacySpokenName(name, spokenProviderLabel(entry.providerId));
     });
-    if (missing.length === 0 && unnamed.length === 0) return;
+    // Two agents under one name cannot be told apart by voice: all but one get a new name.
+    const renamed = new Set(
+      duplicateSpokenNames(
+        this.agentEntries.flatMap((entry) => {
+          const name = state.spokenNames[entry.conversationId];
+          if (!name || unnamed.includes(entry)) return [];
+          const settled = this.seenAgents.has(entry.conversationId);
+          return [{ id: entry.conversationId, name, createdAt: entry.createdAt, settled }];
+        })
+      )
+    );
+    const duplicates = this.agentEntries.filter((entry) => renamed.has(entry.conversationId));
+    const departed = [...this.departedConversationIds()].filter((id) => state.spokenNames[id]);
+    this.forgetDeparted(departed);
+    // An agent whose title is a name (its own, from before it was archived) takes it back before
+    // the others are given the first free ones.
+    const named = (entry: AgentTileEntry) =>
+      parseAgentWindowNameSlot(entry.conversationTitle) !== null;
+    const arriving = [
+      ...unnamed.filter(named),
+      ...unnamed.filter((entry) => !named(entry)),
+      ...duplicates,
+    ];
+    for (const entry of this.agentEntries) {
+      // An agent that exists holds its name by existing; the claim made for it has done its job.
+      this.claimedNames.delete(entry.conversationId);
+      this.seenAgents.set(entry.conversationId, {
+        projectId: entry.projectId,
+        taskId: entry.taskId,
+      });
+    }
+    if (
+      missing.length === 0 &&
+      unnamed.length === 0 &&
+      duplicates.length === 0 &&
+      departed.length === 0
+    ) {
+      this.syncTitles([]);
+      return;
+    }
 
     this.updateState((current) => {
       const tiles = { ...current.tiles };
@@ -876,8 +1121,10 @@ export class CanvasStore {
           });
         }
       }
-      for (const entry of unnamed) delete spokenNames[entry.conversationId];
-      for (const entry of unnamed) {
+      // The names of agents known to be gone are free again, here and in later sessions.
+      for (const id of departed) delete spokenNames[id];
+      for (const entry of arriving) delete spokenNames[entry.conversationId];
+      for (const entry of arriving) {
         spokenNames[entry.conversationId] = assignSpokenName(
           entry.conversationTitle,
           Object.values(spokenNames)
@@ -885,6 +1132,7 @@ export class CanvasStore {
       }
       return { ...current, tiles, spokenNames };
     });
+    this.syncTitles(arriving);
     if (missing.length > 0) {
       this.joinNewTiles(
         missing.map((entry) => ({
@@ -910,7 +1158,8 @@ export class CanvasStore {
     }[]
   ): void {
     const settings = this.layoutSettings;
-    const currentRegionId = this.currentRegion();
+    // A gathering desk only hosts visitors: nothing is born on it.
+    const currentRegionId = this.gatheringHere ? null : this.currentRegion();
     const layout = this.layoutState;
     const buckets = new Map<string, { home: NewWindowHome; tiles: string[] }>();
     for (const tile of tiles) {
@@ -1049,7 +1298,8 @@ export class CanvasStore {
    * picture: each view continues it where that view lies. Going back keeps the active view.
    */
   setPaneCount(requested: number): void {
-    const count = clampPaneCount(requested);
+    // Canvas Pro shows one desk: a single view.
+    const count = this.proMode ? 1 : clampPaneCount(requested);
     const before = this.paneCount;
     if (count === before) return;
     const current = this.paneViews;
@@ -1163,17 +1413,32 @@ export class CanvasStore {
 
   /** Focuses a tile and asks the board to center it at interactive zoom. */
   requestFocus(tileId: string): void {
+    // Canvas Pro: a window on another desk is not on screen, so its desk comes into view first.
+    if (this.proMode && !isRegionId(tileId)) this.revealOnDesk(tileId);
     this.focusTile(tileId);
+    // A desk that fills the screen is already framed at zoom 1: the camera stays put.
+    if (this.proMode && this.deskLocked) return;
     this.viewportCommand = { id: ++this.commandSeq, kind: 'focus', tileId };
   }
 
   requestFit(tileIds?: readonly string[]): void {
+    // Canvas Pro: the desk in view is the whole picture, so fitting means framing it again.
+    const desk = this.activeDeskId;
+    if (desk) {
+      this.requestFrame(this.focusedRegionId ?? desk);
+      return;
+    }
     this.viewportCommand = { id: ++this.commandSeq, kind: 'fit', tileIds };
   }
 
   /** Asks the board to frame a region as the workspace (see `frameViewport`). */
-  requestFrame(regionId: string): void {
-    this.viewportCommand = { id: ++this.commandSeq, kind: 'frame', regionId };
+  requestFrame(regionId: string, instant = false): void {
+    this.viewportCommand = {
+      id: ++this.commandSeq,
+      kind: 'frame',
+      regionId,
+      ...(instant ? { instant } : {}),
+    };
   }
 
   /** Frames the sub-canvas the user is in, else fits the board. */
@@ -1377,6 +1642,162 @@ export class CanvasStore {
     }));
   }
 
+  // ── Documents ──────────────────────────────────────────────────────────────
+
+  /**
+   * Opens a Markdown file as a document window, or brings the window already showing it back.
+   * A new window is placed beside the agent that sent it (else beside its task's agents) and
+   * joins the sub-canvas or desk the developer is in, else a region like any new window. Unless
+   * `focus` is off the window is then shown: a project filter or a collapsed region that hides
+   * it is lifted, and on the stage it joins what is staged. Returns the tile id, or null when
+   * the file's task is not on the board, so it cannot be a window here.
+   */
+  openDoc(input: CanvasDocState & { conversationId?: string; focus?: boolean }): string | null {
+    const { conversationId, focus, ...doc } = input;
+    const project = this.projectManager.projects.get(doc.projectId);
+    const task = asAvailableProject(project)?.get(taskManagerStoreToken).tasks.get(doc.taskId);
+    if (!project || !task || !isCanvasTask(task)) return null;
+
+    const open = Object.entries(this.state.docs ?? {}).find(
+      ([, existing]) => existing.workspaceId === doc.workspaceId && existing.path === doc.path
+    );
+    const docId = open?.[0] ?? crypto.randomUUID();
+    const tileId = docTileId(docId);
+    const hadTile = Boolean(this.state.tiles[tileId]);
+    this.updateState((current) => {
+      const docs = { ...current.docs, [docId]: doc };
+      if (current.tiles[tileId]) return { ...current, docs };
+      const sender = conversationId ? current.tiles[agentTileId(conversationId)] : undefined;
+      const beside = sender
+        ? [sender]
+        : this.agentEntries
+            .filter((entry) => entry.taskId === doc.taskId && current.tiles[entry.tileId])
+            .map((entry) => current.tiles[entry.tileId] as TileRect);
+      const occupied = [...Object.values(current.tiles), ...rootRegionRects(current.regions)];
+      const anchor = nextFreeAnchor(beside.length > 0 ? beside : occupied);
+      const [rect] = placeTiles(occupied, 1, DOC_TILE_SIZE, anchor, 1);
+      return {
+        ...current,
+        docs,
+        tiles: { ...current.tiles, [tileId]: rect ?? { ...anchor, ...DOC_TILE_SIZE } },
+      };
+    });
+    if (!hadTile) {
+      this.homeNewDoc(tileId, doc.projectId, project.name ?? 'Project');
+    } else if (this.state.hiddenTiles.includes(tileId)) {
+      // Closed by a layout command: it returns through the planner, so a tiled region re-tiles.
+      const planned = this.planOps([{ op: 'show', targets: [tileId] }]);
+      const base = planned.ok ? planned.plan.state : this.layoutState;
+      this.commitLayout(
+        { ...base, hidden: base.hidden.filter((id) => id !== tileId) },
+        planned.ok ? planned.plan.summary : `Reopened ${doc.title}`,
+        'command',
+        [tileId]
+      );
+    }
+    if (focus !== false) this.presentDoc(tileId, doc.projectId);
+    return tileId;
+  }
+
+  /** True when a document window is drawn where the developer is looking. */
+  isDocOnScreen(tileId: string): boolean {
+    if (!this.visibleTileIds().has(tileId)) return false;
+    if (this.stageActive) return this.stagedSet.has(tileId);
+    return !this.isFolded(tileId);
+  }
+
+  /** Closes a document window for good. Not undoable, like its opening. */
+  closeDoc(docId: string): void {
+    if (!this.state.docs?.[docId]) return;
+    const tileId = docTileId(docId);
+    // Out through the planner first, so a tiled region gives its space to the windows left.
+    const planned = this.planOps([{ op: 'hide', targets: [tileId] }]);
+    if (planned.ok) this.writeLayout(planned.plan.state);
+    this.updateState((current) => {
+      const docs = { ...current.docs };
+      const tiles = { ...current.tiles };
+      const membership = { ...current.membership };
+      delete docs[docId];
+      delete tiles[tileId];
+      delete membership[tileId];
+      return {
+        ...current,
+        docs,
+        tiles,
+        membership,
+        hiddenTiles: current.hiddenTiles.filter((id) => id !== tileId),
+      };
+    });
+    if (this.focusedTileId === tileId) this.focusedTileId = null;
+  }
+
+  /**
+   * A new document joins the region the developer is in: the sub-canvas or desk in view, the
+   * staged region, or the one a stage of picked windows was opened from. Elsewhere (the main
+   * canvas, a gathering desk) it joins a region like any new window. Birth placement: not undoable.
+   */
+  private homeNewDoc(tileId: string, projectId: string, projectName: string): void {
+    const location = this.location;
+    const home = this.gatheringHere
+      ? null
+      : location.kind === 'stage' && location.target.kind !== 'region'
+        ? this.lastBoardScope()
+        : this.currentRegion();
+    const planned = home
+      ? this.planOps([{ op: 'move', targets: [tileId], to: { kind: 'region', region: home } }])
+      : null;
+    if (!planned?.ok) {
+      this.joinNewTiles([{ tileId, projectId, projectName }]);
+      return;
+    }
+    this.writeLayout(planned.plan.state);
+    this.markChanged(planned.plan.summary, planned.plan.targets, 'command', []);
+  }
+
+  /** Shows a document the developer was just handed, where they are looking. */
+  private presentDoc(tileId: string, projectId: string): void {
+    const filter = this.state.projectFilter;
+    if (filter !== null && filter !== projectId) this.setProjectFilter(null);
+    for (let region = this.regionOf(tileId); region; region = this.regionOf(region)) {
+      if (!this.state.regions[region]?.collapsed) continue;
+      this.runLayout([{ op: 'collapseRegion', region, collapsed: false }], { source: 'command' });
+    }
+    if (this.location.kind !== 'stage') {
+      this.requestFocus(tileId);
+      return;
+    }
+    // On the stage the board's camera is out of sight, and a desk swap would leave the stage.
+    this.stageAlso(tileId);
+    this.focusTile(tileId);
+  }
+
+  /**
+   * Puts a window on the stage that is open: into the staged region, or among the picked
+   * windows. The stage keeps its page and arrangement; a pane shown alone gives way, so the
+   * newcomer is seen.
+   */
+  private stageAlso(tileId: string): void {
+    const location = this.location;
+    if (location.kind !== 'stage') return;
+    if (!this.stagedSet.has(tileId)) {
+      if (location.target.kind === 'region') {
+        const to = { kind: 'region' as const, region: location.target.regionId };
+        this.runLayout([{ op: 'move', targets: [tileId], to }], { source: 'command' });
+      } else {
+        const tileIds = [...this.stageTileIds, tileId];
+        const label =
+          location.target.kind === 'selection' && !/^\d+ windows$/.test(location.target.label)
+            ? location.target.label
+            : `${tileIds.length} windows`;
+        const target: StageTarget = { kind: 'selection', tileIds, label };
+        this.updateState((state) => ({ ...state, location: { ...location, target } }));
+      }
+    }
+    if (this.stageSaved.soloTileId && this.stageSaved.soloTileId !== tileId) {
+      this.updateStage('Showed a document', (saved) => ({ ...saved, soloTileId: null }));
+    }
+  }
+
   // ── Regions, layout history, and navigation ────────────────────────────────
 
   /** The undoable part of the board: geometry, regions, membership, closed windows. */
@@ -1417,6 +1838,17 @@ export class CanvasStore {
         projectId: entry.projectId,
       });
     }
+    for (const entry of this.docEntries) {
+      windows.push({
+        tileId: entry.tileId,
+        kind: 'doc',
+        name: entry.title,
+        taskId: entry.taskId,
+        taskName: entry.taskName,
+        projectName: entry.projectName,
+        projectId: entry.projectId,
+      });
+    }
     for (const entry of this.noteEntries) {
       windows.push({ tileId: entry.tileId, kind: 'note', name: noteName(entry.text) });
     }
@@ -1428,6 +1860,7 @@ export class CanvasStore {
     return new Set([
       ...this.visibleAgentEntries.map((entry) => entry.tileId),
       ...this.visibleBrowserEntries.map((entry) => entry.tileId),
+      ...this.visibleDocEntries.map((entry) => entry.tileId),
       ...this.noteEntries.map((entry) => entry.tileId),
     ]);
   }
@@ -1454,6 +1887,7 @@ export class CanvasStore {
         windowCount: tiles.length,
         waiting: tileStatuses.filter((status) => status === 'needs-you').length,
         working: tileStatuses.filter((status) => status === 'working').length,
+        failed: tileStatuses.filter((status) => status === 'error').length,
         summary: statusSummary(tileStatuses),
         auto: region.auto === true,
         tiled: isTiled(region),
@@ -1596,10 +2030,14 @@ export class CanvasStore {
       if (id.startsWith('agent:')) agents.push(id.slice('agent:'.length));
       else others.push(id);
     }
+    const deskBefore = this.activeDeskId;
+    const scopeBefore = regionOfLocation(this.location);
+    const preferred = [deskBefore, this.previousRegionId];
     this.updateState((current) => {
       const stageLayouts = Object.fromEntries(
         Object.entries(current.stageLayouts).filter(([regionId]) => next.regions[regionId])
       );
+      const within = locationWithin(current.location, next);
       return {
         ...current,
         tiles: { ...next.tiles },
@@ -1608,13 +2046,31 @@ export class CanvasStore {
         hiddenConversationIds: agents,
         hiddenTiles: others,
         stageLayouts,
-        location: locationWithin(current.location, next),
+        // Canvas Pro: the desk in view was removed, so another one takes its place.
+        location: current.mode === 'pro' ? locationOnDesk(within, next, preferred) : within,
       };
     });
+    const after = this.location;
+    if (deskBefore && after.kind === 'board' && after.regionScope) {
+      // The scope went with a removed region: frame where the user is now (the camera is locked
+      // on a desk, so it cannot be left framing something that is gone).
+      const swapped = this.activeDeskId !== deskBefore;
+      if (swapped) this.visitorIds = [];
+      if (swapped || scopeBefore !== after.regionScope) {
+        this.requestFrame(after.regionScope, swapped);
+      }
+    }
     const hidden = new Set(next.hidden);
     if (this.focusedTileId && hidden.has(this.focusedTileId)) this.focusedTileId = null;
     const stale = (id: string) => hidden.has(id) || (isRegionId(id) && !next.regions[id]);
     if (this.selection.some(stale)) this.selection = this.selection.filter((id) => !stale(id));
+    // Canvas Pro: the desk in view is never folded away (an undo can fold it): it has no header
+    // to unfold it from, and nothing on it would be drawn.
+    const inView = this.activeDeskId;
+    if (inView && next.regions[inView]?.collapsed) {
+      const opened = this.planOps([{ op: 'collapseRegion', region: inView, collapsed: false }]);
+      if (opened.ok) this.writeLayout(opened.plan.state);
+    }
   }
 
   private markChanged(
@@ -1682,6 +2138,12 @@ export class CanvasStore {
     const result = undoEntry(this.layoutState, layout);
     this.undoStack = this.undoStack.slice(0, -1);
     this.redoStack = [...this.redoStack, layout];
+    // Undoing the switch to Canvas Pro goes back to the classic canvas with it: its loose windows
+    // could not leave their desk while every window must be on one.
+    if (layout.id === this.proEntryId && this.proMode) {
+      this.visitorIds = [];
+      this.updateState((state) => ({ ...state, mode: 'classic' }));
+    }
     this.writeLayout(result.state);
     this.markChanged(`Undid: ${layout.label}`, layout.targets, 'command', []);
     return { label: layout.label, conflicts: result.conflicts };
@@ -1703,6 +2165,12 @@ export class CanvasStore {
     this.undoStack = [...this.undoStack, layout];
     this.writeLayout(result.state);
     this.markChanged(`Redid: ${layout.label}`, layout.targets, 'command', []);
+    // Redoing the switch to Canvas Pro switches again.
+    if (layout.id === this.proEntryId && !this.proMode) {
+      this.setPaneCount(1);
+      this.updateState((state) => ({ ...state, mode: 'pro' }));
+      this.showDesk(deskIds(this.layoutState)[0] ?? null);
+    }
     return { label: layout.label, conflicts: result.conflicts };
   }
 
@@ -1733,14 +2201,25 @@ export class CanvasStore {
   refitScope(): void {
     const regionId = this.focusedRegionId;
     if (!regionId) return;
+    this.fitWorkspace(regionId);
+    this.requestFrame(regionId);
+  }
+
+  /**
+   * Re-tiles the screen-sized, tiled workspace a region is in to the board size. Not undoable.
+   * `ifResized`: only when its size is not the screen's (a desk coming into view), so a desk that
+   * already fits is not written to, which would make a later undo of its creation see it as
+   * changed since and leave it behind.
+   */
+  private fitWorkspace(regionId: string, options: { ifResized?: boolean } = {}): void {
     const layout = this.layoutState;
     const [root] = regionPath(layout, regionId);
     const top = root ? layout.regions[root] : undefined;
-    if (root && top && isTiled(top) && top.screenSized !== false) {
-      const result = this.planOps([{ op: 'fitRegion', region: root }]);
-      if (result.ok && diffLayout(layout, result.plan.state)) this.writeLayout(result.plan.state);
-    }
-    this.requestFrame(regionId);
+    if (!root || !top || !isTiled(top) || top.screenSized === false) return;
+    const size = workspaceSize(this.boardSize);
+    if (options.ifResized && top.rect.w === size.w && top.rect.h === size.h) return;
+    const result = this.planOps([{ op: 'fitRegion', region: root }]);
+    if (result.ok && diffLayout(layout, result.plan.state)) this.writeLayout(result.plan.state);
   }
 
   setListening(listening: boolean): void {
@@ -1760,7 +2239,8 @@ export class CanvasStore {
    * name for editing. Returns the region id.
    */
   groupSelection(ids: readonly string[] = this.selection, name?: string): string | null {
-    const members = ids.filter((id) => !id.startsWith('frame:'));
+    const visiting = this.visitorRects;
+    const members = ids.filter((id) => !id.startsWith('frame:') && !visiting.has(id));
     if (members.length === 0) return null;
     const result = this.runLayout([{ op: 'createRegion', members, ...(name ? { name } : {}) }], {
       source: 'keyboard',
@@ -1779,14 +2259,17 @@ export class CanvasStore {
    */
   dropNodes(drops: readonly { id: string; x: number; y: number }[]): void {
     const layout = this.layoutState;
+    const visiting = this.visitorRects;
     const ops: LayoutOp[] = [];
     for (const drop of drops.slice(0, 12)) {
+      // A visitor has no place of its own here to change.
+      if (visiting.has(drop.id)) continue;
       const rect = nodeRect(layout, drop.id);
       if (Math.round(rect.x) === Math.round(drop.x) && Math.round(rect.y) === Math.round(drop.y)) {
         continue;
       }
       const probe = { x: drop.x + rect.w / 2, y: drop.y + Math.min(rect.h / 2, 60) };
-      const region = regionAt(layout, probe, isRegionId(drop.id) ? drop.id : undefined);
+      const region = this.dropRegionAt(probe, isRegionId(drop.id) ? drop.id : undefined);
       ops.push({
         op: 'move',
         targets: [drop.id],
@@ -1796,7 +2279,20 @@ export class CanvasStore {
     if (ops.length > 0) this.runLayout(ops, { source: 'pointer' });
   }
 
+  /**
+   * The region a pointer drop at `probe` lands in. Canvas Pro: always on the desk in view (the
+   * other desks sit beside it on a board the user never sees, and must not catch a drop).
+   */
+  dropRegionAt(probe: { x: number; y: number }, exclude?: string): string | null {
+    const layout = this.layoutState;
+    const region = regionAt(layout, probe, exclude);
+    const desk = this.activeDeskId;
+    if (!desk) return region;
+    return region && isWithin(layout, region, desk) ? region : desk;
+  }
+
   resizeTile(tileId: string, rect: TileRect): void {
+    if (this.visitorRects.has(tileId)) return;
     this.runLayout([{ op: 'resize', targets: [tileId], size: { kind: 'exact', rect } }], {
       source: 'pointer',
     });
@@ -1961,8 +2457,9 @@ export class CanvasStore {
   }
 
   /** Goes to a location, recording where the user was for "back". */
-  navigate(location: CanvasLocation, options: { record?: boolean; reveal?: boolean } = {}): void {
+  navigate(target: CanvasLocation, options: { record?: boolean; reveal?: boolean } = {}): void {
     const current = this.location;
+    const location = this.onDesk(target);
     const reveal = options.reveal !== false;
     if (sameLocation(current, location)) {
       if (reveal) this.revealLocation(location);
@@ -1983,17 +2480,36 @@ export class CanvasStore {
       this.rootViewport = { ...this.state.viewport };
     }
     if (to !== from) this.scopeFramedZoom = null;
+    // Canvas Pro: another desk comes into view. Visitors belonged to the one that was showing.
+    const deskBefore = this.deskAt(current);
+    const swapped = this.proMode && deskBefore !== this.deskAt(location);
+    if (swapped) this.previousDeskId = deskBefore;
+    if (swapped && this.visitorIds.length > 0) this.visitorIds = [];
     this.updateState((state) => ({ ...state, location }));
+    // A desk made at another window size (or before the canvas was measured) fits this screen.
+    if (swapped && to) this.fitWorkspace(to, { ifResized: true });
     if (!reveal) return;
     if (location.kind === 'board' && !to && from) this.revealRoot();
-    else this.revealLocation(location);
+    else this.revealLocation(location, swapped);
   }
 
-  private revealLocation(location: CanvasLocation): void {
+  private revealLocation(location: CanvasLocation, instant = false): void {
     if (location.kind !== 'board') return;
     if (location.regionScope && this.state.regions[location.regionScope]) {
-      this.requestFrame(location.regionScope);
+      this.requestFrame(location.regionScope, instant);
     }
+  }
+
+  /** Canvas Pro has no main board to be on: a board location with no region is the desk in view. */
+  private onDesk(location: CanvasLocation): CanvasLocation {
+    if (!this.proMode || location.kind !== 'board' || location.regionScope) return location;
+    const desk = this.activeDeskId;
+    return desk ? { kind: 'board', regionScope: desk } : location;
+  }
+
+  /** The desk a location is on; a stage of loose windows stays on the desk in view. */
+  private deskAt(location: CanvasLocation): string | null {
+    return deskOf(this.layoutState, regionOfLocation(location)) ?? this.activeDeskId;
   }
 
   /** Back on the main canvas: the camera the user left it with, else everything. */
@@ -2035,12 +2551,19 @@ export class CanvasStore {
     }
     if (!location.regionScope) return false;
     const parent = this.regionOf(location.regionScope);
+    // A desk has no board above it: you switch desks, you do not leave one.
+    if (!parent && this.proMode) return false;
     this.navigate({ kind: 'board', regionScope: parent });
     return true;
   }
 
-  /** The main canvas, with the camera where the user left it. */
+  /** The main canvas, with the camera where the user left it (Canvas Pro: the first desk). */
   home(): void {
+    if (this.proMode) {
+      const [first] = deskIds(this.layoutState);
+      if (first) this.switchDesk(first);
+      return;
+    }
     const from = regionOfLocation(this.location);
     this.navigate(BOARD_ROOT);
     if (!from) this.requestFit();
@@ -2054,7 +2577,10 @@ export class CanvasStore {
     const location = this.location;
     if (location.kind !== 'board' || !location.regionScope) return false;
     const parent = this.regionOf(location.regionScope);
-    this.navigate({ kind: 'board', regionScope: parent }, { reveal: false });
+    if (!parent && this.proMode) return false;
+    // Classic: the user already moved the camera. Canvas Pro: the desk is framed again, since a
+    // desk that fills the screen cannot be panned back into place.
+    this.navigate({ kind: 'board', regionScope: parent }, { reveal: this.proMode });
     if (!parent) this.rootViewport = null;
     return true;
   }
@@ -2064,6 +2590,8 @@ export class CanvasStore {
    * region, the board scope becomes the innermost region still in view, else the main canvas.
    */
   cameraMoved(view: TileRect, zoom: number): void {
+    // Canvas Pro: there is nowhere to pan away to; desks are switched, not left.
+    if (this.proMode) return;
     const regionId = this.focusedRegionId;
     if (!regionId) return;
     const layout = this.layoutState;
@@ -2084,9 +2612,24 @@ export class CanvasStore {
 
   /** Switches to the next or previous region beside the current one. Returns the region id. */
   goToAdjacentRegion(step: 1 | -1): string | null {
+    if (this.proMode) {
+      // On a desk (not inside one of its regions): the next or previous desk in order.
+      const desk = this.activeDeskId;
+      const current = this.currentRegion();
+      if (!current || current === desk) return this.stepDesk(step);
+      // Inside one of its regions: the region beside it, else the next desk.
+      const beside = adjacentRegion(this.layoutState, current, step);
+      if (!beside) return this.stepDesk(step);
+    }
     const next = adjacentRegion(this.layoutState, this.currentRegion(), step);
     if (!next || !this.goToRegion(next)) return null;
     return next;
+  }
+
+  /** Canvas Pro: swaps to the next or previous desk in order, wherever the user is on this one. */
+  stepDesk(step: 1 | -1): string | null {
+    const other = adjacentDesk(this.layoutState, this.activeDeskId, step);
+    return other && this.switchDesk(other) ? other : null;
   }
 
   /** Shows a region on the board (expanding it when collapsed). */
@@ -2180,6 +2723,341 @@ export class CanvasStore {
   /** A trail entry whose region is gone falls back to the board. */
   private validLocation(location: CanvasLocation): CanvasLocation {
     return locationWithin(location, this.layoutState);
+  }
+
+  // ── Canvas Pro: desks ──────────────────────────────────────────────────────
+
+  get mode(): CanvasMode {
+    return this.state.mode ?? 'classic';
+  }
+
+  /** Canvas Pro: top-level regions are desks, shown one at a time. */
+  get proMode(): boolean {
+    return this.mode === 'pro';
+  }
+
+  /** The desk in view (Canvas Pro only): where the board is, else where it last was. */
+  get activeDeskId(): string | null {
+    if (!this.proMode) return null;
+    const layout = this.layoutState;
+    return (
+      deskOf(layout, this.currentRegion()) ??
+      deskOf(layout, this.lastBoardScope()) ??
+      deskIds(layout)[0] ??
+      null
+    );
+  }
+
+  /** Desks in order (empty on the classic canvas). */
+  get desks(): DeskEntry[] {
+    if (!this.proMode) return [];
+    const layout = this.layoutState;
+    const active = this.activeDeskId;
+    const entries = new Map(this.regionEntries.map((entry) => [entry.regionId, entry] as const));
+    return deskIds(layout).flatMap((regionId, index) => {
+      const entry = entries.get(regionId);
+      if (!entry) return [];
+      return [
+        {
+          regionId,
+          name: entry.name,
+          index,
+          color: entry.color,
+          active: regionId === active,
+          windowCount: entry.windowCount,
+          waiting: entry.waiting,
+          working: entry.working,
+          failed: entry.failed,
+          summary: entry.summary,
+          gather: layout.regions[regionId]?.gather ?? null,
+        },
+      ];
+    });
+  }
+
+  /** The desk a window or region is on (null for a loose window). */
+  deskOf(id: string): string | null {
+    return deskOf(this.layoutState, id);
+  }
+
+  /** True when the desk in view fills the screen at zoom 1: the camera stays put on it. */
+  get deskLocked(): boolean {
+    const desk = this.activeDeskId;
+    const region = desk ? this.state.regions[desk] : undefined;
+    if (!region) return false;
+    return frameViewport(regionFootprint(region), this.boardSize).zoom >= 1;
+  }
+
+  /** Desks out of view with agents waiting or failed, by the screen edge they lie toward. */
+  get deskSignals(): DeskSignal[] {
+    return deskSignals(this.desks, this.activeDeskId);
+  }
+
+  /** Follows a signal: brings that desk into view and focuses the agent there that needs the user. */
+  answerDesk(regionId: string): boolean {
+    if (!this.switchDesk(regionId)) return false;
+    const layout = this.layoutState;
+    const waiting = this.visibleAgentEntries.filter(
+      (entry) =>
+        (entry.status === 'awaiting-input' || entry.status === 'error') &&
+        deskOf(layout, entry.tileId) === regionId
+    );
+    const next =
+      this.attentionEntries.find((entry) => waiting.includes(entry)) ?? waiting[0] ?? null;
+    if (next) this.focusTile(next.tileId);
+    return true;
+  }
+
+  private get gatheringHere(): boolean {
+    const desk = this.activeDeskId;
+    return Boolean(desk && this.state.regions[desk]?.gather);
+  }
+
+  /**
+   * Switches between the classic canvas (one board) and Canvas Pro (desks). Entering Pro puts every
+   * loose window on a desk called Main and gives the top-level regions their order, as one
+   * undoable change; undoing it also goes back to the classic canvas (in Pro a window is always
+   * on a desk, so the move to Main could not be undone on its own). Leaving Pro changes nothing
+   * but the presentation.
+   */
+  setMode(mode: CanvasMode): { changed: boolean; desks: number; gathered: number } {
+    const layout = this.layoutState;
+    if (mode === this.mode) return { changed: false, desks: deskIds(layout).length, gathered: 0 };
+    this.ghost = null;
+    this.visitorIds = [];
+    if (mode === 'classic') {
+      this.updateState((state) => ({ ...state, mode }));
+      return { changed: true, desks: deskIds(layout).length, gathered: 0 };
+    }
+    this.setPaneCount(1);
+    const gathered = this.looseTileIds().length;
+    const hadMain = mainDeskId(layout);
+    const ops = homeLooseOps(layout, this.visibleTileIds());
+    const planned = ops.length > 0 ? this.planOps(ops) : null;
+    const settled = planned?.ok ? planned.plan.state : layout;
+    // The order the board shows them in, unless they were ordered as desks before.
+    const ordered = Object.values(layout.regions).some((region) => region.order !== undefined)
+      ? deskIds(layout)
+      : peerRegions(layout, null);
+    const main = hadMain ? null : mainDeskId(settled);
+    const next = stampDeskOrder(settled, main ? [main, ...ordered] : ordered);
+    const focusDesk = this.focusedTileId ? deskOf(next, this.focusedTileId) : null;
+    const start = focusDesk ?? deskOf(next, this.currentRegion()) ?? deskIds(next)[0] ?? null;
+    this.updateState((state) => ({ ...state, mode }));
+    const committed = this.commitLayout(
+      next,
+      'Switched to Canvas Pro',
+      'command',
+      main ? [main] : []
+    );
+    this.proEntryId = committed ? (this.undoStack.at(-1)?.id ?? null) : null;
+    this.showDesk(start);
+    return { changed: true, desks: deskIds(next).length, gathered };
+  }
+
+  /** Brings a desk into view at the screen's size (it may have been a region on the board). */
+  private showDesk(desk: string | null): void {
+    if (!desk) return;
+    this.fitWorkspace(desk, { ifResized: true });
+    this.switchDesk(desk);
+  }
+
+  /** Brings a desk into view (the swap), or goes into a region on one. */
+  switchDesk(regionId: string): boolean {
+    return this.goToRegion(regionId);
+  }
+
+  /** Makes a desk and switches to it. Returns its region id. */
+  createDesk(
+    input: { name?: string; members?: readonly string[]; gather?: WindowStatus } = {}
+  ): string | null {
+    const result = this.runLayout(
+      [
+        {
+          op: 'createRegion',
+          parent: null,
+          members: input.members ?? [],
+          ...(input.name ? { name: input.name } : {}),
+          ...(input.gather ? { gather: input.gather } : {}),
+        },
+      ],
+      { source: 'command' }
+    );
+    const created = result.ok ? result.plan.created[0] : undefined;
+    if (!created) return null;
+    this.switchDesk(created);
+    return created;
+  }
+
+  /**
+   * Removes a desk; its windows go to `into`, else to the desk before it. Nothing is closed.
+   * The last desk cannot be removed.
+   */
+  removeDesk(regionId: string, into?: string): LayoutRunResult {
+    const planned = removeDeskOps(this.layoutState, regionId, into);
+    if ('error' in planned) return { ok: false, reason: planned.error };
+    const wasActive = this.activeDeskId === regionId;
+    const result = this.runLayout(planned.ops, { source: 'command' });
+    if (result.ok && result.applied && wasActive) this.switchDesk(planned.heir);
+    return result;
+  }
+
+  reorderDesk(regionId: string, position: DeskPosition): LayoutRunResult {
+    return this.runLayout([{ op: 'reorderDesk', region: regionId, position }], {
+      source: 'command',
+    });
+  }
+
+  /** Windows on no desk, among those showing. */
+  private looseTileIds(): string[] {
+    const layout = this.layoutState;
+    return [...this.visibleTileIds()].filter((id) => parentOf(layout, id) === null).sort();
+  }
+
+  /**
+   * Canvas Pro: windows on no desk join the desk in view (Main when that one only gathers, or when
+   * there is none). Not undoable, like the placement of a new window.
+   */
+  homeStrays(): void {
+    if (!this.proMode) return;
+    const layout = this.layoutState;
+    const here = this.gatheringHere ? null : this.activeDeskId;
+    const ops = homeLooseOps(layout, this.visibleTileIds(), here);
+    if (ops.length === 0) return;
+    const result = this.planOps(ops);
+    if (!result.ok) return;
+    // Every desk has its place in the order, a Main made here included.
+    this.writeLayout(stampDeskOrder(result.plan.state, deskIds(result.plan.state)));
+  }
+
+  // ── Canvas Pro: visitors ───────────────────────────────────────────────────
+
+  /** Visitors showing now: still open, and living on a desk other than the one in view. */
+  get visitors(): string[] {
+    const desk = this.activeDeskId;
+    if (!desk || this.visitorIds.length === 0) return [];
+    const layout = this.layoutState;
+    const visible = this.visibleTileIds();
+    return this.visitorIds.filter((id) => visible.has(id) && deskOf(layout, id) !== desk);
+  }
+
+  /**
+   * Where each visitor is drawn: tiled across a desk with no windows of its own (a gathering
+   * desk), else floating as a group above the desk's windows. Never written to the board.
+   */
+  get visitorRects(): ReadonlyMap<string, TileRect> {
+    const ids = this.visitors;
+    const desk = this.activeDeskId;
+    const region = desk ? this.state.regions[desk] : undefined;
+    if (!desk || !region || ids.length === 0) return NO_VISITORS;
+    const content = contentBox(region, frameAllowanceFor(this.state.showTaskFrames));
+    return visitorLayout(content, ids, (this.regionEntry(desk)?.windowCount ?? 0) > 0);
+  }
+
+  /** True when visitors float above the desk's own windows (the desk recedes behind them). */
+  get visitorsFloating(): boolean {
+    const desk = this.activeDeskId;
+    return (
+      this.visitors.length > 0 && desk !== null && (this.regionEntry(desk)?.windowCount ?? 0) > 0
+    );
+  }
+
+  /** The desk a visitor came from. */
+  visitorHome(tileId: string): string | null {
+    return deskOf(this.layoutState, tileId);
+  }
+
+  /**
+   * Brings windows from other desks to the desk in view without moving them: they visit, and go
+   * home when the desk changes or they are sent back. Returns the ones that came.
+   */
+  bringHere(tileIds: readonly string[]): string[] {
+    const desk = this.activeDeskId;
+    if (!desk) return [];
+    const layout = this.layoutState;
+    const visible = this.visibleTileIds();
+    const brought = tileIds.filter(
+      (id) => !isRegionId(id) && visible.has(id) && deskOf(layout, id) !== desk
+    );
+    const next = [...new Set([...this.visitorIds, ...brought])];
+    if (next.length !== this.visitorIds.length) this.visitorIds = next;
+    const [first] = brought;
+    if (first) this.focusTile(first);
+    return brought;
+  }
+
+  /** Sends visitors home (all of them when none are named). Returns the ones that left. */
+  sendBack(tileIds?: readonly string[]): string[] {
+    const showing = this.visitors;
+    const leaving = tileIds ? showing.filter((id) => tileIds.includes(id)) : showing;
+    this.visitorIds = tileIds ? this.visitorIds.filter((id) => !tileIds.includes(id)) : [];
+    if (this.focusedTileId && leaving.includes(this.focusedTileId)) this.focusedTileId = null;
+    return leaving;
+  }
+
+  /** Makes visitors (all of them when none are named) live on the desk in view. Undoable. */
+  keepVisitors(tileIds?: readonly string[]): LayoutRunResult | null {
+    const desk = this.activeDeskId;
+    const showing = this.visitors;
+    const staying = tileIds ? showing.filter((id) => tileIds.includes(id)) : showing;
+    if (!desk || staying.length === 0) return null;
+    const result = this.runLayout(
+      [{ op: 'move', targets: staying, to: { kind: 'region', region: desk } }],
+      { source: 'command' }
+    );
+    if (result.ok) this.visitorIds = this.visitorIds.filter((id) => !staying.includes(id));
+    return result;
+  }
+
+  /** What the gathering desk in view collects right now ('' when it is not a gathering desk). */
+  private gatherKey(): string {
+    const desk = this.activeDeskId;
+    const status = desk ? this.state.regions[desk]?.gather : undefined;
+    if (!desk || !status) return '';
+    const matches = gatherMatches(
+      this.layoutState,
+      this.layoutWindows,
+      desk,
+      status,
+      this.visibleTileIds()
+    );
+    return `${desk}#${matches.join('|')}`;
+  }
+
+  /**
+   * A gathering desk in view takes in every window with its status. Those already there stay
+   * until the desk changes, so an agent does not vanish the moment it is answered.
+   */
+  gatherVisitors(): void {
+    const desk = this.activeDeskId;
+    const status = desk ? this.state.regions[desk]?.gather : undefined;
+    if (!desk || !status) return;
+    const matches = gatherMatches(
+      this.layoutState,
+      this.layoutWindows,
+      desk,
+      status,
+      this.visibleTileIds()
+    );
+    const next = [...new Set([...this.visitorIds, ...matches])];
+    if (next.length !== this.visitorIds.length) this.visitorIds = next;
+  }
+
+  /** Canvas Pro: brings the desk a window is on into view, unless the window already shows. */
+  private revealOnDesk(tileId: string): void {
+    const layout = this.layoutState;
+    const visiting = this.visitors.includes(tileId);
+    const desk = visiting ? this.activeDeskId : deskOf(layout, tileId);
+    if (!desk) return;
+    if (desk !== this.activeDeskId) {
+      this.switchDesk(desk);
+      return;
+    }
+    // On this desk, but outside the region the camera frames: back out to the whole desk.
+    const scope = this.location.kind === 'board' ? this.location.regionScope : null;
+    if (scope && scope !== desk && (visiting || !isWithin(layout, tileId, scope))) {
+      this.switchDesk(desk);
+    }
   }
 
   // ── Agents ─────────────────────────────────────────────────────────────────
@@ -2285,16 +3163,24 @@ export class CanvasStore {
   claimSpokenName(conversationId: string): string {
     const existing = this.state.spokenNames[conversationId];
     if (existing) return existing;
-    const name = assignSpokenName(undefined, Object.values(this.state.spokenNames));
+    const departed = this.departedConversationIds();
+    this.forgetDeparted([...departed]);
+    const kept = Object.entries(this.state.spokenNames).filter(([id]) => !departed.has(id));
+    const name = assignSpokenName(
+      undefined,
+      kept.map(([, taken]) => taken)
+    );
+    this.claimedNames.add(conversationId);
     this.updateState((current) => ({
       ...current,
-      spokenNames: { ...current.spokenNames, [conversationId]: name },
+      spokenNames: { ...Object.fromEntries(kept), [conversationId]: name },
     }));
     return name;
   }
 
   /** Frees a name claimed for an agent that was never created. */
   releaseSpokenName(conversationId: string): void {
+    this.claimedNames.delete(conversationId);
     if (!this.state.spokenNames[conversationId]) return;
     this.updateState((current) => {
       const spokenNames = { ...current.spokenNames };
@@ -2303,13 +3189,312 @@ export class CanvasStore {
     });
   }
 
-  setSpokenName(conversationId: string, name: string): void {
-    const trimmed = name.trim();
-    if (!trimmed) return;
+  /**
+   * Renames an agent. Returns false, changing nothing, when the name is empty or another agent
+   * already goes by it: two agents under one name could not be addressed by voice.
+   */
+  setSpokenName(conversationId: string, name: string): boolean {
+    const trimmed = name.trim().replace(/\s+/g, ' ');
+    const key = spokenNameKey(trimmed);
+    if (!key) return false;
+    // A stored name is somebody's until its agent is known to be gone, loaded yet or not.
+    const taken = this.keptSpokenNames().some(
+      ([id, other]) => id !== conversationId && spokenNameKey(other) === key
+    );
+    if (taken) return false;
+    const previous = this.state.spokenNames[conversationId];
     this.updateState((current) => ({
       ...current,
       spokenNames: { ...current.spokenNames, [conversationId]: trimmed },
     }));
+    if (previous && spokenNameKey(previous) !== key) {
+      this.rememberFormerName(conversationId, previous);
+    }
+    const entry = this.agentEntries.find((agent) => agent.conversationId === conversationId);
+    if (entry) {
+      this.titlesOwed.set(conversationId, { previous, attempts: 0 });
+      this.syncTitle(entry, trimmed);
+    }
+    return true;
+  }
+
+  /**
+   * The renames that would drop the number from every name whose word no other agent uses
+   * ("Atlas 3" to "Atlas"): for names numbered back when an archived agent's name was never
+   * handed out again. A word an agent that has not loaded may hold is left alone.
+   */
+  simplifiableNames(): { conversationId: string; from: string; to: string }[] {
+    const words = AGENT_WINDOW_NAMES.length;
+    const wordOf = (name: string) => {
+      const slot = parseAgentWindowNameSlot(name);
+      return slot === null ? null : slot % words;
+    };
+    const kept = this.keptSpokenNames();
+    const planned: { conversationId: string; from: string; to: string }[] = [];
+    for (const entry of this.agentEntries) {
+      const conversationId = entry.conversationId;
+      const from = this.state.spokenNames[conversationId];
+      const slot = from ? parseAgentWindowNameSlot(from) : null;
+      if (!from || slot === null || slot < words) continue;
+      const shared = kept.some(
+        ([id, other]) => id !== conversationId && wordOf(other) === slot % words
+      );
+      if (!shared) planned.push({ conversationId, from, to: agentWindowName(slot % words) });
+    }
+    return planned;
+  }
+
+  /**
+   * Makes the renames of `simplifiableNames`, or just `planned` when the developer was shown
+   * those, and returns the ones that took. Never automatic.
+   */
+  simplifySpokenNames(
+    planned: readonly {
+      conversationId: string;
+      from: string;
+      to: string;
+    }[] = this.simplifiableNames()
+  ): { from: string; to: string }[] {
+    return planned
+      .filter(
+        ({ conversationId, from, to }) =>
+          this.state.spokenNames[conversationId] === from && this.setSpokenName(conversationId, to)
+      )
+      .map(({ from, to }) => ({ from, to }));
+  }
+
+  /** Names this agent was renamed from this session, newest first: it still answers to them. */
+  formerNamesOf(conversationId: string): readonly string[] {
+    return this.formerNames.get(conversationId) ?? [];
+  }
+
+  /** Names of agents that left the roster in the last few minutes (archived, deleted). */
+  get departedNames(): readonly string[] {
+    const since = Date.now() - DEPARTED_NAME_TTL_MS;
+    return this.leftNames.filter((left) => left.at >= since).map((left) => left.name);
+  }
+
+  private rememberFormerName(conversationId: string, name: string): void {
+    const key = spokenNameKey(name);
+    if (!key) return;
+    const others = this.formerNamesOf(conversationId).filter(
+      (former) => spokenNameKey(former) !== key
+    );
+    this.formerNames.set(conversationId, [name, ...others].slice(0, FORMER_NAMES_KEPT));
+  }
+
+  /** Drops the session's notes on agents whose names have been freed. */
+  private forgetDeparted(conversationIds: readonly string[]): void {
+    for (const id of conversationIds) {
+      this.seenAgents.delete(id);
+      this.goneSince.delete(id);
+      this.formerNames.delete(id);
+      this.titlesChecked.delete(id);
+      this.titlesOwed.delete(id);
+    }
+  }
+
+  /**
+   * Brings conversation titles in step with spoken names. An agent just named or renamed gets
+   * its name as title. A title from before is looked at once a session and only changed when it
+   * misleads, so two computers that know one conversation by different names do not take turns
+   * retitling it.
+   */
+  private syncTitles(named: readonly AgentTileEntry[]): void {
+    for (const entry of named) {
+      this.titlesOwed.set(entry.conversationId, { attempts: 0 });
+    }
+    const entries = this.agentEntries;
+    // Whether a title misleads depends on who else is here: judged once everyone is.
+    const complete = this.rosterComplete();
+    for (const entry of entries) {
+      const id = entry.conversationId;
+      const name = this.state.spokenNames[id];
+      if (!name) continue;
+      if (complete && !this.titlesChecked.has(id)) {
+        this.titlesChecked.add(id);
+        if (!this.titlesOwed.has(id) && this.titleMisleads(entry, entries)) {
+          this.titlesOwed.set(id, { attempts: 0 });
+        }
+      }
+      if (this.titlesOwed.has(id)) this.syncTitle(entry, name);
+    }
+  }
+
+  /**
+   * True when an agent's default title would send the developer to a different agent: it is
+   * another agent's name ("Atlas" here, an agent called Atlas there), the word of another
+   * agent's numbered name ("Atlas" beside Atlas 3), or a title several agents share.
+   */
+  private titleMisleads(entry: AgentTileEntry, entries: readonly AgentTileEntry[]): boolean {
+    const title = entry.conversationTitle.trim();
+    const key = spokenNameKey(title);
+    if (!key) return true;
+    const words = AGENT_WINDOW_NAMES.length;
+    const slot = parseAgentWindowNameSlot(title);
+    return entries.some((other) => {
+      if (other.conversationId === entry.conversationId) return false;
+      const name = this.state.spokenNames[other.conversationId] ?? '';
+      if (spokenNameKey(name) === key) return true;
+      const otherSlot = parseAgentWindowNameSlot(name);
+      if (slot !== null && slot < words && otherSlot !== null && otherSlot % words === slot) {
+        return true;
+      }
+      return spokenNameKey(other.conversationTitle) === key;
+    });
+  }
+
+  /**
+   * Gives an agent's conversation its spoken name as its title, so the task view, other devices,
+   * and a later session all show the name the developer says. Only a default title or the
+   * agent's previous name is replaced; a title someone wrote stays, as a second name. The title
+   * it replaces keeps working as a name for the rest of the session. A host that is offline
+   * refuses: the title stays owed and is tried again when the roster next changes.
+   */
+  private syncTitle(entry: AgentTileEntry, name: string): void {
+    const id = entry.conversationId;
+    const owed = this.titlesOwed.get(id);
+    // While the host is being asked the title already shows the name: wait for its answer.
+    if (!owed || owed.inFlight) return;
+    const title = entry.conversationTitle.trim();
+    const titleKey = spokenNameKey(title);
+    // Retitled by hand since the first try: that title is the developer's now.
+    if (owed.replacing !== undefined && owed.replacing !== titleKey) {
+      this.titlesOwed.delete(id);
+      return;
+    }
+    const isDefault =
+      !title ||
+      parseAgentWindowNameSlot(title) !== null ||
+      (title.toLowerCase().startsWith(`${entry.providerId.toLowerCase()} (`) &&
+        /^\(\d+\)$/.test(title.slice(entry.providerId.length + 1)));
+    const wasName = owed.previous !== undefined && titleKey === spokenNameKey(owed.previous);
+    const manager = conversationRegistry.get(entry.taskId);
+    if (titleKey === spokenNameKey(name) || (!isDefault && !wasName) || !manager) {
+      this.titlesOwed.delete(id);
+      return;
+    }
+    if (owed.attempts >= TITLE_SYNC_ATTEMPTS) return;
+    if (owed.attempts === 0) {
+      owed.replacing = titleKey;
+      if (title) this.rememberFormerName(id, title);
+    }
+    owed.attempts += 1;
+    owed.inFlight = true;
+    void manager.renameConversation(id, name).then(
+      () => {
+        if (this.titlesOwed.get(id) === owed) this.titlesOwed.delete(id);
+      },
+      (error: unknown) => {
+        owed.inFlight = false;
+        log.warn('canvas: could not give a conversation its spoken name as title', { error });
+      }
+    );
+  }
+
+  /**
+   * Stored names that are still somebody's: `[conversationId, name]`. A rename is the
+   * developer's own act, so it need not wait out the minute that guards against a removal being
+   * undone: the name of an agent that is provably gone is free to it at once.
+   */
+  private keptSpokenNames(): [string, string][] {
+    const departed = this.departedConversationIds(Date.now(), 0);
+    return Object.entries(this.state.spokenNames).filter(([id]) => !departed.has(id));
+  }
+
+  /**
+   * Conversations whose stored names are free again because their agents are known to be gone:
+   * archived, deleted, or in a project that was removed. Then names stay short ("Bravo") instead
+   * of counting up for ever ("Bravo 3"). An agent that is only not loaded yet (the app is
+   * starting, a project is reconnecting) gives no such proof and keeps its name, so a name is
+   * never handed to a second agent behind the back of the first.
+   */
+  private departedConversationIds(now = Date.now(), grace = DEPARTURE_GRACE_MS): Set<string> {
+    const live = new Set(this.agentEntries.map((entry) => entry.conversationId));
+    const gone = new Set<string>();
+    // An agent that was here this session is gone once that can be shown and has lasted: a
+    // removal its host refuses is rolled back, and must not cost the agent its name.
+    for (const [id, where] of this.seenAgents) {
+      if (live.has(id)) {
+        this.goneSince.delete(id);
+        continue;
+      }
+      // Not provable right now (its project is reloading): neither freed nor timed afresh.
+      if (!this.hasLeft(id, where)) continue;
+      const since = this.goneSince.get(id) ?? now;
+      if (!this.goneSince.has(id)) {
+        this.goneSince.set(id, now);
+        const name = this.state.spokenNames[id];
+        if (name) {
+          const key = spokenNameKey(name);
+          const others = this.leftNames.filter((left) => spokenNameKey(left.name) !== key);
+          this.leftNames.splice(0, this.leftNames.length, { name, at: now }, ...others);
+          this.leftNames.length = Math.min(this.leftNames.length, DEPARTED_NAMES_KEPT);
+        }
+      }
+      if (now - since >= grace) gone.add(id);
+    }
+    // An agent from an earlier session, not seen in this one. Archived tasks stay loaded with
+    // their conversations, which is proof on its own.
+    for (const project of this.projectManager.projects.values()) {
+      const context = asAvailableProject(project);
+      if (!context) continue;
+      for (const task of context.get(taskManagerStoreToken).tasks.values()) {
+        if (task.state === 'unregistered' || isCanvasTask(task)) continue;
+        const manager = conversationRegistry.get(task.data.id);
+        for (const id of manager?.conversations.keys() ?? []) {
+          if (!this.seenAgents.has(id)) gone.add(id);
+        }
+      }
+    }
+    // With everything loaded, a name kept for an agent that is nowhere is kept for nobody.
+    if (this.rosterComplete()) {
+      for (const id of Object.keys(this.state.spokenNames)) {
+        if (!this.claimedNames.has(id) && !this.seenAgents.has(id)) gone.add(id);
+      }
+    }
+    for (const id of live) gone.delete(id);
+    return gone;
+  }
+
+  /**
+   * True when every project, task list, and conversation list has loaded, so the roster holds
+   * every agent there is. False whenever that cannot be shown: while the app starts, while a
+   * project is hydrating or failed to, or while a list is still on its way.
+   */
+  private rosterComplete(): boolean {
+    const projects = [...this.projectManager.projects.values()];
+    if (projects.length === 0) return false;
+    for (const project of projects) {
+      const context = asAvailableProject(project);
+      if (!context) return false;
+      const taskManager = context.get(taskManagerStoreToken);
+      if (!taskManager.listLoaded) return false;
+      for (const task of taskManager.tasks.values()) {
+        if (!isCanvasTask(task)) continue;
+        const conversations = conversationRegistry.get(task.data.id);
+        if (!conversations || conversations.list.data === null) return false;
+      }
+    }
+    return true;
+  }
+
+  /** True when an agent seen on the roster earlier is provably gone, not just unloaded. */
+  private hasLeft(conversationId: string, where: { projectId: string; taskId: string }): boolean {
+    const projects = this.projectManager.projects;
+    const project = projects.get(where.projectId);
+    // The project was here this session and is not any more: removed from the app.
+    if (!project) return true;
+    const context = asAvailableProject(project);
+    if (!context) return false;
+    const taskManager = context.get(taskManagerStoreToken);
+    const task = taskManager.tasks.get(where.taskId);
+    // A missing task was deleted, as long as the list it is missing from has loaded.
+    if (!task) return taskManager.listLoaded;
+    if (task.state === 'unregistered') return false;
+    if (!isCanvasTask(task)) return true;
+    const manager = conversationRegistry.get(where.taskId);
+    return !!manager && manager.list.data !== null && !manager.conversations.has(conversationId);
   }
 }
 
@@ -2362,6 +3547,18 @@ function locationWithin(location: CanvasLocation, layout: LayoutState): CanvasLo
     return BOARD_ROOT;
   }
   return location;
+}
+
+/** Canvas Pro: a board location is always on a desk: the preferred one, else the first. */
+function locationOnDesk(
+  location: CanvasLocation,
+  layout: LayoutState,
+  preferred: readonly (string | null)[]
+): CanvasLocation {
+  if (location.kind !== 'board' || location.regionScope) return location;
+  const desk =
+    preferred.map((id) => deskOf(layout, id)).find((id) => id !== null) ?? deskIds(layout)[0];
+  return desk ? { kind: 'board', regionScope: desk } : location;
 }
 
 function overlapArea(a: TileRect, b: TileRect): number {

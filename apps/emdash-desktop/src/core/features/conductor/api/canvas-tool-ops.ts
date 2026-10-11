@@ -5,6 +5,7 @@
  */
 
 import type { LayoutOp, SizeSpec, Slot } from '@core/features/canvas/api/canvas-layout';
+import { deskPhrase } from './canvas-desk-ops';
 import { resolveCanvasRef, type CanvasRefContext, type RefPreference } from './canvas-refs';
 
 export const ARRANGE_OPS = [
@@ -72,6 +73,10 @@ type Ids = { ids: string[] } | { error: string };
 const ROOT = /^(?:board|the board|canvas|the canvas|main board|root|none)$/i;
 
 function resolve(reference: string, context: CanvasRefContext, prefer: RefPreference): Ids {
+  // Canvas Pro: "the Review desk" names a desk, which every step treats as the region it is.
+  const desk = deskPhrase(reference, context);
+  if (desk?.kind === 'match') return { ids: [desk.id] };
+  if (desk?.kind === 'clarify') return { error: desk.question };
   const result = resolveCanvasRef(reference, context, prefer);
   if (result.kind === 'match') return { ids: [...result.ids] };
   if (result.kind === 'clarify') return { error: result.question };

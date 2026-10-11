@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { LayoutOp } from '@core/features/canvas/api/canvas-layout';
-import { resolveCanvasRef, type CanvasEntity, type CanvasRefContext } from './canvas-refs';
+import {
+  resolveCanvasRef,
+  type CanvasDeskContext,
+  type CanvasEntity,
+  type CanvasRefContext,
+} from './canvas-refs';
 import { stepsToOps } from './canvas-tool-ops';
 import { parseCommand } from './grammar';
 import { parseCanvasCommand, type CanvasParse } from './grammar-canvas';
@@ -465,5 +470,306 @@ describe('sub-canvas voice', () => {
     expect(stepsToOps([{ op: 'arrange', region: 'Review', layout: 'tile' }], context())).toEqual({
       ops: [{ op: 'arrange', targets: null, scope: 'region:review', layout: 'tile' }],
     });
+  });
+});
+
+describe('Canvas Pro desks', () => {
+  // Three desks in order (Main, Review, Frontend); Main is in view.
+  const onDesks: CanvasEntity[] = [
+    { id: 'agent:a', kind: 'agent', name: 'Atlas', status: 'working', parentId: 'region:review' },
+    { id: 'agent:b', kind: 'agent', name: 'Bravo', status: 'needs-you', parentId: 'region:review' },
+    { id: 'agent:c', kind: 'agent', name: 'Cedar', status: 'idle', parentId: 'region:main' },
+    { id: 'region:main', kind: 'region', name: 'Main', parentId: null },
+    { id: 'region:review', kind: 'region', name: 'Review', parentId: null },
+    { id: 'region:frontend', kind: 'region', name: 'Frontend', parentId: null },
+  ];
+  const DESKS: CanvasDeskContext = {
+    order: ['region:main', 'region:review', 'region:frontend'],
+    active: 'region:main',
+    newest: 'region:frontend',
+    visitors: [],
+  };
+  const pro = (
+    overrides: Partial<CanvasRefContext> = {},
+    desks: Partial<CanvasDeskContext> = {}
+  ): CanvasRefContext =>
+    context({
+      entities: onDesks,
+      currentRegion: 'region:main',
+      desks: { ...DESKS, ...desks },
+      ...overrides,
+    });
+  /** The desk command an utterance becomes; anything else comes back as parsed. */
+  const desk = (text: string, on: CanvasRefContext = pro()) => {
+    const parsed = parseCanvasCommand(text, on);
+    return parsed?.kind === 'canvas' && parsed.action.type === 'desk'
+      ? parsed.action.command
+      : parsed;
+  };
+  const switchTo = (id: string) => ({ action: 'switch', desk: id });
+  const moveTo = (targets: string[], region: string) => ({
+    op: 'move',
+    targets,
+    to: { kind: 'region', region },
+  });
+
+  it('makes desks, named and filled', () => {
+    expect(desk('new desk')).toEqual({
+      action: 'create',
+      ops: [{ op: 'createRegion', parent: null, members: [] }],
+      members: [],
+      gather: null,
+      follow: true,
+    });
+    expect(desk('new desk called QA with Atlas and Bravo')).toMatchObject({
+      action: 'create',
+      ops: [{ op: 'createRegion', parent: null, members: ['agent:a', 'agent:b'], name: 'QA' }],
+      follow: true,
+    });
+    expect(desk('create a desktop named Docs')).toMatchObject({ ops: [{ name: 'Docs' }] });
+    expect(desk('make a space called Research and stay here')).toMatchObject({
+      ops: [{ name: 'Research' }],
+      follow: false,
+    });
+    expect(desk('put Atlas and Bravo on a new desk called Pairing')).toMatchObject({
+      action: 'create',
+      ops: [{ parent: null, members: ['agent:a', 'agent:b'], name: 'Pairing' }],
+    });
+  });
+
+  it('makes gathering desks, called Triage unless named', () => {
+    for (const text of [
+      'make a desk for everything that needs me',
+      'create a desk for agents that need me',
+      'new desk for everything waiting on me',
+    ]) {
+      expect(desk(text)).toMatchObject({
+        action: 'create',
+        ops: [{ parent: null, members: [], name: 'Triage', gather: 'needs-you' }],
+        gather: 'needs-you',
+      });
+    }
+    expect(desk('make a desk for the failed ones')).toMatchObject({
+      ops: [{ name: 'Failed', gather: 'error' }],
+    });
+    expect(desk('create a desk for everything that is working')).toMatchObject({
+      ops: [{ name: 'Working', gather: 'working' }],
+    });
+    expect(desk('make a desk for agents that are done')).toMatchObject({
+      ops: [{ name: 'Done', gather: 'done' }],
+    });
+    expect(desk('make a desk called Inbox for everything that needs me')).toMatchObject({
+      ops: [{ name: 'Inbox', gather: 'needs-you' }],
+    });
+    // "For" followed by windows fills the desk instead.
+    expect(desk('new desk for Atlas and Bravo')).toMatchObject({
+      ops: [{ members: ['agent:a', 'agent:b'] }],
+      gather: null,
+    });
+  });
+
+  it('switches by name, step, number, and recency', () => {
+    expect(desk('switch to the Review desk')).toEqual(switchTo('region:review'));
+    expect(desk('go to the review desktop')).toEqual(switchTo('region:review'));
+    expect(desk('take me to the frontend space')).toEqual(switchTo('region:frontend'));
+    expect(desk('next desk')).toEqual(switchTo('region:review'));
+    expect(desk('previous desk')).toEqual(switchTo('region:frontend'));
+    expect(desk('desk 3')).toEqual(switchTo('region:frontend'));
+    expect(desk('switch to desk two')).toEqual(switchTo('region:review'));
+    expect(desk('the second desk')).toEqual(switchTo('region:review'));
+    expect(desk('the new desk')).toEqual(switchTo('region:frontend'));
+    expect(desk('the other desk', pro({ previousRegion: 'region:review' }))).toEqual(
+      switchTo('region:review')
+    );
+    expect(desk('the other desk')).toMatchObject({ kind: 'clarify' });
+    expect(desk('next desk', pro({}, { order: ['region:main'] }))).toEqual({
+      kind: 'clarify',
+      question: 'There is only one desk.',
+    });
+  });
+
+  it('goes to a desk named without the word, as it goes into any region', () => {
+    for (const text of ['open Review', 'go to Review', 'switch to Review']) {
+      expect(parseCanvasCommand(text, pro())).toEqual({
+        kind: 'canvas',
+        action: { type: 'goToRegion', regionId: 'region:review' },
+      });
+    }
+  });
+
+  it('moves windows to a desk for good, following when asked', () => {
+    expect(desk('put Cedar on the Frontend desk')).toEqual({
+      action: 'move_windows',
+      ops: [moveTo(['agent:c'], 'region:frontend')],
+      desk: 'region:frontend',
+      windows: ['agent:c'],
+      already: [],
+      follow: false,
+    });
+    expect(desk('move Cedar to the Review desk and follow')).toMatchObject({
+      desk: 'region:review',
+      windows: ['agent:c'],
+      follow: true,
+    });
+    expect(desk('send Atlas and Bravo onto desk 3 and take me there')).toMatchObject({
+      ops: [moveTo(['agent:a', 'agent:b'], 'region:frontend')],
+      follow: true,
+    });
+    expect(desk('move Atlas here')).toMatchObject({
+      ops: [moveTo(['agent:a'], 'region:main')],
+      desk: 'region:main',
+    });
+    // Already there: nothing to move, and the reply says so.
+    expect(desk('move Cedar to the Main desk')).toMatchObject({
+      ops: [],
+      windows: [],
+      already: ['agent:c'],
+    });
+  });
+
+  it('renames, reorders, and removes desks', () => {
+    expect(desk('rename this desk to Home')).toEqual({
+      action: 'rename',
+      ops: [{ op: 'renameRegion', region: 'region:main', name: 'Home' }],
+      desk: 'region:main',
+    });
+    expect(desk('call this desk Home')).toMatchObject({ ops: [{ name: 'Home' }] });
+    expect(ops(parseCanvasCommand('rename the Review desk to QA', pro()))).toEqual([
+      { op: 'renameRegion', region: 'region:review', name: 'QA' },
+    ]);
+    expect(desk('move this desk right')).toEqual({
+      action: 'reorder',
+      ops: [{ op: 'reorderDesk', region: 'region:main', position: 'right' }],
+      desk: 'region:main',
+    });
+    expect(desk('move the Review desk to the left')).toMatchObject({
+      ops: [{ op: 'reorderDesk', region: 'region:review', position: 'left' }],
+    });
+    expect(desk('make this desk last')).toMatchObject({ ops: [{ position: 'last' }] });
+    expect(desk('put the Frontend desk first')).toMatchObject({
+      ops: [{ region: 'region:frontend', position: 'first' }],
+    });
+    expect(desk('remove the Review desk')).toEqual({
+      action: 'remove',
+      desk: 'region:review',
+      into: null,
+    });
+    expect(desk('close this desk')).toMatchObject({ action: 'remove', desk: 'region:main' });
+    expect(desk('delete desk 3')).toMatchObject({ action: 'remove', desk: 'region:frontend' });
+  });
+
+  it('brings visitors, sends them back, and keeps them', () => {
+    expect(desk('bring Atlas here')).toEqual({ action: 'bring', windows: ['agent:a'] });
+    expect(desk('bring Atlas and Bravo over')).toEqual({
+      action: 'bring',
+      windows: ['agent:a', 'agent:b'],
+    });
+    const one = pro({ focusedId: 'agent:a' }, { visitors: ['agent:a'] });
+    expect(desk('send it back', one)).toEqual({ action: 'send_back', windows: ['agent:a'] });
+    expect(desk('keep it here', one)).toEqual({ action: 'keep', windows: ['agent:a'] });
+    expect(desk('send Atlas back', one)).toEqual({ action: 'send_back', windows: ['agent:a'] });
+    const two = pro({}, { visitors: ['agent:a', 'agent:b'] });
+    expect(desk('send them back', two)).toEqual({ action: 'send_back', windows: null });
+    expect(desk('keep them here', two)).toEqual({ action: 'keep', windows: null });
+    // Two visiting and neither focused: "it" is a question, not a pick.
+    expect(desk('send it back', two)).toMatchObject({ kind: 'clarify' });
+    // Nobody visiting: the phrase is not about desks.
+    expect(desk('send it back')).toBeNull();
+    expect(desk('keep it here')).toBeNull();
+    // "Put it back" stays undo, and "bring Atlas back" stays reopen (not a canvas command).
+    expect(parseCanvasCommand('put it back', one)).toEqual({
+      kind: 'canvas',
+      action: { type: 'undo' },
+    });
+    expect(parseCanvasCommand('bring Atlas back', one)).toBeNull();
+  });
+
+  it('switches the canvas mode from either canvas', () => {
+    for (const on of [context(), pro()]) {
+      for (const text of ['switch to canvas pro', 'use canvas pro', 'turn on canvas pro']) {
+        expect(desk(text, on)).toEqual({ action: 'set_mode', mode: 'pro' });
+      }
+      for (const text of [
+        'switch to the classic canvas',
+        'use the classic canvas',
+        'go back to the classic canvas',
+      ]) {
+        expect(desk(text, on)).toEqual({ action: 'set_mode', mode: 'classic' });
+      }
+    }
+  });
+
+  it('reads a desk phrase wherever a region can be named', () => {
+    expect(ops(parseCanvasCommand('tile the Review desk', pro()))).toEqual([
+      { op: 'arrange', targets: null, scope: 'region:review', layout: 'tile' },
+    ]);
+    expect(ops(parseCanvasCommand('clean up my desk', pro()))).toEqual([
+      { op: 'arrange', targets: null, scope: 'region:main', layout: 'tidy' },
+    ]);
+    expect(parseCanvasCommand("what's on the Review desk", pro())).toEqual({
+      kind: 'canvas',
+      action: { type: 'describe', regionId: 'region:review' },
+    });
+    expect(parseCanvasCommand('list desks', pro())).toEqual({
+      kind: 'canvas',
+      action: { type: 'describe', regionId: null },
+    });
+    expect(parseCanvasCommand('leave this desk', pro())).toEqual({
+      kind: 'canvas',
+      action: { type: 'up' },
+    });
+  });
+
+  it('never guesses a desk or a window', () => {
+    for (const text of [
+      'switch to the billing desk',
+      'put Atlas on the billing desk',
+      'move Atlas to the billing desk',
+      'put the login button on the Review desk',
+      'remove the billing desk',
+      'bring the login button here',
+      'new desk with the login button',
+      'this desk',
+    ]) {
+      expect(parseCanvasCommand(text, pro())).toBeNull();
+    }
+  });
+
+  it('claims nothing about desks on the classic canvas', () => {
+    for (const text of [
+      'new desk called Review',
+      'next desk',
+      'switch to the Review desk',
+      'put Cedar on the Review desk',
+      'bring Atlas here',
+      'move Atlas here',
+      'remove this desk',
+      'list desks',
+    ]) {
+      expect(parse(text)).toBeNull();
+    }
+    // "Space" keeps meaning a region there, and becomes a desk only in Canvas Pro.
+    expect(ops(parse('make a space called Docs'))).toEqual([
+      { op: 'createRegion', members: [], name: 'Docs' },
+    ]);
+    expect(desk('make a space called Docs')).toMatchObject({ action: 'create' });
+  });
+
+  it('takes desk commands through the main grammar, polite forms and all', () => {
+    const roster: RosterAgent[] = [
+      { id: 'agent:a', name: 'Atlas', providerLabel: 'Claude', taskName: 'auth-refactor' },
+    ];
+    expect(parseCommand('Can you switch to the Review desk, please?', roster, null, pro())).toEqual(
+      { kind: 'canvas', action: { type: 'desk', command: switchTo('region:review') } }
+    );
+    expect(parseCommand('okay, next desk', roster, null, pro())).toEqual({
+      kind: 'canvas',
+      action: { type: 'desk', command: switchTo('region:review') },
+    });
+    // An agent still wins its own commands.
+    expect(parseCommand('focus Atlas', roster, null, pro())?.kind).toBe('focus');
+    expect(parseCommand('tell Atlas to clean up the desktop', roster, null, pro())?.kind).toBe(
+      'send'
+    );
   });
 });

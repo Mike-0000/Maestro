@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { AGENT_WINDOW_NAMES } from '@core/features/conversations/api/agent-window-names';
 import {
   AGENT_TILE_SIZE,
   assignSpokenName,
   boundsOf,
   browsersToSuspend,
+  duplicateSpokenNames,
   FRAME_HEADER,
   FRAME_PADDING,
   frameRect,
@@ -15,6 +17,7 @@ import {
   rectContains,
   rectsOverlap,
   resolveBrowserTileMode,
+  spokenNameKey,
   TILE_GAP,
   viewportRect,
   zoomBand,
@@ -101,6 +104,59 @@ describe('spoken names', () => {
     expect(assignSpokenName('Atlas', ['Atlas'])).toBe('Bravo');
     expect(assignSpokenName('Claude (1)', [])).toBe('Atlas');
     expect(assignSpokenName('Fix login flow', ['Atlas'])).toBe('Bravo');
+  });
+
+  it('gives a word no agent uses before any numbered name', () => {
+    // Atlas 3 and Kilo 3 are the only agents left: the next one is not "Atlas", and not "Lima 3".
+    expect(assignSpokenName(undefined, ['Atlas 3', 'Kilo 3'])).toBe('Bravo');
+    expect(assignSpokenName(undefined, ['Atlas 3', 'Bravo', 'Cedar 2'])).toBe('Delta');
+    // The task view titled it "Atlas"; an Atlas 3 exists, so the canvas picks another word.
+    expect(assignSpokenName('Atlas', ['Atlas 3'])).toBe('Bravo');
+    expect(assignSpokenName('Cedar', ['Atlas 3'])).toBe('Cedar');
+  });
+
+  it('numbers names only once every word is in use', () => {
+    const all = AGENT_WINDOW_NAMES.map((name) => name);
+    expect(assignSpokenName(undefined, all)).toBe('Atlas 2');
+    expect(assignSpokenName('Vesper 2', all)).toBe('Vesper 2');
+    expect(assignSpokenName(undefined, [...all, 'Atlas 2'])).toBe('Bravo 2');
+    // "Atlas" is free again while Atlas 2 lives on: the lowest free name.
+    expect(assignSpokenName(undefined, [...all.slice(1), 'Atlas 2'])).toBe('Atlas');
+  });
+
+  it('compares names without case, spacing, or punctuation, in any script', () => {
+    expect(spokenNameKey('  Atlas-2 ')).toBe(spokenNameKey('atlas 2'));
+    expect(spokenNameKey('Back End')).not.toBe(spokenNameKey('Backend'));
+    expect(spokenNameKey('Привет')).toBe('привет');
+    expect(spokenNameKey('!!')).toBe('');
+  });
+
+  it('makes all but one holder of a shared name give it up', () => {
+    const holders = [
+      { id: 'old', name: 'Bravo', createdAt: '2026-10-01T10:00:00.000Z', settled: false },
+      { id: 'new', name: 'bravo', createdAt: '2026-10-09T10:00:00.000Z', settled: false },
+      { id: 'other', name: 'Cedar', createdAt: '2026-10-02T10:00:00.000Z', settled: false },
+    ];
+    // Two that arrive together: the newer task keeps the name.
+    expect(duplicateSpokenNames(holders)).toEqual(['old']);
+    // An agent still being created has no date yet and is the newest.
+    expect(
+      duplicateSpokenNames([
+        ...holders,
+        { id: 'starting', name: 'Bravo', createdAt: null, settled: false },
+      ])
+    ).toEqual(['old', 'new']);
+    expect(duplicateSpokenNames(holders.slice(1))).toEqual([]);
+  });
+
+  it('lets the agent already on the roster keep a name another arrives with', () => {
+    // Bravo was archived, its name went to a new agent, and now it is back.
+    expect(
+      duplicateSpokenNames([
+        { id: 'back', name: 'Bravo', createdAt: '2026-10-09T10:00:00.000Z', settled: false },
+        { id: 'here', name: 'Bravo', createdAt: '2026-10-01T10:00:00.000Z', settled: true },
+      ])
+    ).toEqual(['back']);
   });
 
   it('recognises names generated before roster names', () => {

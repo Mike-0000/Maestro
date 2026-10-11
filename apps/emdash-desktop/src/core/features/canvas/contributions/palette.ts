@@ -19,6 +19,10 @@ import {
   canvasBackCommand,
   canvasHomeCommand,
   toggleMultiCanvasCommand,
+  toggleCanvasProCommand,
+  newDeskCommand,
+  nextDeskCommand,
+  previousDeskCommand,
 } from './commands';
 
 export const CANVAS_COMMAND_PALETTE_ITEMS = [
@@ -86,4 +90,14 @@ export const CANVAS_COMMAND_PALETTE_ITEMS = [
     command: toggleMultiCanvasCommand,
     aliases: ['multi canvas', 'split', 'views', 'quadrants', 'side by side'],
   }),
+  defineCommandPaletteItem({
+    command: toggleCanvasProCommand,
+    aliases: ['desks', 'desktops', 'spaces', 'pro', 'classic canvas'],
+  }),
+  defineCommandPaletteItem({
+    command: newDeskCommand,
+    aliases: ['desk', 'desktop', 'space', 'add desk'],
+  }),
+  defineCommandPaletteItem({ command: nextDeskCommand, aliases: ['desk', 'switch desk'] }),
+  defineCommandPaletteItem({ command: previousDeskCommand, aliases: ['desk', 'switch desk'] }),
 ] as const;

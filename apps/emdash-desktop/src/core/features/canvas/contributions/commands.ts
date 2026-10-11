@@ -155,6 +155,38 @@ export const toggleMultiCanvasCommand = defineCommand({
   icon: 'grid-2x2',
 });
 
+export const toggleCanvasProCommand = defineCommand({
+  id: 'canvas.togglePro',
+  title: 'Toggle Canvas Pro',
+  description: 'Switch between desks you swap between and the classic one-board canvas',
+  category: 'Canvas',
+  icon: 'layers',
+});
+
+export const newDeskCommand = defineCommand({
+  id: 'canvas.desk.new',
+  title: 'New Desk',
+  description: 'Add a desk to Canvas Pro and switch to it',
+  category: 'Canvas',
+  icon: 'plus',
+});
+
+export const nextDeskCommand = defineCommand({
+  id: 'canvas.desk.next',
+  title: 'Next Desk',
+  description: 'Swap to the next desk (Ctrl+Alt+PageDown on the canvas)',
+  category: 'Canvas',
+  icon: 'chevron-right',
+});
+
+export const previousDeskCommand = defineCommand({
+  id: 'canvas.desk.previous',
+  title: 'Previous Desk',
+  description: 'Swap to the previous desk (Ctrl+Alt+PageUp on the canvas)',
+  category: 'Canvas',
+  icon: 'chevron-left',
+});
+
 export const CANVAS_COMMAND_DEFS = [
   openCanvasCommand,
   nextAttentionCommand,
@@ -175,4 +207,8 @@ export const CANVAS_COMMAND_DEFS = [
   canvasBackCommand,
   canvasHomeCommand,
   toggleMultiCanvasCommand,
+  toggleCanvasProCommand,
+  newDeskCommand,
+  nextDeskCommand,
+  previousDeskCommand,
 ] as const;

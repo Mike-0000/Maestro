@@ -148,6 +148,38 @@ const canvasBoardV4Schema = canvasBoardV3Schema.extend({
   panes: panesSchema.optional(),
 });
 
+const WINDOW_STATUSES = ['needs-you', 'working', 'idle', 'done', 'error'] as const;
+
+const canvasDocSchema = z.object({
+  projectId: z.string(),
+  /** The workspace the file was checked against: the folder of the agent that showed it. */
+  workspaceId: z.string(),
+  taskId: z.string(),
+  /** Absolute path of the Markdown file; the viewer has it checked again on every read. */
+  path: z.string(),
+  title: z.string(),
+});
+
+const canvasBoardV5Schema = canvasBoardV4Schema.extend({
+  version: z.literal('5'),
+  regions: z.record(
+    z.string(),
+    regionSchema.extend({
+      /** Place among desks (top-level regions) in Canvas Pro. */
+      order: z.number().optional(),
+      /** A gathering desk: windows with this status visit it while it shows. */
+      gather: z.enum(WINDOW_STATUSES).optional(),
+    })
+  ),
+  /** `pro`: top-level regions are desks, shown one at a time. */
+  mode: z.enum(['classic', 'pro']),
+  /**
+   * Document windows keyed by document id; geometry lives in `tiles` (`doc:<docId>`). Absent
+   * until a document is opened.
+   */
+  docs: z.record(z.string(), canvasDocSchema).optional(),
+});
+
 export const DEFAULT_LAYOUT_SETTINGS = {
   showNamesWhileListening: true,
   speakLayoutConfirmations: false,
@@ -175,14 +207,20 @@ export const canvasBoardSchema = defineVersionedSchema()
     location: { kind: 'board' as const, regionScope: null },
     layoutSettings: DEFAULT_LAYOUT_SETTINGS,
   }))
+  .version('5', canvasBoardV5Schema, (v4) => ({
+    ...v4,
+    version: '5' as const,
+    mode: 'classic' as const,
+  }))
   .build();
 
-export type CanvasRegionState = z.infer<typeof regionSchema>;
+export type CanvasRegionState = CanvasBoardState['regions'][string];
 export type CanvasStageTarget = z.infer<typeof stageTargetSchema>;
 export type CanvasLocationState = z.infer<typeof locationSchema>;
 export type CanvasLayoutSettings = z.infer<typeof layoutSettingsSchema>;
 
 export type CanvasBrowserState = z.infer<typeof canvasBrowserSchema>;
+export type CanvasDocState = z.infer<typeof canvasDocSchema>;
 
 export type CanvasBoardState = typeof canvasBoardSchema.Type;
 
@@ -191,7 +229,8 @@ export const canvasBoardMemento = defineMemento({
   subject: appSubject,
   schema: canvasBoardSchema,
   default: {
-    version: '4' as const,
+    version: '5' as const,
+    mode: 'classic' as const,
     viewport: { x: 80, y: 80, zoom: 0.6 },
     tiles: {},
     notes: {},
