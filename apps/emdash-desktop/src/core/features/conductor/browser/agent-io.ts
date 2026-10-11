@@ -11,10 +11,48 @@ const ESC = '\x1b';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function sendRaw(conversationId: string, data: string): Promise<void> {
+/** Writes to an agent's terminal. Resolves to the error type when the host refused it. */
+async function writeInput(conversationId: string, data: string): Promise<string | null> {
   const client = await getConversationsClient();
   const result = await client.tui.sendInput({ conversationId, data });
-  if (!result.success) throw new Error(`The agent did not accept input (${result.error.type}).`);
+  return result.success ? null : result.error.type;
+}
+
+async function sendRaw(conversationId: string, data: string): Promise<void> {
+  const refused = await writeInput(conversationId, data);
+  if (refused) throw new Error(`The agent did not accept input (${refused}).`);
+}
+
+function pastePayload(entry: AgentTileEntry, text: string): string {
+  return buildPromptInjectionPayload({
+    providerId: entry.providerId,
+    text,
+    forceBracketedPaste: true,
+  });
+}
+
+async function pressEnterAfterPaste(conversationId: string): Promise<void> {
+  await sleep(SUBMIT_DELAY_MS);
+  await sendRaw(conversationId, '\r');
+}
+
+/**
+ * Types `text` into a terminal agent the session list calls stopped, when its host still has the
+ * session. The list can trail the host (it is a subscription; input is routed by the host itself),
+ * and a running agent must never be started a second time. Resolves false when the host has no
+ * such session, so the caller can start it.
+ */
+export async function sendToLiveSession(
+  entry: AgentTileEntry,
+  text: string,
+  submit = true
+): Promise<boolean> {
+  if (entry.type === 'acp') return false;
+  const refused = await writeInput(entry.conversationId, pastePayload(entry, text));
+  if (refused === 'not-found') return false;
+  if (refused) throw new Error(`The agent did not accept input (${refused}).`);
+  if (submit) await pressEnterAfterPaste(entry.conversationId);
+  return true;
 }
 
 /** Types `text` into an agent. For TUI agents this pastes, then presses Enter when `submit`. */
@@ -38,16 +76,8 @@ export async function sendToAgent(
     return;
   }
   if (!entry.sessionActive) throw new Error(`${entry.taskName} is not running. Resume it first.`);
-  const payload = buildPromptInjectionPayload({
-    providerId: entry.providerId,
-    text,
-    forceBracketedPaste: true,
-  });
-  await sendRaw(entry.conversationId, payload);
-  if (submit) {
-    await sleep(SUBMIT_DELAY_MS);
-    await sendRaw(entry.conversationId, '\r');
-  }
+  await sendRaw(entry.conversationId, pastePayload(entry, text));
+  if (submit) await pressEnterAfterPaste(entry.conversationId);
 }
 
 /** Presses Enter in an agent (submits dictated text). */
