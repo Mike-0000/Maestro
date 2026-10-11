@@ -340,6 +340,16 @@ export class TaskComposition {
     );
   }
 
+  /** True once the saved pane layout is restored. A tab opened before then is discarded by it. */
+  async whenPaneLayoutRestored(): Promise<boolean> {
+    try {
+      await when(() => this._paneHydrated, { timeout: OPEN_CONVERSATION_TIMEOUT_MS });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   activate(): void {
     this._activated = true;
     if (this._acquiredWorkspaceId) workspaceRegistry.activate(this._acquiredWorkspaceId);

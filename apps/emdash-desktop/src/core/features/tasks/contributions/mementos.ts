@@ -258,6 +258,17 @@ export const tabDescriptorSchema = z.discriminatedUnion('kind', [
     isPreview: z.boolean(),
   }),
   z.object({
+    kind: z.literal('markdown'),
+    tabId: z.string(),
+    /** The workspace the file was checked against; it may belong to another task. */
+    projectId: z.string(),
+    workspaceId: z.string(),
+    taskId: z.string(),
+    path: z.string(),
+    title: z.string(),
+    isPreview: z.boolean(),
+  }),
+  z.object({
     kind: z.literal('diff'),
     tabId: z.string(),
     path: gitFilePathSchema,

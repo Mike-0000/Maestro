@@ -1,6 +1,7 @@
 import type { ChatCommands } from '@core/features/conversations/api/browser/chat/chat-transcript';
 // TODO(conversations-extraction): Inject task editor/file-opening behavior into ACP chat.
 import { openFileInAdjacentPane } from '@core/features/editor/api/browser/open-file-in-file-editor';
+import { viaMarkdownViewer } from '@core/features/markdown-viewer/api/browser/markdown-link-seam';
 
 const EXPLICIT_SCHEME_RE = /^[A-Za-z][A-Za-z\d+.-]*:/u;
 const EDITOR_LOCATION_SUFFIX_RE = /(?::(\d+)(?::\d+)?|#L(\d+)(?:C\d+)?)$/u;
@@ -13,6 +14,7 @@ type TranscriptLinkClassification = ReturnType<NonNullable<ChatCommands['classif
 type TranscriptFileContext = {
   projectId: string;
   taskId: string;
+  conversationId?: string;
 };
 
 type TranscriptFileOpener = (
@@ -62,22 +64,32 @@ export function classifyTranscriptLink(href: string): TranscriptLinkClassificati
   return fileLink;
 }
 
-/** All file affordances originating in chat preserve the transcript and open to its right. */
+/**
+ * All file affordances originating in chat preserve the transcript and open to its right. A
+ * Markdown file named without a line opens in the read-only viewer instead of the editor, except
+ * from a diff, which is about the change.
+ */
 export function createTranscriptFileCommands(
   context: TranscriptFileContext,
   openFile: TranscriptFileOpener = openFileInAdjacentPane
 ): TranscriptFileCommands {
-  const open = (filePath: string, line?: number) => {
+  const openInEditor = (filePath: string, line?: number) => {
     if (line === undefined) {
       void openFile(context.projectId, context.taskId, filePath);
       return;
     }
     void openFile(context.projectId, context.taskId, filePath, { line });
   };
+  const openInViewer = viaMarkdownViewer(context, openInEditor);
+  const open = (filePath: string, line?: number) => {
+    if (line === undefined) openInViewer(filePath);
+    else openInEditor(filePath, line);
+  };
 
   return {
     classifyLink: classifyTranscriptLink,
-    onOpenFile: ({ path, line }) => open(path, line),
+    onOpenFile: ({ path, line, source }) =>
+      source === 'diff' ? openInEditor(path, line) : open(path, line),
     openMentionFile: open,
   };
 }

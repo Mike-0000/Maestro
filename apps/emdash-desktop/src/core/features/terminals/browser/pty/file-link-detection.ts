@@ -3,6 +3,22 @@ import type { ILink } from '@xterm/xterm';
 // Lookbehind on `:` keeps URLs (`https://...`) with WebLinksAddon.
 const FILE_PATH_PATTERN =
   '(?<![\\w\\-./@:])(~/|/|\\.{1,2}/)?(?:[\\w\\-.@]+/)+[\\w\\-.@]+\\.[a-zA-Z][a-zA-Z0-9]{0,9}\\b';
+// A Markdown file in any spelling: Windows separators and drive letters, and a bare file name.
+// The general pattern needs a forward slash, which an agent on Windows often does not print.
+// Folder names may hold letters of any script and, after the first, an apostrophe (a Windows
+// user folder such as `'admin'`); a quote in front of the path is not part of it.
+const SEPARATOR = String.raw`[\\/]`;
+const NAME_START = String.raw`[\p{L}\p{N}_\-.@]`;
+const NAME_CHAR = String.raw`[\p{L}\p{N}_\-.@']`;
+const MARKDOWN_PATH_PATTERN =
+  String.raw`(?<![\p{L}\p{N}_\-./\\@:~])` +
+  `(?:(?:[a-z]:${SEPARATOR}|~${SEPARATOR}|\\.{1,2}${SEPARATOR}|${SEPARATOR})${NAME_CHAR}+|${NAME_START}${NAME_CHAR}*)` +
+  `(?:${SEPARATOR}${NAME_CHAR}+)*` +
+  String.raw`\.(?:md|mdx|markdown)(?![\p{L}\p{N}_\-@\\/]|\.[\p{L}\p{N}_])`;
+/** What may come right before a path that starts with a separator. */
+const BEFORE_ROOTED_PATH = /[\s([{"'`<=]/;
+/** A drive path cut short by a space: the words after it are the rest of that path, not a file. */
+const SPACED_DRIVE_PATH_BEFORE = /(?:^|\s)[a-z]:[\\/]\S* $/i;
 const URL_PROTOCOL_PATTERN = /[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
 const MAX_WRAPPED_LINE_LENGTH = 4096;
 
@@ -28,21 +44,62 @@ type LogicalLine = {
   text: string;
 };
 
-export function findFileLinks(buffer: BufferLike, bufferLineNumber: number): FileLinkMatch[] {
-  const logicalLine = getWrappedLogicalLine(buffer, bufferLineNumber - 1);
-  if (!logicalLine || !logicalLine.text || logicalLine.text.indexOf('/') === -1) {
-    return [];
-  }
+type PathSpan = { text: string; start: number; end: number };
 
+/** Which separators join a path across a hard line break. */
+type PathDialect = 'posix' | 'any';
+
+export function findFileLinks(buffer: BufferLike, bufferLineNumber: number): FileLinkMatch[] {
+  // The general pattern reads the line exactly as before. Markdown paths read it again with
+  // backslash paths joined across hard line breaks too.
+  const general = linksOn(
+    getWrappedLogicalLine(buffer, bufferLineNumber - 1, 'posix'),
+    bufferLineNumber,
+    (text) => (text.indexOf('/') === -1 ? [] : findPathSpans(text, FILE_PATH_PATTERN, 'g'))
+  );
+  const markdown = linksOn(
+    getWrappedLogicalLine(buffer, bufferLineNumber - 1, 'any'),
+    bufferLineNumber,
+    findMarkdownSpans
+  );
+  // A Markdown path wins where the two overlap: it is the whole path, where the general pattern
+  // may have caught only the part after a backslash.
+  return [
+    ...markdown,
+    ...general.filter((link) => !markdown.some((other) => rangesOverlap(link.range, other.range))),
+  ].sort((a, b) => comparePositions(a.range.start, b.range.start));
+}
+
+function findMarkdownSpans(text: string): PathSpan[] {
+  return findPathSpans(text, MARKDOWN_PATH_PATTERN, 'giu').filter((span) => {
+    const before = text.slice(0, span.start);
+    // A separator earlier in the same word: this is the tail of a path with a folder name the
+    // pattern cannot read, and half a path is worse than no link.
+    if (/[\\/]\S*$/.test(before)) return false;
+    if (/^[\\/]/.test(span.text)) return before === '' || BEFORE_ROOTED_PATH.test(before.slice(-1));
+    return /^[a-z]:[\\/]/i.test(span.text) || !SPACED_DRIVE_PATH_BEFORE.test(before);
+  });
+}
+
+function comparePositions(a: ILink['range']['start'], b: ILink['range']['start']): number {
+  return a.y === b.y ? a.x - b.x : a.y - b.y;
+}
+
+function rangesOverlap(a: ILink['range'], b: ILink['range']): boolean {
+  return comparePositions(a.start, b.end) <= 0 && comparePositions(b.start, a.end) <= 0;
+}
+
+function linksOn(
+  logicalLine: LogicalLine | null,
+  bufferLineNumber: number,
+  findSpans: (text: string) => PathSpan[]
+): FileLinkMatch[] {
+  if (!logicalLine || !logicalLine.text) return [];
   const links: FileLinkMatch[] = [];
-  // Fresh regex per call — module-level /g state isn't safe across reentrancy.
-  const regex = new RegExp(FILE_PATH_PATTERN, 'g');
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(logicalLine.text)) !== null) {
-    const matched = match[0];
-    const startOffset = match.index;
-    if (isEmbeddedInUrl(logicalLine.text, startOffset)) continue;
-    const endOffset = startOffset + matched.length;
+  for (const span of findSpans(logicalLine.text)) {
+    const matched = span.text;
+    const startOffset = span.start;
+    const endOffset = span.end;
     const range = mapOffsetRangeToBufferRange(logicalLine, startOffset, endOffset);
     if (!range) continue;
 
@@ -60,13 +117,29 @@ export function findFileLinks(buffer: BufferLike, bufferLineNumber: number): Fil
   return links;
 }
 
+function findPathSpans(text: string, pattern: string, flags: string): PathSpan[] {
+  const spans: PathSpan[] = [];
+  // Fresh regex per call — module-level /g state isn't safe across reentrancy.
+  const regex = new RegExp(pattern, flags);
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    if (isEmbeddedInUrl(text, match.index)) continue;
+    spans.push({ text: match[0], start: match.index, end: match.index + match[0].length });
+  }
+  return spans;
+}
+
 function isEmbeddedInUrl(text: string, startCol: number): boolean {
   const prefix = text.slice(0, startCol);
   const tokenStart = Math.max(prefix.lastIndexOf(' '), prefix.lastIndexOf('\t'), -1) + 1;
   return URL_PROTOCOL_PATTERN.test(prefix.slice(tokenStart));
 }
 
-function getWrappedLogicalLine(buffer: BufferLike, bufferIndex: number): LogicalLine | null {
+function getWrappedLogicalLine(
+  buffer: BufferLike,
+  bufferIndex: number,
+  dialect: PathDialect
+): LogicalLine | null {
   const line = buffer.getLine(bufferIndex);
   if (!line) return null;
 
@@ -94,17 +167,22 @@ function getWrappedLogicalLine(buffer: BufferLike, bufferIndex: number): Logical
     currentIndex += 1;
   }
 
-  return expandHardLineBreakPathContinuations(buffer, {
-    startBufferIndex,
-    lineTexts,
-    lineStartColumns,
-    text: lineTexts.join(''),
-  });
+  return expandHardLineBreakPathContinuations(
+    buffer,
+    {
+      startBufferIndex,
+      lineTexts,
+      lineStartColumns,
+      text: lineTexts.join(''),
+    },
+    dialect
+  );
 }
 
 function expandHardLineBreakPathContinuations(
   buffer: BufferLike,
-  logicalLine: LogicalLine
+  logicalLine: LogicalLine,
+  dialect: PathDialect
 ): LogicalLine {
   let expanded = logicalLine;
   const firstLine = expanded.lineTexts[0];
@@ -115,8 +193,8 @@ function expandHardLineBreakPathContinuations(
   if (
     firstLine !== undefined &&
     previousLine !== undefined &&
-    endsWithPathContinuation(previousLine) &&
-    startsWithPathContinuation(firstLine)
+    endsWithPathContinuation(previousLine, dialect) &&
+    startsWithPathContinuation(firstLine, dialect)
   ) {
     expanded = {
       startBufferIndex: expanded.startBufferIndex - 1,
@@ -139,8 +217,8 @@ function expandHardLineBreakPathContinuations(
   const nextLine = buffer.getLine(lastLineIndex + 1)?.translateToString(true);
   if (
     nextLine !== undefined &&
-    endsWithPathContinuation(expanded.text) &&
-    startsWithPathContinuation(nextLine)
+    endsWithPathContinuation(expanded.text, dialect) &&
+    startsWithPathContinuation(nextLine, dialect)
   ) {
     const trimmedNextLine = trimPathContinuationStart(nextLine);
     expanded = {
@@ -154,14 +232,17 @@ function expandHardLineBreakPathContinuations(
   return expanded.text.length > MAX_WRAPPED_LINE_LENGTH ? logicalLine : expanded;
 }
 
-function endsWithPathContinuation(text: string): boolean {
+function endsWithPathContinuation(text: string, dialect: PathDialect): boolean {
   const fragment = trailingToken(text);
-  return fragment.includes('/') && !isEmbeddedInUrl(text, text.length - fragment.length);
+  const pathLike = fragment.includes('/') || (dialect === 'any' && fragment.includes('\\'));
+  return pathLike && !isEmbeddedInUrl(text, text.length - fragment.length);
 }
 
-function startsWithPathContinuation(text: string): boolean {
+function startsWithPathContinuation(text: string, dialect: PathDialect): boolean {
   const trimmed = trimPathContinuationStart(text);
-  return /^[\w.\-@]+(?:\/|[\w.\-@]*\.[a-zA-Z][a-zA-Z0-9]{0,9}\b)/.test(trimmed);
+  return dialect === 'any'
+    ? /^[\p{L}\p{N}_.\-@']+(?:[\\/]|\.[a-zA-Z][a-zA-Z0-9]{0,9}\b)/u.test(trimmed)
+    : /^[\w.\-@]+(?:\/|[\w.\-@]*\.[a-zA-Z][a-zA-Z0-9]{0,9}\b)/.test(trimmed);
 }
 
 function trimPathContinuationStart(text: string): string {

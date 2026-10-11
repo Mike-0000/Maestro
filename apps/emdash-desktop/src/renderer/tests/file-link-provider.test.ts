@@ -212,3 +212,102 @@ describe('file link provider', () => {
     expect(openedExternal).toEqual(['/tmp/report.md']);
   });
 });
+
+describe('Markdown paths in a terminal', () => {
+  const textsIn = (line: string) =>
+    findFileLinks(makeBuffer([new MockBufferLine(line)]), 1).map((link) => link.text);
+
+  it.each([
+    ['Write(docs\\plan.md)', ['docs\\plan.md']],
+    ['saved C:\\Github\\chorus\\README.md for you', ['C:\\Github\\chorus\\README.md']],
+    ['see C:/Github/chorus/docs/x.md.', ['C:/Github/chorus/docs/x.md']],
+    ['wrote PLAN.md and notes.mdx', ['PLAN.md', 'notes.mdx']],
+    ['..\\shared\\a.markdown', ['..\\shared\\a.markdown']],
+    ['docs\\sub/x.md', ['docs\\sub/x.md']],
+    ['Report: REPORT.MD', ['REPORT.MD']],
+  ])('finds the whole path in %j', (line, expected) => {
+    expect(textsIn(line)).toEqual(expected);
+  });
+
+  it('gives one link where the general pattern matches the same path', () => {
+    expect(findFileLinks(makeBuffer([new MockBufferLine('open docs/guide.md now')]), 1)).toEqual([
+      {
+        range: { start: { x: 6, y: 1 }, end: { x: 18, y: 1 } },
+        text: 'docs/guide.md',
+        isExternal: false,
+      },
+    ]);
+  });
+
+  it('keeps POSIX absolute and home paths external and Windows paths in the app', () => {
+    const links = findFileLinks(
+      makeBuffer([new MockBufferLine('/tmp/report.md ~/notes/todo.md C:\\repo\\plan.md')]),
+      1
+    );
+    expect(links.map((link) => [link.text, link.isExternal])).toEqual([
+      ['/tmp/report.md', true],
+      ['~/notes/todo.md', true],
+      ['C:\\repo\\plan.md', false],
+    ]);
+  });
+
+  it.each([
+    'https://example.com/README.md',
+    'plan.md.bak',
+    'notes.mdtext',
+    'key:docs\\plan.md',
+    'the md format',
+  ])('finds no Markdown link in %j', (line) => {
+    expect(textsIn(line).filter((text) => /\.(?:md|mdx|markdown)$/i.test(text))).toEqual([]);
+  });
+
+  it.each([
+    [
+      "Wrote C:\\Users\\'admin'\\AppData\\Local\\notes\\plan.md",
+      ["C:\\Users\\'admin'\\AppData\\Local\\notes\\plan.md"],
+    ],
+    ['C:\\Users\\José\\notes\\plan.md', ['C:\\Users\\José\\notes\\plan.md']],
+    ['read \'docs/plan.md\' and "notes\\todo.md"', ['docs/plan.md', 'notes\\todo.md']],
+    ["'C:\\repo\\plan.md'", ['C:\\repo\\plan.md']],
+  ])('keeps the whole path in %j', (line, expected) => {
+    expect(textsIn(line)).toEqual(expected);
+  });
+
+  it.each([
+    // The match would be the tail of a path whose folder name the pattern cannot read.
+    'C:\\Program Files (x86)\\app\\README.md',
+    'saved C:\\My Docs\\plan.md',
+    'see C:\\Users\\a&b\\notes\\plan.md',
+  ])('gives no link rather than half of the path in %j', (line) => {
+    expect(textsIn(line)).toEqual([]);
+  });
+
+  it('joins a Windows path split by a hard line break', () => {
+    const buffer = makeBuffer([
+      new MockBufferLine('Wrote C:\\Github\\chorus\\docs\\design\\very-'),
+      new MockBufferLine('  long-name\\plan.md for you'),
+    ]);
+    const whole = 'C:\\Github\\chorus\\docs\\design\\very-long-name\\plan.md';
+    expect(findFileLinks(buffer, 1).map((link) => link.text)).toEqual([whole]);
+    expect(findFileLinks(buffer, 2)).toEqual([
+      { range: { start: { x: 3, y: 2 }, end: { x: 19, y: 2 } }, text: whole, isExternal: false },
+    ]);
+  });
+
+  it('reads a hostile line quickly', () => {
+    const lines = [
+      `${'a.'.repeat(2040)}txt`,
+      `${'a\\'.repeat(2040)}b`,
+      `${"'".repeat(2000)}${'x'.repeat(2000)}.m`,
+      `C:\\${'seg.ment\\'.repeat(400)}file.mdx.bak`,
+    ];
+    const started = performance.now();
+    for (const line of lines) textsIn(line);
+    expect(performance.now() - started).toBeLessThan(200);
+  });
+
+  it('leaves other files to the general pattern', () => {
+    expect(textsIn('src/app.ts and docs\\plan.md')).toEqual(['src/app.ts', 'docs\\plan.md']);
+    expect(textsIn('src\\app.ts')).toEqual([]);
+  });
+});

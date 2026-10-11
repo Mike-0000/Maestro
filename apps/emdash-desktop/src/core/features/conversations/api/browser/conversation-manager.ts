@@ -7,6 +7,7 @@ import type { Terminal } from '@xterm/xterm';
 import { action, computed, makeObservable, observable, reaction, runInAction } from 'mobx';
 // TODO(conversations-extraction): Inject file-link handlers instead of importing task editor plumbing.
 import { makeFileLinkHandlers } from '@core/features/editor/api/browser/open-file-in-file-editor';
+import { viaMarkdownViewer } from '@core/features/markdown-viewer/api/browser/markdown-link-seam';
 import {
   classifyLiveRuntimeObservation,
   type LiveRuntimeObservation,
@@ -521,9 +522,19 @@ export class ConversationManagerStore implements Disposable {
   }
 
   private createSession(conversation: Conversation): PtySession {
-    const handlers = makeFileLinkHandlers(conversation.projectId, conversation.taskId, {
+    const editor = makeFileLinkHandlers(conversation.projectId, conversation.taskId, {
       target: 'right',
     });
+    // A Markdown file the agent names opens in the read-only viewer, in the view on screen.
+    const source = {
+      projectId: conversation.projectId,
+      taskId: conversation.taskId,
+      conversationId: conversation.id,
+    };
+    const handlers = {
+      onOpenFile: viaMarkdownViewer(source, editor.onOpenFile),
+      onOpenExternal: viaMarkdownViewer(source, editor.onOpenExternal),
+    };
     const connector =
       conversation.type === 'acp'
         ? createNoopConnector()
