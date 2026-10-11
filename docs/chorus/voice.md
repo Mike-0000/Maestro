@@ -70,6 +70,38 @@ name to rename it. Common mishearings ("clod two", "codecs", "at less", "brave o
 automatically; a close-but-ambiguous name gets a "which one?" instead of a guess. "Atlas's
 window" and "the Bravo terminal" work too.
 
+How a name finds its agent:
+
+- An agent's own name always wins, whether its window is open or closed. "Atlas 3" is the agent
+  called Atlas 3, never an agent that only has those words in its title or task.
+- The number is part of the name. "Atlas 3" is never Atlas or Atlas 2: if no agent has the name
+  (it was archived, or the number was misheard), nothing is sent and the conductor asks which
+  agent you mean. "Atlas one" is plain Atlas.
+- A name said without its number ("Jasper" for Jasper 3) works when only one agent has that
+  name; with two, you are asked which.
+- "Too" and "for" after a name are words unless only the number makes sense: "stop Atlas too"
+  stops Atlas, and asks "Atlas or Atlas 2?" when both exist. "Ask Atlas for a status update"
+  goes to Atlas.
+- When you talk to one agent, nothing reaches the one beside it: with "tell Atlas 3 ...", "send
+  that to Atlas 3", or "what's Atlas 3 doing", an action headed for Atlas is refused, and the
+  other way round. A name you only mention ("rebase onto Atlas 3's branch") changes nothing.
+- An agent has one name everywhere. When the canvas names or renames an agent, the
+  conversation's title in the task view becomes that name, unless someone wrote the title
+  themselves. A written title works as a second name when it is that agent's alone. A title
+  from before is only replaced when it would send you to a different agent.
+- After a rename the agent still answers to its old name for the rest of the session, until
+  another agent takes that name.
+- For a few minutes after you archive or delete an agent, its name names nobody: "tell Backend
+  ..." does not go to the agent whose task happens to mention the backend. "The backend agent"
+  still describes that one.
+- Every agent has its own name. A new agent gets a word no other agent uses, so names carry a
+  number only when more than 26 agents exist at once. A name is free again about a minute
+  after its agent is archived or deleted; an agent that is merely not loaded yet keeps its
+  name. Renaming an agent to a name another agent has is refused.
+- "Simplify the agent names" (or "drop the numbers from the names") takes the number off every
+  name whose word no other agent uses: Atlas 3 becomes Atlas. It shows what it will rename
+  with the usual countdown. Names never change by themselves.
+
 Sending text, interrupting, or closing several windows shows a 1.5-second countdown in the HUD;
 press **Esc** or say "no" to cancel. Answering a permission prompt, shutting down, and archiving
 always need an explicit "yes" (or **Enter**). Enter only confirms when it is pressed outside a
@@ -118,6 +150,46 @@ cannot place ("arrange my review agents so the failing one is biggest") goes to 
 which has the same abilities through its `arrange_canvas` tool. Rearranging never closes, stops,
 or types into an agent.
 
+### Desks (Canvas Pro)
+
+Canvas Pro shows the canvas as **desks**: each desk is one screen of windows, only one shows at a
+time, and you swap between them. Windows on the other desks keep running. A desk is a top-level
+region shown alone, so everything in "Organizing the canvas" still works inside one; a region
+made there sits on the desk in view. Say "desktop" or "space" if you prefer; both mean desk.
+
+Only the first row works on the classic canvas. The rest need Canvas Pro, and there the phrases
+are instant, with no API key.
+
+| Say | What happens |
+| --- | --- |
+| "Switch to Canvas Pro" / "go back to the classic canvas" | Changes the mode. Entering Pro puts loose windows on a desk called Main (one undo step); leaving it turns the desks back into regions on one board |
+| "New desk" / "new desk called Review with Atlas and Bravo" | Makes a desk and switches to it ("… and stay here" does not switch) |
+| "Put Atlas and Bravo on a new desk called Pairing" | The same, said the other way round |
+| "Make a desk for everything that needs me" | A **gathering desk**, called Triage unless you name it: while it shows, every window that needs you appears on it. Also "… for the failed ones", "… that is working", "… that are done" |
+| "Switch to the Review desk" / "open Review" / "go to Review" | Swaps to that desk |
+| "Next desk" / "previous desk" | Steps through the desks in order, wrapping at the ends |
+| "Desk 2" / "the second desk" / "the new desk" | By its place in the order, or the newest one |
+| "The other desk" / "switch back" | The desk you were on before |
+| "Put Cedar on the Frontend desk" / "move Atlas here" | Moves windows to a desk for good ("… and follow" or "… and take me there" also switches to it) |
+| "Bring Atlas here" / "bring Atlas and Bravo over" | Shows windows from another desk on this one **without moving them**. They go home when you change desk |
+| "Send it back" / "send them back" / "send Atlas back" | Sends visitors home now |
+| "Keep it here" / "keep them here" | Makes visitors live on this desk |
+| "Rename this desk to Home" / "rename the Review desk to QA" | Renames a desk |
+| "Move this desk left" (right, first, last) / "put the Review desk first" | Changes the order of the desks |
+| "Remove the Review desk" / "close this desk" / "delete desk 3" | Removes the desk; its windows go to the desk before it. Nothing is closed, and the last desk stays. Previewed first when the desk has windows on it |
+| "List desks" / "what's on the Review desk" / "which desk am I on" | Answers out loud |
+
+"Focus Atlas", "next" (the agent that needs you), "reopen Bravo", and "show the app" switch to the
+desk the window is on first. There is no main canvas above a desk: "leave" inside a region goes
+back to the desk, and on a desk it says which one you are on. A change you can see is not spoken;
+one that happens on a desk you cannot see ("put Atlas on the Review desk" from a third desk) is.
+Every desk change that moves windows is one **Undo** step.
+
+Anything else about desks ("put the failing ones on their own desk and call it Fire", "remove
+Scratch and send its windows to Review") goes to the conductor, which has the same abilities
+through its `canvas_desks` tool. On the classic canvas that tool only answers that desks are part
+of Canvas Pro. The conductor never switches the canvas mode unless you ask.
+
 ## The conductor
 
 Anything the grammar does not recognise goes to Claude, which can:
@@ -146,16 +218,41 @@ instead of guessed or refused:
 - each agent, newest first: name, provider, status and how long it has waited, task, project,
   when it started, when you last messaged it, its region, and any other title it goes by (an
   agent started from your phone keeps the name it got there);
+- the focused agent and where that reading comes from (see below);
 - the newest agent in each project, who has waited longest, and the current project ("this
-  project" is the focused agent's project, or the one the canvas is filtered to);
+  project" is the focused agent's project, else the project of the task or project view on
+  screen, else the one the canvas is filtered to);
 - closed windows, app browsers, regions, the selection, and the last layout change;
+- in Canvas Pro: the mode, the desks in order with the one in view marked, how many windows each
+  has and what they are up to, what a gathering desk gathers, which desk each agent is on, and
+  the windows visiting the desk in view;
 - the conductor's recent activity: the last few things sent and started, with the exact text,
   including commands the built-in grammar handled without the model.
+
+### The focused agent
+
+The focused agent is the one you are looking at. "This one", "it", and dictation mean that
+agent, and so does an instruction that names no agent ("run the tests again"): the conductor
+sends it there and says the name. A named agent always wins, and the send countdown shows the
+target before anything leaves. Focus is read from whatever is on screen, on every request:
+
+| On screen | Focused agent |
+| --- | --- |
+| The canvas | The window you clicked or asked to focus. A window the project filter hid does not count. |
+| The stage (full screen) | The only agent on the stage, else the pane you clicked. A window focused on the board underneath does not count. |
+| A task view (outside the canvas) | The chat that is the active tab, else the only chat showing, else the task's only agent. |
+| Anything else (settings, home, a project) | None |
+
+The conductor asks instead of guessing when nothing is focused, when the stage or a task view
+shows several agents and none is in front, and when the focused window is outside the
+sub-canvas that fills the screen. Saying "focus Atlas" focuses Atlas's window on the canvas;
+while a task view is on screen, the chat in front stays the focused agent.
 
 So these work:
 
 | Say | What happens |
 | --- | --- |
+| "Run the tests again" (Atlas focused) | Goes to Atlas |
 | "Send this to the latest agent in this project" | Goes to the newest agent of the current project |
 | "Tell the newest Codex agent in Chorus to rebase" | Picks by provider, project, and start time |
 | "Ask Atlas in ACE COMBAT 8 …" | Only an Atlas in that project matches; otherwise you are told who is there |
@@ -165,6 +262,7 @@ So these work:
 | "I started an agent from my phone and can't see it" | Looks through archived tasks and conversations that are not on the canvas (`find_conversations`) |
 | "Send what I copied to Atlas" | Reads the clipboard (`read_clipboard`; Maestro must be the focused window) |
 | "Rename Atlas to Backend" | Changes the spoken name |
+| "Simplify the agent names" / "drop the numbers from the names" | Atlas 3 becomes Atlas wherever no other agent uses the word |
 | "Only show the Chorus project" / "show all projects" | Filters the canvas |
 
 "The latest agent in Chorus" and "Atlas in ACE COMBAT 8" also work in the instant commands
@@ -225,6 +323,194 @@ up to 200 redacted events to the clipboard; paste into a trusted coding agent on
 The app does not silently grant worktree agents access to the desktop profile. Speech and tool
 arguments may contain private data despite automatic secret redaction; do not export without
 reviewing them. Cloud STT sends audio to the chosen provider; local whisper.cpp does not.
+
+### When an agent asks for something
+
+Claude Code and Codex agents on this computer can send the conductor a request:
+
+| The agent asks to | What you hear | What happens |
+| --- | --- | --- |
+| Start another agent with a brief | What the conductor decided, or "Atlas asks to start a codex agent on … Say yes to allow it, or no." | An approved agent starts behind the usual cancel window, with the brief unchanged |
+| Send another agent a message | The same | The message is passed on, marked as coming from that agent |
+| Ask you a question | "Atlas asks: …" | Answer by voice ("make the pod longer", or "tell Atlas …"); the answer is typed into Atlas |
+| Tell you something | "Atlas is blocked: …" | Nothing else |
+
+The conductor decides requests to start or message an agent, and asks you when it is unsure.
+"Yes" or "no" answers a request only when its question is the last thing the conductor said;
+say more ("tell Atlas yes", "make the pod longer") at any other time. A request is never treated
+as your permission for anything else. When an agent finishes work another agent asked for, its final
+reply is passed back to the one that asked. Turn all of this off with **Let agents ask the
+conductor** in Settings → Voice & Conductor. See [agent requests](agent-requests.md) for the
+request format and the kinds.
+
+### Checking the code (built, not switched on)
+
+The conductor can ask a read-only Claude Code process questions about a project's files ("do we
+already have a retry helper?") before it plans or answers, and show each answer with the files it
+rests on. A check runs in a contained process: it cannot write, cannot read outside the project
+or its secret files, and runs no project hooks. While a check runs, a card shows what is being
+read, and Esc or "stop" cancels it. After a check, everything the conductor does in that turn
+asks for an explicit yes, because the files it read are not your words.
+
+The setting for this is hidden until the checks in
+[the code-check plan](../conductor-subagent-plan.md) have been run; see
+[the design](../design/talk-mode.md#implementation-status).
+
+### Calls from agents
+
+Off by default. Turn it on with **Calls from agents** in Settings → Voice & Conductor.
+
+With calls on, agents reach you **one at a time**. A finished agent, an agent's question, a
+request that needs your yes or no, and a permission prompt each become a call from exactly one
+agent. Maestro says it (or only shows it, with **Shown**), marks that agent's window with a green
+ring, and keeps the call "on the line" for a few seconds. The ring is a mark, not focus: nothing
+moves on the canvas.
+
+While a call is on the line, **pick it up** and speak. What you say goes to that caller without
+naming it:
+
+| Pick up by | Then |
+| --- | --- |
+| Tapping **Right Ctrl** once (or your global hold key) | Speak; it ends when you pause. A second tap sends at once |
+| Holding the talk key | Speak, release |
+| **Answer** on the call card | Same as a tap |
+| **Type** on the call card | Type the answer in the command box |
+
+| Say (after picking up) | What happens |
+| --- | --- |
+| "Fix the lint error too" (after Atlas finished) | Goes to Atlas, behind the usual cancel window |
+| "It should, default three" (after Maple asked a question) | Sent to Maple as your answer, in your words |
+| "Allow" / "no" (at a permission call) | Answers that agent's prompt, after the usual explicit yes |
+| "Yes" / "no" (at a request call) | Settles that request, not whichever is newest |
+| "Yes" / "sure, do that" (after an agent's news) | Goes to the conductor, which asks before each thing it does: your words named no action |
+| "Tell Bravo to rebase" | A name you say always wins over the caller, also when the caller asked a question |
+| "Never mind" / "stop" | Ends the call; nothing is sent |
+
+A yes or a no after a pick-up is always for the caller. It never approves or discards a plan, or
+settles another agent's request, that happens to be waiting too. Calls are not delivered while a
+plan waits for your yes.
+
+Dictation after a pick-up is typed into the caller, and a "send it" in the next 45 seconds is
+sent there, not to the window in front, unless you have moved to another window since. A call
+picked up with **Type** goes back on the line when nothing was typed for a minute; a sound that
+opens the hands-free microphone does not use it up. **Skip** stays on the call card while you
+answer. A second sentence said while the first still waits its turn is for the same caller. If
+the caller's window closes while you are speaking to it, your words go nowhere.
+
+Steering needs no pick-up:
+
+| Say | What happens |
+| --- | --- |
+| "Skip" / "not now" | Drops the call on the line and takes the next |
+| "Later" | Sets it aside: it comes back after the others, and not for two minutes |
+| "Next call" | Takes the next call now, including one you set aside |
+| "Hold my calls" / "take my calls" | Stops and resumes delivery; calls keep queuing |
+| "Stay with Atlas" / "back to everyone" | Atlas's calls go first, until you say otherwise |
+
+The most urgent call comes first (Jev's triage when it is on, otherwise permission prompts, then
+questions, then finished agents). A call you do not pick up lapses and the next one comes; the
+agent still shows as waiting, so "next" and "who needs me" work as before. An agent that calls
+more than four times in a minute is shown, not spoken. A tap with no call on the line does
+nothing, so a stray tap never opens the microphone. With no call on the line or waiting, "skip",
+"later" and "not now" are ordinary words again and go to the conductor. An agent that leaves the
+canvas takes its calls with it.
+
+With calls on, **confirmations are read aloud** in a spoken turn, by the computer's own voice, so
+you are not left waiting on a prompt you cannot see. A send is read out too ("Send to Atlas: …")
+when you answered a call or Maestro is not the window in front; otherwise the countdown is enough.
+Speaking over the read-back counts as having heard it.
+
+Always on, with or without calls:
+
+- **A yes counts only for the prompt it was said to.** Words you began to say before a prompt
+  appeared, or before it finished being read out, never confirm it. They can still stop it:
+  "stop" cancels it, and any other words cancel a countdown, as they always did. The same goes
+  for a plan and for an agent's question: a yes or a no begun before the plan was shown, or
+  before the question was asked, neither starts nor discards the plan and is not sent to the
+  agent.
+- **Speaking stops the clock.** Opening the microphone during a countdown pauses it until your
+  words arrive, so "no" lands in time. Anything other than a yes still cancels. Dictation pauses
+  the clock too, and it runs again when the dictation ends.
+- **"Stop" ends the conductor's turn.** While it is thinking, or during one of its countdowns,
+  "stop" (or "no" to a countdown) ends the whole turn: what it already did stays done, the action
+  it was about to take is not taken, and nothing else it asked for runs. Any wording works
+  there: "No, stop!", "stop it", "cancel that", "no, don't send that", "hang on". With nothing
+  pending and the conductor idle, "stop it" is still a command for the agent in front. Other
+  words said during one of the conductor's countdowns drop the rest of that turn too, then take
+  their own turn. "No" to a yes-or-no question answers that question only, and "no" to a note
+  you dropped by hand cancels the note, not the conductor's turn.
+- **Allowing a permission prompt** checks that the last 60 lines of the terminal are still what
+  you were asked about, character for character apart from an agent's working line ("… esc to
+  interrupt") and spinner lines. If the agent moved on to a different prompt, or its terminal
+  cannot be read, nothing is sent and you answer it in its window. Denying needs no such check.
+- **A reply that names no action** ("yes", "um, sure, do that", "the second one", "yes, run it")
+  to something an agent suggested makes each action the conductor then takes ask for an explicit
+  yes, with the full text shown and, in a spoken turn, read aloud. That covers a call you picked
+  up, anything Maestro announced since you last spoke ("Atlas finished: tests pass. Shall I
+  push?"), an agent's report, and output the conductor read for you a turn or two ago. An
+  instruction in your own words ("merge it", "yes, and add a changelog entry") keeps the usual
+  cancel window. The rule is a word list, so it can misjudge an unusual phrasing either way.
+- A message is not typed into an agent that reached a permission prompt while the countdown ran,
+  and "send it" is refused there too: Enter would answer the prompt.
+
+### The talk line (experimental)
+
+Off by default. Turn it on with **Talk with Maestro on a live line** in Settings → Voice &
+Conductor → Talk line. It needs an OpenAI API key (API keys, in the same settings); OpenRouter
+does not carry realtime sessions.
+
+The talk line is one realtime voice session (OpenAI's Realtime API, over WebRTC) between you and
+Maestro. A small dot next to the microphone button shows it: green when open, with a ring while
+its microphone is open, amber while connecting, red when it is wanted but not connected.
+
+What it adds:
+
+- **Questions get a spoken answer in about a second or two.** "What's everyone doing?", "what
+  did Maple change?", "why did Bravo stop?" are answered by a voice model that is kept up to
+  date with your agents and can read their output.
+- **Follow-ups need no key.** After Maestro speaks, the line's microphone stays open for a few
+  seconds (6 by default, 0 to turn this off). In that window you can ask the next question, say
+  "stop", or steer calls ("skip", "later").
+- **One voice.** With the line open, replies and calls are spoken by it. Consent prompts and
+  read-backs still use the computer's own voice, which reads exactly what it is given.
+
+What it cannot do, by design:
+
+- **It cannot act.** The voice model's tools only read (an agent's output and details, recent
+  activity, conversations off the canvas, the canvas layout). It cannot message, start, stop, or
+  approve anything, focus a window, or move the canvas.
+- **Nothing said with no key can change anything.** In the open window a command ("tell Atlas to
+  rebase", "focus Bravo", "yes") is not run; Maestro tells you to tap the talk key and say it
+  again. Only "no"/"stop" (which cancel), call steering, and "mute" (which silences) work without
+  a key. "No" and "stop" are never mistaken for Maestro's own voice coming back.
+- **It writes nothing that is acted on.** When you ask for something with the key and the voice
+  model decides it needs the conductor, the conductor gets your own words, and each action in
+  that turn asks for an explicit yes.
+
+How turns are taken: the provider detects when you stop speaking but never answers on its own.
+Maestro reads the transcript first, drops noise and its own voice coming back through the
+microphone, and only then lets the voice answer. While you hold the talk key the line says
+nothing, and a sentence it had started is cut off. Muted, the line neither speaks nor listens:
+its microphone closes and its answers are shown. The microphone opens a moment after a voice
+stops, and closes after a minute of sound that never turns into words for Maestro (a meeting, a
+radio).
+
+| Setting | What it does |
+| --- | --- |
+| Voice model | `gpt-realtime-2.1` (default), `gpt-realtime-2.1-mini` (about a quarter of the cost), or `gpt-realtime-1.5` |
+| Seconds the microphone stays open | The follow-up window; 0 means the microphone opens only with the talk key |
+| Speak over the voice to stop it | Keeps the microphone open while the voice speaks. Use it with headphones, or if echo cancellation holds on your speakers. Off, the talk key stops the voice |
+| Daily limit | In US dollars ($5 by default). At the limit the line closes; it opens again by itself within half an hour of the next day starting |
+
+Privacy and cost: while the line is open, what you say in its window, the state of your agents,
+and what the voice reads (redacted like diagnostics) go to OpenAI. No audio leaves outside the
+window or a held key. A spoken reply costs roughly two cents on the full model and half a cent on
+mini; the settings show today's spend. If the line drops, cannot open, or hits its limit,
+everything works as it does without it.
+
+The line has been built against OpenAI's documentation and tested with a stand-in for the
+provider. Its latency, its echo cancellation on speakers, and its answers have not been measured
+on a real session yet; see [the design](../design/talk-mode.md) for what to check.
 
 ## Spoken replies (text-to-speech)
 

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import {
   createServer,
   type IncomingHttpHeaders,
@@ -393,5 +393,170 @@ describe('ConductorService log', () => {
     const [record] = await conductor.readLog(1);
     expect(prompt.length).toBeGreaterThan(2000);
     expect(JSON.parse(record!.actions[0]!.input as string)).toEqual({ prompt });
+  });
+});
+
+describe('ConductorService code checks', () => {
+  type SentTool = { name: string; cache_control?: unknown };
+  const marked = (tools: SentTool[]) =>
+    tools.filter((tool) => tool.cache_control !== undefined).map((tool) => tool.name);
+
+  it('sends the investigate tool only while the setting is on, each list with its own marker', async () => {
+    await withKey();
+    const conductor = service();
+
+    await conductor.runTurn('command', userTurn);
+    const off = captured[0]?.body.tools as SentTool[];
+    expect(off.map((tool) => tool.name)).not.toContain('investigate');
+    expect(marked(off)).toEqual([off.at(-1)?.name]);
+
+    await conductor.updateSettings({ investigations: true });
+    await conductor.runTurn('command', userTurn);
+    const on = captured[1]?.body.tools as SentTool[];
+    expect(on.at(-1)?.name).toBe('investigate');
+    expect(marked(on)).toEqual(['investigate']);
+    // Everything before it is the other list, minus that list's own marker.
+    expect(on.slice(0, -1).map((tool) => tool.name)).toEqual(off.map((tool) => tool.name));
+
+    await conductor.updateSettings({ investigations: false });
+    await conductor.runTurn('command', userTurn);
+    expect(captured[2]?.body.tools).toEqual(off);
+  });
+
+  it('selects the same list on the OpenRouter path', async () => {
+    await secrets.setSecret('chorus.credential.openrouter', secret('sk-or-test', 'openrouter'));
+    process.env.OPENROUTER_BASE_URL = baseUrl;
+    respond = json(200, { choices: [{ finish_reason: 'stop', message: { content: 'ok' } }] });
+    const conductor = service();
+    await conductor.updateSettings({ provider: 'openrouter' });
+    const names = (index: number) =>
+      ((captured[index]?.body.tools ?? []) as { function: { name: string } }[]).map(
+        (tool) => tool.function.name
+      );
+
+    await conductor.runTurn('command', userTurn);
+    expect(names(0)).not.toContain('investigate');
+    await conductor.updateSettings({ investigations: true });
+    await conductor.runTurn('command', userTurn);
+    expect(names(1).at(-1)).toBe('investigate');
+    expect(names(1).slice(0, -1)).toEqual(names(0));
+  });
+
+  it('reports the investigator as off until one is attached, then asks it with the settings', async () => {
+    const conductor = service();
+    expect((await conductor.status()).investigator).toEqual({ state: 'off', reason: null });
+
+    const read = vi.fn((settings: { investigations: boolean }) =>
+      settings.investigations
+        ? { state: 'unavailable' as const, reason: 'Claude Code is not signed in.' }
+        : { state: 'off' as const, reason: null }
+    );
+    conductor.attachInvestigator(read);
+    expect((await conductor.status()).investigator).toEqual({ state: 'off', reason: null });
+    expect((await conductor.updateSettings({ investigations: true })).investigator).toEqual({
+      state: 'unavailable',
+      reason: 'Claude Code is not signed in.',
+    });
+    expect(await conductor.readSettings()).toMatchObject({
+      investigations: true,
+      investigatorModel: 'haiku',
+      investigationTimeoutSec: 45,
+      investigationsPerDay: 100,
+      investigationDailyUsd: 2,
+      investigationOfferShown: false,
+    });
+  });
+
+  it('records checks next to tokens, and keeps both when writes overlap', async () => {
+    await withKey();
+    const conductor = service();
+    expect(await conductor.investigationsToday()).toEqual({ count: 0, costUsd: 0 });
+
+    await Promise.all([
+      conductor.recordInvestigations(1, 0.004),
+      conductor.runTurn('command', userTurn),
+      conductor.recordInvestigations(2, 0.006),
+      conductor.runTurn('command', userTurn),
+      conductor.recordInvestigations(0, 0.003),
+    ]);
+
+    const today = await conductor.investigationsToday();
+    expect(today.count).toBe(3);
+    expect(today.costUsd).toBeCloseTo(0.013);
+    expect((await conductor.status()).usageToday).toMatchObject({
+      inputTokens: 220,
+      outputTokens: 40,
+      cacheReadTokens: 100,
+      investigations: 3,
+    });
+    // A second instance reads the same totals from the file.
+    expect(await service().investigationsToday()).toEqual(today);
+  });
+
+  it("starts a new day with no checks and only that day's tokens", async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2026-10-10T12:00:00Z'));
+      await withKey();
+      const conductor = service();
+      await conductor.runTurn('command', userTurn);
+      await conductor.recordInvestigations(5, 0.02);
+      expect((await conductor.status()).usageToday).toMatchObject({
+        day: '2026-10-10',
+        inputTokens: 110,
+        investigations: 5,
+      });
+
+      vi.setSystemTime(new Date('2026-10-11T00:00:05Z'));
+      expect(await conductor.investigationsToday()).toEqual({ count: 0, costUsd: 0 });
+      // The first write of the new day must not carry yesterday's cached counts along.
+      await conductor.runTurn('command', userTurn);
+      expect((await conductor.status()).usageToday).toEqual({
+        day: '2026-10-11',
+        inputTokens: 110,
+        outputTokens: 20,
+        cacheReadTokens: 50,
+        investigations: 0,
+        investigationCostUsd: 0,
+      });
+      await conductor.recordInvestigations(1, 0.001);
+      expect((await conductor.status()).usageToday).toMatchObject({
+        day: '2026-10-11',
+        inputTokens: 110,
+        investigations: 1,
+        investigationCostUsd: 0.001,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('loads settings and usage files written before code checks existed', async () => {
+    const day = new Date().toISOString().slice(0, 10);
+    writeFileSync(
+      join(dataDir, 'conductor-settings.json'),
+      JSON.stringify({ model: 'claude-haiku-4-5', dailyTokenBudget: 5_000, jevEnabled: false })
+    );
+    writeFileSync(
+      join(dataDir, 'conductor-usage.json'),
+      JSON.stringify({ day, inputTokens: 900, outputTokens: 100, cacheReadTokens: 300 })
+    );
+
+    const status = await service().status();
+    expect(status.settings).toMatchObject({
+      model: 'claude-haiku-4-5',
+      dailyTokenBudget: 5_000,
+      jevEnabled: false,
+      investigations: false,
+      investigatorModel: 'haiku',
+    });
+    expect(status.usageToday).toEqual({
+      day,
+      inputTokens: 900,
+      outputTokens: 100,
+      cacheReadTokens: 300,
+      investigations: 0,
+      investigationCostUsd: 0,
+    });
   });
 });

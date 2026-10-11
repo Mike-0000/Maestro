@@ -1,4 +1,5 @@
 import { formatAgo } from './activity-ledger';
+import { nameBase, normalizeSpoken } from './resolver';
 
 /**
  * The facts about each agent that the conductor's per-turn context states by default, so "the
@@ -15,6 +16,8 @@ export type AgentFact = {
   readonly projectName: string;
   /** The conversation's own title, when it differs from the spoken name. */
   readonly title?: string;
+  /** Names it was renamed from a short while ago and still answers to. */
+  readonly formerly?: readonly string[];
   /** Epoch ms the agent's task was created; undefined while it is being created. */
   readonly createdAt?: number;
   /** Epoch ms the developer last sent it something. */
@@ -23,6 +26,8 @@ export type AgentFact = {
   readonly waitingSince?: number;
   /** The region (sub-canvas) its window is in. */
   readonly region?: string;
+  /** Canvas Pro: the desk its window is on (`region` is then a region inside that desk). */
+  readonly desk?: string;
   readonly focused?: boolean;
   readonly diff?: string;
 };
@@ -43,7 +48,10 @@ function minutes(since: number, now: number): string {
 
 /** One roster line: everything the conductor knows about an agent without a tool call. */
 export function agentLine(agent: AgentFact, now: number): string {
-  const also = agent.title ? `, also titled "${agent.title}"` : '';
+  const former = agent.formerly?.length
+    ? `, until just now called ${agent.formerly.map((name) => `"${name}"`).join(' and ')}`
+    : '';
+  const also = `${agent.title ? `, also titled "${agent.title}"` : ''}${former}`;
   const focus = agent.focused ? ', focused' : '';
   const waited = agent.waitingSince !== undefined ? ` for ${minutes(agent.waitingSince, now)}` : '';
   const parts = [
@@ -55,6 +63,7 @@ export function agentLine(agent: AgentFact, now: number): string {
     parts.push(`last messaged ${formatAgo(agent.lastMessagedAt, now)}`);
   }
   if (agent.region) parts.push(`in region ${agent.region}`);
+  if (agent.desk) parts.push(`on desk ${agent.desk}`);
   if (agent.diff) parts.push(agent.diff);
   return `- ${agent.name} (${agent.providerLabel}${also}${focus}): ${parts.join('; ')}`;
 }
@@ -70,6 +79,20 @@ export function newestPerProject(agents: readonly AgentFact[]): string | null {
   return [...newest].map(([project, name]) => `${project}: ${name}`).join('; ');
 }
 
+/**
+ * "Atlas / Atlas 3; Vesper / Vesper 2": names that differ only by their number, which a
+ * transcript mixes up most easily. Null when every name stands alone.
+ */
+export function soundAlikeLine(agents: readonly AgentFact[]): string | null {
+  const groups = new Map<string, string[]>();
+  for (const agent of agents) {
+    const base = nameBase(normalizeSpoken(agent.name));
+    if (base) groups.set(base, [...(groups.get(base) ?? []), agent.name]);
+  }
+  const alike = [...groups.values()].filter((names) => names.length > 1);
+  return alike.length > 0 ? alike.map((names) => names.join(' / ')).join('; ') : null;
+}
+
 /** Agents waiting on the developer, longest first. */
 export function waitingLine(agents: readonly AgentFact[], now: number): string | null {
   const waiting = agents
@@ -79,6 +102,45 @@ export function waitingLine(agents: readonly AgentFact[], now: number): string |
     .sort((a, b) => a.waitingSince - b.waitingSince);
   if (waiting.length < 2) return null;
   return waiting.map((agent) => `${agent.name} (${minutes(agent.waitingSince, now)})`).join(', ');
+}
+
+/** What the context says about one desk (Canvas Pro). */
+export type DeskFact = {
+  readonly name: string;
+  /** The desk in view. */
+  readonly active: boolean;
+  /** Windows that live on it. */
+  readonly windowCount: number;
+  /** "1 needs you, 2 working"; empty when nothing on it is worth a mention. */
+  readonly status: string;
+  /** A gathering desk: what it collects ("needs you"), else null. */
+  readonly gathers: string | null;
+};
+
+/** Desks named in the context line; more than this and the rest are counted. */
+export const CONTEXT_MAX_DESKS = 12;
+
+/**
+ * "Main (3), Review* (2, 1 needs you), Triage (gathers needs you)": the desks in order, with a
+ * star on the one in view. Bounded: past `max` desks the rest are counted, and the one in view is
+ * still named.
+ */
+export function desksLine(desks: readonly DeskFact[], max = CONTEXT_MAX_DESKS): string {
+  if (desks.length === 0) return 'none';
+  const describe = (desk: DeskFact): string => {
+    const parts = [
+      ...(desk.gathers ? [`gathers ${desk.gathers}`] : []),
+      ...(desk.gathers && desk.windowCount === 0 ? [] : [String(desk.windowCount)]),
+      ...(desk.status ? [desk.status] : []),
+    ];
+    return `${desk.name}${desk.active ? '*' : ''} (${parts.join(', ')})`;
+  };
+  const shown = desks.slice(0, max);
+  const rest = desks.slice(max);
+  const inView = rest.find((desk) => desk.active);
+  const more = rest.length > 0 ? `, and ${rest.length} more` : '';
+  const hidden = inView ? `, including ${describe(inView)}` : '';
+  return `${shown.map(describe).join(', ')}${more}${hidden}`;
 }
 
 /** "Thursday, October 8, 2026, 5:42 PM": the developer's local date and time. */

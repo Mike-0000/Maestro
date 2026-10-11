@@ -5,6 +5,11 @@
  * the stage ("full screen Review"), and navigation ("open Review", "switch to the new one",
  * "switch back", "next sub-canvas", "main canvas", "back", "undo"). Pure: it returns what to do, the conductor does it.
  *
+ * In Canvas Pro it also takes desk commands ("new desk called Review with Atlas", "next desk",
+ * "put Cedar on the Frontend desk", "bring Atlas here", "remove this desk"); "desktop" and "space"
+ * are understood as desk. Only the mode switch itself ("switch to Canvas Pro") works on both
+ * canvases, so on the classic one every other phrase means what it always did.
+ *
  * It claims an utterance only when every reference resolves (or needs a clarifying question), so
  * anything it does not understand still reaches the model.
  */
@@ -17,7 +22,17 @@ import type {
   SizeSpec,
   Slot,
 } from '@core/features/canvas/api/canvas-layout';
-import type { RegionColor } from '@core/features/canvas/api/canvas-regions';
+import type { RegionColor, WindowStatus } from '@core/features/canvas/api/canvas-regions';
+import {
+  createDesk,
+  DESK_WORD,
+  deskPhrase,
+  moveToDesk,
+  renameDesk,
+  reorderDesk,
+  resolveDesk,
+  type DeskCommand,
+} from './canvas-desk-ops';
 import {
   resolveCanvasRef,
   resolveRegionRef,
@@ -45,7 +60,9 @@ export type CanvasAction =
   | { readonly type: 'renameAgent'; readonly id: string; readonly name: string }
   /** Say what is in a region (or list the regions when null). */
   | { readonly type: 'describe'; readonly regionId: string | null }
-  | { readonly type: 'where'; readonly ids: readonly string[] };
+  | { readonly type: 'where'; readonly ids: readonly string[] }
+  /** Canvas Pro: make, switch, or change a desk, show a visitor, or switch the canvas mode. */
+  | { readonly type: 'desk'; readonly command: DeskCommand };
 
 export type CanvasParse =
   | { readonly kind: 'canvas'; readonly action: CanvasAction }
@@ -158,6 +175,97 @@ const WHERE = /^where(?:'s| is| are| did) (.+?)(?: go| end up)?$/;
 const LIST_REGIONS =
   /^(?:what|which) (?:regions|groups|areas) (?:are there|do i have|exist|have i got)|^(?:list|name|show me) (?:the |my |all )?(?:regions|groups|areas)$|^(?:describe|summari[sz]e) (?:the )?(?:canvas|board|layout)$/;
 
+// ── Canvas Pro: the mode and desks ("desktop" and "space" are heard as desk) ──
+const PRO_NAME = '(?:canvas pro|pro canvas)(?: mode)?';
+const PRO_ON = new RegExp(
+  `^(?:(?:(?:switch|change|go|move)(?: over)? to|use|turn on|enable|start|enter|open|try)(?: the)? ${PRO_NAME}|turn (?:the )?${PRO_NAME} on)$`
+);
+const PRO_OFF = new RegExp(
+  `^(?:(?:(?:switch|change|go|move)(?: back| over)? to|use|return to|back to|turn on|enable)(?: the)? classic (?:canvas|board)(?: mode)?|(?:turn off|leave|exit|disable|quit|stop using)(?: the)? ${PRO_NAME}|turn (?:the )?${PRO_NAME} off)$`
+);
+/** Only once in Canvas Pro: on the classic canvas "the normal canvas" is not a mode. */
+const PRO_OFF_LOOSE =
+  /^(?:(?:switch|change|go|move)(?: back| over)? to|use|return to|back to)(?: the)? (?:regular|normal|old|standard|original) (?:canvas|board)$/;
+const DESKS_WORD = '(?:desks|desktops|spaces)';
+const LIST_DESKS = new RegExp(
+  `^(?:(?:what|which) ${DESKS_WORD} (?:are there|do i have|exist|have i got)|(?:list|name|show me|what are) (?:the |my |all |all the |all my )?${DESKS_WORD}|(?:what|which) ${DESK_WORD} (?:am i on|am i in|is this)|where am i)$`
+);
+const WHATS_ON_DESK = /^(?:what(?:'s| is| are)|who(?:'s| is| are)) on (.+)$/;
+const LEAVE_DESK = new RegExp(
+  `^(?:leave|exit|get out of|step out of|back out of) (?:this|the|my) ${DESK_WORD}$`
+);
+const DESK_MAKE = '(?:make|create|add|start|set up|open|build|give me|i want|i need)(?: me)?';
+const DESK_STAY = `( (?:and|but) (?:stay|keep me|leave me)(?: here| where i am| on this ${DESK_WORD})?)?`;
+const DESK_GATHER = new RegExp(
+  `^(?:${DESK_MAKE} )?(?:a |an |one |another )?(?:new )?(?:gathering |triage )?${DESK_WORD}(?: (?:called|named|titled) (.+?))? (?:for|of|that (?:shows|gathers|collects|has|holds)|to (?:show|gather|collect|hold)|showing|gathering|collecting) (.+)$`
+);
+const GATHER_NAMED = / (?:called|named|titled) (.+)$/;
+const GATHER_SUBJECT =
+  '(?:everything|anything|everyone|anyone|whatever|whoever|what|every (?:agent|window)|all(?: of)?(?: the)? (?:agents|windows)|(?:the )?(?:agents|windows|ones))';
+const GATHER_WHAT = new RegExp(
+  `^(?:${GATHER_SUBJECT}(?:'s)? )?(?:(?:that|which|who)(?:'s| is| are| has| have)? )?(?:(?:is|are|has|have) )?(?:all )?(?:the )?(.+?)(?: (?:agents|windows|ones))?$`
+);
+const GATHER_STATUS: readonly (readonly [RegExp, WindowStatus])[] = [
+  [
+    /^(?:needs? (?:me|you|my attention|attention)|waiting(?: (?:for|on) me)?|blocked|triage)$/,
+    'needs-you',
+  ],
+  [/^(?:failed|failing|broken|errored|crashed|errors|failures)$/, 'error'],
+  [/^(?:working|running|busy)$/, 'working'],
+  [/^(?:done|finished|completed|complete)$/, 'done'],
+  [/^(?:idle|quiet)$/, 'idle'],
+];
+const DESK_PREP = '(?:onto|on to|over to|to|on|in|into)';
+const DESK_MOVE_NEW = new RegExp(
+  `^${MOVE_VERB} (.+?) ${DESK_PREP} (?:a|an|another|its own|their own|a brand) (?:new |separate |fresh )?${DESK_WORD}(?: (?:called|named|titled) (.+?))?${DESK_STAY}$`
+);
+// "Open a desk" makes one; a bare "open space" does not say so.
+const DESK_CREATE = new RegExp(
+  `^(?:${DESK_MAKE} (?:(?:a|an|one|another) (?:new |empty |blank |fresh )?|new |one more )|new |another |a new |one more )${DESK_WORD}(?: (?:called|named|titled) (.+?))?(?: (?:with|for|containing|holding|and put|and add|and move|that has|to hold) (.+?)(?: (?:in|on|onto|to|into) it| inside| there)?)?${DESK_STAY}$`
+);
+const DESK_RENAME_HERE = new RegExp(
+  `^(?:rename|retitle|call|name) (?:this|that|the|the current|my) ${DESK_WORD} (?:to |as )?(.+)$`
+);
+const DESK_REORDER = new RegExp(
+  `^(?:move|shift|put|push|slide|send|make|bring) (?:(.+?) )?${DESK_WORD} (?:one )?(?:over )?(?:to the |to be |to |the )?(left|right|first|last|start|beginning|front|end)(?: one)?$`
+);
+const DESK_POSITIONS: Record<string, 'first' | 'last' | 'left' | 'right'> = {
+  left: 'left',
+  right: 'right',
+  first: 'first',
+  start: 'first',
+  beginning: 'first',
+  front: 'first',
+  last: 'last',
+  end: 'last',
+};
+const DESK_REMOVE_VERB = '(?:remove|close|delete|get rid of|drop|discard|destroy|trash|kill)';
+const DESK_REMOVE = new RegExp(`^${DESK_REMOVE_VERB} (?:(.+?) )?${DESK_WORD}$`);
+const DESK_REMOVE_NUMBERED = new RegExp(`^${DESK_REMOVE_VERB} (${DESK_WORD} .+)$`);
+const BRING_HERE = new RegExp(
+  `^(?:bring|pull|fetch|get|grab|summon|borrow|show(?: me)?) (.+?) (?:over here|in here|here|over|(?:on|onto|to) (?:this|the current) ${DESK_WORD})$`
+);
+const SEND_BACK = /^(?:send|return|take|put) (.+?) (?:back home|back|home)$/;
+const KEEP_HERE = new RegExp(
+  `^(?:keep|leave|pin|park) (.+?) (?:here|on this ${DESK_WORD}|on this one)$|^(?:let|make) (.+?) (?:stay|live)(?: here)?$`
+);
+const ALL_VISITORS =
+  /^(?:them|them all|those|they|all|all of them|everyone|everything|everybody|both|both of them|(?:the |all (?:the )?)?visitors|(?:the |all (?:the )?)?visiting (?:ones|windows|agents))$/;
+const ONE_VISITOR = /^(?:it|that|that one|this|this one|the visitor|that window|this window)$/;
+const DESK_FOLLOW =
+  '( and (?:follow(?: (?:it|them|along))?|take me (?:there|along|with (?:it|them))|go there|switch(?: there| over| to it)?|come along|bring me(?: there| along)?|show (?:me|it)))?';
+const DESK_MOVE = new RegExp(
+  `^${MOVE_VERB} (.+?) ${DESK_PREP} (?:the |my )?(.+?) ${DESK_WORD}${DESK_FOLLOW}$`
+);
+const DESK_MOVE_NUMBERED = new RegExp(
+  `^${MOVE_VERB} (.+?) ${DESK_PREP} (${DESK_WORD} .+?)${DESK_FOLLOW}$`
+);
+const MOVE_HERE = /^(?:move|put|place|drop) (.+?) (?:over )?here$/;
+const DESK_GO =
+  '(?:(?:go|switch|swap|flip|jump|change|head|hop|move)(?: over| back)? to|take me(?: back)? to|show(?: me)?|open|bring up|give me|back to)';
+const DESK_SWITCH = new RegExp(`^(?:(${DESK_GO}) )?(?:the |my )?(.+?) ${DESK_WORD}$`);
+const DESK_SWITCH_NUMBERED = new RegExp(`^(?:(${DESK_GO}) )?(${DESK_WORD} .+)$`);
+
 const COLORS: Record<string, RegionColor> = {
   blue: 'blue',
   violet: 'violet',
@@ -211,11 +319,21 @@ const ORGANIZE_BY: Record<string, OrganizeBy> = {
 type Refs = { readonly ids: readonly string[] } | { readonly question: string } | null;
 
 function refs(text: string, context: CanvasRefContext, prefer: RefPreference = 'any'): Refs {
-  return fromResult(resolveCanvasRef(text, context, prefer));
+  return deskRefs(text, context) ?? fromResult(resolveCanvasRef(text, context, prefer));
 }
 
 function regionOnly(text: string, context: CanvasRefContext): Refs {
-  return fromResult(resolveRegionRef(text, context));
+  return deskRefs(text, context) ?? fromResult(resolveRegionRef(text, context));
+}
+
+/**
+ * Canvas Pro: a phrase that says desk ("the Review desk", "this desk", "desk 2") names a desk
+ * wherever a region can be named. Undefined when it is not one, so the usual resolver has a go.
+ */
+function deskRefs(text: string, context: CanvasRefContext): Refs | undefined {
+  const desk = deskPhrase(text, context);
+  if (!desk) return undefined;
+  return desk.kind === 'match' ? { ids: [desk.id] } : { question: desk.question };
 }
 
 function fromResult(result: RefResult): Refs {
@@ -350,6 +468,189 @@ function windowsOnly(ids: readonly string[]): string[] {
   return ids.filter((id) => !isRegion(id));
 }
 
+/** "Everything that needs me", "the failed ones", "agents that are done": the status meant. */
+function gatherStatus(what: string): WindowStatus | null {
+  const said = GATHER_WHAT.exec(what.trim())?.[1];
+  if (!said) return null;
+  return GATHER_STATUS.find(([pattern]) => pattern.test(said))?.[1] ?? null;
+}
+
+/** Windows (and regions on a desk) for a desk command; a desk itself is never one of them. */
+function deskWindows(text: string, context: CanvasRefContext): Refs {
+  const found = refs(text, context, 'window');
+  if (!found || 'question' in found) return found;
+  const desks = context.desks?.order ?? [];
+  return found.ids.length > 0 && !found.ids.some((id) => desks.includes(id)) ? found : null;
+}
+
+/**
+ * Who "send it back" or "keep them here" means among the windows visiting the desk in view:
+ * `ids: null` is all of them. "It" with several visiting and none focused is a question.
+ */
+function visitorRefs(
+  who: string,
+  context: CanvasRefContext
+): { readonly ids: readonly string[] | null } | { readonly question: string } | null {
+  const visitors = context.desks?.visitors ?? [];
+  if (ALL_VISITORS.test(who)) return { ids: null };
+  if (ONE_VISITOR.test(who)) {
+    const [only] = visitors;
+    if (context.focusedId && visitors.includes(context.focusedId)) {
+      return { ids: [context.focusedId] };
+    }
+    if (visitors.length === 1 && only) return { ids: [only] };
+    const names = visitors.map(
+      (id) => context.entities.find((entity) => entity.id === id)?.name ?? 'a window'
+    );
+    return { question: `Which one: ${names.join(' or ')}? Or say "all of them".` };
+  }
+  const found = refs(who, context, 'window');
+  if (!found || 'question' in found) return found;
+  const ids = windowsOnly(found.ids);
+  return ids.length > 0 ? { ids } : null;
+}
+
+/**
+ * Canvas Pro. Switching the mode works on either canvas; everything else needs desks, so on the
+ * classic canvas this claims nothing more. Null when the utterance is not about desks (or names
+ * something that does not resolve), so the rest of the grammar and the model get a turn.
+ */
+function parseDeskCommand(
+  text: string,
+  context: CanvasRefContext,
+  named: (name: string) => string
+): CanvasParse | null {
+  const desk = (command: DeskCommand): CanvasParse => act({ type: 'desk', command });
+  if (PRO_ON.test(text)) return desk({ action: 'set_mode', mode: 'pro' });
+  if (PRO_OFF.test(text) || (context.desks && PRO_OFF_LOOSE.test(text))) {
+    return desk({ action: 'set_mode', mode: 'classic' });
+  }
+  const desks = context.desks;
+  if (!desks) return null;
+
+  // ── Looking around ──
+  if (LIST_DESKS.test(text)) return act({ type: 'describe', regionId: null });
+  if (LEAVE_DESK.test(text)) return act({ type: 'up' });
+  const whatsOn = WHATS_ON_DESK.exec(text);
+  if (whatsOn?.[1]) {
+    const target = resolveDesk(whatsOn[1], context);
+    if (target.kind === 'match') return act({ type: 'describe', regionId: target.id });
+  }
+
+  // ── New desks ──
+  const gather = DESK_GATHER.exec(text);
+  if (gather?.[2]) {
+    const tail = GATHER_NAMED.exec(gather[2]);
+    const status = gatherStatus(tail ? gather[2].slice(0, tail.index) : gather[2]);
+    const name = gather[1] ?? tail?.[1];
+    if (status) return desk(createDesk({ gather: status, ...(name ? { name: named(name) } : {}) }));
+  }
+  const moveNew = DESK_MOVE_NEW.exec(text);
+  if (moveNew?.[1]) {
+    const members = deskWindows(moveNew[1], context);
+    if (members && 'question' in members) return ask(members.question);
+    if (members) {
+      return desk(
+        createDesk({
+          members: members.ids,
+          ...(moveNew[2] ? { name: named(moveNew[2]) } : {}),
+          ...(moveNew[3] ? { follow: false } : {}),
+        })
+      );
+    }
+  }
+  const create = DESK_CREATE.exec(text);
+  if (create) {
+    const options = {
+      ...(create[1] ? { name: named(create[1]) } : {}),
+      ...(create[3] ? { follow: false } : {}),
+    };
+    if (!create[2]) return desk(createDesk(options));
+    const members = deskWindows(create[2], context);
+    if (members && 'question' in members) return ask(members.question);
+    if (!members) return null;
+    return desk(createDesk({ ...options, members: members.ids }));
+  }
+
+  // ── Changing a desk ──
+  const renameHere = DESK_RENAME_HERE.exec(text);
+  if (renameHere?.[1] && desks.active) {
+    return desk(renameDesk(desks.active, named(renameHere[1])));
+  }
+  const reorder = DESK_REORDER.exec(text);
+  const position = reorder?.[2] ? DESK_POSITIONS[reorder[2]] : undefined;
+  if (reorder && position) {
+    const target = resolveDesk(`${reorder[1] ?? 'this'} desk`, context);
+    if (target.kind === 'clarify') return ask(target.question);
+    if (target.kind === 'match') return desk(reorderDesk(target.id, position));
+  }
+  const remove = DESK_REMOVE.exec(text);
+  const removed = remove ? `${remove[1] ?? 'this'} desk` : DESK_REMOVE_NUMBERED.exec(text)?.[1];
+  if (removed) {
+    const target = resolveDesk(removed, context);
+    if (target.kind === 'clarify') return ask(target.question);
+    if (target.kind === 'match') return desk({ action: 'remove', desk: target.id, into: null });
+  }
+
+  // ── Visitors: a window from another desk shown here without moving it ──
+  const bring = BRING_HERE.exec(text);
+  if (bring?.[1]) {
+    const windows = refs(bring[1], context, 'window');
+    if (windows && 'question' in windows) return ask(windows.question);
+    const ids = windows ? windowsOnly(windows.ids) : [];
+    if (ids.length > 0) return desk({ action: 'bring', windows: ids });
+  }
+  // With nobody visiting, "send it back" is not about desks.
+  if (desks.visitors.length > 0) {
+    const back = SEND_BACK.exec(text);
+    const keep = back ? null : KEEP_HERE.exec(text);
+    const who = back?.[1] ?? keep?.[1] ?? keep?.[2];
+    if (who) {
+      const visitors = visitorRefs(who, context);
+      if (visitors && 'question' in visitors) return ask(visitors.question);
+      if (visitors) return desk({ action: back ? 'send_back' : 'keep', windows: visitors.ids });
+    }
+  }
+
+  // ── Windows to a desk, for good ──
+  const move = DESK_MOVE.exec(text);
+  const moveNumbered = move ? null : DESK_MOVE_NUMBERED.exec(text);
+  const destination = move ? `${move[2]} desk` : moveNumbered?.[2];
+  const moved = move?.[1] ?? moveNumbered?.[1];
+  if (destination && moved) {
+    const target = resolveDesk(destination, context);
+    if (target.kind === 'clarify') return ask(target.question);
+    if (target.kind === 'match') {
+      const windows = deskWindows(moved, context);
+      if (windows && 'question' in windows) return ask(windows.question);
+      const follow = Boolean((move ?? moveNumbered)?.[3]);
+      if (windows) return desk(moveToDesk(windows.ids, target.id, follow, context));
+    }
+  }
+  const here = MOVE_HERE.exec(text);
+  const place = context.currentRegion ?? desks.active;
+  if (here?.[1] && place) {
+    const windows = deskWindows(here[1], context);
+    if (windows && 'question' in windows) return ask(windows.question);
+    if (windows) return desk(moveToDesk(windows.ids, place, false, context));
+  }
+
+  // ── Switching ──
+  const go = DESK_SWITCH.exec(text);
+  const goNumbered = go ? null : DESK_SWITCH_NUMBERED.exec(text);
+  const wanted = go ? `${go[2]} desk` : goNumbered?.[2];
+  if (wanted) {
+    const target = resolveDesk(wanted, context);
+    if (target.kind === 'clarify') return ask(target.question);
+    // Without a verb, "this desk" is not a request to go anywhere.
+    const asked = Boolean((go ?? goNumbered)?.[1]);
+    if (target.kind === 'match' && (asked || target.id !== desks.active)) {
+      return desk({ action: 'switch', desk: target.id });
+    }
+  }
+  return null;
+}
+
 /**
  * Parses a canvas layout command from a cleaned utterance (fillers and politeness removed).
  * Returns null when it is not one, so other grammar and the model get a turn.
@@ -371,6 +672,9 @@ export function parseCanvasCommand(
   if (UP.test(text)) return act({ type: 'up' });
   if (HOME.test(text)) return act({ type: 'home' });
   if (context.onStage && LEAVE_STAGE.test(text)) return act({ type: 'leaveStage' });
+  // Before the region forms: in Canvas Pro "next space" is a desk, and "close this desk" removes it.
+  const deskCommand = parseDeskCommand(text, context, named);
+  if (deskCommand) return deskCommand;
   if (!context.onStage && LEAVE_REGION.test(text)) {
     return context.currentRegion ? act({ type: 'up' }) : ask("You're on the main canvas already.");
   }
@@ -799,4 +1103,4 @@ export function parseCanvasCommand(
 
 /** Utterances that look like layout talk: skip Jev routing and go straight to the model. */
 export const LAYOUT_CUES =
-  /\b(?:region|regions|group|groups|sub ?canvas|sub ?canvases|workspace|quadrants?|tile|tiled|stage|full ?screen|side by side|tidy|organi[sz]e|arrange|layout|lay out|move|put|drag|resize|bigger|smaller|wider|narrower|taller|shorter|swap|collapse|expand|ungroup|dissolve|corner|next to|beside|above|below|left of|right of)\b/i;
+  /\b(?:region|regions|group|groups|sub ?canvas|sub ?canvases|workspace|desks?|canvas pro|classic canvas|quadrants?|tile|tiled|stage|full ?screen|side by side|tidy|organi[sz]e|arrange|layout|lay out|move|put|drag|resize|bigger|smaller|wider|narrower|taller|shorter|swap|collapse|expand|ungroup|dissolve|corner|next to|beside|above|below|left of|right of)\b/i;

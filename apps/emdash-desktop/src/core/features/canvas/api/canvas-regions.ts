@@ -9,6 +9,7 @@
 import {
   AGENT_TILE_SIZE,
   BROWSER_TILE_SIZE,
+  DOC_TILE_SIZE,
   boundsOf,
   FRAME_HEADER,
   FRAME_PADDING,
@@ -42,6 +43,10 @@ export type RegionState = {
   readonly weights?: Readonly<Record<string, number>>;
   /** A top-level tiled region sized to the canvas viewport; false once the user sizes it. */
   readonly screenSized?: boolean;
+  /** Place among desks (Canvas Pro shows top-level regions one at a time, in this order). */
+  readonly order?: number;
+  /** A gathering desk: while it is showing, every window with this status visits it. */
+  readonly gather?: WindowStatus;
 };
 
 export type RegionArrangement = 'tiled' | 'free';
@@ -62,7 +67,7 @@ export type LayoutState = {
 
 export const EMPTY_LAYOUT: LayoutState = { tiles: {}, regions: {}, membership: {}, hidden: [] };
 
-export type WindowKind = 'agent' | 'browser' | 'note';
+export type WindowKind = 'agent' | 'browser' | 'note' | 'doc';
 
 /** Coarse status used for grouping and summaries. */
 export type WindowStatus = 'needs-you' | 'working' | 'idle' | 'done' | 'error';
@@ -101,6 +106,7 @@ export function newRegionId(uuid: string): string {
 export function windowKindOf(tileId: string): WindowKind {
   if (tileId.startsWith('note:')) return 'note';
   if (tileId.startsWith('browser:')) return 'browser';
+  if (tileId.startsWith('doc:')) return 'doc';
   return 'agent';
 }
 
@@ -110,6 +116,8 @@ export function defaultSizeOf(tileId: string): { w: number; h: number } {
       return NOTE_TILE_SIZE;
     case 'browser':
       return BROWSER_TILE_SIZE;
+    case 'doc':
+      return DOC_TILE_SIZE;
     default:
       return AGENT_TILE_SIZE;
   }
@@ -121,6 +129,8 @@ export function minSizeOf(tileId: string): { w: number; h: number } {
       return { w: 200, h: 120 };
     case 'browser':
       return { w: 480, h: 320 };
+    case 'doc':
+      return { w: 320, h: 240 };
     default:
       return { w: 360, h: 220 };
   }

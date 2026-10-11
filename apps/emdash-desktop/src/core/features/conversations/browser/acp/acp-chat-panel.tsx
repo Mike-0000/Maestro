@@ -775,7 +775,11 @@ export const AcpChatPanel = observer(function AcpChatPanel() {
 
   const transcriptCommands = useMemo<ChatCommands>(() => {
     const fileCommands = store
-      ? createTranscriptFileCommands({ projectId: store.projectId, taskId: store.taskId })
+      ? createTranscriptFileCommands({
+          projectId: store.projectId,
+          taskId: store.taskId,
+          conversationId: store.conversationId,
+        })
       : null;
     return {
       onViewImage: (arg) => {

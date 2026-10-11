@@ -5,6 +5,7 @@
  */
 
 import {
+  AGENT_WINDOW_NAMES,
   agentWindowName,
   parseAgentWindowNameSlot,
 } from '@core/features/conversations/api/agent-window-names';
@@ -16,6 +17,8 @@ export type CanvasViewport = { x: number; y: number; zoom: number };
 /** Default agent tile size in canvas units (1 unit = 1 CSS px at zoom 1). */
 export const AGENT_TILE_SIZE = { w: 720, h: 460 } as const;
 export const NOTE_TILE_SIZE = { w: 320, h: 200 } as const;
+/** Document windows (a rendered Markdown file): a readable column, as tall as an agent and a half. */
+export const DOC_TILE_SIZE = { w: 640, h: 720 } as const;
 /** App browser tiles: a laptop-ish viewport so screenshots read like the real app. */
 export const BROWSER_TILE_SIZE = { w: 960, h: 640 } as const;
 /** Height of a browser tile's header strip (the rest is the page). */
@@ -214,10 +217,11 @@ export function numberWord(n: number): string {
 }
 
 /**
- * Assigns a short, speakable name that is unique across the canvas, from the fixed agent window
- * roster ("Atlas", "Bravo", ...). `preferred` (usually the conversation title) wins when it is a
- * roster name nobody else holds, so the canvas and the task view agree; otherwise the first free
- * roster slot is used.
+ * Assigns a short, speakable name from the fixed agent window roster ("Atlas", "Bravo", ...) that
+ * none of `taken` (the names of the agents that exist now) holds. A word no agent uses comes
+ * first, so two agents differ only by a number ("Atlas", "Atlas 2") once all 26 words are in
+ * use, never before: those are the names speech-to-text mixes up. `preferred` (usually the
+ * conversation title) wins when it is such a name, so the canvas and the task view agree.
  */
 export function assignSpokenName(preferred: string | undefined, taken: Iterable<string>): string {
   const used = new Set<number>();
@@ -225,11 +229,57 @@ export function assignSpokenName(preferred: string | undefined, taken: Iterable<
     const slot = parseAgentWindowNameSlot(name);
     if (slot !== null) used.add(slot);
   }
+  const words = AGENT_WINDOW_NAMES.length;
+  const usedWords = new Set([...used].map((slot) => slot % words));
   const preferredSlot = preferred ? parseAgentWindowNameSlot(preferred) : null;
-  if (preferredSlot !== null && !used.has(preferredSlot)) return agentWindowName(preferredSlot);
+  const preferredFree = preferredSlot !== null && !used.has(preferredSlot);
+  if (preferredFree && !usedWords.has(preferredSlot % words)) return agentWindowName(preferredSlot);
+  for (let word = 0; word < words; word++) {
+    if (!usedWords.has(word)) return agentWindowName(word);
+  }
+  if (preferredFree) return agentWindowName(preferredSlot);
   let slot = 0;
   while (used.has(slot)) slot++;
   return agentWindowName(slot);
+}
+
+/**
+ * A spoken name reduced to what tells two names apart: letters and digits of any script, in any
+ * case or spacing.
+ */
+export function spokenNameKey(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
+export type SpokenNameHolder = {
+  id: string;
+  name: string;
+  /** When the agent's task was created; null while it is being created. */
+  createdAt: string | null;
+  /** Already on the roster under this name before now, as opposed to just arriving with it. */
+  settled: boolean;
+};
+
+/**
+ * The agents that must give up a spoken name because another agent holds the same one. An agent
+ * already on the roster keeps it over one arriving with it (an agent back from the archive whose
+ * name was handed on meanwhile); between two of a kind the newer task keeps it, and one still
+ * being created counts as newest.
+ */
+export function duplicateSpokenNames(holders: readonly SpokenNameHolder[]): string[] {
+  const keepers = new Map<string, SpokenNameHolder>();
+  const rank = (holder: SpokenNameHolder) => `${holder.settled ? 1 : 0}${holder.createdAt ?? '￿'}`;
+  for (const holder of holders) {
+    const key = spokenNameKey(holder.name);
+    const keeper = keepers.get(key);
+    if (!keeper || rank(holder) > rank(keeper)) keepers.set(key, holder);
+  }
+  return holders
+    .filter((holder) => keepers.get(spokenNameKey(holder.name))?.id !== holder.id)
+    .map((holder) => holder.id);
 }
 
 /**

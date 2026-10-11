@@ -9,6 +9,7 @@
  * The vocabulary has no absolute coordinates except `exact`, which only the pointer path builds.
  */
 
+import { deskIds, reorderDesks, type DeskPosition } from './canvas-desks';
 import {
   AGENT_TILE_SIZE,
   boundsOf,
@@ -133,10 +134,15 @@ export type LayoutOp =
       readonly color?: RegionColor;
       readonly auto?: boolean;
       readonly projectId?: string;
+      /** A gathering desk: windows with this status visit it while it shows. */
+      readonly gather?: WindowStatus;
     }
   | { readonly op: 'renameRegion'; readonly region: string; readonly name: string }
   | { readonly op: 'recolorRegion'; readonly region: string; readonly color: RegionColor | null }
-  | { readonly op: 'dissolveRegion'; readonly region: string }
+  /** `into`: the region its members go to (a removed desk's windows move to another desk). */
+  | { readonly op: 'dissolveRegion'; readonly region: string; readonly into?: string }
+  /** Canvas Pro: moves a desk (a top-level region) to another place in the desk order. */
+  | { readonly op: 'reorderDesk'; readonly region: string; readonly position: DeskPosition }
   | { readonly op: 'collapseRegion'; readonly region: string; readonly collapsed: boolean }
   | { readonly op: 'fitRegion'; readonly region: string }
   | { readonly op: 'hide'; readonly targets: readonly string[] }
@@ -1644,6 +1650,10 @@ function opCreateRegion(draft: Draft, op: Extract<LayoutOp, { op: 'createRegion'
   for (const member of members) draft.targets.add(member);
   const color =
     op.color ?? REGION_COLORS[Object.keys(draft.regions).length % (REGION_COLORS.length - 1)];
+  // Where desks are ordered (Canvas Pro), a new one takes the last place.
+  const orders = parentId
+    ? []
+    : deskIds(draft.state).flatMap((desk) => draft.regions[desk]?.order ?? []);
   draft.regions[id] = {
     name,
     parentId,
@@ -1654,6 +1664,8 @@ function opCreateRegion(draft: Draft, op: Extract<LayoutOp, { op: 'createRegion'
     arrangement: 'tiled',
     ...(op.auto ? { auto: true } : {}),
     ...(op.projectId ? { projectId: op.projectId } : {}),
+    ...(op.gather ? { gather: op.gather } : {}),
+    ...(orders.length > 0 ? { order: Math.max(...orders) + 1 } : {}),
     ...(color ? { color } : {}),
   };
 
@@ -1738,7 +1750,7 @@ function opRename(draft: Draft, regionId: string, name: string): OpResult {
   return `Renamed ${old} to ${trimmed}.`;
 }
 
-function opDissolve(draft: Draft, regionId: string): OpResult {
+function opDissolve(draft: Draft, regionId: string, into?: string): OpResult {
   const region = draft.regions[regionId];
   if (!region) return { error: 'That region no longer exists.' };
   const parentId = draft.parent(regionId);
@@ -1749,6 +1761,27 @@ function opDissolve(draft: Draft, regionId: string): OpResult {
     ...childRegions(draft.state, regionId),
   ];
   const visible = draft.children(regionId);
+  if (into !== undefined) {
+    if (!draft.regions[into]) return { error: 'The region to move its windows to is gone.' };
+    if (isWithinDraft(draft, into, regionId)) {
+      return { error: `${draft.name(into)} is inside ${region.name}.` };
+    }
+    for (const member of members) {
+      const problem = canReparent(draft, member, into);
+      if (problem) return { error: problem };
+    }
+    if (visible.length > 0) draft.forcePreview = true;
+    for (const member of members) {
+      placeInside(draft, member, into);
+      draft.targets.add(member);
+    }
+    draft.targets.add(into);
+    delete draft.regions[regionId];
+    const count = visible.length;
+    return count > 0
+      ? `Removed ${region.name}; its ${count} window${count === 1 ? '' : 's'} went to ${draft.name(into)}.`
+      : `Removed ${region.name}.`;
+  }
   if (visible.length > 0) draft.forcePreview = true;
   for (const member of members) {
     draft.setParent(member, parentId);
@@ -1838,7 +1871,16 @@ function applyOp(draft: Draft, op: LayoutOp): OpResult {
       return `Recolored ${region.name}.`;
     }
     case 'dissolveRegion':
-      return opDissolve(draft, op.region);
+      return opDissolve(draft, op.region, op.into);
+    case 'reorderDesk': {
+      const region = draft.regions[op.region];
+      if (!region || draft.parent(op.region)) return { error: 'That is not a desk.' };
+      const order = reorderDesks(deskIds(draft.state), op.region, op.position);
+      if (!order) return { error: 'That is not a desk.' };
+      order.forEach((id, index) => draft.setRegion(id, { order: index }));
+      draft.targets.add(op.region);
+      return `${region.name} is now desk ${order.indexOf(op.region) + 1} of ${order.length}.`;
+    }
     case 'collapseRegion':
       return opCollapse(draft, op.region, op.collapsed);
     case 'fitRegion':

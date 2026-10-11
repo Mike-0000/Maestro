@@ -133,4 +133,64 @@ describe('routing eval with a canvas (layout grammar enabled)', () => {
   it('never grabs an utterance that belongs to the model', () => {
     expect(grabbed).toEqual([]);
   });
+
+  // Canvas Pro adds desk commands. None of the eval's utterances is one, so with the same regions
+  // as desks (and a window visiting, which arms "send it back") every row must route as before.
+  it('routes every row the same way in Canvas Pro', () => {
+    const pro: CanvasRefContext = {
+      ...canvas,
+      currentRegion: 'region:review',
+      desks: {
+        order: ['region:review', 'region:backend'],
+        active: 'region:review',
+        newest: 'region:backend',
+        visitors: ['browser:1'],
+      },
+    };
+    const classic: CanvasRefContext = { ...canvas, currentRegion: 'region:review' };
+    const changed = rows
+      .filter((row) => {
+        const on = (context: CanvasRefContext) =>
+          JSON.stringify(
+            parseCommand(row.utterance, roster, row.focused, { ...context, focusedId: row.focused })
+          );
+        return on(pro) !== on(classic);
+      })
+      .map((row) => row.utterance);
+    expect(changed).toEqual([]);
+  });
+});
+
+/**
+ * Questions about the code must reach the model, which can run a code check; an agent or its
+ * task named in the question still wins, as it did before. The same file pins the phrases that
+ * steer calls, and the neighbours they must not take over.
+ */
+describe('routing eval (code questions and call steering)', () => {
+  const extraLines = readFileSync(
+    join(__dirname, '../../../../../../../docs/chorus/evals/code-questions.jsonl'),
+    'utf8'
+  )
+    .split('\n')
+    .filter(Boolean);
+  const extraRoster = (JSON.parse(extraLines[0] ?? '{}') as { roster: RosterAgent[] }).roster;
+  const extraRows = extraLines.slice(1).map((line) => JSON.parse(line) as Row);
+
+  it('routes every row as expected', () => {
+    const wrong = extraRows
+      .filter((row) => !matches(parseCommand(row.utterance, extraRoster, row.focused), row.expect))
+      .map((row) => {
+        const command = parseCommand(row.utterance, extraRoster, row.focused);
+        return `[${row.tag}] "${row.utterance}" expected ${JSON.stringify(row.expect)} got ${JSON.stringify(command?.kind ?? null)}`;
+      });
+    expect(wrong).toEqual([]);
+  });
+
+  it('sends every code question to the model', () => {
+    const questions = extraRows.filter((row) => row.tag === 'code-question');
+    expect(questions.length).toBeGreaterThanOrEqual(8);
+    for (const row of questions) {
+      expect(parseCommand(row.utterance, extraRoster, row.focused)).toBeNull();
+    }
+  });
 });

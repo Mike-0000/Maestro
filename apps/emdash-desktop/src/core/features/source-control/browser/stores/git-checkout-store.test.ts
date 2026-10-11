@@ -128,6 +128,69 @@ describe('GitCheckoutStore', () => {
     store.dispose();
   });
 
+  it('counts untracked lines a few files at a time', async () => {
+    const paths = Array.from({ length: 10 }, (_, index) => `new/file-${index}.ts`);
+    let active = 0;
+    let peak = 0;
+    mocks.readFileText.mockImplementation(async () => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      active -= 1;
+      return ok({ content: 'one\ntwo\n', truncated: false, totalSize: 8, etag: 'etag' });
+    });
+    statusState.set(untrackedStatus(paths));
+    const store = new GitCheckoutStore('project-1', 'workspace-1', '/repo');
+    store.start();
+
+    await waitFor(
+      () =>
+        store.unstagedFileChanges.length === paths.length &&
+        store.unstagedFileChanges.every((change) => change.additions === 2)
+    );
+
+    expect(mocks.readFileText).toHaveBeenCalledTimes(paths.length);
+    expect(peak).toBeLessThanOrEqual(4);
+    store.dispose();
+  });
+
+  it('skips untracked line counts for a checkout with too many untracked files', async () => {
+    const paths = Array.from({ length: 201 }, (_, index) => `build/out-${index}.bin`);
+    statusState.set(untrackedStatus(paths));
+    const store = new GitCheckoutStore('project-1', 'workspace-1', '/repo');
+    store.start();
+
+    await waitFor(() => store.unstagedFileChanges.length === paths.length);
+    await waitFor(() => mocks.getChangedFiles.mock.calls.length >= 2);
+    await waitFor(() => true);
+
+    expect(mocks.readFileText).not.toHaveBeenCalled();
+    store.dispose();
+  });
+
+  it('stops counting untracked lines once a newer status arrives', async () => {
+    const paths = Array.from({ length: 10 }, (_, index) => `new/file-${index}.ts`);
+    const reads: Deferred<void>[] = [];
+    mocks.readFileText.mockImplementation(async () => {
+      const read = deferred<void>();
+      reads.push(read);
+      await read.promise;
+      return ok({ content: 'one\n', truncated: false, totalSize: 4, etag: 'etag' });
+    });
+    statusState.set(untrackedStatus(paths));
+    const store = new GitCheckoutStore('project-1', 'workspace-1', '/repo');
+    store.start();
+    await waitFor(() => reads.length === 4);
+
+    statusState.set(status());
+    await waitFor(() => store.unstagedFileChanges.length === 0);
+    for (const read of reads) read.resolve();
+    await waitFor(() => true);
+
+    expect(mocks.readFileText).toHaveBeenCalledTimes(4);
+    store.dispose();
+  });
+
   it('uses checkout upstream state instead of repository branch inventory', async () => {
     headState.set(head('main', { kind: 'none' }));
     const store = new GitCheckoutStore('project-1', 'workspace-1', '/repo');
@@ -601,6 +664,20 @@ function stagedStatus(changedPath: string): CheckoutStatusState {
       },
     },
     summary: { staged: 1, unstaged: 0, conflicted: 0, untracked: 0 },
+    operation: 'none',
+  };
+}
+
+function untrackedStatus(changedPaths: readonly string[]): CheckoutStatusState {
+  const entries: Extract<CheckoutStatusState, { kind: 'ok' }>['entries'] = {};
+  for (const changedPath of changedPaths) {
+    const path = portablePath(changedPath);
+    entries[path] = { path, index: 'untracked', worktree: 'untracked', isConflicted: false };
+  }
+  return {
+    kind: 'ok',
+    entries,
+    summary: { staged: 0, unstaged: 0, conflicted: 0, untracked: changedPaths.length },
     operation: 'none',
   };
 }

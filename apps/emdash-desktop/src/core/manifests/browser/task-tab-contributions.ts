@@ -1,6 +1,7 @@
 import { browserTaskTabContributions } from '@core/features/browser/contributions/tabs';
 import { conversationTaskTabContributions } from '@core/features/conversations/contributions/tabs';
 import { editorTaskTabContributions } from '@core/features/editor/contributions/tabs';
+import { markdownViewerTaskTabContributions } from '@core/features/markdown-viewer/contributions/tabs';
 import { sourceControlTaskTabContributions } from '@core/features/source-control/contributions/tabs';
 import { terminalTaskTabContributions } from '@core/features/terminals/contributions/tabs';
 
@@ -10,4 +11,5 @@ export const taskTabContributions = [
   ...sourceControlTaskTabContributions,
   ...terminalTaskTabContributions,
   ...browserTaskTabContributions,
+  ...markdownViewerTaskTabContributions,
 ] as const;

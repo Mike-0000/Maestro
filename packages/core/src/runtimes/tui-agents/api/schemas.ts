@@ -31,8 +31,19 @@ export const tuiAgentStartInputSchema = z.object({
   shellSetup: z.string().optional(),
   tmux: z.object({ identity: z.string().min(1) }).optional(),
   /**
-   * Loopback MCP servers for this session only (Chorus's browser tools). Tokens are not part of
-   * the input: each server names the `providerVars` entry holding it.
+   * Run the agent inside WSL2 when the host is Windows and its default distro has the CLI;
+   * otherwise it runs natively. `configRoot` names the agent's configuration directory (the
+   * variable that overrides it, and its name under the home directory), so hooks can be
+   * installed where the agent inside the distro reads them.
+   */
+  wsl: z
+    .object({
+      configRoot: z.object({ env: z.string().min(1), directory: z.string().min(1) }).optional(),
+    })
+    .optional(),
+  /**
+   * Loopback MCP servers for this session only (Maestro's browser tools and conductor requests).
+   * Tokens are not part of the input: each server names the `providerVars` entry holding it.
    */
   sessionMcp: z
     .object({

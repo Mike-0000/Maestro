@@ -28,6 +28,36 @@ export async function openTaskConversation(
   await handle.current?.openConversation(conversationId);
 }
 
+/**
+ * Opens a tab beside what the developer is looking at in a task view: in the pane that already
+ * holds a tab of this kind, else in the pane to the right of the focused one, splitting if there
+ * is none. Reusing the pane keeps a run of opens from splitting the view again each time. Waits
+ * for the task's pane layout to exist and be restored. False when the task has no view to open
+ * the tab in.
+ */
+export async function openTaskTabBeside(
+  projectId: string,
+  taskId: string,
+  kind: string,
+  args: Record<string, unknown>
+): Promise<boolean> {
+  const handle = getTaskStore(projectId, taskId)?.get(taskCompositionHandleStoreToken);
+  if (!handle) return false;
+  try {
+    await when(() => handle.current !== null, { timeout: TASK_COMPOSITION_TIMEOUT_MS });
+  } catch {
+    return false;
+  }
+  const composition = handle.current;
+  if (!composition || !(await composition.whenPaneLayoutRestored())) return false;
+  const layout = composition.paneLayout;
+  const home = layout.groups.find((group) =>
+    group.pane.resolvedTabs.some((tab) => tab.kind === kind)
+  );
+  layout.open(kind, args, { target: home ? { paneId: home.paneId } : 'right', preview: false });
+  return true;
+}
+
 export function getTaskWorkspace(projectId: string, taskId: string) {
   const workspaceId = getTaskStore(projectId, taskId)?.workspaceId;
   return workspaceId ? workspaceRegistry.get(workspaceId) : undefined;

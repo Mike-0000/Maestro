@@ -1,4 +1,5 @@
 import { AgentStatus } from '@emdash/ui/react/components';
+import { toast } from '@emdash/ui/react/primitives';
 import { NodeResizer, useStore, type NodeProps } from '@xyflow/react';
 import { EyeOff, Maximize2, PanelsTopLeft, Play } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
@@ -42,6 +43,8 @@ export const AgentTileNode = observer(function AgentTileNode({ data, selected }:
   // reaches the terminal only at zoom 1.
   const focused = store.focusedTileId === tileId;
   const attention = needsAttention(entry);
+  // The conductor is delivering this agent's call. A mark only: focus stays where it was.
+  const onLine = store.insight(conversationId)?.onLine === true;
   // A staged agent is mounted on the stage; mounting its terminal here too would fight over it.
   const staged = store.isStaged(tileId);
   const badge = store.listening && store.layoutSettings.showNamesWhileListening;
@@ -51,7 +54,8 @@ export const AgentTileNode = observer(function AgentTileNode({ data, selected }:
       className={cn(
         'flex h-full w-full flex-col overflow-hidden rounded-xl border bg-background shadow-lg transition-[box-shadow,border-color]',
         focused ? 'border-blue-500 ring-2 ring-blue-500/40' : 'border-border',
-        attention && !focused && 'border-amber-500/70 ring-2 ring-amber-500/30'
+        attention && !focused && 'border-amber-500/70 ring-2 ring-amber-500/30',
+        onLine && 'border-emerald-500 ring-2 ring-emerald-500/50'
       )}
       onPointerDownCapture={() => store.focusTile(tileId)}
     >
@@ -128,7 +132,12 @@ const AgentTileHeader = observer(function AgentTileHeader({
           aria-label="Agent name"
           className="nodrag w-32 rounded border border-border bg-background px-1 text-sm font-semibold text-foreground outline-none"
           onBlur={(event) => {
-            store.setSpokenName(entry.conversationId, event.currentTarget.value);
+            const wanted = event.currentTarget.value.trim();
+            if (wanted && !store.setSpokenName(entry.conversationId, wanted)) {
+              toast.error(`Another agent is already called ${wanted}`, {
+                description: 'Each agent needs its own name so you can address it by voice.',
+              });
+            }
             setRenaming(false);
           }}
           onKeyDown={(event) => {

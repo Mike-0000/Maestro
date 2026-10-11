@@ -138,9 +138,12 @@ sign releases with a publicly trusted certificate, such as Azure Trusted Signing
 
 - The feed covers Windows x64 only. macOS updates need an Apple Developer ID signature and
   notarization. Linux is not set up.
-- `/push` installs from the local delivery coordinator are unpacked builds without
-  `app-update.yml`, so their updater stays off. They keep the plain package version (such as
-  `1.2.6`) and are updated only by `/push`. On a given machine, use either `/push` or the feed.
+- Every machine, including the development machine, runs an installer build and updates from
+  the feed. `/push` (`.claude/skills/push`) only builds and publishes a release; it never installs
+  locally. Installer builds refuse the local delivery coordinator's install and rollback actions.
+- Older unpacked installs from the local delivery coordinator (`%LOCALAPPDATA%\Programs\Chorus`)
+  have no `app-update.yml`, so their updater stays off. Install the latest release once from the
+  feed; it goes to `%LOCALAPPDATA%\Programs\Maestro` and keeps the same profile.
 - A feed host can withhold new releases (a freeze), but it cannot serve a modified or older one.
 - To rotate the signing key, ship a build that trusts both keys, then switch publishing to the new
   key.

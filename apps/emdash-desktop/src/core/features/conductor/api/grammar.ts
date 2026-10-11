@@ -1,6 +1,8 @@
+import type { CallSteer } from './calls';
 import type { CanvasRefContext } from './canvas-refs';
 import { parseCanvasCommand, type CanvasAction } from './grammar-canvas';
 import {
+  candidateLabels,
   isDeictic,
   normalizeSpoken,
   resolveAgent,
@@ -38,6 +40,10 @@ export type GrammarCommand =
   /** Answer an agent's permission prompt (needs confirmation). */
   | { kind: 'permission'; agent: RosterAgent; decision: 'allow' | 'deny' }
   | { kind: 'help' }
+  /** Drop the number from every agent name whose word no other agent uses ("Atlas 3" to "Atlas"). */
+  | { kind: 'simplifyNames' }
+  /** Steering the calls from agents: skip one, put it off, hold them all, stay with one agent. */
+  | { kind: 'calls'; steer: CallSteer; agent?: RosterAgent }
   /** Canvas layout: regions, moves, sizes, the stage, and layout undo. */
   | { kind: 'canvas'; action: CanvasAction }
   | { kind: 'clarify'; question: string };
@@ -60,6 +66,14 @@ const SUBMIT = /^(?:send it|submit|submit it|enter|hit enter|press enter)$/;
 const MUTE = /^(?:mute|be quiet|quiet|stop talking|shut up)$/;
 const UNMUTE = /^(?:unmute|talk to me|speak)$/;
 const NOTE = /^(?:take a note|add a note|note)[:,]?\s+(.+)$/i;
+// Calls from agents. None of these phrases is a command anywhere else in the grammar.
+const CALL_SKIP = /^(?:skip|skip (?:it|this|that|this one|that one)|not now)$/;
+const CALL_NEXT = /^(?:next call|next caller|who(?:'s| is) calling)$/;
+const CALL_LATER = /^(?:later|ask me later|remind me later|come back to (?:it|that|this))$/;
+const CALL_HOLD = /^(?:hold (?:my|all|the) calls|no calls|do not disturb|don'?t disturb me)$/;
+const CALL_RESUME = /^(?:take (?:my|the) calls|resume (?:my |the )?calls|calls on)$/;
+const CALL_BACK = /^(?:back to (?:everyone|everybody|all|all calls)|all calls|stop staying)$/;
+const CALL_STAY = /^stay (?:with|on)\s+(.+)$/i;
 const FOCUS =
   /^(?:focus(?: on)?|go to|open|show(?: me)?|zoom (?:in )?(?:on|to)|switch to|jump to|look at)\s+(.+)$/i;
 const INTERRUPT = /^(?:stop|interrupt|pause|halt|escape)\s+(.+)$/i;
@@ -72,6 +86,13 @@ const TELL = /^(?:tell|ask)\s+(.+)$/i;
 const POLITE = /^(?:(?:can|could|would) you|i want to|i'd like to|let'?s|go ahead and|just)\s+/i;
 const HELP =
   /^(?:help|help me|what can i say|what can you do|what do you understand|(?:list |show |voice )?commands|how do i use (?:this|you))$/;
+// Renames several agents at once, so only wording that says so: agents' names, and what to do
+// with their numbers. "Fix the names" or "remove the numbers" alone goes to the model.
+const AGENT_NAMES = String.raw`(?:the |all (?:of )?the |all )?(?:agent names|agents' names|agent's names|names of (?:the |all (?:of )?the )?agents)`;
+const SIMPLIFY_NAMES = new RegExp(
+  String.raw`^(?:simplify ${AGENT_NAMES}` +
+    String.raw`|(?:drop|remove|strip|take) (?:all )?the numbers (?:from|off|off of|out of) (?:${AGENT_NAMES}|(?:the |all (?:of )?the )?names))$`
+);
 const CLOSE_VERB = '(?:close|hide|dismiss|remove|minimi[sz]e|put away|get rid of|close out)';
 const CLOSE = new RegExp(`^${CLOSE_VERB}(?:\\s+(.+?))?$`, 'i');
 const CLOSE_ALL = new RegExp(
@@ -122,7 +143,7 @@ function key(text: string): string {
 }
 
 function describeCandidates(candidates: readonly RosterAgent[]): string {
-  const names = candidates.map((agent) => agent.name);
+  const names = candidateLabels(candidates);
   if (names.length <= 2) return names.join(' or ');
   return `${names.slice(0, -1).join(', ')}, or ${names[names.length - 1]}`;
 }
@@ -173,6 +194,8 @@ function parseWindowCommand(
   focusedId: string | null
 ): GrammarCommand | null {
   if (HELP.test(key(text))) return { kind: 'help' };
+  // Before "remove …" and "get rid of …" are read as closing a window.
+  if (SIMPLIFY_NAMES.test(key(text))) return { kind: 'simplifyNames' };
   if (CLOSE_ALL.test(text)) return { kind: 'closeMany', scope: 'all' };
   if (CLOSE_OTHERS.test(text)) return { kind: 'closeMany', scope: 'others' };
   if (CLOSE_DONE.test(text)) return { kind: 'closeMany', scope: 'done' };
@@ -251,13 +274,14 @@ function splitAddressed(
     const reference = words.slice(0, k).join(' ');
     const lastWord = (words[k - 1] ?? '').toLowerCase().replace(/[^a-z]/g, '');
     let remainder = words.slice(k);
-    // Never split a name from its number ("claude | 3 to deploy").
-    if (
-      /^\d+$/.test(normalizeSpoken(remainder[0] ?? '')) &&
-      !/^(?:to|too)$/i.test(remainder[0] ?? '')
-    ) {
-      continue;
-    }
+    // Never split a name from its number ("claude | 3 to deploy"). "To" is the connector and
+    // "for" starts a message ("Atlas | for a status update"), unless a connector follows it
+    // ("Atlas for | to deploy"). "Too" is left to the longer reading: "Atlas too" is Atlas 2 or
+    // Atlas as well, and with both about that is a question.
+    const startsMessage =
+      /^to$/i.test(remainder[0] ?? '') ||
+      (/^for$/i.test(remainder[0] ?? '') && !/^(?:to|that)$/i.test(remainder[1] ?? ''));
+    if (/^\d+$/.test(normalizeSpoken(remainder[0] ?? '')) && !startsMessage) continue;
     // "Atlas | in chorus to run…": the scope belongs to the reference, not to the message. The
     // longer reading resolves it, or nobody matches and the model sorts it out.
     if (startsWithProjectScope(remainder, roster)) continue;
@@ -278,10 +302,13 @@ function splitAddressed(
       ambiguity = { question: `Which one: ${describeCandidates(resolution.candidates)}?` };
     }
   }
+  const named = splits.find((split) => !split.refEndsWithTo && !split.fuzzy);
+  if (named) return named;
+  // A reading that only resembles a name never settles a question between two real ones
+  // ("Atlas for a…" as Atlas 4 when "Atlas for" could be Atlas or Atlas 4).
+  if (ambiguity && !splits.some((split) => !split.fuzzy)) return ambiguity;
   // Among readings that only resemble a name, the shortest keeps the most of the message.
-  const preferred =
-    splits.find((split) => !split.refEndsWithTo && !split.fuzzy) ??
-    [...splits].reverse().find((split) => !split.refEndsWithTo);
+  const preferred = [...splits].reverse().find((split) => !split.refEndsWithTo);
   if (preferred) return preferred;
   // "Claude too to run…": a name read with a trailing to/too counts as "2" only when a connector
   // still follows it; "tell Claude to run…" stays ambiguous instead of guessing Claude 2.
@@ -308,6 +335,19 @@ export function parseCommand(
   if (SUBMIT.test(normalized)) return { kind: 'submit' };
   if (MUTE.test(normalized)) return { kind: 'mute' };
   if (UNMUTE.test(normalized)) return { kind: 'unmute' };
+  if (CALL_SKIP.test(normalized)) return { kind: 'calls', steer: 'skip' };
+  if (CALL_NEXT.test(normalized)) return { kind: 'calls', steer: 'next' };
+  if (CALL_LATER.test(normalized)) return { kind: 'calls', steer: 'later' };
+  if (CALL_HOLD.test(normalized)) return { kind: 'calls', steer: 'hold' };
+  if (CALL_RESUME.test(normalized)) return { kind: 'calls', steer: 'resume' };
+  if (CALL_BACK.test(normalized)) return { kind: 'calls', steer: 'back' };
+  const stay = CALL_STAY.exec(text);
+  if (stay?.[1]) {
+    const agent = resolveOrClarify(stay[1], roster, focusedId);
+    if (agent && 'question' in agent) return { kind: 'clarify', question: agent.question };
+    if (agent) return { kind: 'calls', steer: 'stay', agent };
+    return null;
+  }
 
   const note = NOTE.exec(text);
   if (note?.[1]) return { kind: 'note', text: note[1].trim() };

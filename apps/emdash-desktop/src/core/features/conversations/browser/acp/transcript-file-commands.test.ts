@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { seedMarkdownLinkOpener } from '@core/features/markdown-viewer/api/browser/markdown-link-seam';
 import { classifyTranscriptLink, createTranscriptFileCommands } from './transcript-file-commands';
 
 vi.mock('@core/features/editor/api/browser/open-file-in-file-editor', () => ({
@@ -113,5 +114,58 @@ describe('createTranscriptFileCommands', () => {
       ['project-1', 'task-1', 'src/prose-link.ts'],
       ['project-1', 'task-1', 'src/mention.ts'],
     ]);
+  });
+
+  describe('Markdown files', () => {
+    const context = { projectId: 'project-1', taskId: 'task-1', conversationId: 'conversation-1' };
+
+    afterEach(() => seedMarkdownLinkOpener(undefined));
+
+    it('opens a Markdown link, file row and mention in the viewer instead of the editor', async () => {
+      const openFile = vi.fn(async () => {});
+      const openMarkdown = vi.fn(async () => true);
+      seedMarkdownLinkOpener(openMarkdown);
+      const commands = createTranscriptFileCommands(context, openFile);
+
+      commands.onOpenFile({ path: 'docs/plan.md', itemId: 'prose', source: 'prose-link' });
+      commands.onOpenFile({ path: 'docs/report.md', itemId: 'file-op', source: 'file-op' });
+      commands.openMentionFile('README.md');
+
+      await vi.waitFor(() => expect(openMarkdown).toHaveBeenCalledTimes(3));
+      expect(openMarkdown.mock.calls).toEqual([
+        [context, 'docs/plan.md'],
+        [context, 'docs/report.md'],
+        [context, 'README.md'],
+      ]);
+      expect(openFile).not.toHaveBeenCalled();
+    });
+
+    it('keeps the editor for a line in a Markdown file and for a diff of one', () => {
+      const openFile = vi.fn(async () => {});
+      const openMarkdown = vi.fn(async () => true);
+      seedMarkdownLinkOpener(openMarkdown);
+      const commands = createTranscriptFileCommands(context, openFile);
+
+      commands.onOpenFile({ path: 'README.md', line: 42, itemId: 'prose', source: 'prose-link' });
+      commands.onOpenFile({ path: 'docs/plan.md', itemId: 'diff', source: 'diff' });
+
+      expect(openMarkdown).not.toHaveBeenCalled();
+      expect(openFile.mock.calls).toEqual([
+        ['project-1', 'task-1', 'README.md', { line: 42 }],
+        ['project-1', 'task-1', 'docs/plan.md'],
+      ]);
+    });
+
+    it('falls back to the editor for a Markdown file the viewer may not show', async () => {
+      const openFile = vi.fn(async () => {});
+      seedMarkdownLinkOpener(async () => false);
+      const commands = createTranscriptFileCommands(context, openFile);
+
+      commands.onOpenFile({ path: '../elsewhere/notes.md', itemId: 'prose', source: 'prose-link' });
+
+      await vi.waitFor(() =>
+        expect(openFile).toHaveBeenCalledWith('project-1', 'task-1', '../elsewhere/notes.md')
+      );
+    });
   });
 });

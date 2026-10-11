@@ -13,6 +13,7 @@ import {
 import { observer } from 'mobx-react-lite';
 import type { RegionEntry } from '@core/features/canvas/api/browser/stores/canvas-store';
 import { cn } from '@core/primitives/styling/browser/cn';
+import { GATHER_PHRASES } from '../../api/canvas-desks';
 import { REGION_COLORS, REGION_HEADER, type RegionColor } from '../../api/canvas-regions';
 import { getCanvasStore } from '../../contributions/browser/app-stores';
 import { useCanvasPane } from '../canvas-pane-context';
@@ -84,6 +85,46 @@ export const RegionNode = observer(function RegionNode({ data, selected }: NodeP
   const style = regionStyle(region.color);
   const dropping = store.dropHint === regionId;
   const badges = store.listening && store.layoutSettings.showNamesWhileListening;
+
+  // Canvas Pro: a desk is the whole screen, not a frame on a board. It draws no border or header
+  // (its name is in the desk strip); only what an empty desk says, and its name while listening.
+  if (store.proMode && region.parentId === null) {
+    const gather = store.desks.find((desk) => desk.regionId === regionId)?.gather ?? null;
+    const visited = store.visitors.length > 0;
+    return (
+      <div
+        className={cn(
+          'pointer-events-none relative h-full w-full rounded-3xl transition-shadow',
+          dropping && 'shadow-[0_0_0_6px_rgb(59_130_246/0.25)]'
+        )}
+      >
+        {region.windowCount === 0 && !visited && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-6 text-center text-foreground-muted">
+            <span className="text-base font-medium text-foreground">
+              {gather ? `${region.name} is clear` : `${region.name} is empty`}
+            </span>
+            <span className="text-sm">
+              {gather
+                ? `Agents that ${GATHER_PHRASES[gather]} show up here, and go back to their own desks when you leave.`
+                : `Say “move Atlas to this desk”, or “bring Atlas here” to borrow it for a moment.`}
+            </span>
+          </div>
+        )}
+        {badges && (
+          <div className="absolute inset-x-0 top-6 flex justify-center">
+            <span
+              className={cn(
+                'rounded-2xl px-6 py-2 text-5xl font-bold tracking-tight shadow-lg backdrop-blur',
+                style.chip
+              )}
+            >
+              {region.name}
+            </span>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div

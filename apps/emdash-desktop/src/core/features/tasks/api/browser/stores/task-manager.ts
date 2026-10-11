@@ -191,6 +191,11 @@ export class TaskManagerStore {
     );
   }
 
+  /** True once the first task list has arrived: until then `tasks` says nothing of what exists. */
+  get listLoaded(): boolean {
+    return this._taskListData !== null;
+  }
+
   loadTasks(): Promise<void> {
     if (!this._loadPromise) {
       this._loadPromise = this._ensureTaskListModels().catch((e) => {

@@ -21,8 +21,10 @@ export function isTypingTarget(target: EventTarget | null): boolean {
 
 /** What keyboard layout commands act on: the selection, else the focused window. */
 function keyboardTargets(store: CanvasStore): string[] {
-  if (store.selection.length > 0) return [...store.selection];
-  return store.focusedTileId ? [store.focusedTileId] : [];
+  // A window visiting this desk has no place here to nudge or resize.
+  const here = (id: string) => !store.visitorRects.has(id);
+  if (store.selection.length > 0) return store.selection.filter(here);
+  return store.focusedTileId && here(store.focusedTileId) ? [store.focusedTileId] : [];
 }
 
 /**

@@ -11,12 +11,12 @@ import {
   type NodeTypes,
 } from '@xyflow/react';
 import '@xyflow/react/dist/base.css';
-import { comparer, reaction } from 'mobx';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { comparer, reaction, runInAction } from 'mobx';
 import { observer } from 'mobx-react-lite';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CanvasStore } from '@core/features/canvas/api/browser/stores/canvas-store';
 import { cn } from '@core/primitives/styling/browser/cn';
-import { regionAt } from '../api/canvas-layout';
 import { MAX_ZOOM, MIN_ZOOM, viewportRect, type TileRect } from '../api/canvas-model';
 import { PANE_DIVIDER, paneGrid } from '../api/canvas-panes';
 import {
@@ -35,17 +35,41 @@ import { CanvasToolbar } from './canvas-toolbar';
 import { CanvasStage } from './stage/canvas-stage';
 import { AgentTileNode } from './tiles/agent-tile';
 import { BrowserTileNode, CANVAS_OVERLAY_ATTRIBUTE } from './tiles/browser-tile';
+import { DocTileNode } from './tiles/doc-tile';
 import { NoteTileNode } from './tiles/note-tile';
 import { GhostNode, RegionNode, regionStyle } from './tiles/region-node';
 import { TaskFrameNode } from './tiles/task-frame';
 
+const SCRIM_NODE_ID = 'desk:scrim';
+/** Visitors sit above the desk's own windows (0) and below layout previews (2000). */
+const VISITOR_Z = 50;
+/** A desk swap fades in this fast: a cut, softened. */
+const DESK_SWAP_MS = 160;
+
+const prefersReducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/** Behind visiting windows: the desk recedes, and a click on it sends the visitors home. */
+function ScrimNode() {
+  return (
+    <button
+      type="button"
+      aria-label="Send the visiting windows back to their desks"
+      title="Send the visiting windows back to their desks"
+      onClick={() => getCanvasStore().sendBack()}
+      className="h-full w-full cursor-default rounded-3xl bg-background/70"
+    />
+  );
+}
+
 const nodeTypes: NodeTypes = {
   agent: AgentTileNode,
   browser: BrowserTileNode,
+  doc: DocTileNode,
   note: NoteTileNode,
   frame: TaskFrameNode,
   region: RegionNode,
   ghost: GhostNode,
+  scrim: ScrimNode,
 };
 
 const overlayProps = { [CANVAS_OVERLAY_ATTRIBUTE]: '' };
@@ -78,16 +102,39 @@ function outsideScope(layout: LayoutState, scope: string | null, id: string): bo
 
 const recede = (outside: boolean) => (outside ? { opacity: OUTSIDE_SCOPE_OPACITY } : undefined);
 
+/** A visiting window floats above the desk it visits; it has no place there to drag it from. */
+function visitorNode(node: Node): Node {
+  return {
+    ...node,
+    zIndex: VISITOR_Z,
+    draggable: false,
+    // Selection commands (group, nudge, resize) would edit its own desk, out of sight.
+    selectable: false,
+    style: {
+      borderRadius: 12,
+      boxShadow: '0 0 0 2px rgb(139 92 246 / 0.75), 0 24px 60px rgb(0 0 0 / 0.35)',
+    },
+  };
+}
+
 /** Desired node geometry from the store; React Flow keeps selection and drag state. */
 function buildNodes(store: CanvasStore, pane: number): Node[] {
   const nodes: Node[] = [];
   const layout = store.layoutState;
   // Each multi-canvas view recedes what is outside the sub-canvas that view is in.
   const scope = store.paneScope(pane);
-  const outside = (id: string) => outsideScope(layout, scope, id);
+  // Canvas Pro: only the desk in view is drawn, with the windows visiting it.
+  const pro = store.proMode;
+  const desk = store.activeDeskId;
+  const visitors = store.visitorRects;
+  const offDesk = (id: string) =>
+    pro && !visitors.has(id) && !(desk !== null && isWithin(layout, id, desk));
+  const outside = (id: string) => !visitors.has(id) && outsideScope(layout, scope, id);
+  const placed = (node: Node) => (visitors.has(node.id) ? visitorNode(node) : node);
   // Regions first and lowest (nested ones above their parents), then task frames, then windows.
   // Only their header strips take pointer input.
   for (const region of store.regionEntries) {
+    if (offDesk(region.regionId)) continue;
     nodes.push({
       id: region.regionId,
       type: 'region',
@@ -101,6 +148,7 @@ function buildNodes(store: CanvasStore, pane: number): Node[] {
     });
   }
   for (const frame of store.taskFrames) {
+    if (pro && frame.tileIds.some((id) => offDesk(id) || visitors.has(id))) continue;
     nodes.push({
       id: frame.frameId,
       type: 'frame',
@@ -114,35 +162,62 @@ function buildNodes(store: CanvasStore, pane: number): Node[] {
       data: { frameId: frame.frameId },
     });
   }
+  // A visitor shows wherever it lives, folded away or not: it was asked for.
+  const skipped = (id: string) => offDesk(id) || (!visitors.has(id) && store.isFolded(id));
   for (const entry of store.visibleAgentEntries) {
-    if (store.isFolded(entry.tileId)) continue;
-    nodes.push({
-      ...tileNode('agent', store.tileRect(entry.tileId), entry.tileId, {
-        tileId: entry.tileId,
-        projectId: entry.projectId,
-        taskId: entry.taskId,
-        conversationId: entry.conversationId,
-      }),
-      style: recede(outside(entry.tileId)),
-    });
+    if (skipped(entry.tileId)) continue;
+    nodes.push(
+      placed({
+        ...tileNode('agent', store.tileRect(entry.tileId), entry.tileId, {
+          tileId: entry.tileId,
+          projectId: entry.projectId,
+          taskId: entry.taskId,
+          conversationId: entry.conversationId,
+        }),
+        style: recede(outside(entry.tileId)),
+      })
+    );
   }
   for (const browser of store.visibleBrowserEntries) {
-    if (store.isFolded(browser.tileId)) continue;
-    nodes.push({
-      ...tileNode('browser', store.tileRect(browser.tileId), browser.tileId, {
-        tileId: browser.tileId,
-      }),
-      style: recede(outside(browser.tileId)),
-    });
+    if (skipped(browser.tileId)) continue;
+    nodes.push(
+      placed({
+        ...tileNode('browser', store.tileRect(browser.tileId), browser.tileId, {
+          tileId: browser.tileId,
+        }),
+        style: recede(outside(browser.tileId)),
+      })
+    );
+  }
+  for (const doc of store.visibleDocEntries) {
+    if (skipped(doc.tileId)) continue;
+    nodes.push(
+      placed({
+        ...tileNode('doc', store.tileRect(doc.tileId), doc.tileId, { tileId: doc.tileId }),
+        style: recede(outside(doc.tileId)),
+      })
+    );
   }
   for (const note of store.noteEntries) {
-    if (store.isFolded(note.tileId)) continue;
+    if (skipped(note.tileId)) continue;
+    nodes.push(
+      placed({
+        ...tileNode('note', store.tileRect(note.tileId), note.tileId, {
+          tileId: note.tileId,
+          noteId: note.noteId,
+        }),
+        style: recede(outside(note.tileId)),
+      })
+    );
+  }
+  // Visitors floating above a desk's own windows: the desk recedes behind a scrim.
+  const deskRect = desk && store.visitorsFloating ? store.regionEntry(desk)?.rect : undefined;
+  if (deskRect) {
     nodes.push({
-      ...tileNode('note', store.tileRect(note.tileId), note.tileId, {
-        tileId: note.tileId,
-        noteId: note.noteId,
-      }),
-      style: recede(outside(note.tileId)),
+      ...tileNode('scrim', deskRect, SCRIM_NODE_ID, {}),
+      zIndex: VISITOR_Z - 1,
+      selectable: false,
+      draggable: false,
     });
   }
   nodes.push(...ghostNodes(store));
@@ -196,6 +271,9 @@ function mergeNodes(previous: Node[], next: Node[]): Node[] {
       height: node.height,
       zIndex: node.zIndex,
       style: node.style,
+      // A window that starts or stops visiting a desk changes whether it can be dragged.
+      draggable: node.draggable,
+      selectable: node.selectable,
     };
   });
 }
@@ -218,6 +296,7 @@ const minimapColor = (node: Node): string => {
       return '#22c55e';
     default:
       if (node.type === 'browser') return '#8b5cf6';
+      if (node.type === 'doc') return '#14b8a6';
       return node.type === 'note' ? '#d6b656' : '#8a8a8a';
   }
 };
@@ -231,7 +310,7 @@ type GroupDrag = {
 /** Selected windows and regions of a view (task frames and ghosts are never part of a selection). */
 function selectedIds(nodes: readonly Node[]): string[] {
   return nodes
-    .filter((node) => node.type !== 'frame' && node.type !== 'ghost')
+    .filter((node) => node.type !== 'frame' && node.type !== 'ghost' && node.type !== 'scrim')
     .map((node) => node.id);
 }
 
@@ -253,6 +332,7 @@ const Board = observer(function Board({
   const [animating, setAnimating] = useState(false);
   const multi = store.multiCanvas;
   const active = store.activePane === pane;
+  const locked = store.proMode && store.deskLocked;
 
   useEffect(
     () =>
@@ -310,7 +390,10 @@ const Board = observer(function Board({
               if (!rect) return;
               const viewport = frameViewport(rect, store.boardSize);
               store.setScopeFramedZoom(viewport.zoom);
-              void flow.setViewport(viewport, { duration: SCOPE_ANIMATION_MS });
+              // A desk swap is a cut: nothing travels across a board the user never sees.
+              void flow.setViewport(viewport, {
+                duration: command.instant ? 0 : SCOPE_ANIMATION_MS,
+              });
               return;
             }
             case 'restore':
@@ -355,6 +438,24 @@ const Board = observer(function Board({
       for (const timer of timers) clearTimeout(timer);
     };
   }, [store, setNodes]);
+
+  // Canvas Pro: another desk came into view. The swap is a cut, softened by a quick fade.
+  useEffect(
+    () =>
+      reaction(
+        () => store.activeDeskId,
+        (desk, previous) => {
+          if (!desk || !previous || !container || prefersReducedMotion()) return;
+          container
+            .querySelector('.react-flow__viewport')
+            ?.animate([{ opacity: 0 }, { opacity: 1 }], {
+              duration: DESK_SWAP_MS,
+              easing: 'ease-out',
+            });
+        }
+      ),
+    [store, container]
+  );
 
   // The view's size feeds screen-relative sizes ("half the screen") and slot placement.
   useEffect(() => {
@@ -444,8 +545,7 @@ const Board = observer(function Board({
           );
         }
         if (node.type === 'frame') return;
-        const layout = store.layoutState;
-        const hint = regionAt(layout, dropProbe(node), isRegionId(node.id) ? node.id : undefined);
+        const hint = store.dropRegionAt(dropProbe(node), isRegionId(node.id) ? node.id : undefined);
         store.setDropHint(hint && hint !== store.regionOf(node.id) ? hint : null);
       }}
       onNodeDragStop={(_event, node, dragged) => {
@@ -506,37 +606,49 @@ const Board = observer(function Board({
         }
         if (target.closest('.chorus-frame-handle, .chorus-region-handle')) return;
         const position = flow.screenToFlowPosition({ x: event.clientX, y: event.clientY });
-        const noteId = store.addNote('', position);
-        // Notes dropped inside a region belong to it.
-        const region = regionAt(store.layoutState, position);
-        if (region) {
-          store.runLayout(
-            [
-              {
-                op: 'move',
-                targets: [`note:${noteId}`],
-                to: { kind: 'exact', x: position.x, y: position.y, region },
-              },
-            ],
-            { source: 'pointer' }
-          );
-        }
+        // One action, so the note joins the region it was dropped in before anything else (Canvas
+        // Pro puts a window that is on no desk onto one) gives it a place.
+        runInAction(() => {
+          const noteId = store.addNote('', position);
+          // Notes dropped inside a region belong to it.
+          const region = store.dropRegionAt(position);
+          if (region) {
+            store.runLayout(
+              [
+                {
+                  op: 'move',
+                  targets: [`note:${noteId}`],
+                  to: { kind: 'exact', x: position.x, y: position.y, region },
+                },
+              ],
+              { source: 'pointer' }
+            );
+          }
+        });
       }}
       defaultViewport={defaultViewport}
       minZoom={MIN_ZOOM}
       maxZoom={MAX_ZOOM}
       zoomOnDoubleClick={false}
+      // A desk that fills the screen stays framed: there is no board around it to pan to.
+      panOnDrag={!locked}
+      zoomOnScroll={!locked}
+      zoomOnPinch={!locked}
+      autoPanOnNodeDrag={!locked}
       onlyRenderVisibleElements
       proOptions={{ hideAttribution: true }}
       className={cn(
-        'chorus-canvas bg-background',
+        // Canvas Pro: the desk's backdrop shows through the board.
+        store.proMode ? 'chorus-canvas bg-transparent' : 'chorus-canvas bg-background',
         '[&_.chorus-flash]:rounded-2xl [&_.chorus-flash]:shadow-[0_0_0_4px_rgb(59_130_246/0.55),0_0_32px_rgb(59_130_246/0.35)]',
         animating &&
           'motion-safe:[&_.react-flow__node]:transition-[transform,width,height] motion-safe:[&_.react-flow__node]:duration-300 motion-safe:[&_.react-flow__node]:ease-out'
       )}
     >
-      <Background variant={BackgroundVariant.Dots} gap={24} size={1.2} className="opacity-40" />
-      {!multi && !store.focusedRegionId && (
+      {!store.proMode && (
+        <Background variant={BackgroundVariant.Dots} gap={24} size={1.2} className="opacity-40" />
+      )}
+      {!multi && !store.focusedRegionId && !store.proMode && (
         <MiniMap
           pannable
           zoomable
@@ -586,6 +698,110 @@ const GhostBanner = observer(function GhostBanner() {
   );
 });
 
+/**
+ * Canvas Pro: the desk's own light, a wash of its color behind its windows, so each desk is
+ * recognisable at a glance. On a swap it drifts in from the side the new desk lies on.
+ */
+const DeskBackdrop = observer(function DeskBackdrop() {
+  const store = getCanvasStore();
+  const desk = store.desks.find((candidate) => candidate.active);
+  const ref = useRef<HTMLDivElement | null>(null);
+  const previous = useRef<number | null>(null);
+  const index = desk?.index ?? null;
+  useEffect(() => {
+    const from = previous.current;
+    previous.current = index;
+    if (index === null || from === null || index === from || prefersReducedMotion()) return;
+    ref.current?.animate(
+      [
+        { opacity: 0, translate: `${index > from ? 64 : -64}px 0` },
+        { opacity: 1, translate: '0 0' },
+      ],
+      { duration: 360, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' }
+    );
+  }, [index]);
+  if (!desk) return null;
+  const fill = regionStyle(desk.color).fill;
+  return (
+    <div
+      ref={ref}
+      aria-hidden
+      className="pointer-events-none absolute inset-0"
+      style={{
+        background: `radial-gradient(80% 65% at 12% 0%, ${fill}, transparent 70%), radial-gradient(70% 60% at 100% 100%, ${fill}, transparent 65%)`,
+      }}
+    />
+  );
+});
+
+/**
+ * Canvas Pro: desks out of view that need the user light the edge of the screen they lie toward,
+ * with a chip that goes there. The one desk on screen never hides work that is waiting elsewhere.
+ */
+const DeskSignals = observer(function DeskSignals() {
+  const store = getCanvasStore();
+  const signals = store.deskSignals;
+  if (signals.length === 0) return null;
+  return (
+    <>
+      {(['left', 'right'] as const).map((side) => {
+        const here = signals.filter((signal) => signal.side === side);
+        if (here.length === 0) return null;
+        const tint = here.some((signal) => signal.waiting > 0) ? '245 158 11' : '244 63 94';
+        const Arrow = side === 'left' ? ChevronLeft : ChevronRight;
+        return (
+          <div
+            key={side}
+            className={cn(
+              'pointer-events-none absolute inset-y-0 z-10 flex w-44 flex-col justify-center gap-2',
+              side === 'left' ? 'left-0 items-start' : 'right-0 items-end'
+            )}
+          >
+            <div
+              aria-hidden
+              className="absolute inset-0 motion-safe:animate-pulse"
+              style={{
+                background: `linear-gradient(to ${side === 'left' ? 'right' : 'left'}, rgb(${tint} / 0.22), transparent)`,
+              }}
+            />
+            {here.map((signal) => (
+              <button
+                key={signal.regionId}
+                type="button"
+                title={`Go to ${signal.name}`}
+                onClick={() => store.answerDesk(signal.regionId)}
+                className={cn(
+                  'pointer-events-auto relative mx-2 flex max-w-40 items-center gap-1.5 rounded-full border border-border bg-background/95 px-2.5 py-1.5 text-xs shadow-md backdrop-blur hover:bg-background-secondary',
+                  side === 'right' && 'flex-row-reverse'
+                )}
+                {...overlayProps}
+              >
+                <Arrow className="size-3.5 shrink-0 text-foreground-muted" />
+                <span className="min-w-0 text-left">
+                  <span className="block truncate font-semibold text-foreground">
+                    {signal.name}
+                  </span>
+                  <span className="block truncate text-foreground-muted">
+                    {signalLabel(signal)}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        );
+      })}
+    </>
+  );
+});
+
+function signalLabel(signal: { waiting: number; failed: number }): string {
+  const parts: string[] = [];
+  if (signal.waiting > 0)
+    parts.push(`${signal.waiting} need${signal.waiting === 1 ? 's' : ''} you`);
+  if (signal.failed > 0) parts.push(`${signal.failed} failed`);
+  return parts.join(', ');
+}
+
 /** One view's cell: no frame of its own, so neighbouring views meet at the divider line. */
 function BoardPane({ pane }: { pane: number }) {
   const store = getCanvasStore();
@@ -596,6 +812,7 @@ function BoardPane({ pane }: { pane: number }) {
       className="relative min-h-0 min-w-0 overflow-hidden bg-background"
       onPointerDownCapture={() => store.activatePane(pane)}
     >
+      <DeskBackdrop />
       <CanvasPaneContext.Provider value={pane}>
         <ReactFlowProvider>
           <Board container={container} pane={pane} />
@@ -651,6 +868,7 @@ const CanvasSurface = observer(function CanvasSurface() {
             <CanvasToolbar />
           </div>
         )}
+      {store.proMode && !store.stageActive && <DeskSignals />}
       {store.stageActive && <CanvasStage />}
     </div>
   );

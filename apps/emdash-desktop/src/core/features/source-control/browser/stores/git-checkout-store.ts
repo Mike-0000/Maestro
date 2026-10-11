@@ -50,6 +50,11 @@ const TOO_MANY_FILES_MSG = 'Too many files changed to display';
 // show (with retry) instead of leaving the store in a permanent loading state.
 const CHECKOUT_MODEL_STARTUP_TIMEOUT_MS = 30_000;
 const MAX_UNTRACKED_STAT_BYTES = 2 * 1024 * 1024;
+// Each untracked line count is a whole-file read through the files runtime. A checkout with
+// thousands of untracked files (a generated build tree) refreshed on every status update queues
+// gigabytes of reads, so the counts are skipped above this many files and read a few at a time.
+const MAX_UNTRACKED_STAT_FILES = 200;
+const UNTRACKED_STAT_CONCURRENCY = 4;
 type CheckoutModel = typeof sourceControlContract.checkout.model;
 type CheckoutRemote = RemoteModel<CheckoutModel>;
 type CheckoutRemoteMember = ReturnType<CheckoutRemote>;
@@ -557,7 +562,12 @@ export class GitCheckoutStore {
       staged: stagedResult.data.files,
       unstaged: unstagedResult.data.files,
     });
-    await addUntrackedLineCounts(enriched.unstaged, this.workspacePath, this.sshConnectionId);
+    await addUntrackedLineCounts(
+      enriched.unstaged,
+      this.workspacePath,
+      this.sshConnectionId,
+      () => request === this.changesRequest && this.started
+    );
     if (request !== this.changesRequest || !this.started) return;
     metadata.set(enriched);
     runInAction(() => {
@@ -630,13 +640,18 @@ function waitForCheckoutModel(
 async function addUntrackedLineCounts(
   changes: GitChange[],
   workspacePath: string,
-  sshConnectionId: string | undefined
+  sshConnectionId: string | undefined,
+  isCurrent: () => boolean
 ): Promise<void> {
   const untracked = changes.filter((change) => change.status === 'added' && change.additions === 0);
-  if (untracked.length === 0) return;
+  if (untracked.length === 0 || untracked.length > MAX_UNTRACKED_STAT_FILES) return;
   const client = await getFilesClient();
-  await Promise.all(
-    untracked.map(async (change) => {
+  let next = 0;
+  const readNext = async (): Promise<void> => {
+    // A newer status supersedes this pass, and its remaining reads would be thrown away.
+    while (next < untracked.length && isCurrent()) {
+      const change = untracked[next];
+      next += 1;
       const result = await client.fs.readText({
         uri: encodeResourceUri(
           hostFileRefFromNativePath(
@@ -649,6 +664,9 @@ async function addUntrackedLineCounts(
       if (result.success && !result.data.truncated) {
         change.additions = result.data.content.split('\n').length - 1;
       }
-    })
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(UNTRACKED_STAT_CONCURRENCY, untracked.length) }, readNext)
   );
 }

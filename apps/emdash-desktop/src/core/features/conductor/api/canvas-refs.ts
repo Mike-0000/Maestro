@@ -8,6 +8,7 @@
 
 import type { WindowStatus } from '@core/features/canvas/api/canvas-regions';
 import {
+  candidateLabels,
   editDistance,
   normalizeSpoken,
   phoneticKey,
@@ -15,7 +16,7 @@ import {
   type RosterAgent,
 } from './resolver';
 
-export type CanvasEntityKind = 'agent' | 'browser' | 'note' | 'region';
+export type CanvasEntityKind = 'agent' | 'browser' | 'note' | 'doc' | 'region';
 
 export type CanvasEntity = {
   /** Tile id (`agent:…`, `browser:…`, `note:…`) or region id (`region:…`). */
@@ -29,6 +30,20 @@ export type CanvasEntity = {
   readonly parentId?: string | null;
   /** Closed or filtered out: addressable, but visible windows win. */
   readonly hidden?: boolean;
+};
+
+/** Canvas Pro: the desks (top-level regions, shown one at a time) as the conductor addresses them. */
+export type CanvasDeskContext = {
+  /** Desk region ids, in desk order. */
+  readonly order: readonly string[];
+  /** The desk in view. */
+  readonly active: string | null;
+  /** The desk made most recently ("the new desk"). */
+  readonly newest?: string | null;
+  /** The desk that was in view before this one ("the other desk", "switch back"). */
+  readonly previous?: string | null;
+  /** Windows from other desks that are visiting the desk in view. */
+  readonly visitors: readonly string[];
 };
 
 export type CanvasRefContext = {
@@ -46,6 +61,10 @@ export type CanvasRefContext = {
   readonly newestRegion?: string | null;
   /** Region the user was in before this one ("the other one", "switch back"). */
   readonly previousRegion?: string | null;
+  /** Names of agents archived or deleted a moment ago: said again, they name no window here. */
+  readonly departedAgents?: readonly string[];
+  /** Set only in Canvas Pro; absent on the classic canvas, where there are no desks. */
+  readonly desks?: CanvasDeskContext;
 };
 
 export type RefResult =
@@ -428,12 +447,17 @@ function resolveAgentRef(reference: string, context: CanvasRefContext): RefResul
       taskName: entity.taskName ?? '',
       ...(entity.hidden ? { hidden: true } : {}),
     }));
-  const resolution = resolveAgent(reference, roster, context.focusedId);
+  // "Stage Backend" after Backend was archived is nobody, not the agent on a backend task.
+  const resolution = resolveAgent(
+    reference,
+    Object.assign(roster, { departed: context.departedAgents ?? [] }),
+    context.focusedId
+  );
   if (resolution.kind === 'match') return match([resolution.agent.id]);
   if (resolution.kind === 'ambiguous') {
     return {
       kind: 'clarify',
-      question: listQuestion(resolution.candidates.map((agent) => agent.name)),
+      question: listQuestion(candidateLabels(resolution.candidates)),
     };
   }
   return NONE;

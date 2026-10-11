@@ -572,7 +572,7 @@ export function createLocalUpdateService(
     const repositoryPath = await localRepository(projectId);
     if (!host.delivery.installRoot || !host.delivery.installWorkerPath) {
       throw new Error(
-        'Local Maestro installation replacement is available only in the packaged Windows app.'
+        'This Maestro updates from the release feed. Publish with /push, then choose Download and Restart.'
       );
     }
     const pendingGate = await readInstallTargetGate(stateRoot);
@@ -732,7 +732,9 @@ export function createLocalUpdateService(
       throw new Error('Rollback requires explicit consent to restore the matched profile backup.');
     const repositoryPath = await localRepository(projectId);
     if (!host.delivery.installRoot || !host.delivery.installWorkerPath) {
-      throw new Error('Rollback is available only in the packaged Windows Maestro app.');
+      throw new Error(
+        'This Maestro updates from the release feed and cannot roll back locally. Publish a fixed build with /push.'
+      );
     }
     const pendingGate = await readInstallTargetGate(stateRoot);
     if (pendingGate) await completeInstallResults(pendingGate.repositoryPath);

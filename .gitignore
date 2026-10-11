@@ -78,6 +78,7 @@ Thumbs.db
 !.claude/skills/
 .claude/skills/*
 !.claude/skills/chorus-install/
+!.claude/skills/push/
 .scratch/
 
 # Written by Windows when a process runs with %SystemDrive% unset (e.g. packaging, WMI helpers)

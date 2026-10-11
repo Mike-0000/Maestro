@@ -212,9 +212,12 @@ export function WindowScope({ children }: { readonly children: ReactNode }) {
       execute: () => {
         if (currentView !== 'canvas') getNavigation().navigate(canvasViewDef({}));
         const canvas = getCanvasStore();
-        const result = canvas.runLayout([{ op: 'createRegion', members: [] }], {
-          source: 'command',
-        });
+        // Canvas Pro: a region with no parent would be a desk, so it goes on the desk in view.
+        const desk = canvas.activeDeskId;
+        const result = canvas.runLayout(
+          [{ op: 'createRegion', members: [], ...(desk ? { parent: desk } : {}) }],
+          { source: 'command' }
+        );
         const created = result.ok ? result.plan.created[0] : undefined;
         if (created) canvas.setRenamingRegion(created);
       },
@@ -280,6 +283,43 @@ export function WindowScope({ children }: { readonly children: ReactNode }) {
       execute: () => {
         if (currentView !== 'canvas') getNavigation().navigate(canvasViewDef({}));
         getCanvasStore().toggleMultiCanvas();
+      },
+    }),
+    'canvas.togglePro': () => ({
+      execute: () => {
+        if (currentView !== 'canvas') getNavigation().navigate(canvasViewDef({}));
+        const canvas = getCanvasStore();
+        const result = canvas.setMode(canvas.proMode ? 'classic' : 'pro');
+        toast(
+          canvas.proMode
+            ? `Canvas Pro: ${result.desks} desk${result.desks === 1 ? '' : 's'}`
+            : 'Classic canvas'
+        );
+      },
+    }),
+    'canvas.desk.new': () => ({
+      execute: () => {
+        if (currentView !== 'canvas') getNavigation().navigate(canvasViewDef({}));
+        const canvas = getCanvasStore();
+        if (!canvas.proMode) canvas.setMode('pro');
+        const created = canvas.createDesk();
+        if (created) canvas.setRenamingRegion(created);
+      },
+    }),
+    'canvas.desk.next': () => ({
+      execute: () => {
+        if (currentView !== 'canvas') getNavigation().navigate(canvasViewDef({}));
+        const canvas = getCanvasStore();
+        if (!canvas.proMode) toast('Desks are part of Canvas Pro');
+        else if (!canvas.stepDesk(1)) toast('There is no other desk');
+      },
+    }),
+    'canvas.desk.previous': () => ({
+      execute: () => {
+        if (currentView !== 'canvas') getNavigation().navigate(canvasViewDef({}));
+        const canvas = getCanvasStore();
+        if (!canvas.proMode) toast('Desks are part of Canvas Pro');
+        else if (!canvas.stepDesk(-1)) toast('There is no other desk');
       },
     }),
     'voice.toggleListening': () => ({

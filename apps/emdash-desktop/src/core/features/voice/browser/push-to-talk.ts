@@ -42,7 +42,10 @@ export function installPushToTalk(store: VoiceStore, target: Window = window): (
 
   const onKeyUp = (event: KeyboardEvent) => {
     if (event.code !== HOLD_TO_TALK_CODE) return;
+    // Released before the hold delay: a tap, which answers whatever is waiting for a reply.
+    const tapped = holdTimer !== null;
     clearHold();
+    if (tapped) store.tap();
     if (holding) {
       holding = false;
       if (store.mode === 'hold') void store.stopListening();

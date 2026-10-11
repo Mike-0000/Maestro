@@ -34,6 +34,8 @@ describe('completion follow-up tools', () => {
     for (const tool of ['use_app', 'look_at_app', 'close_agent', 'arrange_canvas', 'add_note']) {
       expect(isFollowUpTool(tool)).toBe(false);
     }
+    // Agent output never moves windows between desks or switches the canvas mode.
+    expect(isFollowUpTool('canvas_desks')).toBe(false);
   });
 });
 

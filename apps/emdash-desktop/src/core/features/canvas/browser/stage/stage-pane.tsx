@@ -3,6 +3,7 @@ import { observer } from 'mobx-react-lite';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { AgentTileEntry } from '@core/features/canvas/api/browser/stores/canvas-store';
 import { getConversationsClient } from '@core/features/conversations/api/browser/client';
+import { MarkdownDocView } from '@core/features/markdown-viewer/contributions/browser/markdown-doc-view';
 import { log } from '@core/primitives/logging/browser/logger';
 import { windowKindOf } from '../../api/canvas-regions';
 import { getCanvasBrowserHost, getCanvasStore } from '../../contributions/browser/app-stores';
@@ -23,6 +24,8 @@ export const StagePaneContent = observer(function StagePaneContent({
   switch (windowKindOf(tileId)) {
     case 'browser':
       return <StageBrowserPane tileId={tileId} placement={placement} />;
+    case 'doc':
+      return <StageDocPane tileId={tileId} />;
     case 'note':
       return <StageNotePane tileId={tileId} />;
     default:
@@ -201,6 +204,12 @@ const StageBrowserPane = observer(function StageBrowserPane({
       </div>
     </div>
   );
+});
+
+const StageDocPane = observer(function StageDocPane({ tileId }: { tileId: string }) {
+  const doc = getCanvasStore().docEntries.find((entry) => entry.tileId === tileId);
+  if (!doc) return <TerminalPlaceholder label="This document is closed." />;
+  return <MarkdownDocView key={`${doc.workspaceId}:${doc.path}`} doc={doc} />;
 });
 
 const StageNotePane = observer(function StageNotePane({ tileId }: { tileId: string }) {
