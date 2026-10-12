@@ -70,6 +70,13 @@ export type TuiConversationProviderDependencies = {
     taskId: string;
     title: string;
   }): Promise<TuiSessionMcp | undefined>;
+  /** Whether the host is a WSL2 distro on this computer. */
+  isWslHost?(host: HostRef): Promise<boolean>;
+  /**
+   * Whether the user's own configuration on this computer starts the agent without permission
+   * prompts. Only asked for sessions inside WSL2, which do not read that configuration.
+   */
+  localAutoApprove?(providerId: string): Promise<boolean>;
 };
 
 /**
@@ -178,6 +185,10 @@ export class TuiConversationProvider implements ConversationProvider {
     }
     const trustWorkspace =
       conversation.autoApprove === true || taskSettings?.autoTrustWorktrees === true;
+    const wslOnLocalHost = providerConfig?.wsl === true && isLocalHostRef(this.host);
+    const autoApprove =
+      conversation.autoApprove === true ||
+      (await this.localAutoApproveInWsl(conversation.providerId, wslOnLocalHost));
     const providerVars = {
       ...(providerConfig?.env ?? {}),
       ...colorEnv,
@@ -196,7 +207,7 @@ export class TuiConversationProvider implements ConversationProvider {
       chosenSessionId: agentSession.isResuming ? null : agentSession.sessionId,
       model: conversation.model ?? null,
       initialPrompt: effectiveInitialPrompt,
-      autoApprove: conversation.autoApprove ?? false,
+      autoApprove,
       trustWorkspace,
       extraArgs: parseExtraArgs(providerConfig?.extraArgs),
       providerVars,
@@ -206,10 +217,28 @@ export class TuiConversationProvider implements ConversationProvider {
       rows: initialSize.rows,
       shellSetup: launchContext.data.shellSetup,
       tmux: launchContext.data.tmux ? { identity: sessionId } : undefined,
-      ...(providerConfig?.wsl === true && isLocalHostRef(this.host)
-        ? { wsl: wslLaunchFor(conversation.providerId) }
-        : {}),
+      ...(wslOnLocalHost ? { wsl: wslLaunchFor(conversation.providerId) } : {}),
     };
+  }
+
+  /**
+   * A session inside WSL2 runs the distro's copy of the agent, which reads the distro's
+   * configuration. When the user set the agent on this computer to start without permission
+   * prompts, that is carried over on the command line, so both start the same way. Best effort:
+   * when it cannot be found out, the session starts as the conversation says.
+   */
+  private async localAutoApproveInWsl(
+    providerId: string,
+    wslOnLocalHost: boolean
+  ): Promise<boolean> {
+    const { isWslHost, localAutoApprove } = this.dependencies;
+    if (!localAutoApprove) return false;
+    try {
+      const inWsl = wslOnLocalHost || ((await isWslHost?.(this.host)) ?? false);
+      return inWsl && (await localAutoApprove(providerId));
+    } catch {
+      return false;
+    }
   }
 
   /** Best effort: a session without Maestro's tools beats a session that fails to start. */

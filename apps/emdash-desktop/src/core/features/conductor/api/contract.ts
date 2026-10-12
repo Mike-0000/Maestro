@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { agentRequestAckSchema, agentRequestSchema } from './agent-requests';
 import { callModes, DEFAULT_CALL_WINDOW_SEC } from './calls';
 import { jevAnswerSchema, type JevQuestions } from './jev';
+import { instructionChangeSchema, standingInstructionSchema } from './standing-instructions';
 
 export const conductorDomain = 'conductor' as const;
 
@@ -68,7 +69,7 @@ export const conductorSettingsSchema = z.object({
   jevConfidence: z.number().min(0.5).max(0.99),
   /**
    * Fast verbatim routing: when Jev is confident, it sends the developer's own words to an agent
-   * or starts an agent directly (behind the usual cancel window) instead of Claude rewriting them.
+   * or starts an agent directly instead of Claude rewriting them.
    */
   jevVerbatimRouting: z.boolean(),
   /** Local diagnostic traces are disabled until the user explicitly opts in. */
@@ -159,6 +160,11 @@ export const conductorStatusSchema = z.object({
   usageToday: conductorUsageSchema,
   /** Test fixtures build a partial status, so read it as `status?.investigator?.state`. */
   investigator: investigatorStatusSchema,
+  /**
+   * What the developer told the conductor to do from now on, in the order it was saved. Test
+   * fixtures build a partial status, so read it as `status?.instructions ?? []`.
+   */
+  instructions: z.array(standingInstructionSchema),
 });
 export type ConductorStatus = z.infer<typeof conductorStatusSchema>;
 
@@ -234,7 +240,7 @@ export const traceEventSchema = z.object({
     'model',
     /** A call from an agent: offered, spoken, picked up, skipped, or lapsed. */
     'call',
-    /** A countdown paused because the developer started speaking, or resumed. */
+    /** A confirmation's clock paused because the developer started speaking, or resumed. */
     'hold',
     /** The realtime voice line: opened, closed, rolled over, or fell back. */
     'line',
@@ -400,6 +406,15 @@ export const conductorContract = defineContract({
     output: conductorStatusSchema,
   }),
   /** Predicts merge conflicts between worktrees of one repository (read-only `git merge-tree`). */
+  /**
+   * Adds, replaces, removes or clears a standing instruction and returns the new status. Only
+   * the conductor's own tool and the settings page call it, both in the developer's name.
+   */
+  adjustInstructions: fallible({
+    input: instructionChangeSchema,
+    data: z.object({ status: conductorStatusSchema, summary: z.string() }),
+    error: z.object({ message: z.string() }),
+  }),
   checkConflicts: fallible({
     input: z.object({
       worktrees: z

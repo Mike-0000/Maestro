@@ -24,7 +24,10 @@ export type OpenAiCachedTextPart = {
 };
 
 export type OpenAiMessage =
-  | { role: 'system'; content: string | OpenAiCachedTextPart[] }
+  | {
+      role: 'system';
+      content: string | (OpenAiCachedTextPart | { type: 'text'; text: string })[];
+    }
   | { role: 'user'; content: string | OpenAiUserPart[] }
   | { role: 'assistant'; content: string | null; tool_calls?: OpenAiToolCall[] }
   | { role: 'tool'; tool_call_id: string; content: string };
@@ -67,15 +70,24 @@ export function cachesByBreakpoint(model: string): boolean {
 export function toOpenAiMessages(
   system: string,
   messages: readonly Anthropic.Beta.BetaMessageParam[],
-  options: { cacheSystem?: boolean } = {}
+  options: {
+    cacheSystem?: boolean;
+    /** Text that follows the system prompt and may change between turns; '' adds nothing. */
+    standing?: string;
+  } = {}
 ): OpenAiMessage[] {
+  const standing = options.standing ?? '';
   const out: OpenAiMessage[] = [
     options.cacheSystem
       ? {
           role: 'system',
-          content: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
+          // The breakpoint stays on the fixed prompt, so what follows it never costs its cache.
+          content: [
+            { type: 'text', text: system, cache_control: { type: 'ephemeral' } },
+            ...(standing ? [{ type: 'text' as const, text: standing }] : []),
+          ],
         }
-      : { role: 'system', content: system },
+      : { role: 'system', content: standing ? `${system}\n\n${standing}` : system },
   ];
   for (const message of messages) {
     if (typeof message.content === 'string') {

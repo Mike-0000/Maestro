@@ -465,7 +465,7 @@ const voiceStreams = new Map<string, { bytes: number; words: number }>();
 const speechTimers = new Map<string, ReturnType<typeof setTimeout>[]>();
 let conductorTimer: ReturnType<typeof setTimeout> | undefined;
 let nextPendingId = 1;
-/** What runs when the pending action is confirmed or its countdown ends. */
+/** What runs when the pending action is confirmed. */
 let pendingAction: (() => void) | null = null;
 
 function recordVoice(entry: Record<string, unknown>): void {
@@ -481,15 +481,14 @@ function conductorReply(reply: string): void {
   patchVoice({ phase: 'idle', activity: '', reply, replyAt: Date.now() });
 }
 
-function hold(label: string, kind: 'countdown' | 'confirm', durationMs: number, run: () => void) {
+function hold(label: string, run: () => void) {
   clearTimeout(conductorTimer);
   pendingAction = run;
   patchVoice({
     phase: 'idle',
     activity: '',
-    pending: { id: nextPendingId++, label, kind, startedAt: Date.now(), durationMs },
+    pending: { id: nextPendingId++, label, kind: 'confirm', startedAt: Date.now(), durationMs: 0 },
   });
-  if (kind === 'countdown') conductorTimer = setTimeout(() => settlePending('yes'), durationMs);
 }
 
 function settlePending(decision: 'yes' | 'no'): void {
@@ -561,15 +560,13 @@ function conductorHear(text: string): void {
       conductorReply('Here is a plan with three agents. Say yes to start.');
     } else if (/\b(shut down|kill|archive|allow|deny)\b/i.test(said)) {
       const verb = /\barchive\b/i.test(said) ? 'Archive' : 'Shut down';
-      hold(`${verb} ${agent}?`, 'confirm', 0, () =>
+      hold(`${verb} ${agent}?`, () =>
         conductorReply(`${agent} is ${verb === 'Archive' ? 'archived' : 'shut down'}.`)
       );
     } else if (/\b(tell|ask|send)\b/i.test(said)) {
       const message = /\bto (.+)$/i.exec(said)?.[1] ?? 'continue';
-      hold(`Send to ${agent}: ${message}`, 'countdown', 2_500, () => {
-        patchVoice({ phase: 'acting', activity: `Sending to ${agent}…` });
-        conductorTimer = setTimeout(() => conductorReply(`Sent to ${agent}.`), 500);
-      });
+      patchVoice({ phase: 'acting', activity: `Sending to ${agent}: ${message}…` });
+      conductorTimer = setTimeout(() => conductorReply(`Sent to ${agent}.`), 500);
     } else if (/\b(error|broken)\b/i.test(said)) {
       patchVoice({
         phase: 'idle',

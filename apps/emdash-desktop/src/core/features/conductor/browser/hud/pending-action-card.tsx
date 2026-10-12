@@ -1,13 +1,11 @@
 import { observer } from 'mobx-react-lite';
-import { useEffect, useState } from 'react';
 import { getConductorStore } from '../../contributions/browser/app-stores';
 
-/** A side effect waiting to run: a countdown the user can cancel, or an explicit confirmation. */
+/** A side effect that runs only on the user's explicit confirmation. */
 export const PendingActionCard = observer(function PendingActionCard() {
   const conductor = getConductorStore();
   const pending = conductor.pending;
   if (!pending) return null;
-  const countdown = pending.kind === 'countdown';
   return (
     <div className="space-y-2 rounded-lg border border-blue-500/40 bg-blue-500/5 px-2.5 py-2">
       <div className="flex items-center gap-2 text-sm">
@@ -24,7 +22,7 @@ export const PendingActionCard = observer(function PendingActionCard() {
           onClick={() => conductor.confirmPending()}
           className="rounded-md bg-foreground px-2 py-1 text-xs font-medium text-background hover:opacity-90"
         >
-          {countdown ? 'Now' : 'Confirm'} <span className="opacity-60">Enter</span>
+          Confirm <span className="opacity-60">Enter</span>
         </button>
       </div>
       {pending.detail && (
@@ -37,9 +35,6 @@ export const PendingActionCard = observer(function PendingActionCard() {
         <p className="text-xs text-foreground-muted">
           Waiting while this is read out or you are speaking. Nothing runs until then.
         </p>
-      ) : countdown ? (
-        // Keyed by its start too: a clock that was stopped starts over with what is left.
-        <CountdownBar key={`${pending.id}:${pending.startedAt}`} durationMs={pending.durationMs} />
       ) : (
         <p className="text-xs text-foreground-muted">
           Say “yes” or press Enter to confirm (Enter typed into a terminal or text field doesn’t
@@ -49,23 +44,3 @@ export const PendingActionCard = observer(function PendingActionCard() {
     </div>
   );
 });
-
-function CountdownBar({ durationMs }: { durationMs: number }) {
-  const [started, setStarted] = useState(false);
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => setStarted(true));
-    return () => cancelAnimationFrame(frame);
-  }, []);
-  return (
-    <div className="h-1 overflow-hidden rounded-full bg-foreground/10">
-      <div
-        className="h-full bg-blue-500 ease-linear"
-        style={{
-          width: started ? '0%' : '100%',
-          transitionProperty: 'width',
-          transitionDuration: `${durationMs}ms`,
-        }}
-      />
-    </div>
-  );
-}

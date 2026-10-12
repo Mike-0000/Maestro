@@ -10,7 +10,7 @@ import {
   type InvestigationResult,
 } from '../api/contract';
 import type { ConductorTalkLine, LineTurnResult } from '../api/voice-line';
-import { CANCEL_WINDOW_MS, ConductorStore, type ConductorVoicePort } from './conductor-store';
+import { ConductorStore, type ConductorVoicePort } from './conductor-store';
 import type { InvestigationRun } from './investigation-client';
 import type * as Roster from './roster';
 
@@ -376,7 +376,7 @@ describe('after a check, the model asks before it acts', () => {
     await settle();
     expect(store.pending?.kind).toBe('confirm');
     expect(store.pending?.detail).toContain('use retryUpload in the export path');
-    await vi.advanceTimersByTimeAsync(CANCEL_WINDOW_MS * 2);
+    await vi.advanceTimersByTimeAsync(3_000);
     expect(mocks.sendToAgent).not.toHaveBeenCalled();
     store.cancelPending();
     await done;
@@ -396,26 +396,25 @@ describe('after a check, the model asks before it acts', () => {
         .mockResolvedValueOnce(text('ok'));
       const done = store.handleUtterance(words, 'typed');
       await settle();
-      const kind = store.pending?.kind;
+      const asked = store.pending !== null;
       store.confirmPending();
       await done;
-      return kind;
+      return asked;
     };
 
-    expect(await sendTurn('have Atlas use it in the export path')).toBe('confirm');
-    expect(await sendTurn('and have Atlas add a test for it')).toBe('confirm');
+    expect(await sendTurn('have Atlas use it in the export path')).toBe(true);
+    expect(await sendTurn('and have Atlas add a test for it')).toBe(true);
     // Two requests later the answer is gone from the context, and so is the reason to ask.
-    expect(await sendTurn('now have Atlas run the linter')).toBe('countdown');
+    expect(await sendTurn('now have Atlas run the linter')).toBe(false);
     store.dispose();
   });
 
-  it('leaves a note the developer drops by hand on its ordinary cancel window', async () => {
+  it('sends a note the developer drops by hand at once, whatever the turn has read', async () => {
     const store = setup();
     store['turnTainted'] = true;
     const sent = store['sendNote']('conv-atlas', 'remember the changelog');
     await settle();
-    expect(store.pending?.kind).toBe('countdown');
-    await vi.advanceTimersByTimeAsync(CANCEL_WINDOW_MS);
+    expect(store.pending).toBeNull();
     await sent;
     expect(mocks.sendToAgent).toHaveBeenCalledTimes(1);
     store.dispose();

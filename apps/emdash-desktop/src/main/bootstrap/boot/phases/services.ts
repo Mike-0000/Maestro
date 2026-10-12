@@ -25,6 +25,7 @@ import { createConversationDeletionSweepKind } from '@core/features/conversation
 import { ConversationBackfillService } from '@core/features/conversations/node/sync/conversation-backfill';
 import { ConversationSyncService } from '@core/features/conversations/node/sync/conversation-sync-service';
 import { TuiConversationProvider } from '@core/features/conversations/node/tui-conversation-provider';
+import { createWslAutoApprove } from '@core/features/conversations/node/wsl-auto-approve';
 import {
   createGitCredentialsService,
   type GitCredentialsService,
@@ -290,6 +291,7 @@ export async function bootServices(
     resolveSessionGitCredentials: (params: { projectId: string; host: HostRef }) =>
       gitCredentials.resolveSessionSpec(params),
     resolveSessionMcp: resolveAgentSessionMcp,
+    ...createWslAutoApprove(db),
   };
   const projectAttachmentAdapter = createProjectAttachmentAdapter({
     db,

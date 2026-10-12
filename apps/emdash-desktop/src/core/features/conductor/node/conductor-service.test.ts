@@ -560,3 +560,48 @@ describe('ConductorService code checks', () => {
     });
   });
 });
+
+describe('ConductorService standing instructions', () => {
+  it('saves them, reports them, and sends them after the fixed prompt', async () => {
+    await withKey();
+    const first = service();
+    expect((await first.status()).instructions).toEqual([]);
+    await first.runTurn('command', userTurn);
+    const plain = captured[0]?.body.system as { text: string }[];
+    expect(plain).toHaveLength(1);
+
+    const added = await first.adjustInstructions({
+      action: 'add',
+      text: 'Keep prompts to agents short and open-ended.',
+    });
+    expect(added.success).toBe(true);
+    if (added.success) {
+      expect(added.data.summary).toContain('Saved as i1');
+      expect(added.data.status.instructions.map((entry) => entry.id)).toEqual(['i1']);
+    }
+
+    // A new service is a restart: the instruction is read from disk.
+    await service().runTurn('command', userTurn);
+    const system = captured[1]?.body.system as { text: string; cache_control?: unknown }[];
+    expect(system).toHaveLength(2);
+    // The fixed prompt is the same bytes with the same marker, so its cache is kept.
+    expect(system[0]).toEqual(plain[0]);
+    expect(system[1]?.text).toContain('- [i1] Keep prompts to agents short and open-ended.');
+    expect(system[1]?.cache_control).toEqual({ type: 'ephemeral' });
+  });
+
+  it('refuses a change it cannot make, keeps overlapping changes, and redacts secrets', async () => {
+    const conductor = service();
+    const missing = await conductor.adjustInstructions({ action: 'remove', id: 'i4' });
+    expect(missing.success).toBe(false);
+    await Promise.all([
+      conductor.adjustInstructions({ action: 'add', text: 'Use Codex for reviews.' }),
+      conductor.adjustInstructions({ action: 'add', text: 'Answer in one sentence.' }),
+    ]);
+    const key = `sk-ant-api03-${'a'.repeat(40)}`;
+    await conductor.adjustInstructions({ action: 'add', text: `Use the key ${key} for it.` });
+    const saved = (await service().status()).instructions;
+    expect(saved.map((entry) => entry.id)).toEqual(['i1', 'i2', 'i3']);
+    expect(saved[2]?.text).not.toContain(key);
+  });
+});

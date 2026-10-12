@@ -55,8 +55,8 @@ export function conductorSnapshot(
 /**
  * Carries out what a paired device asked for. Device input arrives as typed text: the
  * conductor then shows its reply without speaking it on this computer, and the device voices
- * it instead. "yes" and "no" go through the same grammar a spoken answer does, so countdowns,
- * confirmations, and plan approval behave exactly as they do here.
+ * it instead. "yes" and "no" go through the same grammar a spoken answer does, so
+ * confirmations and plan approval behave exactly as they do here.
  */
 export function runRemoteConductorCommand(
   conductor: Pick<ConductorStore, 'handleUtterance'>,

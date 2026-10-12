@@ -10,20 +10,20 @@ import {
   taintClasses,
   taintedActionLabel,
 } from './tainted-turn';
-import { CANCEL_WINDOW_TOOLS, CONFIRM_REQUIRED_TOOLS, conductorToolNames } from './tools';
+import { DIRECT_TOOLS, CONFIRM_REQUIRED_TOOLS, conductorToolNames } from './tools';
 
 describe('taint classes', () => {
   it('gives every tool exactly one class', () => {
     const classes = taintClasses();
     expect(Object.keys(classes).sort()).toEqual([...conductorToolNames].sort());
     for (const name of conductorToolNames) {
-      expect(['view', 'confirms', 'countdown', 'other']).toContain(classes[name]);
+      expect(['view', 'confirms', 'direct', 'other']).toContain(classes[name]);
     }
   });
 
   it('keeps tools that already ask as they are', () => {
     for (const name of CONFIRM_REQUIRED_TOOLS) expect(taintClass(name)).toBe('confirms');
-    for (const name of CANCEL_WINDOW_TOOLS) expect(taintClass(name)).toBe('countdown');
+    for (const name of DIRECT_TOOLS) expect(taintClass(name)).toBe('direct');
   });
 
   it('lets reading and showing run, and makes everything else ask first', () => {

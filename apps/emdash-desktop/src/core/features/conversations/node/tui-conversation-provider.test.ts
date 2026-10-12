@@ -79,6 +79,73 @@ describe('TuiConversationProvider', () => {
     });
   });
 
+  describe('sessions inside WSL2', () => {
+    const wslMachine = { type: 'remote' as const, id: 'wsl-1' };
+    const startedWith = async (overrides: Parameters<typeof createProvider>[0]) => {
+      await createProvider(overrides).ensureSession({
+        conversation: conversation({ providerId: 'claude' }),
+        mode: 'start',
+      });
+      return start.mock.calls[0]?.[0];
+    };
+
+    it('carries over auto-approve set on this computer to a WSL machine', async () => {
+      const localAutoApprove = vi.fn(async () => true);
+      const input = await startedWith({
+        host: wslMachine,
+        isWslHost: async () => true,
+        localAutoApprove,
+      });
+
+      expect(input.autoApprove).toBe(true);
+      expect(localAutoApprove).toHaveBeenCalledWith('claude');
+    });
+
+    it('carries it over to an agent set to run in WSL on this computer', async () => {
+      const input = await startedWith({
+        getProviderConfig: async () => ({ wsl: true }),
+        localAutoApprove: async () => true,
+      });
+
+      expect(input.autoApprove).toBe(true);
+      expect(input.wsl).toBeDefined();
+    });
+
+    it('leaves sessions outside WSL as the conversation says', async () => {
+      const localAutoApprove = vi.fn(async () => true);
+      const native = await startedWith({ localAutoApprove });
+      start.mockClear();
+      const ssh = await startedWith({
+        host: { type: 'remote', id: 'ssh-1' },
+        isWslHost: async () => false,
+        localAutoApprove,
+      });
+
+      expect(native.autoApprove).toBe(false);
+      expect(ssh.autoApprove).toBe(false);
+      expect(localAutoApprove).not.toHaveBeenCalled();
+    });
+
+    it('does not turn it on when this computer does not have it, or cannot be asked', async () => {
+      const unset = await startedWith({
+        host: wslMachine,
+        isWslHost: async () => true,
+        localAutoApprove: async () => false,
+      });
+      start.mockClear();
+      const failed = await startedWith({
+        host: wslMachine,
+        isWslHost: async () => {
+          throw new Error('database closed');
+        },
+        localAutoApprove: async () => true,
+      });
+
+      expect(unset.autoApprove).toBe(false);
+      expect(failed.autoApprove).toBe(false);
+    });
+  });
+
   it('routes fresh starts to the runtime start path with the initial prompt', async () => {
     const provider = createProvider();
 
@@ -278,6 +345,9 @@ function createProvider(
     getTaskSettings?: () => Promise<{ autoTrustWorktrees: boolean }>;
     launchContextSource?: TuiConversationProviderOptions['launchContextSource'];
     resolveSessionMcp?: TuiConversationProviderDependencies['resolveSessionMcp'];
+    getProviderConfig?: TuiConversationProviderDependencies['getProviderConfig'];
+    isWslHost?: TuiConversationProviderDependencies['isWslHost'];
+    localAutoApprove?: TuiConversationProviderDependencies['localAutoApprove'];
   } = {}
 ): TuiConversationProvider {
   return new TuiConversationProvider(
@@ -304,13 +374,15 @@ function createProvider(
     },
     {
       db: { select: vi.fn() } as never,
-      getProviderConfig: () => Promise.resolve(undefined),
+      getProviderConfig: overrides.getProviderConfig ?? (() => Promise.resolve(undefined)),
       getTaskSettings:
         overrides.getTaskSettings ??
         (() => Promise.resolve({ autoTrustWorktrees: overrides.autoTrustWorktrees ?? false })),
       getTerminalColorEnv: () => Promise.resolve({}),
       resolveSessionGitCredentials: () => Promise.resolve(undefined),
       ...(overrides.resolveSessionMcp ? { resolveSessionMcp: overrides.resolveSessionMcp } : {}),
+      ...(overrides.isWslHost ? { isWslHost: overrides.isWslHost } : {}),
+      ...(overrides.localAutoApprove ? { localAutoApprove: overrides.localAutoApprove } : {}),
     }
   );
 }

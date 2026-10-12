@@ -28,14 +28,14 @@ export type AppTask = {
 export type AppToolDeps = {
   readonly canvas: CanvasStore;
   readonly host: CanvasBrowserHost;
-  requestPending(label: string, kind: 'countdown' | 'confirm' | null): Promise<boolean>;
+  requestPending(label: string, kind: 'direct' | 'confirm' | null): Promise<boolean>;
   /** Resolves the tool's `agent` argument (or the focus) to a task with a workspace. */
   resolveTask(agent: string | undefined): { task: AppTask } | { error: string };
 };
 
 /**
  * After the user lets the conductor drive an app once, further actions within this window run
- * without another cancel countdown (main's control lease is the visible signal).
+ * without asking again (main's control lease is the visible signal).
  */
 const DRIVE_GRACE_MS = 60_000;
 
@@ -57,7 +57,7 @@ export class ConductorAppTools {
       this.deps.host.openForTask(task);
       return { content: `${task.name}'s app is already running at ${running}. Opened it.` };
     }
-    if (!(await this.deps.requestPending(`Run ${task.name}'s app`, 'countdown'))) {
+    if (!(await this.deps.requestPending(`Run ${task.name}'s app`, 'direct'))) {
       return { content: 'Cancelled by the user.' };
     }
     await this.deps.host.runApp(task);
@@ -70,7 +70,7 @@ export class ConductorAppTools {
     const resolved = this.deps.resolveTask(input.agent);
     if ('error' in resolved) return { content: resolved.error, isError: true };
     const { task } = resolved;
-    if (!(await this.deps.requestPending(`Stop ${task.name}'s app`, 'countdown'))) {
+    if (!(await this.deps.requestPending(`Stop ${task.name}'s app`, 'direct'))) {
       return { content: 'Cancelled by the user.' };
     }
     await this.deps.host.stopApp(task);
@@ -233,7 +233,7 @@ export class ConductorAppTools {
       return true;
     }
     const label = `${task.name}'s app: ${describeBrowserAction(action)}`;
-    if (!(await this.deps.requestPending(label, 'countdown'))) return false;
+    if (!(await this.deps.requestPending(label, 'direct'))) return false;
     this.approvedUntil.set(entry.browserId, this.now() + DRIVE_GRACE_MS);
     return true;
   }

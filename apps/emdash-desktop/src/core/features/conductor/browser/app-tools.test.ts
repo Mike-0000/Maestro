@@ -81,10 +81,10 @@ describe('ConductorAppTools', () => {
     expect(requestPending).not.toHaveBeenCalled();
   });
 
-  it('starts the app after the cancel window, and respects a cancel', async () => {
+  it('starts the app, and respects a turn that does not allow it', async () => {
     const started = setup();
     await started.tools.startApp({ agent: 'Atlas' });
-    expect(started.requestPending).toHaveBeenCalledWith("Run Atlas's app", 'countdown');
+    expect(started.requestPending).toHaveBeenCalledWith("Run Atlas's app", 'direct');
     expect(started.host.runApp).toHaveBeenCalledWith(task);
 
     const cancelled = setup({ answers: [false] });
@@ -127,7 +127,7 @@ describe('ConductorAppTools', () => {
     expect(outcome.content).not.toContain('AAAA');
   });
 
-  it('gives the first action a countdown, then drives without one during the grace window', async () => {
+  it('asks for the first action, then drives without asking during the grace window', async () => {
     client.act.mockResolvedValue({
       success: true,
       data: { url: 'http://localhost:5173/settings', title: 'App', changed: true },
@@ -147,7 +147,7 @@ describe('ConductorAppTools', () => {
     expect(requestPending).toHaveBeenCalledTimes(2);
   });
 
-  it('does not act when the countdown is cancelled or input is invalid', async () => {
+  it('does not act when the action is not allowed or input is invalid', async () => {
     const { tools } = setup({ entry: agentsEntry, answers: [false] });
     expect((await tools.useApp({ action: 'reload' })).content).toBe('Cancelled by the user.');
     expect(await tools.useApp({ action: 'click' })).toMatchObject({ isError: true });

@@ -43,6 +43,14 @@ import {
   toOpenAiMessages,
   toOpenAiTools,
 } from '../api/openrouter-format';
+import {
+  applyInstructionChange,
+  EMPTY_STANDING_INSTRUCTIONS,
+  standingInstructionsBlock,
+  standingInstructionsFileSchema,
+  type InstructionChange,
+  type StandingInstructionsFile,
+} from '../api/standing-instructions';
 import { CONDUCTOR_SYSTEM_PROMPT } from '../api/system-prompt';
 import { conductorToolDefinitions } from '../api/tools';
 import { InteractionDiagnostics } from './diagnostics';
@@ -103,6 +111,9 @@ export class ConductorService {
   private readonly credentials: ChorusCredentials;
   private readonly settings: JsonSettingsFile<ConductorSettings>;
   private readonly usage: JsonSettingsFile<ConductorUsage>;
+  /** What the developer told the conductor to do from now on; see standing-instructions.ts. */
+  private readonly instructions: JsonSettingsFile<StandingInstructionsFile>;
+  private instructionWrites: Promise<void> = Promise.resolve();
   /**
    * Two tool lists, each built once from its own definitions so each carries the breakpoint on
    * its own last tool: without the code-check tool, and with it. Switching the setting starts a
@@ -136,6 +147,12 @@ export class ConductorService {
       'conductor-usage.json',
       conductorUsageSchema,
       emptyUsage()
+    );
+    this.instructions = JsonSettingsFile.inDir(
+      host.dataDir,
+      'conductor-instructions.json',
+      standingInstructionsFileSchema,
+      EMPTY_STANDING_INSTRUCTIONS
     );
   }
 
@@ -172,7 +189,41 @@ export class ConductorService {
       settings,
       usageToday: await this.usageToday(),
       investigator: this.investigator?.(settings) ?? { state: 'off', reason: null },
+      instructions: (await this.instructions.read()).entries,
     };
+  }
+
+  /**
+   * One change to the standing instructions, saved before it is reported. Changes run one after
+   * another, so two that overlap cannot lose one. The text is redacted like a log line: a key
+   * said aloud by mistake is never written to disk or sent with every later turn.
+   */
+  adjustInstructions(
+    change: InstructionChange
+  ): Promise<Result<{ status: ConductorStatus; summary: string }, { message: string }>> {
+    const next = this.instructionWrites.then(async () => {
+      const result = applyInstructionChange(
+        await this.instructions.read(),
+        { ...change, ...(change.text === undefined ? {} : { text: redactAll(change.text) }) },
+        new Date()
+      );
+      if (!result.ok) return err({ message: result.message });
+      await this.instructions.update(result.file);
+      return ok({ status: await this.status(), summary: result.summary });
+    });
+    this.instructionWrites = next.then(
+      () => {},
+      () => {}
+    );
+    return next.catch((error: unknown) => {
+      this.logger.warn('conductor: standing instructions could not be saved', { error });
+      return err({ message: 'The instruction could not be saved.' });
+    });
+  }
+
+  /** The block that follows the system prompt, read from memory; '' when nothing is saved. */
+  private async standingBlock(): Promise<string> {
+    return standingInstructionsBlock((await this.instructions.read()).entries);
   }
 
   /**
@@ -242,6 +293,7 @@ export class ConductorService {
     if (settings.provider === 'openrouter')
       return this.runOpenRouterTurn(key, settings, mode, messages);
 
+    const standing = await this.standingBlock();
     const adaptive = startsWithAny(settings.model, ADAPTIVE_MODEL_PREFIXES);
     const withFallback = startsWithAny(settings.model, FALLBACK_MODEL_PREFIXES);
     try {
@@ -259,8 +311,19 @@ export class ConductorService {
               },
             }
           : {}),
+        // The fixed prompt keeps its own breakpoint: standing instructions come after it, so
+        // changing them never costs the cached tools and prompt.
         system: [
           { type: 'text', text: CONDUCTOR_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+          ...(standing
+            ? [
+                {
+                  type: 'text' as const,
+                  text: standing,
+                  cache_control: { type: 'ephemeral' as const },
+                },
+              ]
+            : []),
         ],
         tools: this.toolsFor(settings),
         messages,
@@ -428,6 +491,7 @@ export class ConductorService {
         max_tokens: mode === 'plan' ? 16000 : 4096,
         messages: toOpenAiMessages(CONDUCTOR_SYSTEM_PROMPT, messages, {
           cacheSystem: cachesByBreakpoint(settings.openrouterModel),
+          standing: await this.standingBlock(),
         }),
         tools: toOpenAiTools(this.toolsFor(settings)),
         reasoning: {

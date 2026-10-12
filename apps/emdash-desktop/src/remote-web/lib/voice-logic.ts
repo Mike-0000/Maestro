@@ -209,38 +209,6 @@ export class AttentionBatcher {
   }
 }
 
-// ── Countdown ────────────────────────────────────────────────────────────────
-
-export type CountdownAnchor = { startedAt: number; durationMs: number };
-
-/**
- * Places a host countdown on this device's clock. `startedAt` is the host's time, and a phone's
- * clock can be seconds off; when the host's start looks impossible from here (in the future, or
- * already past its own end) the countdown is taken to have started when it was first seen.
- */
-export function anchorCountdown(
-  pending: { startedAt: number; durationMs: number },
-  seenAt: number
-): CountdownAnchor {
-  const durationMs = Math.max(0, pending.durationMs);
-  const elapsed = seenAt - pending.startedAt;
-  const plausible = elapsed >= 0 && elapsed < durationMs;
-  return { startedAt: plausible ? pending.startedAt : seenAt, durationMs };
-}
-
-/** Time left and the share of the ring still to draw (1 at the start, 0 when it runs). */
-export function countdownRemaining(
-  anchor: CountdownAnchor,
-  now: number
-): { remainingMs: number; fraction: number } {
-  if (anchor.durationMs <= 0) return { remainingMs: 0, fraction: 0 };
-  const remainingMs = Math.max(
-    0,
-    Math.min(anchor.durationMs, anchor.startedAt + anchor.durationMs - now)
-  );
-  return { remainingMs, fraction: remainingMs / anchor.durationMs };
-}
-
 // ── Examples ─────────────────────────────────────────────────────────────────
 
 /** A few things worth saying, phrased with the host's real agent and project names. */

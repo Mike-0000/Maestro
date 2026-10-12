@@ -1,14 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { CONDUCTOR_SYSTEM_PROMPT } from '@core/features/conductor/api/system-prompt';
+import {
+  STANDING_LIMITS,
+  standingInstructionsBlock,
+} from '@core/features/conductor/api/standing-instructions';
+import {
+  CONDUCTOR_REPLY_RULES,
+  CONDUCTOR_RULES,
+  CONDUCTOR_SYSTEM_PROMPT,
+} from '@core/features/conductor/api/system-prompt';
 import { conductorToolDefinitions } from '@core/features/conductor/api/tools';
 import {
+  briefSize,
   isLineInstantTool,
   lineRecord,
   lineTurnActed,
 } from '@core/features/conductor/api/voice-line';
 import { TALK_INSTRUCTIONS_MAX_CHARS, TALK_TOOLS_MAX } from './contract';
 import { ECHO_WINDOW_MS, isEcho, neverEcho, recentSpoken } from './echo-guard';
-import { LINE_INSTRUCTIONS, lineTools, sayExactly } from './voice-prompt';
+import { lineInstructions, lineTools, sayExactly } from './voice-prompt';
 import {
   carriedOver,
   feedSnapshot,
@@ -119,16 +128,94 @@ describe('what the line is given', () => {
   });
 
   it("is the conductor's own prompt, with what hearing and speaking change", () => {
-    expect(LINE_INSTRUCTIONS.startsWith(CONDUCTOR_SYSTEM_PROMPT)).toBe(true);
-    expect(LINE_INSTRUCTIONS).toContain('There is no <context> block.');
-    expect(LINE_INSTRUCTIONS.length).toBeLessThan(TALK_INSTRUCTIONS_MAX_CHARS);
+    for (const replies of ['brief', 'normal'] as const) {
+      const instructions = lineInstructions(replies);
+      expect(instructions.startsWith(CONDUCTOR_RULES)).toBe(true);
+      expect(instructions).toContain('There is no <context> block.');
+      expect(instructions).toContain('do not ask the developer to confirm what a tool will ask');
+      expect(instructions).toContain('pass on every requirement they gave');
+      expect(instructions.length).toBeLessThan(TALK_INSTRUCTIONS_MAX_CHARS);
+    }
     expect(sayExactly('Sent to "Atlas".')).toContain(JSON.stringify('Sent to "Atlas".'));
+  });
+
+  it("ends with the developer's standing instructions, and still fits with all of them", () => {
+    const entries = Array.from({ length: 10 }, (_, index) => ({
+      id: `i${index + 1}`,
+      text: 'z'.repeat(STANDING_LIMITS.totalChars / 10),
+      at: '2026-10-11T12:00:00.000Z',
+    }));
+    const standing = standingInstructionsBlock(entries);
+    for (const replies of ['brief', 'normal'] as const) {
+      expect(lineInstructions(replies, '')).toBe(lineInstructions(replies));
+      const instructions = lineInstructions(replies, standing);
+      expect(instructions).toBe(`${lineInstructions(replies)}\n\n${standing}`);
+      expect(instructions.length).toBeLessThan(TALK_INSTRUCTIONS_MAX_CHARS);
+    }
+  });
+
+  it('keeps the text conductor reading the prompt it always had', () => {
+    expect(CONDUCTOR_SYSTEM_PROMPT).toBe(`${CONDUCTOR_RULES}\n\n${CONDUCTOR_REPLY_RULES}`);
+    expect(CONDUCTOR_SYSTEM_PROMPT).toContain('\n\nHow to reply:\n- Your final text is spoken');
+    expect(CONDUCTOR_SYSTEM_PROMPT.endsWith('If nothing was needed, say so briefly.')).toBe(true);
+  });
+
+  it('answers in a sentence or two when the voice is not kept short', () => {
+    const normal = lineInstructions('normal');
+    expect(normal.startsWith(CONDUCTOR_SYSTEM_PROMPT)).toBe(true);
+    expect(normal).toContain('one or two short sentences, plain words, no lists');
+    expect(normal).toContain('Before a tool that takes a moment you may say a few words');
+  });
+
+  it('kept short, confirms in a word or two and says nothing before a tool', () => {
+    const brief = lineInstructions('brief');
+    // The text conductor's "How to reply" asks for more than the voice should say.
+    expect(brief).not.toContain(CONDUCTOR_REPLY_RULES);
+    expect(brief).not.toContain('you may say a few words');
+    expect(brief).toContain('confirm it in one to three words');
+    expect(brief).toContain('say nothing before or while you call them');
+    expect(brief).toContain('do not offer a next step');
+  });
+
+  it('kept short, still says a failure, a cancel, and a question it needs answered', () => {
+    const brief = lineInstructions('brief');
+    expect(brief).toContain('a tool failed, was refused, or was cancelled');
+    expect(brief).toContain('one short question when you cannot tell which agent');
+    expect(brief).toContain('Being brief never means leaving out a failure');
+    expect(brief).toContain('Never say something was sent, started, stopped, or approved before');
+    expect(brief).toContain('If a tool fails, say what failed.');
+  });
+
+  it('keeps what an agent is sent to what the developer said, however the voice answers', () => {
+    for (const replies of ['brief', 'normal'] as const) {
+      const instructions = lineInstructions(replies);
+      expect(instructions).toContain('says what the developer said, and nothing they did not');
+      expect(instructions).toContain('A short request stays short');
+      expect(instructions).toContain('Do not add requirements, steps, tests');
+    }
+  });
+
+  it('measures what was written for an agent against what was said', () => {
+    const asked = 'tell Lima to implement its fix';
+    expect(
+      briefSize('send_to_agent', { agent: 'Lima', text: 'Implement your fix.' }, asked)
+    ).toEqual({ askedWords: 6, writtenWords: 3 });
+    expect(briefSize('spawn_agent', { prompt: 'one two  three\nfour' }, '')).toEqual({
+      askedWords: 0,
+      writtenWords: 4,
+    });
+    // Nothing is written for an agent, or the input is not what the tool takes.
+    expect(briefSize('close_agent', { agent: 'Lima' }, asked)).toEqual({});
+    expect(briefSize('send_to_agent', null, asked)).toEqual({});
+    expect(briefSize('send_to_agent', { text: 7 }, asked)).toEqual({});
   });
 
   it('fits the provider limit for instructions and tools together', () => {
     // 16,384 tokens; about four characters to a token, with room to spare.
-    const size = LINE_INSTRUCTIONS.length + JSON.stringify(lineTools({ codeChecks: true })).length;
-    expect(size).toBeLessThan(56_000);
+    const tools = JSON.stringify(lineTools({ codeChecks: true })).length;
+    for (const replies of ['brief', 'normal'] as const) {
+      expect(lineInstructions(replies).length + tools).toBeLessThan(56_000);
+    }
   });
 });
 
@@ -150,7 +237,7 @@ describe('the record of a finished turn', () => {
         'Done: spawn_agent: Created task "Dictation button". It will appear on the canvas as Echo.. ' +
         'You answered: “Started Echo.”'
     );
-    expect(LINE_INSTRUCTIONS).toContain('"[Conductor] Earlier, and over"');
+    expect(lineInstructions('brief')).toContain('"[Conductor] Earlier, and over"');
   });
 
   it('never carries the brief that was delivered, and keeps long words short', () => {

@@ -49,6 +49,7 @@ export function createConductorWireController(options: {
       investigations.settingsChanged(patch);
       return service.updateSettings(patch);
     },
+    adjustInstructions: (change) => service.adjustInstructions(change),
     checkConflicts: async ({ worktrees }) => {
       try {
         return ok(await checkWorktreeConflicts(worktrees));

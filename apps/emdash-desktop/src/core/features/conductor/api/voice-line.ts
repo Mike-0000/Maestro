@@ -3,8 +3,8 @@ import type { BrowserImage } from '@core/primitives/browser/api';
 /**
  * The seam between the conductor and the realtime voice line. While the line is open its model
  * is the conductor: it hears the developer, decides, and calls the conductor's tools. The
- * conductor store still runs every tool, behind the same cancel windows and confirmations as
- * always, and falls back to the text model when the line is not open.
+ * conductor store still runs every tool, behind the same confirmations as always, and falls
+ * back to the text model when the line is not open.
  */
 
 /** How much of one tool result reaches the voice model. */
@@ -26,6 +26,7 @@ const LINE_INSTANT_TOOLS: ReadonlySet<string> = new Set([
   'check_conflicts',
   'look_at_app',
   'investigate',
+  'review_instructions',
 ]);
 
 export function isLineInstantTool(name: string): boolean {
@@ -88,6 +89,31 @@ export function lineRecord(turn: {
   ].join(' ');
 }
 
+export function wordCount(text: string): number {
+  return text.split(/\s+/).filter(Boolean).length;
+}
+
+/** The field of each tool's input that is written for an agent to read. */
+const BRIEF_FIELDS: Readonly<Record<string, string>> = {
+  send_to_agent: 'text',
+  spawn_agent: 'prompt',
+};
+
+/**
+ * For the diagnostics: how many words the developer said and how many the model wrote for the
+ * agent. A message much longer than what was said carries things the developer did not say.
+ */
+export function briefSize(
+  tool: string,
+  input: unknown,
+  asked: string
+): { askedWords: number; writtenWords: number } | Record<string, never> {
+  const field = BRIEF_FIELDS[tool];
+  const written = field ? (input as Record<string, unknown> | null)?.[field] : undefined;
+  if (typeof written !== 'string') return {};
+  return { askedWords: wordCount(asked), writtenWords: wordCount(written) };
+}
+
 /** One turn the conductor asks the line to take. */
 export type LineTurnInput = {
   /** The developer's words when they were typed or transcribed here; absent when the line heard them. */
@@ -104,6 +130,10 @@ export type LineTurnResult = {
   /** False when the turn was stopped, dropped, or cut off. */
   readonly completed: boolean;
   readonly tokens: number;
+  /** How many times the model was asked: one, plus one for each batch of tool results. */
+  readonly rounds?: number;
+  /** Words it said in a response that also called a tool: said before any result was in. */
+  readonly leadWords?: number;
 };
 
 /** A tool's result as the line hands it to its model. */

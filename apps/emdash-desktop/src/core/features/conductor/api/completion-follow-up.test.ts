@@ -11,7 +11,7 @@ import {
   isFollowUpTool,
   isNoNewsReply,
 } from './completion-follow-up';
-import { CANCEL_WINDOW_TOOLS, CONFIRM_REQUIRED_TOOLS } from './tools';
+import { DIRECT_TOOLS, CONFIRM_REQUIRED_TOOLS } from './tools';
 
 const report = buildCompletionReport(
   'Built the todo app and started it. It is running at http://localhost:3000.'
@@ -29,8 +29,8 @@ describe('completion follow-up tools', () => {
     ]);
   });
 
-  it('never allows a tool that needs a cancel window or a confirmation', () => {
-    for (const tool of [...CANCEL_WINDOW_TOOLS, ...CONFIRM_REQUIRED_TOOLS]) {
+  it('never allows a tool that acts on agents or needs a confirmation', () => {
+    for (const tool of [...DIRECT_TOOLS, ...CONFIRM_REQUIRED_TOOLS]) {
       expect(isFollowUpTool(tool)).toBe(false);
     }
     for (const tool of ['use_app', 'look_at_app', 'close_agent', 'arrange_canvas', 'add_note']) {
@@ -113,6 +113,16 @@ describe('nothing-new completions', () => {
     ]);
     expect(text).toContain(`answer with exactly ${COMPLETION_NO_NEWS}`);
     expect(text).toMatch(/Do not offer to check again later/);
+  });
+
+  it('asks for one short sentence, and a question only when one is due', () => {
+    const text = completionTurnText([
+      { name: 'Zulu', providerLabel: 'Claude', taskName: 't', report },
+    ]);
+    expect(text).toContain('one short spoken sentence, twenty words at most');
+    expect(text).toContain('when neither holds, end without a question');
+    expect(text).toContain('a count or a wait that only grew');
+    expect(text).not.toContain('one or two short spoken sentences');
   });
 
   it('recognizes the marker alone, not a sentence that mentions it', () => {

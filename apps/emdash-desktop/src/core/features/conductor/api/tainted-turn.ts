@@ -1,7 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { MAESTRO_EVENT_MARK } from './history';
 import {
-  CANCEL_WINDOW_TOOLS,
+  DIRECT_TOOLS,
   CONFIRM_REQUIRED_TOOLS,
   conductorToolNames,
   type ConductorToolName,
@@ -21,8 +21,8 @@ export type TaintClass =
   | 'view'
   /** Asks for its own confirmation already. Unchanged. */
   | 'confirms'
-  /** Runs behind a cancel window. In a tainted turn the window becomes a confirmation. */
-  | 'countdown'
+  /** Runs at once on the developer's own words. In a tainted turn it asks first itself. */
+  | 'direct'
   /** Everything else changes something without asking. In a tainted turn it asks first. */
   | 'other';
 
@@ -42,13 +42,14 @@ const VIEW_TOOLS: ReadonlySet<string> = new Set([
   'canvas_view',
   'investigate',
   'propose_plan',
+  'review_instructions',
 ]);
 
 /** A tool nobody classified changes something until shown otherwise, so it asks first. */
 export function taintClass(name: string): TaintClass {
   if (VIEW_TOOLS.has(name)) return 'view';
   if (CONFIRM_REQUIRED_TOOLS.has(name as ConductorToolName)) return 'confirms';
-  if (CANCEL_WINDOW_TOOLS.has(name as ConductorToolName)) return 'countdown';
+  if (DIRECT_TOOLS.has(name as ConductorToolName)) return 'direct';
   return 'other';
 }
 
@@ -92,10 +93,30 @@ export function taintedActionLabel(name: string, input: unknown): string {
         : 'Show every project on the canvas';
     case 'read_clipboard':
       return 'Read the clipboard';
+    case 'adjust_instructions':
+      return instructionChangeLabel(input);
+    case 'change_setting':
+      return `Set ${(field(input, 'setting') ?? 'a setting').replace(/_/g, ' ')} to ${field(input, 'value') ?? '?'}`;
     case 'answer_request':
       return `Answer request ${field(input, 'request_id') ?? ''}: ${field(input, 'decision') ?? 'decide'}`.trim();
     default:
       return `${name.replace(/_/g, ' ')}: ${clip(JSON.stringify(input ?? {}), 100)}`;
+  }
+}
+
+/** What a change to the conductor's standing instructions asks the developer to say yes to. */
+export function instructionChangeLabel(input: unknown): string {
+  const id = field(input, 'id');
+  const text = clip(field(input, 'text') ?? '', 120);
+  switch (field(input, 'action')) {
+    case 'add':
+      return `Save the standing instruction “${text}”`;
+    case 'replace':
+      return `Replace standing instruction ${id ?? ''} with “${text}”`;
+    case 'remove':
+      return `Remove standing instruction ${id ?? ''}`.trim();
+    default:
+      return 'Clear every standing instruction';
   }
 }
 

@@ -70,6 +70,7 @@ function harness(settings: Partial<TalkSettings> = {}) {
     }),
   };
   const callOnLine = observable.box(false);
+  const standing = observable.box('');
   const guarded = { value: false };
   let line: ConductorTalkLine | null = null;
   const conductor = {
@@ -93,6 +94,9 @@ function harness(settings: Partial<TalkSettings> = {}) {
       return callOnLine.get();
     },
     codeChecksReady: false,
+    get standingInstructions() {
+      return standing.get();
+    },
   };
   const track = { enabled: true, stop: vi.fn() } as unknown as MediaStreamTrack;
   const play = vi.fn();
@@ -148,6 +152,7 @@ function harness(settings: Partial<TalkSettings> = {}) {
     voice,
     guarded,
     callOnLine,
+    standing,
     track,
     play,
     line: () => line!,
@@ -607,6 +612,33 @@ describe('a turn of the model', () => {
     store.dispose();
   });
 
+  it('counts the rounds of a turn and the words said before a tool had answered', async () => {
+    const { store, open, line } = harness();
+    const session = await open();
+    const result = line().turn({ context: 'c', spoken: true });
+
+    said(session, 'Got it, let me do that.');
+    toolCall(session, 'c1', 'close_agent', '{"agent":"Ginger"}');
+    responseDone(session, { tools: true });
+    await settle();
+    said(session, 'Closed.');
+    responseDone(session);
+    await expect(result).resolves.toMatchObject({
+      reply: 'Got it, let me do that. Closed.',
+      rounds: 2,
+      leadWords: 6,
+    });
+
+    const quiet = line().turn({ context: 'c', spoken: true });
+    toolCall(session, 'c2', 'close_agent', '{"agent":"Ginger"}');
+    responseDone(session, { tools: true });
+    await settle();
+    said(session, 'Closed.');
+    responseDone(session);
+    await expect(quiet).resolves.toMatchObject({ reply: 'Closed.', rounds: 2, leadWords: 0 });
+    store.dispose();
+  });
+
   it('does not ask again while the response that called the tool is still in flight', async () => {
     const { store, open, line } = harness();
     const session = await open();
@@ -755,7 +787,7 @@ describe('a turn of the model', () => {
     void line().turn({ context: 'c', spoken: true });
     toolCall(session, 'c1', 'send_to_agent');
     responseDone(session, { tools: true });
-    // The conductor reads its cancel window out while the tool waits.
+    // The conductor reads its confirmation out while the tool waits.
     const reading = line().say('Sending to Atlas. Say stop to cancel.');
     session.sent.length = 0;
     await settle();
@@ -1079,6 +1111,47 @@ describe('the daily limit', () => {
     await store.updateSettings({ model: 'gpt-realtime-2.1-mini' });
     await settle();
     expect(sessions).toHaveLength(2);
+    store.dispose();
+  });
+
+  it('answers briefly unless told otherwise, and reopens to answer the other way', async () => {
+    const { store, open, sessions, client } = harness();
+    await open();
+    const brief = client.openCall.mock.calls[0]![0].instructions;
+    expect(brief).toContain('say nothing before or while you call them');
+    expect(brief).not.toContain('one or two short sentences');
+
+    await store.updateSettings({ replies: 'normal' });
+    await settle();
+    expect(sessions).toHaveLength(2);
+    const normal = client.openCall.mock.calls[1]![0].instructions;
+    expect(normal).toContain('one or two short sentences');
+    expect(normal).not.toContain('say nothing before or while you call them');
+    store.dispose();
+  });
+
+  it('gives the open session new standing instructions without a new connection', async () => {
+    const { store, open, sessions, client, standing, conductor } = harness();
+    const session = await open();
+    const opened = client.openCall.mock.calls[0]![0].instructions;
+    expect(opened).not.toContain('Standing instructions');
+
+    runInAction(() => standing.set('Standing instructions from the developer:\n- [i1] Be open.'));
+    await settle();
+    expect(sessions).toHaveLength(1);
+    const update = session.sent.find((event) => event.type === 'session.update');
+    expect(update?.session).toEqual({
+      type: 'realtime',
+      instructions: `${opened}\n\nStanding instructions from the developer:\n- [i1] Be open.`,
+    });
+    expect(conductor.traceLine).toHaveBeenCalledWith('instructed', expect.anything());
+
+    // The next session opens with them, and is not told twice.
+    await store.updateSettings({ model: 'gpt-realtime-2.1-mini' });
+    await settle();
+    expect(sessions).toHaveLength(2);
+    expect(client.openCall.mock.calls[1]![0].instructions).toContain('- [i1] Be open.');
+    expect(sentTypes(sessions[1]!)).not.toContain('session.update');
     store.dispose();
   });
 });

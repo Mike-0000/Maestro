@@ -520,7 +520,7 @@ export class VoiceStore {
     return this.say(command, { keepOnFailure: false });
   }
 
-  /** Answers a countdown, a confirmation, or a proposed plan. */
+  /** Answers a confirmation or a proposed plan. */
   async respond(decision: 'yes' | 'no'): Promise<void> {
     const api = this.api;
     if (!api || this.responding) return;

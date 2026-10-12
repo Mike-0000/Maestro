@@ -100,12 +100,12 @@ export const remoteAdoptConversationInputSchema = z.object({
 });
 export type RemoteAdoptConversationInput = z.infer<typeof remoteAdoptConversationInputSchema>;
 
-/** A side effect the conductor is holding for a moment, or until it is confirmed. */
+/** A side effect the conductor is holding until it is confirmed. */
 export const remoteVoicePendingSchema = z.object({
   id: z.number(),
   label: z.string(),
-  /** `countdown` runs unless cancelled; `confirm` runs only when confirmed. */
-  kind: z.enum(['countdown', 'confirm']),
+  /** Runs only when confirmed. */
+  kind: z.literal('confirm'),
   startedAt: z.number(),
   durationMs: z.number(),
 });

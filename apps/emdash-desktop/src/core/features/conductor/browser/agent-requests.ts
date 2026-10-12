@@ -48,7 +48,7 @@ export interface AgentRequestHost {
    */
   decide(open: OpenRequestView): Promise<string>;
   /**
-   * Runs one conductor tool exactly as given, behind its usual cancel window, in the asking
+   * Runs one conductor tool exactly as given, in the asking
    * agent's project and aimed at the agent the request named.
    */
   act(

@@ -1,13 +1,37 @@
 import { describe, expect, it } from 'vitest';
 import { isFollowUpTool } from './completion-follow-up';
 import {
-  CANCEL_WINDOW_TOOLS,
   CONFIRM_REQUIRED_TOOLS,
   conductorToolNames,
   conductorToolSchemas,
+  DIRECT_TOOLS,
 } from './tools';
 
 describe('conductor tools', () => {
+  it("appends the conductor's own tools after the others, before the code check", () => {
+    expect(run('canvas_desks', 5)).toEqual([
+      'canvas_desks',
+      'review_instructions',
+      'adjust_instructions',
+      'change_setting',
+      'investigate',
+    ]);
+    // They run on the developer's own words; reading back changes nothing.
+    for (const name of ['review_instructions', 'adjust_instructions', 'change_setting'] as const) {
+      expect(DIRECT_TOOLS.has(name)).toBe(false);
+      expect(CONFIRM_REQUIRED_TOOLS.has(name)).toBe(false);
+      // An agent's finished reply never reaches the conductor's own instructions.
+      expect(isFollowUpTool(name)).toBe(false);
+    }
+    expect(
+      conductorToolSchemas.adjust_instructions.safeParse({ action: 'add', text: 'Be brief.' })
+        .success
+    ).toBe(true);
+    expect(
+      conductorToolSchemas.change_setting.safeParse({ setting: 'model', value: 'x' }).success
+    ).toBe(false);
+  });
+
   // Each group was appended after the ones before it and must stay in place: a tool inserted or
   // reordered earlier would change the cached prefix. Positions are counted from each group's
   // first tool, so appending a new tool at the end never disturbs these.
@@ -79,16 +103,15 @@ describe('conductor tools', () => {
     expect(desks.safeParse({ action: 'create', gather: 'waiting' }).success).toBe(false);
     expect(desks.safeParse({ action: 'set_mode', mode: 'glass' }).success).toBe(false);
     // A desk change is layout: it previews like one and needs no confirmation of its own.
-    expect(CANCEL_WINDOW_TOOLS.has('canvas_desks')).toBe(false);
+    expect(DIRECT_TOOLS.has('canvas_desks')).toBe(false);
     expect(CONFIRM_REQUIRED_TOOLS.has('canvas_desks')).toBe(false);
   });
 
-  it('appends the code-check tool last, behind neither a confirmation nor a countdown', () => {
-    // Last of 43: the tool list without it is then a plain prefix of the list with it. A tool
-    // appended later goes after it (the service handles either list), and this moves with it.
-    expect(run('canvas_desks', 2)).toEqual(['canvas_desks', 'investigate']);
+  it('keeps the code-check tool last, behind no confirmation', () => {
+    // Last of 46: the tool list without it is then a plain prefix of the list with it. A tool
+    // added later goes just before it, and this moves with it.
     expect(conductorToolNames.at(-1)).toBe('investigate');
-    expect(conductorToolNames).toHaveLength(43);
+    expect(conductorToolNames).toHaveLength(46);
     const investigate = conductorToolSchemas.investigate;
     expect(investigate.safeParse({ questions: ['Is there a retry helper?'] }).success).toBe(true);
     expect(
@@ -106,16 +129,16 @@ describe('conductor tools', () => {
         .success
     ).toBe(false);
     // It only reads, so it runs at once. What follows a check is gated by the tainted-turn rule.
-    expect(CANCEL_WINDOW_TOOLS.has('investigate')).toBe(false);
+    expect(DIRECT_TOOLS.has('investigate')).toBe(false);
     expect(CONFIRM_REQUIRED_TOOLS.has('investigate')).toBe(false);
     // A finished agent's reply is untrusted, so it can never start a check.
     expect(isFollowUpTool('investigate')).toBe(false);
   });
 
-  it('gives app starts and stops a cancel window', () => {
-    expect(CANCEL_WINDOW_TOOLS.has('start_app')).toBe(true);
-    expect(CANCEL_WINDOW_TOOLS.has('stop_app')).toBe(true);
-    expect(CANCEL_WINDOW_TOOLS.has('look_at_app')).toBe(false);
+  it('runs app starts and stops at once, asking only in a tainted turn', () => {
+    expect(DIRECT_TOOLS.has('start_app')).toBe(true);
+    expect(DIRECT_TOOLS.has('stop_app')).toBe(true);
+    expect(DIRECT_TOOLS.has('look_at_app')).toBe(false);
   });
 
   it('requires explicit confirmation for delivery rollback', () => {

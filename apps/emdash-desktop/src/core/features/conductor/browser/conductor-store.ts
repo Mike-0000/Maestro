@@ -35,6 +35,11 @@ import {
 import { log } from '@core/primitives/logging/browser/logger';
 import { ActivityLedger, formatAgo } from '../api/activity-ledger';
 import {
+  describeAdjustableSettings,
+  parseSettingChange,
+  SETTINGS_PAGE_ONLY,
+} from '../api/adjustable-settings';
+import {
   isRequestTurnTool,
   plainText,
   requestTurnText,
@@ -121,10 +126,17 @@ import {
   substitutionRefusal,
   type RosterAgent,
 } from '../api/resolver';
+import {
+  asksToAdjustConductor,
+  STANDING_LIMITS,
+  standingInstructionsBlock,
+  type InstructionChange,
+} from '../api/standing-instructions';
 import { isPureStop, meansStop } from '../api/stop-words';
 import { conductorUserMessage } from '../api/system-prompt';
 import {
   AGENT_TEXT_REACH,
+  instructionChangeLabel,
   isBareReply,
   readsAgentText,
   restsOnAgentText,
@@ -132,7 +144,7 @@ import {
   taintedActionLabel,
 } from '../api/tainted-turn';
 import {
-  CANCEL_WINDOW_TOOLS,
+  DIRECT_TOOLS,
   CONFIRM_REQUIRED_TOOLS,
   conductorToolNames,
   conductorToolSchemas,
@@ -143,8 +155,10 @@ import {
 import {
   isLineInstantTool,
   LINE_TOOL_MAX_CHARS,
+  briefSize,
   lineRecord,
   lineTurnActed,
+  wordCount,
   type ConductorTalkLine,
   type LineSpeech,
   type LineToolResult,
@@ -240,8 +254,8 @@ export type UtteranceSource = 'voice' | 'typed';
 export type PendingAction = {
   readonly id: number;
   readonly label: string;
-  /** "countdown" runs unless cancelled; "confirm" runs only when confirmed. */
-  readonly kind: 'countdown' | 'confirm';
+  /** Runs only when confirmed. */
+  readonly kind: 'confirm';
   readonly startedAt: number;
   readonly durationMs: number;
   /**
@@ -253,11 +267,6 @@ export type PendingAction = {
   readonly held?: boolean;
   /** Everything the action carries (a whole message or prompt) when the label shortens it. */
   readonly detail?: string;
-  /**
-   * Started by the developer's own hand outside any turn (a dropped note). Stopping a turn does
-   * not cancel it, and cancelling it does not stop a turn.
-   */
-  readonly plain?: boolean;
 };
 
 export type ConductorErrorState = { message: string; kind: ConductorError['type'] | 'other' };
@@ -292,8 +301,6 @@ type DeskReply = {
   readonly cancelled?: boolean;
 };
 
-/** Short cancel window before side-effecting commands run. */
-export const CANCEL_WINDOW_MS = 1_500;
 /** How long an explicit confirmation waits before it lapses. */
 const CONFIRM_TIMEOUT_MS = 30_000;
 /** A call picked up for typing goes back on the line when nothing was typed for this long. */
@@ -371,8 +378,8 @@ type ToolRunOptions = {
 /**
  * The conductor turns utterances into actions on agents. A deterministic grammar handles common
  * commands instantly; everything else goes to Claude with tools that execute here in the renderer
- * against the live canvas and task stores. Side effects run behind a cancel window, and answering
- * permission prompts always needs an explicit yes.
+ * against the live canvas and task stores. What the developer's words name runs at once, and
+ * answering permission prompts always needs an explicit yes.
  */
 export class ConductorStore {
   phase: ConductorPhase = 'idle';
@@ -446,8 +453,14 @@ export class ConductorStore {
    * words do not name the action, so each action asks for an explicit yes.
    */
   private turnTainted = false;
-  /** A tainted tool call the developer just confirmed: its own countdowns are skipped. */
+  /** A tainted tool call the developer just confirmed: the tool does not ask again. */
   private preconfirmed = false;
+  /**
+   * The running turn read text the developer did not write (an agent's output, a page, the
+   * clipboard). A change to the conductor's own instructions or settings then asks first: it
+   * outlasts the turn, and such text may be what asked for it.
+   */
+  private turnReadAgentText = false;
   /** Replies being spoken, so a call does not talk over one. */
   private speakingReplies = 0;
   /** The agent whose window is marked as the caller. */
@@ -586,6 +599,7 @@ export class ConductorStore {
       | 'turnCancelled'
       | 'turnTainted'
       | 'preconfirmed'
+      | 'turnReadAgentText'
       | 'speakingReplies'
       | 'highlighted'
       | 'talkLine'
@@ -644,6 +658,7 @@ export class ConductorStore {
       turnCancelled: false,
       turnTainted: false,
       preconfirmed: false,
+      turnReadAgentText: false,
       speakingReplies: false,
       highlighted: false,
       talkLine: false,
@@ -874,7 +889,7 @@ export class ConductorStore {
 
   /**
    * On-device dictation, finished: sends the words to the agent in front at once. The developer
-   * watched them appear and chose to send, so there is no cancel window.
+   * watched them appear and chose to send.
    */
   async sendDictation(
     text: string
@@ -1025,19 +1040,14 @@ export class ConductorStore {
   }
 
   /**
-   * "Stop" or "no" to what is pending: that action does not run. In a model turn a cancel
-   * window, or words that say more than no (`whole` when they were begun before the prompt
-   * existed, so they were never an answer to it), end the turn with it, and nothing else the
-   * model asked for runs. True when the turn was stopped.
+   * "Stop" or "no" to what is pending: that action does not run. In a model turn words that say
+   * more than no (`whole` when they were begun before the prompt existed, so they were never an
+   * answer to it) end the turn with it, and nothing else the model asked for runs. True when the
+   * turn was stopped.
    */
   private rejectPending(text: string, interactionId: string, whole = false): boolean {
-    const pending = this.pending;
     const stopsTurn =
-      this.busy &&
-      this.modelTurn &&
-      !this.turnCancelled &&
-      pending?.plain !== true &&
-      (whole || pending?.kind === 'countdown' || meansStop(text));
+      this.busy && this.modelTurn && !this.turnCancelled && (whole || meansStop(text));
     this.cancelPending();
     if (stopsTurn) this.cancelTurn(interactionId);
     return stopsTurn;
@@ -1046,11 +1056,10 @@ export class ConductorStore {
   /**
    * Words that are neither a yes nor a stop arrived while something was pending. They are not
    * consent, so the action is dropped; in a model turn the rest of what the turn asked for is
-   * dropped with it, or its next cancel window would run out while these words wait their turn.
+   * dropped with it, or it would run while these words wait their turn.
    */
   private interruptPending(interactionId: string): void {
-    const stopsTurn =
-      this.busy && this.modelTurn && !this.turnCancelled && this.pending?.plain !== true;
+    const stopsTurn = this.busy && this.modelTurn && !this.turnCancelled;
     this.cancelPending();
     if (stopsTurn) this.cancelTurn(interactionId);
   }
@@ -1114,14 +1123,8 @@ export class ConductorStore {
         if (call) this.putBackCall(call);
         return;
       }
-      if (this.pending.kind === 'countdown' && command?.kind !== 'confirm') {
-        // A cancel window runs out on its own. It never ran over words the developer was
-        // already saying, and it still does not.
-        this.interruptPending(interactionId);
-      } else {
-        this.armPending(Date.now());
-        this.resumePending();
-      }
+      this.armPending(Date.now());
+      this.resumePending();
     } else if (this.pending) {
       if (command?.kind === 'confirm') {
         this.trace(
@@ -1237,9 +1240,12 @@ export class ConductorStore {
       // from a new command; the fast router would type it into whichever agent is focused.
       // While the voice line is open its model is the conductor: no router, no text model.
       if (await this.conductOnLine(text, source, startedAt)) return;
-      const routed = this.requests.awaitingDeveloper
-        ? { handled: false as const, mode: undefined, hints: undefined }
-        : await this.routeWithJev(text, source, startedAt);
+      // Words about how the conductor itself should act are the model's too: the router only
+      // knows commands about agents.
+      const routed =
+        this.requests.awaitingDeveloper || asksToAdjustConductor(text)
+          ? { handled: false as const, mode: undefined, hints: undefined }
+          : await this.routeWithJev(text, source, startedAt);
       if (routed.handled) return;
       await this.runModel(text, source, startedAt, routed.mode, routed.hints);
     } finally {
@@ -1282,7 +1288,7 @@ export class ConductorStore {
   /**
    * Opens a fresh agent of `providerId` on the canvas, the way spawn_agent does by default: a new
    * task in the project directory, focused on the canvas once it appears. Picking the suggestion is the
-   * confirmation, so there is no cancel window.
+   * confirmation.
    */
   async openAgent(providerId: string): Promise<void> {
     const interactionId = crypto.randomUUID();
@@ -1342,6 +1348,7 @@ export class ConductorStore {
     this.modelTurn = false;
     this.turnCancelled = false;
     this.turnTainted = false;
+    this.turnReadAgentText = false;
     this.turnSaidAt = Number.POSITIVE_INFINITY;
     this.turnInvestigations = 0;
     this.interim = null;
@@ -1357,9 +1364,8 @@ export class ConductorStore {
   private cancelTurn(interactionId: string): void {
     this.turnCancelled = true;
     // What the turn was about to do does not wait for an answer any more, and (see
-    // `requestPending`) nothing else it asks for is offered. A note the developer dropped by
-    // hand is not the turn's.
-    if (this.pending && !this.pending.plain) this.settlePending(false);
+    // `requestPending`) nothing else it asks for is offered.
+    if (this.pending) this.settlePending(false);
     // A code check in flight is stopped with the turn: nobody is waiting for its answer.
     this.investigationAbort?.abort();
     // On the voice line the model stops answering and its voice goes quiet.
@@ -1507,7 +1513,7 @@ export class ConductorStore {
 
   /**
    * An answer to the question of the call the developer picked up. Their own words go to the
-   * agent that asked, behind the usual cancel window. False when the call is not an open
+   * agent that asked. False when the call is not an open
    * question, and the utterance is routed like any other with the caller as "it".
    */
   private async answerCall(
@@ -1531,7 +1537,7 @@ export class ConductorStore {
     this.trace('route', undefined, { route: 'call', intent: 'answer', agent: call.agentName });
     this.phase = 'acting';
     const label = `Answer ${this.targetLabel(entry)}: “${truncate(text, 90)}”`;
-    if (!(await this.requestPending(label, 'countdown', { detail: text }))) {
+    if (!(await this.requestPending(label, 'direct', { detail: text }))) {
       this.setReply('Cancelled.', null);
       return true;
     }
@@ -1882,9 +1888,9 @@ export class ConductorStore {
       // From here no tool call is this turn's: one still running finishes and changes nothing.
       if (this.lineTurn === turn) this.lineTurn = 0;
     }
-    // The turn is over, however it ended (the line may have dropped under a cancel window):
+    // The turn is over, however it ended (the line may have dropped under a confirmation):
     // nothing it was about to do is left waiting to run by itself.
-    if (this.pending && !this.pending.plain) this.settlePending(false);
+    if (this.pending) this.settlePending(false);
     if (!result) {
       this.modelTurn = false;
       return false;
@@ -1893,6 +1899,10 @@ export class ConductorStore {
       ms: Math.round(performance.now() - requestedAt),
       status: result.completed ? 'completed' : 'cut-off',
       tokens: result.tokens,
+      // How much was said, and how much of it before a tool had answered.
+      words: wordCount(result.reply),
+      ...(result.leadWords !== undefined ? { leadWords: result.leadWords } : {}),
+      ...(result.rounds !== undefined ? { rounds: result.rounds } : {}),
     });
     if (this.lineHeard) await this.lineHeard;
     // A read in this turn starts the count again; otherwise it runs down.
@@ -1938,13 +1948,13 @@ export class ConductorStore {
 
   /**
    * One tool call from the line's model. It runs through `executeTool` like the text model's
-   * calls, so every cancel window, confirmation and refusal applies. Anything but a plain read
+   * calls, so every confirmation and refusal applies. Anything but a plain read
    * waits until the developer's words have been transcribed: they are what a confirmation
    * rule, a name check, and the verbatim copy of a long request go by.
    */
   lineTool(name: string, rawInput: unknown): Promise<LineToolResult> {
     const turn = this.lineTurn;
-    // One at a time, in the order the model asked: two cancel windows cannot share the screen.
+    // One at a time, in the order the model asked: two confirmations cannot share the screen.
     const run = this.lineTools.then(() => this.runLineTool(turn, name, rawInput));
     this.lineTools = run.catch(() => undefined);
     return run;
@@ -1972,6 +1982,7 @@ export class ConductorStore {
     this.trace('tool-start', undefined, {
       tool: name,
       input: JSON.stringify(rawInput ?? {}).slice(0, 2000),
+      ...briefSize(name, rawInput, this.lastUtterance),
     });
     const outcome = await this.executeTool(name, rawInput);
     // What the developer copied goes to the model they asked, never into the diagnostics.
@@ -2066,29 +2077,13 @@ export class ConductorStore {
     }
   }
 
-  /** A note dropped on an agent: send its text after the usual cancel window. */
+  /** A note dropped on an agent: its text is sent at once. */
   private async sendNote(conversationId: string, text: string): Promise<void> {
     const entry = entryForConversation(this.canvas, conversationId);
     if (!entry) return;
     const blocked = this.permissionBlock(entry);
     if (blocked) {
       this.setReply(blocked, null);
-      return;
-    }
-    const confirmed = await this.requestPending(
-      `Send note to ${this.targetLabel(entry)}: “${truncate(text, 80)}”`,
-      'countdown',
-      // Dropped by hand: it keeps its cancel window whatever a running turn has read.
-      { plain: true }
-    );
-    if (!confirmed) {
-      this.setReply('Cancelled.', null);
-      return;
-    }
-    // The agent may have reached a prompt while the countdown ran.
-    const blockedNow = this.permissionBlock(entry);
-    if (blockedNow) {
-      this.setReply(blockedNow, null);
       return;
     }
     this.setReply((await this.deliverWithReply(entry, text)).reply, null);
@@ -2325,12 +2320,11 @@ export class ConductorStore {
           reply = 'No agent name has a number it can lose.';
           break;
         }
-        // Several agents change name at once: show which, and leave time to say no.
         const label = `Rename ${listNames(
           planned.map(({ from, to }) => `${from} to ${to}`),
           4
         )}`;
-        if (!(await this.requestPending(label, 'countdown'))) {
+        if (!(await this.requestPending(label, 'direct'))) {
           this.setReply('Cancelled.', null);
           return true;
         }
@@ -2390,7 +2384,7 @@ export class ConductorStore {
           reply = `${command.agent.name} isn't running.`;
           break;
         }
-        const confirmed = await this.requestPending(`Interrupt ${command.agent.name}`, 'countdown');
+        const confirmed = await this.requestPending(`Interrupt ${command.agent.name}`, 'direct');
         if (!confirmed) {
           this.setReply('Cancelled.', null);
           return true;
@@ -2416,13 +2410,13 @@ export class ConductorStore {
         }
         const confirmed = await this.requestPending(
           `Send to ${this.targetLabel(entry)}: “${truncate(command.text, 90)}”`,
-          'countdown'
+          'direct'
         );
         if (!confirmed) {
           this.setReply('Cancelled.', null);
           return true;
         }
-        // The agent may have reached a prompt while the countdown ran.
+        // The agent may have reached a prompt while a confirmation waited.
         const blockedNow = this.permissionBlock(entry);
         if (blockedNow) {
           reply = blockedNow;
@@ -2709,7 +2703,8 @@ export class ConductorStore {
   }
 
   /**
-   * Applies layout ops; a large change is previewed as outlines behind a short cancel window.
+   * Applies layout ops at once. In a tainted turn a large change is previewed as outlines until
+   * the developer confirms it.
    * `label` names the change in the preview and the undo line instead of the planner's summary,
    * and `enter: false` stays put when the change makes a region.
    */
@@ -2734,7 +2729,8 @@ export class ConductorStore {
     const onDesks = this.opsOnDesks(ops);
     if ('error' in onDesks) return failed(onDesks.error);
     const label = options.label ? { label: options.label } : {};
-    const result = canvas.runLayout(onDesks.ops, { source, allowPreview: true, ...label });
+    const allowPreview = this.turnTainted && !this.preconfirmed;
+    const result = canvas.runLayout(onDesks.ops, { source, allowPreview, ...label });
     if (!result.ok) return failed(result.reason);
     const failures = result.plan.failures.length > 0 ? ` ${result.plan.failures.join(' ')}` : '';
     const applied = (plan: LayoutPlan): LayoutReply => {
@@ -2749,14 +2745,14 @@ export class ConductorStore {
     };
     if (result.applied) return applied(result.plan);
     const startedAt = Date.now();
-    // Escape (or the board's Cancel) clears the preview: stop the countdown with it.
+    // Escape (or the board's Cancel) clears the preview: the confirmation goes with it.
     const stop = reaction(
       () => canvas.ghost,
       (ghost) => {
         if (!ghost) this.cancelPending();
       }
     );
-    const confirmed = await this.requestPending(options.label ?? result.plan.summary, 'countdown');
+    const confirmed = await this.requestPending(options.label ?? result.plan.summary, 'direct');
     stop();
     if (!confirmed) {
       // The board's Apply button applies the preview itself.
@@ -3345,7 +3341,7 @@ export class ConductorStore {
 
   /**
    * Runs an action Jev bound. Navigation reuses the grammar's commands; sends and spawns run the
-   * same tool code Claude's calls do (permission-prompt block, cancel window, delivery), with the
+   * same tool code Claude's calls do (permission-prompt block, delivery), with the
    * developer's words passed through as they are.
    */
   private async runJevAction(
@@ -3755,7 +3751,7 @@ export class ConductorStore {
           };
         }
       }
-      // Confirmed once: the tool's own cancel window would only ask again. Its own
+      // Confirmed once: a tool that asks only in a tainted turn would ask again. Its own
       // confirmations are still asked.
       this.preconfirmed = gated;
       let outcome: ToolOutcome;
@@ -3764,6 +3760,7 @@ export class ConductorStore {
       } finally {
         this.preconfirmed = false;
       }
+      if (readsAgentText(name) && !outcome.isError) this.turnReadAgentText = true;
       const agent = (input as { agent?: unknown }).agent;
       // What an agent's request reached is not what the developer means by "it".
       if (
@@ -3794,13 +3791,19 @@ export class ConductorStore {
   ): Promise<ToolOutcome> {
     const confirmKind = CONFIRM_REQUIRED_TOOLS.has(name)
       ? 'confirm'
-      : CANCEL_WINDOW_TOOLS.has(name)
-        ? 'countdown'
+      : DIRECT_TOOLS.has(name)
+        ? 'direct'
         : null;
 
     switch (name) {
       case 'investigate':
         return this.investigateTool(input as ConductorToolInput<'investigate'>);
+      case 'review_instructions':
+        return { content: this.describeSelf() };
+      case 'adjust_instructions':
+        return this.adjustInstructionsTool(input as ConductorToolInput<'adjust_instructions'>);
+      case 'change_setting':
+        return this.changeSettingTool(input as ConductorToolInput<'change_setting'>);
       case 'list_agents': {
         const providers = await installedProviders();
         return { content: buildContext(this.canvas, providers, [], this.reportOf) };
@@ -3855,7 +3858,7 @@ export class ConductorStore {
         ) {
           return { content: 'The user cancelled this before it was sent.', cancelled: true };
         }
-        // The agent may have reached a prompt while the countdown ran.
+        // The agent may have reached a prompt while a confirmation waited.
         const blockedNow = this.permissionBlock(entry.entry);
         if (blockedNow) return { content: blockedNow, isError: true };
         const outcome = await this.deliver(
@@ -4428,6 +4431,93 @@ export class ConductorStore {
     return reply;
   }
 
+  // ── The conductor's own behavior ───────────────────────────────────────────
+
+  /**
+   * The developer's standing instructions as the model reads them, '' when there are none. The
+   * main process adds the same block to the text model's prompt; the voice line reads it here.
+   */
+  get standingInstructions(): string {
+    return standingInstructionsBlock(this.status?.instructions ?? []);
+  }
+
+  /** `review_instructions`: what shapes the conductor, and what of it can be changed by whom. */
+  private describeSelf(): string {
+    const saved = this.status?.instructions ?? [];
+    return [
+      saved.length > 0
+        ? `Your standing instructions (${saved.length} of at most ${STANDING_LIMITS.entries}):`
+        : 'You have no standing instructions.',
+      ...saved.map((entry) => `- [${entry.id}] ${entry.text}`),
+      'Change them with adjust_instructions when the developer says how you should act from now on. They shape how you word prompts and replies and which defaults you pick. They cannot change what Maestro asks the developer to confirm, and they do not reach commands Maestro runs without you (fast commands and fast verbatim routing).',
+      'Settings you can change with change_setting:',
+      ...describeAdjustableSettings(this.status?.settings ?? null),
+      `Only the developer can change, in Settings → Voice & Conductor: ${SETTINGS_PAGE_ONLY}. Your built-in rules and tools change only with a new version of Maestro.`,
+    ].join('\n');
+  }
+
+  /**
+   * True when a change to the conductor itself must be put to the developer first: the turn
+   * read text they did not write, and they have not already said yes to this very call.
+   */
+  private selfChangeAsks(): boolean {
+    return this.turnReadAgentText && !this.preconfirmed;
+  }
+
+  private async adjustInstructionsTool(change: InstructionChange): Promise<ToolOutcome> {
+    if (
+      this.selfChangeAsks() &&
+      !(await this.requestPending(instructionChangeLabel(change), 'confirm', {
+        ...(change.text ? { detail: change.text } : {}),
+      }))
+    ) {
+      return {
+        content: 'The developer did not confirm this, so nothing was saved.',
+        cancelled: true,
+      };
+    }
+    const result = await this.adjustInstructions(change);
+    if (!result.success) return { content: result.error.message, isError: true };
+    const saved = this.status?.instructions ?? [];
+    return {
+      content: [
+        result.data.summary,
+        saved.length > 0
+          ? `Your standing instructions are now:\n${saved.map((entry) => `- [${entry.id}] ${entry.text}`).join('\n')}`
+          : 'You have no standing instructions now.',
+        'They apply from your next answer on, and in every later session.',
+      ].join('\n'),
+    };
+  }
+
+  /**
+   * Saves one change to the standing instructions and takes the new status, which the voice
+   * line watches. The conductor's tool and the settings page both come through here.
+   */
+  async adjustInstructions(change: InstructionChange) {
+    const result = await (await getConductorClient()).adjustInstructions(change);
+    if (result.success) runInAction(() => (this.status = result.data.status));
+    return result;
+  }
+
+  private async changeSettingTool(
+    input: ConductorToolInput<'change_setting'>
+  ): Promise<ToolOutcome> {
+    const change = parseSettingChange(input.setting, input.value);
+    if (!change.ok) return { content: change.message, isError: true };
+    if (
+      (change.confirm || this.selfChangeAsks()) &&
+      !(await this.requestPending(change.label, 'confirm'))
+    ) {
+      return {
+        content: 'The developer did not confirm this, so the setting is unchanged.',
+        cancelled: true,
+      };
+    }
+    await this.updateSettings(change.patch);
+    return { content: `${change.label}: done.` };
+  }
+
   /** Hides windows (agents keep running) and remembers them for "reopen". */
   private closeEntries(entries: readonly AgentTileEntry[]): string {
     const open = entries.filter((entry) => !this.canvas.isOffBoard(entry));
@@ -4436,10 +4526,10 @@ export class ConductorStore {
     this.canvas.hideConversations(ids);
     this.lastClosed = ids;
     const names = listNames(open.map((entry) => this.nameOf(entry)));
-    return `Closed ${names}. ${open.length === 1 ? 'It keeps' : 'They keep'} running; say "reopen" to bring ${open.length === 1 ? 'it' : 'them'} back.`;
+    return `Closed ${names}.`;
   }
 
-  /** "Close all" / "close the others" / "close the finished ones", behind a short countdown. */
+  /** "Close all" / "close the others" / "close the finished ones". */
   private async closeMany(scope: CloseScope, actions: ActionRecord[]): Promise<string | null> {
     const focusedId = focusedConversationId(this.canvas);
     const visible = this.canvas.visibleAgentEntries;
@@ -4454,7 +4544,7 @@ export class ConductorStore {
         entries.map((entry) => this.nameOf(entry)),
         4
       )}`;
-      if (!(await this.requestPending(label, 'countdown'))) {
+      if (!(await this.requestPending(label, 'direct'))) {
         this.setReply('Cancelled.', null);
         return null;
       }
@@ -4623,51 +4713,43 @@ export class ConductorStore {
   // ── Pending actions ────────────────────────────────────────────────────────
 
   /**
-   * Shows a cancellable (or confirmable) action and resolves whether it should run.
+   * Resolves whether an action should run. A "direct" action runs at once: the developer's own
+   * words named it. In a tainted turn they did not, so it is shown and waits for their yes like
+   * a "confirm" action.
    *
-   * The action is armed once the developer can have taken it in: at once when it is only shown,
-   * after its prompt was read out when it is spoken, and never while they are in the middle of
-   * saying something else. Words begun before that neither confirm nor cancel it.
+   * A shown action is armed once the developer can have taken it in: at once when it is only
+   * shown, after its prompt was read out when it is spoken, and never while they are in the
+   * middle of saying something else. Words begun before that neither confirm nor cancel it.
    */
   requestPending(
     label: string,
-    kind: 'countdown' | 'confirm' | null,
-    options: {
-      detail?: string;
-      /**
-       * An action the developer started with their own hands while a turn runs (a dropped note):
-       * it keeps its ordinary cancel window whatever that turn has read.
-       */
-      plain?: boolean;
-    } = {}
+    kind: 'direct' | 'confirm' | null,
+    options: { detail?: string } = {}
   ): Promise<boolean> {
     if (!kind) return Promise.resolve(true);
     // The developer stopped the turn: nothing more it asks for is offered, let alone run.
-    if (this.turnCancelled && !options.plain) return Promise.resolve(false);
-    // The developer confirmed this very tool call a moment ago: its cancel window is skipped.
-    if (this.preconfirmed && !options.plain && kind === 'countdown') return Promise.resolve(true);
-    // In a tainted turn a cancel window is not consent.
-    const asked = kind === 'countdown' && this.turnTainted && !options.plain ? 'confirm' : kind;
+    if (this.turnCancelled) return Promise.resolve(false);
+    // The developer confirmed this very tool call a moment ago, so it does not ask again.
+    if (kind === 'direct' && (!this.turnTainted || this.preconfirmed)) return Promise.resolve(true);
     this.settlePending(false);
-    const durationMs = asked === 'countdown' ? CANCEL_WINDOW_MS : CONFIRM_TIMEOUT_MS;
+    const durationMs = CONFIRM_TIMEOUT_MS;
     const now = Date.now();
     const speaking = this.voice.capturing === true;
-    const readBack = this.readsBack(asked);
+    const readBack = this.readsBack();
     const waits = speaking || readBack;
     const id = ++this.pendingSeq;
     this.pending = {
       id,
       label,
-      kind: asked,
+      kind: 'confirm',
       startedAt: now,
       durationMs,
       armedAt: waits ? Number.POSITIVE_INFINITY : now,
       ...(waits ? { held: true } : {}),
       ...(options.detail ? { detail: options.detail } : {}),
-      ...(options.plain ? { plain: true } : {}),
     };
     this.pendingRemainingMs = durationMs;
-    this.trace('confirmation', undefined, { status: 'waiting', kind: asked });
+    this.trace('confirmation', undefined, { status: 'waiting', kind: 'confirm' });
     return new Promise<boolean>((resolve) => {
       this.pendingResolve = resolve;
       if (readBack) void this.readBackPending(id, label);
@@ -4694,23 +4776,19 @@ export class ConductorStore {
     if (resolve)
       this.trace('confirmation', undefined, { status: confirmed ? 'confirmed' : 'cancelled' });
     resolve?.(confirmed);
-    // A pending action outside a turn (a note drop) held agent requests back; nothing else
-    // would pick them up when it settles.
+    // A pending action outside a turn held agent requests back; nothing else would pick them
+    // up when it settles.
     if (!this.busy) void this.requests.drain().then(() => this.calls.pump());
   }
 
   /**
-   * Whether a pending action is read aloud. A confirmation always is in a spoken turn, so the
-   * developer is not left waiting on a prompt they cannot see. A cancel window is read out when
-   * they answered a call or are not looking at Maestro; in front of it the countdown is enough.
+   * Whether a confirmation is read aloud. In a spoken turn it is, so the developer is not left
+   * waiting on a prompt they cannot see.
    */
-  private readsBack(kind: 'countdown' | 'confirm'): boolean {
+  private readsBack(): boolean {
     if (!this.voice.speak || this.turnSource !== 'voice') return false;
     // A confirmation the developer did not expect: they must hear it, calls or no calls.
-    if (kind === 'confirm' && this.turnTainted) return true;
-    if (this.callMode === 'off') return false;
-    if (kind === 'confirm') return true;
-    return this.boundCall !== null || (typeof document !== 'undefined' && !document.hasFocus());
+    return this.turnTainted || this.callMode !== 'off';
   }
 
   /** Reads a pending action out in the system voice, then arms it and starts its clock. */
@@ -4757,9 +4835,10 @@ export class ConductorStore {
       held: false,
       armedAt: Math.min(pending.armedAt, now),
     };
-    const { id, kind } = pending;
+    const { id } = pending;
+    // A confirmation nobody answered lapses: it does not run.
     this.pendingTimer = setTimeout(() => {
-      if (this.pending?.id === id) this.settlePending(kind === 'countdown');
+      if (this.pending?.id === id) this.settlePending(false);
     }, ms);
   }
 
@@ -5353,7 +5432,7 @@ export class ConductorStore {
   }
 
   /**
-   * An agent's name for a cancel countdown. With agents in several projects it carries the
+   * An agent's name in a confirmation. With agents in several projects it carries the
    * project, so a message about to go to the wrong project's agent is caught before it leaves.
    */
   private targetLabel(entry: AgentTileEntry): string {
@@ -5826,6 +5905,12 @@ function describeTool(name: string): string {
       return 'Searching past conversations…';
     case 'read_clipboard':
       return 'Reading the clipboard…';
+    case 'review_instructions':
+      return 'Reading my instructions…';
+    case 'adjust_instructions':
+      return 'Updating my instructions…';
+    case 'change_setting':
+      return 'Changing a setting…';
     case 'rename_agent':
       return 'Renaming…';
     case 'filter_canvas':

@@ -37,7 +37,7 @@ const SNAPSHOT: RemoteConductorSnapshot = {
   reply: 'Atlas is running the tests.',
   replyAt: 42,
   error: null,
-  pending: { id: 1, label: 'Send to Atlas', kind: 'countdown', startedAt: 10, durationMs: 1500 },
+  pending: { id: 1, label: 'Send to Atlas', kind: 'confirm', startedAt: 10, durationMs: 30000 },
   plan: null,
   agentNames: ['Atlas', 'Bravo'],
   vocabulary: ['Atlas', 'Bravo', 'chorus'],
@@ -148,7 +148,7 @@ describe('remote voice', () => {
       phase: 'thinking',
       reply: 'Atlas is running the tests.',
       replyAt: 42,
-      pending: { kind: 'countdown', label: 'Send to Atlas' },
+      pending: { kind: 'confirm', label: 'Send to Atlas' },
       agentNames: ['Atlas', 'Bravo'],
     });
   });

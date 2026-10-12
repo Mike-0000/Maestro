@@ -100,7 +100,7 @@ stores. A paired device is its remote microphone, speaker, and heads-up display
   (`conductor/browser/remote-voice-bridge.ts`); devices read it as `voice.state`.
 - A device's words reach the window as `remoteAccess.conductorCommands` events and run through
   `handleUtterance` as typed input, so the reply is shown, not spoken, on the host, and the
-  device voices it. "Yes" and "no" take the same path, so countdowns, confirmations, and plan
+  device voices it. "Yes" and "no" take the same path, so confirmations and plan
   approval are the conductor's own.
 - Transcription and synthesis use the host's voice service; no key reaches a device. Partial
   transcripts and synthesized audio are forwarded only for streams and requests a device opened.
