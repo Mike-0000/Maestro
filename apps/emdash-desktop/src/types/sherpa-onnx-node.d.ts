@@ -29,6 +29,33 @@ declare module 'sherpa-onnx-node' {
     }): Promise<GeneratedAudio>;
   }
 
-  const sherpa: { OfflineTts: typeof OfflineTts; GenerationConfig: typeof GenerationConfig };
+  interface OfflineRecognizerConfig {
+    featConfig: { sampleRate: number; featureDim: number };
+    modelConfig: {
+      transducer: { encoder: string; decoder: string; joiner: string };
+      tokens: string;
+      numThreads: number;
+      provider: 'cpu';
+      modelType: 'nemo_transducer';
+      debug: 0 | 1;
+    };
+  }
+
+  class OfflineStream {
+    acceptWaveform(waveform: { samples: Float32Array; sampleRate: number }): void;
+  }
+
+  export class OfflineRecognizer {
+    static createAsync(config: OfflineRecognizerConfig): Promise<OfflineRecognizer>;
+    createStream(): OfflineStream;
+    decodeAsync(stream: OfflineStream): Promise<void>;
+    getResult(stream: OfflineStream): { text: string };
+  }
+
+  const sherpa: {
+    OfflineTts: typeof OfflineTts;
+    GenerationConfig: typeof GenerationConfig;
+    OfflineRecognizer: typeof OfflineRecognizer;
+  };
   export default sherpa;
 }

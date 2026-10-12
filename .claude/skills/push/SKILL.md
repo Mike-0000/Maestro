@@ -53,6 +53,43 @@ the side, and promotion brings `chorus/main` up to it without touching anyone el
 4. Don't edit the files you pushed while it runs. If one of them changes on disk before promotion,
    promotion refuses rather than overwrite it, and nothing is published.
 
+## From a WSL checkout
+
+An agent whose working directory is inside a WSL distro (for example
+`/home/dev/emdash/repositories/Maestro`) is working in a live mirror of `C:\Github\chorus`
+(see `docs/chorus/wsl.md`). It is the same project directory, so use project directory mode.
+The same rules hold on both sides: no commit, stage, stash, reset, or branch switch, and no
+`git push` (in the distro `origin` is a GitHub remote; it is still never pushed to).
+
+1. **The script runs on Windows, never in the distro.** The distro has no pnpm, Node 24,
+   Electron, signing key, or Azure sign-in. Run the focused tests in the distro from
+   `apps/emdash-desktop` with `../../node_modules/.bin/vitest run --project node <paths>`.
+2. **Check that the mirror has carried your edits** before pushing. The script snapshots the
+   Windows files, not the ones in the distro. From the repo root in the distro:
+
+   ```bash
+   for f in <path> <path>; do cmp -s "$f" "/mnt/c/Github/chorus/$f" || echo "not mirrored yet: $f"; done
+   ```
+
+   No output means every file matches. `git -C /mnt/c/Github/chorus status --short` shows what
+   Windows sees.
+3. **Start the script through Windows PowerShell**, in the background. `powershell.exe` is not
+   on the distro's `PATH`, so call it by its full path, and set the Windows directory inside the
+   command:
+
+   ```bash
+   /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -Command \
+     "Set-Location 'C:\Github\chorus'; node \"C:\Users\'admin'\.claude\skills\push\scripts\push.mjs\" --message '<type>(<scope>): <summary>' -- <path> <path> ..."
+   ```
+
+   The user folder is literally `'admin'`, quotes included: keep the script path in escaped
+   double quotes as shown, and put the message in single quotes with no apostrophe in it. Paths
+   are relative to the repo root with forward slashes, the same as in the distro.
+4. The output has Windows line endings; read it through `tr -d '\r'`. Step logs are under
+   `/mnt/c/Users/'admin'/AppData/Local/Chorus/Delivery/v1/Logs/`.
+5. After `published:`, the mirror brings the promoted `chorus/main` into the distro. Confirm
+   with `git log --oneline -1` there, and that your files no longer show in `git status`.
+
 ## Task worktree mode
 
 1. Run the focused tests for what you touched.

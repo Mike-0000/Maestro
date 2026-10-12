@@ -55,6 +55,18 @@ export type LiveCapture = {
   cancel(): void;
 };
 
+/**
+ * On-device dictation to the open agent. It owns a single tap of the talk key, and the command
+ * microphone stays closed while it is listening.
+ */
+export type TapDictation = {
+  /** Its panel is up: a tap belongs to it. */
+  readonly active: boolean;
+  /** Its microphone is open or its last words are being transcribed. */
+  readonly capturing: boolean;
+  toggle(): void;
+};
+
 /** How a spoken sentence ended; `suppressed` when it was never started (muted, or listening). */
 export type SpeechResult = 'ended' | 'cancelled' | 'failed' | 'suppressed';
 
@@ -125,6 +137,7 @@ export class VoiceStore {
   private captureHandler: ((event: CaptureEvent) => void) | null = null;
   /** Asked on a tap of the talk key: true when something is waiting for a spoken answer. */
   private tapGate: (() => boolean) | null = null;
+  private dictation: TapDictation | null = null;
   private liveCapture: LiveCapture | null = null;
   /** The capture in progress is heard by the live session, since when. */
   private live: { capture: LiveCapture; since: number } | null = null;
@@ -141,6 +154,7 @@ export class VoiceStore {
       VoiceStore,
       | 'captureHandler'
       | 'tapGate'
+      | 'dictation'
       | 'liveCapture'
       | 'live'
       | 'quietMs'
@@ -166,6 +180,7 @@ export class VoiceStore {
       speech: false,
       captureHandler: false,
       tapGate: false,
+      dictation: false,
       liveCapture: false,
       live: false,
       quietMs: false,
@@ -251,6 +266,10 @@ export class VoiceStore {
     this.tapGate = gate;
   }
 
+  setDictation(dictation: TapDictation): void {
+    this.dictation = dictation;
+  }
+
   /** Hands captures to a live voice session while one is open; null takes them back. */
   setLiveCapture(capture: LiveCapture | null): void {
     this.liveCapture = capture;
@@ -303,6 +322,8 @@ export class VoiceStore {
     options: { endOnPause?: boolean } = {}
   ): Promise<void> {
     if (this.phase === 'listening' || this.phase === 'transcribing') return;
+    // One microphone at a time: dictation is finished or cancelled first.
+    if (this.dictation?.capturing) return;
     this.speech.stop(); // barge-in
     const interactionId = crypto.randomUUID();
     this.interactionId = interactionId;
@@ -359,23 +380,34 @@ export class VoiceStore {
   }
 
   /**
-   * One tap of the talk key. It answers whatever is waiting for a spoken reply: the capture it
-   * starts ends on a pause, and a second tap sends it at once. With nothing waiting it does
-   * nothing, so a stray tap never opens the microphone.
+   * One tap of the talk key. With something waiting for a spoken reply it answers that: the
+   * capture it starts ends on a pause, and a second tap sends it at once. Otherwise it starts
+   * dictation to the open agent, and the next tap finishes and sends it.
    */
   tap(): void {
     const now = Date.now();
+    // The in-app key and the system-wide key hook can both report the same tap.
+    if (now - this.lastTapAt < TAP_REPEAT_MS) return;
     if (this.phase === 'listening') {
-      // The in-app key and the system-wide key hook can both report the tap that started this.
-      if (now - this.lastTapAt < TAP_REPEAT_MS) return;
       if (this.mode === 'toggle' && this.endsOnPause && this.origin === 'user') {
+        this.lastTapAt = now;
         void this.stopListening();
       }
       return;
     }
-    if (this.phase !== 'idle' || !this.tapGate?.()) return;
-    this.lastTapAt = now;
-    void this.startListening('toggle', 'command', 'user', { endOnPause: true });
+    if (this.dictation?.active) {
+      this.lastTapAt = now;
+      this.dictation.toggle();
+      return;
+    }
+    if (this.phase !== 'idle') return;
+    if (this.tapGate?.()) {
+      this.lastTapAt = now;
+      void this.startListening('toggle', 'command', 'user', { endOnPause: true });
+    } else if (this.dictation) {
+      this.lastTapAt = now;
+      this.dictation.toggle();
+    }
   }
 
   async stopListening(): Promise<void> {

@@ -301,6 +301,54 @@ describe('tap to answer', () => {
   });
 });
 
+describe('tap to dictate', () => {
+  function dictationStub() {
+    return { active: false, capturing: false, toggle: vi.fn() };
+  }
+
+  it('starts dictation on a tap when nothing is waiting for a reply, and finishes it on the next', () => {
+    const store = readyStore();
+    const dictation = dictationStub();
+    store.setDictation(dictation);
+    const now = vi.spyOn(Date, 'now');
+    now.mockReturnValue(1_000_000);
+    store.tap();
+    expect(dictation.toggle).toHaveBeenCalledTimes(1);
+    expect(store.phase).toBe('idle');
+    dictation.active = true;
+    // The same tap reported again by the system-wide hook is not a second tap.
+    now.mockReturnValue(1_000_300);
+    store.tap();
+    expect(dictation.toggle).toHaveBeenCalledTimes(1);
+    now.mockReturnValue(1_005_000);
+    store.tap();
+    expect(dictation.toggle).toHaveBeenCalledTimes(2);
+    store.dispose();
+  });
+
+  it('answers a waiting call first', () => {
+    const store = readyStore();
+    const dictation = dictationStub();
+    store.setDictation(dictation);
+    store.setTapGate(() => true);
+    store.tap();
+    expect(store.phase).toBe('listening');
+    expect(dictation.toggle).not.toHaveBeenCalled();
+    store.cancelListening();
+    store.dispose();
+  });
+
+  it('keeps the command microphone closed while dictation is listening', async () => {
+    const store = readyStore();
+    const dictation = dictationStub();
+    dictation.capturing = true;
+    store.setDictation(dictation);
+    await store.startListening('hold');
+    expect(store.phase).toBe('idle');
+    store.dispose();
+  });
+});
+
 describe('speak', () => {
   it('resolves when the sentence ends and records how long the first sound took', async () => {
     const store = readyStore();
