@@ -46,6 +46,17 @@ export function CanvasBrowserSettingsCard() {
               />
             }
           />
+          <SettingRow
+            title="Conductor can open public websites"
+            description="When you ask for one, the conductor can open an https site on the public internet in a task's browser tile. You confirm each new site, private-network addresses stay blocked, and coding agents never get this. Tiles use their own profile, without your logins."
+            control={
+              <Switch
+                checked={value?.conductorPublicWeb ?? false}
+                disabled={off || value?.conductorControl === false}
+                onCheckedChange={(next) => update({ conductorPublicWeb: next })}
+              />
+            }
+          />
         </SeparatedList>
       </SettingsCard>
     </SettingsSection>

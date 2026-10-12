@@ -128,6 +128,15 @@ const EFFORT_LABELS = {
 
 type Effort = keyof typeof EFFORT_LABELS;
 
+/** The efforts offered for the voice line's realtime model. */
+const TALK_EFFORT_LABELS = {
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+} as const;
+
+type TalkEffort = keyof typeof TALK_EFFORT_LABELS;
+
 export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
   const voice = getVoiceStore();
   const conductor = getConductorStore();
@@ -1060,6 +1069,32 @@ const TalkLineSettings = observer(function TalkLineSettings() {
               {TALK_MODELS.map((model) => (
                 <Select.Item key={model} value={model}>
                   {model}
+                </Select.Item>
+              ))}
+            </Select.Content>
+          </Select.Root>
+        }
+      />
+      <SettingsRow
+        label="Voice effort"
+        description="How much the voice model reasons before it answers. Higher follows instructions more closely; lower answers sooner and costs less. Changing it reopens the line."
+        control={
+          <Select.Root
+            value={settings?.effort ?? 'low'}
+            disabled={!settings}
+            onValueChange={(effort) => {
+              if (effort) void talk.updateSettings({ effort });
+            }}
+          >
+            <Select.Trigger className="w-[140px]">
+              <Select.Value>
+                {settings ? (TALK_EFFORT_LABELS[settings.effort as TalkEffort] ?? 'Minimal') : ''}
+              </Select.Value>
+            </Select.Trigger>
+            <Select.Content align="end">
+              {Object.entries(TALK_EFFORT_LABELS).map(([id, label]) => (
+                <Select.Item key={id} value={id}>
+                  {label}
                 </Select.Item>
               ))}
             </Select.Content>

@@ -49,4 +49,6 @@
   bounded, with no reasoning or transcript. The conductor treats it as untrusted data. A
   completion follow-up turn may run only `COMPLETION_FOLLOW_UP_TOOLS`
   (`src/core/features/conductor/api/completion-follow-up.ts`), and `show_app` opens only
-  loopback or same-origin URLs. Keep both fences when changing either side.
+  loopback or same-origin URLs in such a turn: a public website needs the user's own request
+  (`actingOnAgentOutput` in `src/core/features/conductor/browser/app-tools.ts`). Keep both fences
+  when changing either side.

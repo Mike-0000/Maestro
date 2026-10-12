@@ -43,6 +43,8 @@ export type BrowserSurfaceLayout = {
 export type BrowserLease = { until: number; actor: BrowserAutomationActor };
 
 const APP_START_TIMEOUT_MS = 90_000;
+/** Matches the cap main applies to a browser's approved public origins. */
+const MAX_PUBLIC_ORIGINS = 16;
 /** How long an agent's request waits for the user's answer (main waits 30 s in total). */
 const CONSENT_ANSWER_MS = 25_000;
 /** The offer stays up longer; a late "Allow" still hands the tile over for the agent's retry. */
@@ -75,6 +77,8 @@ export class CanvasBrowserHost {
   private readonly leaseTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Open consent prompts per task; concurrent agent requests share one prompt. */
   private readonly consents = new Map<string, Promise<boolean>>();
+  /** Public origins the user approved for the conductor, per browser. Not kept across restarts. */
+  private readonly publicOrigins = new Map<string, string[]>();
   private unsubscribeEvents: (() => void) | null = null;
   private settings: CanvasBrowserSettings = DEFAULT_CANVAS_BROWSER_SETTINGS;
   private disposed = false;
@@ -248,6 +252,7 @@ export class CanvasBrowserHost {
     this.registered.delete(entry.browserId);
     this.previews.delete(entry.browserId);
     this.leases.delete(entry.browserId);
+    this.publicOrigins.delete(entry.browserId);
     const client = await getBrowserClient();
     await client.forgetControl({ browserId: entry.browserId });
     await client.unregisterSession({ browserId: entry.browserId });
@@ -268,6 +273,26 @@ export class CanvasBrowserHost {
     if (!next) return false;
     await this.syncControl(next);
     return this.canvas.browserForTask(entry.taskId)?.control === control;
+  }
+
+  /** Whether the conductor may open public websites at all (the setting, read fresh). */
+  async conductorPublicWebEnabled(): Promise<boolean> {
+    await this.refreshSettings();
+    const { enabled, conductorControl, conductorPublicWeb } = this.settings;
+    return enabled && conductorControl && conductorPublicWeb;
+  }
+
+  publicOriginApproved(browserId: string, origin: string): boolean {
+    return this.publicOrigins.get(browserId)?.includes(origin) ?? false;
+  }
+
+  /** Records the user's approval of a public origin for this browser and tells main. */
+  async approvePublicOrigin(entry: BrowserTileEntry, origin: string): Promise<void> {
+    const approved = this.publicOrigins.get(entry.browserId) ?? [];
+    if (!approved.includes(origin)) {
+      this.publicOrigins.set(entry.browserId, [...approved, origin].slice(-MAX_PUBLIC_ORIGINS));
+    }
+    await this.syncControl(entry);
   }
 
   async stopLease(browserId: string): Promise<void> {
@@ -324,6 +349,7 @@ export class CanvasBrowserHost {
       taskId: entry.taskId,
       control: entry.control,
       ...(localOrigin ? { origins: [localOrigin] } : {}),
+      publicOrigins: this.publicOrigins.get(entry.browserId) ?? [],
     });
     if (!result.success) {
       log.warn('canvas-browser: setControl failed', { error: result.error });
