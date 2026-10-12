@@ -18,7 +18,7 @@ import {
 /**
  * Voice control from a paired device. The conductor runs in the host's window; a device is its
  * remote microphone, speaker, and heads-up display. Nothing here bypasses the conductor's own
- * countdowns and confirmations.
+ * confirmations.
  */
 export const remoteVoiceContract = defineContract({
   /** The conductor's heads-up display: what it heard, what it is doing, and what it said. */
@@ -71,7 +71,7 @@ export const remoteVoiceContract = defineContract({
     error: remoteControlErrorSchema,
   }),
 
-  /** Answers what the conductor is waiting on: a countdown, a confirmation, or a plan. */
+  /** Answers what the conductor is waiting on: a confirmation or a plan. */
   respond: fallible({
     input: z.object({ decision: z.enum(['yes', 'no']) }),
     data: z.void(),

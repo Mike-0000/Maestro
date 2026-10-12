@@ -29,7 +29,7 @@ export type RouterThresholds = { navigate: number; guarded: number; write: numbe
 
 /**
  * Per-class thresholds from the one user setting: navigation is visible and undoable (−0.10),
- * close/interrupt run behind a cancel window (the setting), and sends and spawns type into
+ * close/interrupt are harder to take back (the setting), and sends and spawns type into
  * agents or create tasks (+0.05).
  */
 export function thresholdsFrom(base: number): RouterThresholds {

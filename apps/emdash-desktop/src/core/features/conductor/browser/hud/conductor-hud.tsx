@@ -358,11 +358,7 @@ const StatusLine = observer(function StatusLine() {
     );
   }
   if (conductor.pending) {
-    return (
-      <span className="px-1 text-foreground">
-        {conductor.pending.kind === 'confirm' ? 'Waiting for your confirmation' : 'About to act…'}
-      </span>
-    );
+    return <span className="px-1 text-foreground">Waiting for your confirmation</span>;
   }
   if (conductor.busy) {
     return (

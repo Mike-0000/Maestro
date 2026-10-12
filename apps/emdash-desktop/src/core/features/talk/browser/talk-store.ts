@@ -1,11 +1,12 @@
 import { makeAutoObservable, reaction, runInAction } from 'mobx';
 import { looksLikeSttArtifact } from '@core/features/conductor/api/jev-router/trace';
-import type {
-  ConductorTalkLine,
-  LineSpeech,
-  LineToolResult,
-  LineTurnInput,
-  LineTurnResult,
+import {
+  wordCount,
+  type ConductorTalkLine,
+  type LineSpeech,
+  type LineToolResult,
+  type LineTurnInput,
+  type LineTurnResult,
 } from '@core/features/conductor/api/voice-line';
 import { log } from '@core/primitives/logging/browser/logger';
 import type { TalkClient } from '../api/browser/client';
@@ -13,7 +14,7 @@ import type { TalkSettings, TalkStatus } from '../api/contract';
 import { isEcho, neverEcho, recentSpoken, type Spoken } from '../api/echo-guard';
 import { inputSize, tokensFromUsage } from '../api/usage';
 import {
-  LINE_INSTRUCTIONS,
+  lineInstructions,
   lineTools,
   ROLLOVER_INSTRUCTIONS,
   sayExactly,
@@ -44,6 +45,11 @@ export interface TalkConductorPort {
   readonly callOnLine: boolean;
   /** True when a code check can run, so the model may be offered that tool. */
   readonly codeChecksReady: boolean;
+  /**
+   * The developer's standing instructions as the model reads them, '' when there are none.
+   * Observable: the open session is given them again when they change.
+   */
+  readonly standingInstructions: string;
 }
 
 /** A capture the line takes in place of the recorder: it hears the microphone itself. */
@@ -150,6 +156,10 @@ type Turn = {
   resolve(result: LineTurnResult): void;
   readonly spoken: boolean;
   readonly said: string[];
+  /** How many parts of `said` came before the response in flight. */
+  saidBefore: number;
+  /** Words said in responses that also called a tool. */
+  leadWords: number;
   tokens: number;
   toolsRunning: number;
   /** A response of this turn is in flight, and the provider's id for it once known. */
@@ -174,7 +184,7 @@ type Turn = {
  * The talk line: a realtime voice session that is the conductor while it is open. It hears the
  * developer (while they hold the talk key, for a moment after Maestro speaks, or all the time),
  * asks its model to answer, and runs every tool the model calls through the conductor store,
- * which keeps its cancel windows and confirmations. Words that could be a yes or a stop to
+ * which keeps its confirmations. Words that could be a yes or a stop to
  * something in progress are read before anything answers them. When the line is not open,
  * everything works as it does without it.
  */
@@ -231,6 +241,8 @@ export class TalkStore {
   private stateItem: string | null = null;
   private stateSeq = 0;
   private rolling = false;
+  /** The instructions the session in use was last given. */
+  private instructed: string | null = null;
   private carry: string | null = null;
   private disposers: (() => void)[] = [];
   private readonly now: () => number;
@@ -290,6 +302,7 @@ export class TalkStore {
       | 'stateItem'
       | 'stateSeq'
       | 'rolling'
+      | 'instructed'
       | 'carry'
       | 'disposers'
       | 'now'
@@ -329,6 +342,7 @@ export class TalkStore {
       stateItem: false,
       stateSeq: false,
       rolling: false,
+      instructed: false,
       carry: false,
       disposers: false,
       now: false,
@@ -371,6 +385,12 @@ export class TalkStore {
           if (onLine) this.openWindowSoon();
         }
       ),
+      // The developer changed how the conductor should act: the session that is open follows it
+      // from its next answer, with no new connection.
+      reaction(
+        () => conductor.standingInstructions,
+        () => this.reinstruct()
+      ),
       reaction(
         () => voice.muted,
         (muted) => {
@@ -404,7 +424,7 @@ export class TalkStore {
     const before = this.settings;
     const status = await (await this.deps.client()).updateSettings(patch);
     runInAction(() => (this.status = status));
-    // A different model, voice, or way of taking turns is a different session.
+    // A different model, voice, way of taking turns, or way of answering is a different session.
     const after = status.settings;
     const reshaped =
       before !== null &&
@@ -412,6 +432,7 @@ export class TalkStore {
         before.voice !== after.voice ||
         before.effort !== after.effort ||
         before.talkOver !== after.talkOver ||
+        before.replies !== after.replies ||
         before.transcriptionModel !== after.transcriptionModel);
     if (reshaped && this.line !== 'off') this.shut('off');
     this.retries = 0;
@@ -483,6 +504,8 @@ export class TalkStore {
       this.deps.conductor.setTalkLine(this.port);
       this.deps.voice.setLiveCapture(this.capture);
       this.deps.conductor.traceLine('opened', { model: this.settings?.model ?? '' });
+      // The instructions may have changed while the session was being set up.
+      this.reinstruct();
       this.reopen();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'The talk line could not open.';
@@ -496,13 +519,41 @@ export class TalkStore {
   /** Trades the offer for the provider's answer, through the main process. */
   private async exchange(sdp: string): Promise<string> {
     const client = await this.deps.client();
+    const instructions = this.instructions();
+    this.instructed = instructions;
     const result = await client.openCall({
       sdp,
-      instructions: LINE_INSTRUCTIONS,
+      instructions,
       tools: lineTools({ codeChecks: this.deps.conductor.codeChecksReady }),
     });
     if (!result.success) throw new TalkOpenError(result.error.type, result.error.message);
     return result.data.sdp;
+  }
+
+  /** Who the line's model is right now: the conductor, with the developer's standing instructions. */
+  private instructions(): string {
+    return lineInstructions(
+      this.settings?.replies ?? 'brief',
+      this.deps.conductor.standingInstructions
+    );
+  }
+
+  /**
+   * Gives the open session its instructions again when they are no longer the ones it has. The
+   * session keeps its conversation; the next answer follows the new text. A line that is not
+   * open needs nothing: it is given the current text when it opens.
+   */
+  private reinstruct(): void {
+    if (this.line !== 'open') return;
+    const instructions = this.instructions();
+    if (instructions === this.instructed) return;
+    const sent = this.send({
+      type: 'session.update',
+      session: { type: 'realtime', instructions },
+    });
+    if (!sent) return;
+    this.instructed = instructions;
+    this.deps.conductor.traceLine('instructed', { chars: instructions.length });
   }
 
   private retryLater(error: unknown): void {
@@ -749,6 +800,8 @@ export class TalkStore {
         resolve,
         spoken: input.spoken,
         said: [],
+        saidBefore: 0,
+        leadWords: 0,
         tokens: 0,
         toolsRunning: 0,
         responding: false,
@@ -787,6 +840,7 @@ export class TalkStore {
     }
     turn.responding = true;
     turn.responseId = null;
+    turn.saidBefore = turn.said.length;
     turn.rounds++;
     turn.watchdog = setTimeout(() => {
       turn.watchdog = null;
@@ -815,7 +869,12 @@ export class TalkStore {
       turn.items.unshift(...(turn.heard?.() ?? []));
       this.past.push(turn);
     }
-    turn.resolve({ ...result, tokens: turn.tokens });
+    turn.resolve({
+      ...result,
+      tokens: turn.tokens,
+      rounds: turn.rounds,
+      leadWords: turn.leadWords,
+    });
     this.maybeRollOver();
   }
 
@@ -1239,6 +1298,9 @@ export class TalkStore {
     const id = str(done.id);
     if (turn.responseId && id && id !== turn.responseId) return;
     turn.items.push(...itemIds(done.output));
+    if (callsTools(done.output)) {
+      turn.leadWords += wordCount(turn.said.slice(turn.saidBefore).join(' '));
+    }
     if (turn.watchdog) clearTimeout(turn.watchdog);
     turn.watchdog = null;
     turn.responding = false;

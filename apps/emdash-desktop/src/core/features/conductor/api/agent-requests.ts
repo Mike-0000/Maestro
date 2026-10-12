@@ -515,7 +515,7 @@ export type RequestOutcome =
   | { readonly status: 'undecided' }
   /** Approved, but the action did not happen. */
   | { readonly status: 'failed'; readonly detail: string }
-  /** The developer cancelled the action in its cancel window. */
+  /** The developer did not confirm the action, or stopped the turn before it ran. */
   | { readonly status: 'cancelled' }
   | { readonly status: 'expired' };
 

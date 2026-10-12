@@ -1,10 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  anchorCountdown,
   appendDictation,
   AttentionBatcher,
   attentionSentence,
-  countdownRemaining,
   detectReply,
   examplePhrases,
   formatElapsed,
@@ -265,35 +263,6 @@ describe('attention notices', () => {
       vi.advanceTimersByTime(5000);
       expect(announce).not.toHaveBeenCalled();
     });
-  });
-});
-
-describe('countdown', () => {
-  it('uses the host start time when the clocks agree', () => {
-    const anchor = anchorCountdown({ startedAt: 1000, durationMs: 1500 }, 1200);
-    expect(anchor).toEqual({ startedAt: 1000, durationMs: 1500 });
-    expect(countdownRemaining(anchor, 1200)).toEqual({ remainingMs: 1300, fraction: 1300 / 1500 });
-  });
-
-  it('starts from first sight when the host clock is ahead of this device', () => {
-    expect(anchorCountdown({ startedAt: 9000, durationMs: 1500 }, 1200).startedAt).toBe(1200);
-  });
-
-  it('starts from first sight when the host clock is far behind this device', () => {
-    expect(anchorCountdown({ startedAt: 1000, durationMs: 1500 }, 60_000).startedAt).toBe(60_000);
-  });
-
-  it('empties to zero and never goes negative or above full', () => {
-    const anchor = { startedAt: 1000, durationMs: 2000 };
-    expect(countdownRemaining(anchor, 500)).toEqual({ remainingMs: 2000, fraction: 1 });
-    expect(countdownRemaining(anchor, 2000)).toEqual({ remainingMs: 1000, fraction: 0.5 });
-    expect(countdownRemaining(anchor, 3000)).toEqual({ remainingMs: 0, fraction: 0 });
-    expect(countdownRemaining(anchor, 9000)).toEqual({ remainingMs: 0, fraction: 0 });
-  });
-
-  it('treats a confirmation, which has no duration, as an empty ring', () => {
-    const anchor = anchorCountdown({ startedAt: 1000, durationMs: 0 }, 1000);
-    expect(countdownRemaining(anchor, 1000)).toEqual({ remainingMs: 0, fraction: 0 });
   });
 });
 

@@ -19,6 +19,13 @@ export const talkEffortSchema = z.enum(['minimal', 'low', 'medium', 'high']);
  */
 export const talkListeningSchema = z.enum(['key', 'open']);
 
+/**
+ * How much the voice says. `brief`: a word or two for something done, one sentence for an
+ * answer, nothing while it works. `normal`: a sentence or two, and a few words before a tool.
+ */
+export const talkRepliesSchema = z.enum(['brief', 'normal']);
+export type TalkReplies = z.infer<typeof talkRepliesSchema>;
+
 export const talkSettingsSchema = z.object({
   /** Off: no session is ever opened and nothing here costs anything. */
   enabled: z.boolean(),
@@ -40,6 +47,7 @@ export const talkSettingsSchema = z.object({
   dailyUsd: z.number().min(0).max(1000),
   /** The model that writes the transcript of what the developer said. */
   transcriptionModel: z.string().min(1).max(80),
+  replies: talkRepliesSchema,
 });
 export type TalkSettings = z.infer<typeof talkSettingsSchema>;
 
@@ -53,6 +61,7 @@ export const DEFAULT_TALK_SETTINGS: TalkSettings = {
   talkOver: false,
   dailyUsd: 5,
   transcriptionModel: 'gpt-transcribe',
+  replies: 'brief',
 };
 
 export const talkTokensSchema = z.object({

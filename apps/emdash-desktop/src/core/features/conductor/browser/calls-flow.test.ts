@@ -9,7 +9,6 @@ import { DEFAULT_CONDUCTOR_SETTINGS, type ConductorStatus } from '../api/contrac
 import { MAESTRO_EVENT_MARK } from '../api/history';
 import type { ConductorTalkLine, LineTurnResult } from '../api/voice-line';
 import {
-  CANCEL_WINDOW_MS,
   ConductorStore,
   type ConductorCaptureEvent,
   type ConductorVoicePort,
@@ -28,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   readAgentOutput: vi.fn(async (): Promise<string> => '(terminal)'),
   submitAgentInput: vi.fn(async (_entry: unknown) => {}),
   interruptAgent: vi.fn(async (_entry: unknown) => {}),
+  stopAgentSession: vi.fn(async (_entry: unknown) => {}),
   // What the main process reports; activating a store refreshes from it.
   status: null as unknown,
 }));
@@ -70,7 +70,7 @@ vi.mock('./agent-io', () => ({
   readFinishedTerminal: vi.fn(async () => null),
   sendToAgent: mocks.sendToAgent,
   sendToLiveSession: vi.fn(async () => false),
-  stopAgentSession: vi.fn(async () => {}),
+  stopAgentSession: mocks.stopAgentSession,
   submitAgentInput: mocks.submitAgentInput,
 }));
 vi.mock('./roster', async (importOriginal) => ({
@@ -303,16 +303,9 @@ describe('calls', () => {
 
     const done = store.handleUtterance('tell it to fix the lint error too', 'voice', id);
     await settle();
-    // The cancel window is read out by the system voice, with the target in it.
-    expect(store.pending?.label).toContain('Send to Atlas');
-    expect(store.pending?.held).toBe(true);
-    expect(speech.spoken.at(-1)).toMatchObject({ voice: 'system' });
-    expect(speech.spoken.at(-1)?.text).toContain('Send to Atlas');
-    expect(mocks.sendToAgent).not.toHaveBeenCalled();
-
+    // Their own words named it: it goes at once, with nothing shown or read out first.
+    expect(store.pending).toBeNull();
     await speech.endSpeech();
-    expect(store.pending?.held).toBe(false);
-    await vi.advanceTimersByTimeAsync(CANCEL_WINDOW_MS);
     await done;
 
     expect(mocks.sendToAgent).toHaveBeenCalledTimes(1);
@@ -404,11 +397,9 @@ describe('an agent that asked the developer a question', () => {
     speech.capturing = false;
     const done = store.handleUtterance('It should, default three', 'voice', id);
     await settle();
-    // Their words are read back with who they go to, then sent after the cancel window.
-    expect(store.pending?.label).toBe('Answer Atlas: “It should, default three”');
-    expect(store.pending?.detail).toBe('It should, default three');
+    // Their words go to the agent that asked at once.
+    expect(store.pending).toBeNull();
     await speech.endSpeech();
-    await vi.advanceTimersByTimeAsync(CANCEL_WINDOW_MS);
     await done;
     await settle();
 
@@ -419,25 +410,6 @@ describe('an agent that asked the developer a question', () => {
       'The developer answered: It should, default three'
     );
     expect(store.requests.awaiting('r-1')).toBe(false);
-    store.dispose();
-  });
-
-  it('sends nothing when the developer cancels the read-back', async () => {
-    const atlas = agent('atlas', { status: 'working' });
-    const { store, speech } = setup([atlas]);
-    await ask(store);
-    await speech.endSpeech();
-    const id = crypto.randomUUID();
-    speech.capture({ type: 'start', interactionId: id, origin: 'user' });
-    speech.capturing = false;
-    const done = store.handleUtterance('It should, default three', 'voice', id);
-    await settle();
-    store.cancelPending();
-    await done;
-
-    expect(mocks.sendToAgent).not.toHaveBeenCalled();
-    // The question is still open: nothing was answered for the developer.
-    expect(store.requests.awaiting('r-1')).toBe(true);
     store.dispose();
   });
 });
@@ -467,15 +439,15 @@ describe('consent is bound to its prompt', () => {
     store.dispose();
   });
 
-  it('stops the countdown while the developer is speaking and resumes when they said nothing', async () => {
+  it('stops a confirmation while the developer is speaking and resumes when they said nothing', async () => {
     const { store, speech } = setup();
-    const decision = store.requestPending('Send to Atlas: “hi”', 'countdown');
-    vi.advanceTimersByTime(1_000);
+    const decision = store.requestPending("Stop Atlas's session", 'confirm');
+    vi.advanceTimersByTime(29_500);
 
     const id = crypto.randomUUID();
     speech.capture({ type: 'start', interactionId: id, origin: 'user' });
     expect(store.pending?.held).toBe(true);
-    vi.advanceTimersByTime(10_000);
+    vi.advanceTimersByTime(60_000);
     expect(store.pending).not.toBeNull();
 
     speech.capture({ type: 'end', interactionId: id, reason: 'cancelled' });
@@ -483,13 +455,14 @@ describe('consent is bound to its prompt', () => {
     vi.advanceTimersByTime(699);
     expect(store.pending).not.toBeNull();
     vi.advanceTimersByTime(1);
-    await expect(decision).resolves.toBe(true);
+    // Nobody answered: it lapses, and nothing runs.
+    await expect(decision).resolves.toBe(false);
     store.dispose();
   });
 
-  it('cancels on anything the developer says once it is armed, as before', async () => {
+  it('cancels on anything the developer says once it is armed', async () => {
     const { store, speech } = setup();
-    const decision = store.requestPending('Send to Atlas: “hi”', 'countdown');
+    const decision = store.requestPending("Stop Atlas's session", 'confirm');
     vi.advanceTimersByTime(500);
     const id = crypto.randomUUID();
     speech.capture({ type: 'start', interactionId: id, origin: 'user' });
@@ -508,7 +481,10 @@ describe('consent is bound to its prompt', () => {
     const first = crypto.randomUUID();
     speech.capture({ type: 'start', interactionId: first, origin: 'user' });
     speech.capturing = false;
-    const done = store.handleUtterance('tell it to rebase', 'voice', first);
+    mocks.runTurn
+      .mockResolvedValueOnce(toolUse('stop_agent', { agent: 'Atlas' }))
+      .mockResolvedValue(text('Left Atlas running.'));
+    const done = store.handleUtterance('shut Atlas down for good', 'voice', first);
     await settle();
     expect(store.pending?.armedAt).toBe(Number.POSITIVE_INFINITY);
 
@@ -520,7 +496,7 @@ describe('consent is bound to its prompt', () => {
     await store.handleUtterance('no', 'voice', second);
     await done;
 
-    expect(mocks.sendToAgent).not.toHaveBeenCalled();
+    expect(mocks.stopAgentSession).not.toHaveBeenCalled();
     expect(store.pending).toBeNull();
     store.dispose();
   });
@@ -646,7 +622,7 @@ describe('a yes to something an agent suggested', () => {
     { role: 'assistant', content: [{ type: 'text', text: 'Atlas is done. Tell Bravo to merge?' }] },
   ];
 
-  it('turns the cancel window into a confirmation', async () => {
+  it('asks for a confirmation', async () => {
     const { store } = setup();
     store['history'] = [...eventHistory];
     mocks.runTurn
@@ -656,8 +632,8 @@ describe('a yes to something an agent suggested', () => {
     const done = store.handleUtterance('yes', 'typed');
     await settle();
     expect(store.pending?.kind).toBe('confirm');
-    // A countdown would have sent it by now.
-    await vi.advanceTimersByTimeAsync(CANCEL_WINDOW_MS * 2);
+    // It does not go by itself.
+    await vi.advanceTimersByTimeAsync(3_000);
     expect(mocks.sendToAgent).not.toHaveBeenCalled();
     store.cancelPending();
     await done;
@@ -685,7 +661,7 @@ describe('a yes to something an agent suggested', () => {
     store.dispose();
   });
 
-  it('leaves an instruction in the developer own words on its usual cancel window', async () => {
+  it('sends an instruction in the developer own words at once', async () => {
     const { store } = setup();
     store['history'] = [...eventHistory];
     mocks.runTurn
@@ -694,8 +670,7 @@ describe('a yes to something an agent suggested', () => {
 
     const done = store.handleUtterance('have Bravo merge what Atlas did', 'typed');
     await settle();
-    expect(store.pending?.kind).toBe('countdown');
-    await vi.advanceTimersByTimeAsync(CANCEL_WINDOW_MS);
+    expect(store.pending).toBeNull();
     await done;
     expect(mocks.sendToAgent).toHaveBeenCalledTimes(1);
     store.dispose();
@@ -729,7 +704,7 @@ describe('the voice line as the conductor', () => {
     };
   }
 
-  it('runs a typed request on the line, behind the same cancel window, with no text model', async () => {
+  it('runs a typed request on the line at once, with no text model', async () => {
     const { store } = setup();
     const talk = line(async () => {
       await store.lineTool('send_to_agent', { agent: 'Atlas', text: 'rebase onto main' });
@@ -742,8 +717,7 @@ describe('the voice line as the conductor', () => {
     expect(talk.turn).toHaveBeenCalledWith(
       expect.objectContaining({ text: REQUEST, spoken: false })
     );
-    expect(store.pending?.kind).toBe('countdown');
-    await vi.advanceTimersByTimeAsync(CANCEL_WINDOW_MS);
+    expect(store.pending).toBeNull();
     await done;
 
     expect(mocks.sendToAgent).toHaveBeenCalledTimes(1);
@@ -810,8 +784,7 @@ describe('the voice line as the conductor', () => {
     said.heard('tell Atlas to rebase onto main');
     await settle();
     expect(store.lastUtterance).toBe('tell Atlas to rebase onto main');
-    expect(store.pending?.kind).toBe('countdown');
-    await vi.advanceTimersByTimeAsync(CANCEL_WINDOW_MS);
+    expect(store.pending).toBeNull();
     await done;
     expect(mocks.sendToAgent).toHaveBeenCalledTimes(1);
     expect(store.busy).toBe(false);
@@ -840,7 +813,7 @@ describe('the voice line as the conductor', () => {
     second.heard('yes, do that');
     await settle();
     expect(store.pending?.kind).toBe('confirm');
-    await vi.advanceTimersByTimeAsync(CANCEL_WINDOW_MS * 2);
+    await vi.advanceTimersByTimeAsync(3_000);
     expect(mocks.sendToAgent).not.toHaveBeenCalled();
     store.cancelPending();
     await done;
@@ -891,23 +864,24 @@ describe('the voice line as the conductor', () => {
   it('runs nothing that was still waiting when the line dropped, and is free again', async () => {
     const { store } = setup();
     const talk = line(async () => {
-      // The cancel window is open when the connection goes.
-      void store.lineTool('send_to_agent', { agent: 'Atlas', text: 'rebase onto main' });
+      // The confirmation is open when the connection goes.
+      void store.lineTool('stop_agent', { agent: 'Atlas' });
       await settle();
+      expect(store.pending?.kind).toBe('confirm');
       return { reply: 'The voice line dropped.', completed: false, tokens: 0 };
     });
     store.setTalkLine(talk);
 
     await store.handleUtterance(REQUEST, 'typed');
     expect(store.pending).toBeNull();
-    await vi.advanceTimersByTimeAsync(CANCEL_WINDOW_MS * 2);
+    await vi.advanceTimersByTimeAsync(60_000);
     await settle();
-    expect(mocks.sendToAgent).not.toHaveBeenCalled();
+    expect(mocks.stopAgentSession).not.toHaveBeenCalled();
     expect(store.busy).toBe(false);
     store.dispose();
   });
 
-  it('runs two actions of one answer one after the other, each behind its own window', async () => {
+  it('runs two actions of one answer one after the other, in the order asked', async () => {
     const { store } = setup();
     const talk = line(async () => {
       await Promise.all([
@@ -918,14 +892,12 @@ describe('the voice line as the conductor', () => {
     });
     store.setTalkLine(talk);
 
-    const done = store.handleUtterance(REQUEST, 'typed');
-    await settle();
-    await vi.advanceTimersByTimeAsync(CANCEL_WINDOW_MS);
-    await settle();
-    expect(mocks.sendToAgent).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(CANCEL_WINDOW_MS);
-    await done;
-    expect(mocks.sendToAgent).toHaveBeenCalledTimes(2);
+    await store.handleUtterance(REQUEST, 'typed');
+    expect(
+      mocks.sendToAgent.mock.calls.map(
+        ([entry]) => (entry as { conversationId: string }).conversationId
+      )
+    ).toEqual(['conv-atlas', 'conv-bravo']);
     store.dispose();
   });
 
@@ -1039,7 +1011,7 @@ function slowTurn(): (value: unknown) => void {
 }
 
 describe('stop stops what the model asked for', () => {
-  it('sends nothing when stop was begun before the cancel window appeared', async () => {
+  it('runs nothing when stop was begun before the confirmation appeared', async () => {
     const { store, speech } = setup(undefined, { calls: 'off' });
     const answer = slowTurn();
     const done = store.handleUtterance('ask the model something long', 'typed');
@@ -1049,18 +1021,17 @@ describe('stop stops what the model asked for', () => {
     // lands before their words do.
     const id = crypto.randomUUID();
     speech.capture({ type: 'start', interactionId: id, origin: 'user' });
-    answer(toolUse('send_to_agent', { agent: 'Atlas', text: 'delete the build directory' }));
+    answer(toolUse('stop_agent', { agent: 'Atlas' }));
     await settle();
-    expect(store.pending?.kind).toBe('countdown');
+    expect(store.pending?.kind).toBe('confirm');
     expect(store.pending?.held).toBe(true);
 
     speech.capturing = false;
     await store.handleUtterance('stop', 'voice', id);
     expect(store.pending).toBeNull();
-    await vi.advanceTimersByTimeAsync(CANCEL_WINDOW_MS + 200);
     await done;
 
-    expect(mocks.sendToAgent).not.toHaveBeenCalled();
+    expect(mocks.stopAgentSession).not.toHaveBeenCalled();
     expect(store.reply).toBe('Cancelled.');
     store.dispose();
   });
@@ -1073,8 +1044,8 @@ describe('stop stops what the model asked for', () => {
           {
             type: 'tool_use',
             id: 'a',
-            name: 'send_to_agent',
-            input: { agent: 'Atlas', text: '1' },
+            name: 'stop_agent',
+            input: { agent: 'Atlas' },
           },
           {
             type: 'tool_use',
@@ -1086,16 +1057,16 @@ describe('stop stops what the model asked for', () => {
         'tool_use'
       )
     );
-    const done = store.handleUtterance('have them both do it', 'typed');
+    const done = store.handleUtterance('stop Atlas and have Bravo take over', 'typed');
     await settle();
-    expect(store.pending?.label).toContain('Send to Atlas');
+    expect(store.pending?.kind).toBe('confirm');
     vi.advanceTimersByTime(300);
     await store.handleUtterance('stop', 'typed');
     await settle();
     expect(store.pending).toBeNull();
-    await vi.advanceTimersByTimeAsync(CANCEL_WINDOW_MS + 100);
     await done;
 
+    expect(mocks.stopAgentSession).not.toHaveBeenCalled();
     expect(mocks.sendToAgent).not.toHaveBeenCalled();
     expect(mocks.runTurn).toHaveBeenCalledTimes(1);
     expect(store.reply).toBe('Cancelled.');
@@ -1115,50 +1086,6 @@ describe('stop stops what the model asked for', () => {
     // The model heard the refusal and finished its turn.
     expect(mocks.runTurn).toHaveBeenCalledTimes(2);
     expect(store.reply).toBe('Left Atlas running.');
-    store.dispose();
-  });
-
-  it('cancels a cancel window over other words the developer was already saying', async () => {
-    const { store, speech } = setup(undefined, { calls: 'off' });
-    const answer = slowTurn();
-    const done = store.handleUtterance('ask the model something long', 'typed');
-    await settle();
-    const id = crypto.randomUUID();
-    speech.capture({ type: 'start', interactionId: id, origin: 'user' });
-    answer(toolUse('send_to_agent', { agent: 'Atlas', text: 'push it' }));
-    await settle();
-    expect(store.pending?.kind).toBe('countdown');
-
-    mocks.runTurn.mockResolvedValue(text('Nothing was sent.'));
-    speech.capturing = false;
-    await store.handleUtterance('hang on that is the wrong agent', 'voice', id);
-    await vi.advanceTimersByTimeAsync(CANCEL_WINDOW_MS + 200);
-    await done;
-    await settle();
-    expect(mocks.sendToAgent).not.toHaveBeenCalled();
-    store.dispose();
-  });
-
-  it('lets a cancel window run when the earlier words were only a yes to something else', async () => {
-    const { store, speech } = setup(undefined, { calls: 'off' });
-    const answer = slowTurn();
-    const done = store.handleUtterance('ask the model something long', 'typed');
-    await settle();
-    const id = crypto.randomUUID();
-    speech.capture({ type: 'start', interactionId: id, origin: 'user' });
-    answer(toolUse('send_to_agent', { agent: 'Atlas', text: 'push it' }));
-    await settle();
-    mocks.runTurn.mockResolvedValue(text('Sent.'));
-
-    speech.capturing = false;
-    await store.handleUtterance('yes', 'voice', id);
-    // Not a yes to this prompt, and not a reason to drop it: its clock runs.
-    expect(store.pending?.held).toBe(false);
-    expect(mocks.sendToAgent).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(CANCEL_WINDOW_MS + 200);
-    await done;
-    await settle();
-    expect(mocks.sendToAgent).toHaveBeenCalledTimes(1);
     store.dispose();
   });
 });
@@ -1292,9 +1219,9 @@ describe('a pick-up does not outlive its words', () => {
     answer(text('ok'));
     await done;
     await settle();
-    expect(store.pending?.label).toContain('Send to Atlas');
-    store.cancelPending();
-    await settle();
+    expect(mocks.sendToAgent.mock.calls.at(-1)?.[0]).toMatchObject({
+      conversationId: 'conv-atlas',
+    });
     expect(store.calls.current).toBeNull();
     store.dispose();
   });
@@ -1312,11 +1239,10 @@ describe('a pick-up does not outlive its words', () => {
     expect(store.calls.current).toBeNull();
 
     // What is typed much later is for the window in front.
-    const done = store.handleUtterance('tell it to rebase', 'typed');
-    await settle();
-    expect(store.pending?.label).toContain('Send to Bravo');
-    store.cancelPending();
-    await done;
+    await store.handleUtterance('tell it to rebase', 'typed');
+    expect(mocks.sendToAgent.mock.calls.at(-1)?.[0]).toMatchObject({
+      conversationId: 'conv-bravo',
+    });
     store.dispose();
   });
 
@@ -1342,9 +1268,9 @@ describe('a pick-up does not outlive its words', () => {
     await done;
     await settle();
     // The window in front is Bravo, and that is who "it" is for the words that waited.
-    expect(store.pending?.label).toContain('Send to Bravo');
-    store.cancelPending();
-    await settle();
+    expect(mocks.sendToAgent.mock.calls.at(-1)?.[0]).toMatchObject({
+      conversationId: 'conv-bravo',
+    });
     store.dispose();
   });
 });
@@ -1478,7 +1404,7 @@ describe('a reply that names no action', () => {
     store.dispose();
   });
 
-  it('leaves an instruction in the developer own words on its cancel window after a call', async () => {
+  it('sends an instruction in the developer own words at once after a call', async () => {
     const [atlas, bravo] = [agent('atlas'), agent('bravo')];
     const { store, speech, announce } = setup([atlas, bravo]);
     await announce([atlas]);
@@ -1490,9 +1416,10 @@ describe('a reply that names no action', () => {
       capture(speech)
     );
     await settle();
-    expect(store.pending?.kind).toBe('countdown');
-    store.cancelPending();
+    expect(store.pending).toBeNull();
+    await speech.endSpeech();
     await done;
+    expect(mocks.sendToAgent).toHaveBeenCalledTimes(1);
     store.dispose();
   });
 });
@@ -1634,15 +1561,16 @@ describe('an agent that leaves the canvas', () => {
 // ── What a second review found, of the fixes above ──────────────────────────────────────────
 
 describe('stop, the way it is said', () => {
-  const twoSends = () =>
+  /** A step that asks for a confirmation and has more to do after it. */
+  const stopThenSend = () =>
     mocks.runTurn.mockResolvedValueOnce(
       turn(
         [
           {
             type: 'tool_use',
             id: 'a',
-            name: 'send_to_agent',
-            input: { agent: 'Atlas', text: '1' },
+            name: 'stop_agent',
+            input: { agent: 'Atlas' },
           },
           {
             type: 'tool_use',
@@ -1668,20 +1596,20 @@ describe('stop, the way it is said', () => {
       vi.clearAllMocks();
       const { store, canvas } = setup(undefined, { calls: 'off' });
       (canvas as { focusedTileId: string | null }).focusedTileId = 'tile-bravo';
-      twoSends();
-      const done = store.handleUtterance('have them both do it', 'typed');
+      stopThenSend();
+      const done = store.handleUtterance('stop Atlas and have Bravo take over', 'typed');
       await settle();
-      expect(store.pending?.label, words).toContain('Send to Atlas');
+      expect(store.pending?.kind, words).toBe('confirm');
       vi.advanceTimersByTime(300);
       await store.handleUtterance(words, 'typed');
       await settle();
       expect(store.pending, words).toBeNull();
-      await vi.advanceTimersByTimeAsync(CANCEL_WINDOW_MS + 100);
       await done;
       await settle();
 
+      expect(mocks.stopAgentSession, words).not.toHaveBeenCalled();
       expect(mocks.sendToAgent, words).not.toHaveBeenCalled();
-      // "Stop it" was about the send, not an order to interrupt the window in front.
+      // "Stop it" was about the prompt, not an order to interrupt the window in front.
       expect(mocks.interruptAgent, words).not.toHaveBeenCalled();
       expect(mocks.runTurn, words).toHaveBeenCalledTimes(1);
       expect(store.reply, words).toBe('Cancelled.');
@@ -1689,37 +1617,20 @@ describe('stop, the way it is said', () => {
     }
   });
 
-  it('drops the rest of the turn when other words cancel one of its cancel windows', async () => {
+  it('drops the rest of the turn when other words answer one of its confirmations', async () => {
     const { store } = setup(undefined, { calls: 'off' });
-    twoSends();
+    stopThenSend();
     mocks.runTurn.mockResolvedValue(text('Bravo is idle.'));
-    const done = store.handleUtterance('have them both do it', 'typed');
+    const done = store.handleUtterance('stop Atlas and have Bravo take over', 'typed');
     await settle();
     vi.advanceTimersByTime(300);
     await store.handleUtterance('hmm what is Bravo working on right now', 'typed');
-    await vi.advanceTimersByTimeAsync(CANCEL_WINDOW_MS + 100);
     await done;
     await settle();
-    // Neither send ran, and the words then took their own turn.
+    // Neither action ran, and the words then took their own turn.
+    expect(mocks.stopAgentSession).not.toHaveBeenCalled();
     expect(mocks.sendToAgent).not.toHaveBeenCalled();
     expect(store.reply).toBe('Bravo is idle.');
-    store.dispose();
-  });
-
-  it('does not stop a model turn when the no was for a note dropped by hand', async () => {
-    const { store } = setup(undefined, { calls: 'off' });
-    const answer = slowTurn();
-    const done = store.handleUtterance('ask the model something long', 'typed');
-    await settle();
-    void store['sendNote']('conv-bravo', 'remember the changelog');
-    expect(store.pending?.label).toContain('Send note to Bravo');
-    await store.handleUtterance('no', 'typed');
-    expect(store.pending).toBeNull();
-    answer(text('Here is the answer.'));
-    await done;
-    await settle();
-    expect(store.reply).toBe('Here is the answer.');
-    expect(mocks.sendToAgent).not.toHaveBeenCalled();
     store.dispose();
   });
 });
@@ -1838,9 +1749,9 @@ describe('a reply to something Maestro only announced', () => {
       .mockResolvedValue(text('Sent.'));
     const again = store.handleUtterance('yes', 'typed');
     await settle();
-    expect(store.pending?.kind).toBe('countdown');
-    store.cancelPending();
+    expect(store.pending).toBeNull();
     await again;
+    expect(mocks.sendToAgent).toHaveBeenCalledTimes(1);
     store.dispose();
   });
 });
@@ -1853,8 +1764,8 @@ describe('words after a pick-up never reach the window in front', () => {
     await announce([atlas]);
     await speech.endSpeech();
 
-    // A note dropped on Bravo, and a request of Bravo's that waits behind its cancel window.
-    void store['sendNote']('conv-bravo', 'remember the changelog');
+    // A confirmation is waiting, and a request of Bravo's waits behind it.
+    void store.requestPending("Stop Bravo's session", 'confirm');
     await store.requests.receive(
       {
         id: 'r-9',
@@ -1944,11 +1855,10 @@ describe('words after a pick-up never reach the window in front', () => {
     speech.capture({ type: 'end', interactionId: id, reason: 'ignored' });
     expect(store.calls.pickedUp?.agentName).toBe('Atlas');
 
-    const done = store.handleUtterance('tell it to rebase', 'typed');
-    await settle();
-    expect(store.pending?.label).toContain('Send to Atlas');
-    store.cancelPending();
-    await done;
+    await store.handleUtterance('tell it to rebase', 'typed');
+    expect(mocks.sendToAgent.mock.calls.at(-1)?.[0]).toMatchObject({
+      conversationId: 'conv-atlas',
+    });
     store.dispose();
   });
 

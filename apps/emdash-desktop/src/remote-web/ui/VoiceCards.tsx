@@ -1,117 +1,43 @@
 import type { RemoteVoicePending, RemoteVoicePlan } from '@emdash/core/services/remote-control/api';
 import { CircleCheck, MicOff, Play, TriangleAlert, WifiOff, X } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { anchorCountdown, countdownRemaining } from '../lib/voice-logic';
+import type { ReactNode } from 'react';
 import type { VoiceNotice } from '../state/voice-store';
 import { useVoice } from './app-context';
 import { Button, IconButton, Spinner } from './controls';
 
-const RING_RADIUS = 17;
-const RING_LENGTH = 2 * Math.PI * RING_RADIUS;
-
-/** A ring that empties as the countdown runs, with the seconds left inside it. */
-function CountdownRing({ pending }: { pending: RemoteVoicePending }) {
-  // Anchored once per action: the host's clock and this device's can disagree.
-  const anchor = useMemo(
-    () => anchorCountdown(pending, Date.now()),
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-    [pending.id]
-  );
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    let frame = requestAnimationFrame(function tick() {
-      setNow(Date.now());
-      frame = requestAnimationFrame(tick);
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [anchor]);
-  const { remainingMs, fraction } = countdownRemaining(anchor, now);
-  return (
-    <span className="relative flex size-11 shrink-0 items-center justify-center">
-      <svg viewBox="0 0 40 40" className="absolute inset-0 -rotate-90" aria-hidden="true">
-        <circle
-          cx="20"
-          cy="20"
-          r={RING_RADIUS}
-          fill="none"
-          strokeWidth="3"
-          className="stroke-surface-3"
-        />
-        <circle
-          cx="20"
-          cy="20"
-          r={RING_RADIUS}
-          fill="none"
-          strokeWidth="3"
-          strokeLinecap="round"
-          strokeDasharray={RING_LENGTH}
-          strokeDashoffset={RING_LENGTH * (1 - fraction)}
-          className="stroke-working"
-        />
-      </svg>
-      <span className="text-[14px] font-semibold tabular-nums" aria-hidden="true">
-        {Math.ceil(remainingMs / 1000)}
-      </span>
-    </span>
-  );
-}
-
-/**
- * Something the conductor is about to do. A countdown runs unless it is cancelled; a
- * confirmation runs only on an explicit yes.
- */
+/** Something the conductor will do only on an explicit yes. */
 export const PendingCard = observer(function PendingCard({
   pending,
 }: {
   pending: RemoteVoicePending;
 }) {
   const voice = useVoice();
-  const countdown = pending.kind === 'countdown';
   return (
     <section
-      aria-label={countdown ? 'About to act' : 'Confirmation needed'}
+      aria-label="Confirmation needed"
       className="animate-pop-in border-line-strong bg-canvas rounded-2xl border p-3.5"
     >
-      {countdown ? (
-        <div className="flex items-center gap-3">
-          <CountdownRing key={pending.id} pending={pending} />
-          <p className="min-w-0 flex-1 text-[15px] leading-snug break-words">{pending.label}</p>
-          <Button
-            variant="secondary"
-            className="shrink-0 px-4"
-            disabled={voice.responding}
-            onClick={() => void voice.respond('no')}
-          >
-            Cancel
-          </Button>
-        </div>
-      ) : (
-        <>
-          <p className="text-fg-muted text-[12.5px] font-semibold tracking-wide uppercase">
-            Confirm
-          </p>
-          <p className="mt-1 text-[16px] leading-snug break-words">{pending.label}</p>
-          <div className="mt-3 flex gap-2">
-            <Button
-              variant="secondary"
-              className="flex-1"
-              disabled={voice.responding}
-              onClick={() => void voice.respond('no')}
-            >
-              No
-            </Button>
-            <Button
-              variant="primary"
-              className="flex-1"
-              disabled={voice.responding}
-              onClick={() => void voice.respond('yes')}
-            >
-              Yes
-            </Button>
-          </div>
-        </>
-      )}
+      <p className="text-fg-muted text-[12.5px] font-semibold tracking-wide uppercase">Confirm</p>
+      <p className="mt-1 text-[16px] leading-snug break-words">{pending.label}</p>
+      <div className="mt-3 flex gap-2">
+        <Button
+          variant="secondary"
+          className="flex-1"
+          disabled={voice.responding}
+          onClick={() => void voice.respond('no')}
+        >
+          No
+        </Button>
+        <Button
+          variant="primary"
+          className="flex-1"
+          disabled={voice.responding}
+          onClick={() => void voice.respond('yes')}
+        >
+          Yes
+        </Button>
+      </div>
     </section>
   );
 });

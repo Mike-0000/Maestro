@@ -69,6 +69,7 @@ describe('voice interaction capture', () => {
 function readyStore(): VoiceStore {
   vi.spyOn(MicRecorder.prototype, 'start').mockResolvedValue();
   vi.spyOn(MicRecorder.prototype, 'cancel').mockReturnValue();
+  vi.spyOn(MicRecorder.prototype, 'setMonitoring').mockResolvedValue();
   const store = new VoiceStore();
   store.status = {
     settings: { ...DEFAULT_VOICE_SETTINGS, engine: 'whisper-local' },
@@ -225,6 +226,56 @@ describe('a live voice session', () => {
     store.cancelListening();
     expect(session.cancel).toHaveBeenCalledTimes(2);
     expect(events.at(-1)).toMatchObject({ type: 'end', reason: 'cancelled' });
+    store.dispose();
+  });
+
+  it('shows the level of a capture the session hears, without recording it', async () => {
+    const start = vi.spyOn(MicRecorder.prototype, 'start');
+    const pass = clock();
+    const store = readyStore();
+    const monitor = vi.mocked(MicRecorder.prototype.setMonitoring);
+    const session = live();
+    store.setLiveCapture(session);
+
+    await store.startListening('hold');
+    expect(monitor).toHaveBeenLastCalledWith(true);
+    expect(start).not.toHaveBeenCalled();
+    store['onChunk'](0.2, 20);
+    expect(store.level).toBeGreaterThan(0);
+
+    // Sent: the recorder stops listening along, and the meter is at rest.
+    pass(1_000);
+    await store.stopListening();
+    expect(monitor).toHaveBeenLastCalledWith(false);
+    expect(store.level).toBe(0);
+    for (let round = 0; round < 5; round++) await Promise.resolve();
+
+    await store.startListening('hold');
+    expect(monitor).toHaveBeenLastCalledWith(true);
+    store['onChunk'](0.2, 20);
+    store.cancelListening();
+    expect(monitor).toHaveBeenLastCalledWith(false);
+    expect(store.level).toBe(0);
+
+    // Hands-free keeps the microphone monitored between captures.
+    store.status = { ...store.status!, settings: { ...store.settings!, handsFree: true } };
+    await store.startListening('hold');
+    store.cancelListening();
+    expect(monitor).toHaveBeenLastCalledWith(true);
+    store.dispose();
+  });
+
+  it('keeps the capture when the meter cannot open the microphone', async () => {
+    const store = readyStore();
+    vi.mocked(MicRecorder.prototype.setMonitoring).mockRejectedValue(new Error('no microphone'));
+    const session = live();
+    store.setLiveCapture(session);
+
+    await store.startListening('hold');
+    await Promise.resolve();
+    expect(store.phase).toBe('listening');
+    expect(store.error).toBeNull();
+    store.cancelListening();
     store.dispose();
   });
 

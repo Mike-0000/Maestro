@@ -355,6 +355,7 @@ export class VoiceStore {
         : null;
     if (live?.begin(interactionId)) {
       this.live = { capture: live, since: Date.now() };
+      this.meterLive(true);
       if (mode === 'toggle') {
         this.maxTimer = setTimeout(() => void this.stopListening(), MAX_MANUAL_MS);
       }
@@ -492,6 +493,7 @@ export class VoiceStore {
   private finishLive(live: { capture: LiveCapture; since: number }): void {
     const interactionId = this.interactionId;
     this.live = null;
+    this.meterLive(false);
     if (!interactionId || Date.now() - live.since < MIN_UTTERANCE_MS) {
       live.capture.cancel();
       runInAction(() => {
@@ -521,6 +523,19 @@ export class VoiceStore {
       });
   }
 
+  /**
+   * The live session hears a capture through its own track, which nothing here measures: the
+   * recorder listens along without recording, so the level meter moves as the developer speaks.
+   * Afterwards it goes back to what hands-free asks for.
+   */
+  private meterLive(on: boolean): void {
+    const monitor = on || (this.settings?.handsFree ?? false);
+    void this.recorder.setMonitoring(monitor).catch((error: unknown) => {
+      // The session still hears the developer; only the meter stays flat.
+      if (on) log.warn('voice: no level meter for the live capture', { error });
+    });
+  }
+
   cancelListening(): void {
     this.trace('ignored', undefined, { reason: 'cancelled' });
     this.clearMaxTimer();
@@ -529,6 +544,7 @@ export class VoiceStore {
     if (this.live) {
       this.live.capture.cancel();
       this.live = null;
+      this.meterLive(false);
     } else this.recorder.cancel();
     this.phase = 'idle';
     this.level = 0;

@@ -100,6 +100,26 @@ describe('fromOpenAiChoice', () => {
   });
 });
 
+describe('toOpenAiMessages standing instructions', () => {
+  it('puts them after the system prompt and outside its cache breakpoint', () => {
+    expect(toOpenAiMessages('SYS', [], { standing: '' })).toEqual([
+      { role: 'system', content: 'SYS' },
+    ]);
+    expect(toOpenAiMessages('SYS', [], { standing: 'STAND' })).toEqual([
+      { role: 'system', content: 'SYS\n\nSTAND' },
+    ]);
+    expect(toOpenAiMessages('SYS', [], { cacheSystem: true, standing: 'STAND' })).toEqual([
+      {
+        role: 'system',
+        content: [
+          { type: 'text', text: 'SYS', cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: 'STAND' },
+        ],
+      },
+    ]);
+  });
+});
+
 describe('toOpenAiMessages caching', () => {
   it('marks the system prompt as a cache breakpoint only when asked', () => {
     expect(toOpenAiMessages('SYS', [], { cacheSystem: true })).toEqual([

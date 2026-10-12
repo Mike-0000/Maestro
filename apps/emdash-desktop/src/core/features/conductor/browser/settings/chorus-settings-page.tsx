@@ -18,6 +18,7 @@ import type { ChorusCredentialId } from '@core/primitives/chorus-host/api/creden
 import { copyTextToClipboard } from '@core/primitives/desktop-host/browser/host-client';
 import { getConductorClient } from '../../api/browser/client';
 import { CODE_CHECKS_UI, type SystemChecks } from '../../api/contract';
+import { STANDING_LIMITS, type InstructionChange } from '../../api/standing-instructions';
 import { getConductorStore } from '../../contributions/browser/app-stores';
 import { KeyCaptureControl } from './key-capture-control';
 
@@ -673,7 +674,7 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
         />
         <SettingsRow
           label="Fast verbatim routing"
-          description="When Jev is confident, it sends your own words to an agent or starts a new agent itself (after the usual cancel window) instead of Claude rewriting your request. Off: Claude writes every message and starts every agent."
+          description="When Jev is confident, it sends your own words to an agent or starts a new agent itself instead of Claude rewriting your request. Off: Claude writes every message and starts every agent."
           control={
             <Switch
               checked={conductorSettings?.jevVerbatimRouting ?? true}
@@ -805,10 +806,64 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
         />
       </SettingsSection>
 
+      <StandingInstructionSettings />
+
       <TalkLineSettings />
 
       {CODE_CHECKS_UI && <CodeCheckSettings />}
     </div>
+  );
+});
+
+/**
+ * What the developer told the conductor to do from now on. The conductor saves these itself
+ * when asked by voice; here they can be read, added, and taken back.
+ */
+const StandingInstructionSettings = observer(function StandingInstructionSettings() {
+  const conductor = getConductorStore();
+  const saved = conductor.status?.instructions ?? [];
+  const [message, setMessage] = useState('');
+  const change = (input: InstructionChange) => {
+    void conductor
+      .adjustInstructions(input)
+      .then((result) => setMessage(result.success ? '' : result.error.message))
+      .catch(() => setMessage('The instruction could not be saved.'));
+  };
+  return (
+    <SettingsSection title="Standing instructions">
+      <SettingsRow
+        label="How the conductor should act from now on"
+        description={`Say it to the conductor ("from now on, keep your prompts short and open-ended") and it saves the instruction here, or type one. They shape how it words prompts and replies and which defaults it picks, in every session; they never change what Maestro asks you to confirm. ${saved.length} of ${STANDING_LIMITS.entries} saved.${message ? ` ${message}` : ''}`}
+        control={
+          <CommitInput
+            // A new field once one is saved, so what was typed does not stay in it.
+            key={saved.length}
+            value=""
+            ariaLabel="New standing instruction"
+            placeholder="Add an instruction…"
+            className="w-72"
+            onCommit={(text) => change({ action: 'add', text })}
+          />
+        }
+      />
+      {saved.map((entry) => (
+        <SettingsRow
+          key={entry.id}
+          label={entry.id}
+          description={entry.text}
+          control={
+            <Button
+              variant="secondary"
+              size="xs"
+              aria-label={`Remove standing instruction ${entry.id}`}
+              onClick={() => change({ action: 'remove', id: entry.id })}
+            >
+              Remove
+            </Button>
+          }
+        />
+      ))}
+    </SettingsSection>
   );
 });
 
@@ -976,8 +1031,8 @@ const TalkLineSettings = observer(function TalkLineSettings() {
         label="Use a realtime voice model as the conductor"
         description={
           status && !status.hasKey
-            ? 'Needs an OpenAI API key (API keys, above). While it is on, a realtime voice model is the conductor: it hears you directly, answers aloud, and messages, starts and manages agents itself. Cancel windows and confirmations stay as they are.'
-            : `While it is on, a realtime voice model is the conductor: it hears you directly, answers aloud, and messages, starts and manages agents itself. Cancel windows and confirmations stay as they are, and typed commands go to it too. If the line is down or over its limit, the text conductor answers. Audio and the state it is told go to OpenAI while the line is open. Line: ${state}.`
+            ? 'Needs an OpenAI API key (API keys, above). While it is on, a realtime voice model is the conductor: it hears you directly, answers aloud, and messages, starts and manages agents itself. Confirmations stay as they are.'
+            : `While it is on, a realtime voice model is the conductor: it hears you directly, answers aloud, and messages, starts and manages agents itself. Confirmations stay as they are, and typed commands go to it too. If the line is down or over its limit, the text conductor answers. Audio and the state it is told go to OpenAI while the line is open. Line: ${state}.`
         }
         control={
           <Switch
@@ -1009,6 +1064,19 @@ const TalkLineSettings = observer(function TalkLineSettings() {
               ))}
             </Select.Content>
           </Select.Root>
+        }
+      />
+      <SettingsRow
+        label="Short answers"
+        description="On: the voice confirms what it did in a word or two, answers a question in one sentence, and says nothing while it works. A failure, a cancel, or a question it needs answered is still said. Off: it takes a sentence or two. Changing it reopens the line."
+        control={
+          <Switch
+            checked={settings?.replies === 'brief'}
+            disabled={!settings}
+            onCheckedChange={(brief) =>
+              void talk.updateSettings({ replies: brief ? 'brief' : 'normal' })
+            }
+          />
         }
       />
       <SettingsRow

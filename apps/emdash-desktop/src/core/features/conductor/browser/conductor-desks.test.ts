@@ -105,8 +105,8 @@ function setup(mode: 'classic' | 'pro' = 'pro') {
   const speech = voice();
   const store = new ConductorStore(canvas, speech);
   store.status = status();
-  // Previews run at once instead of waiting out their countdown.
-  const pending = vi.fn(async (_label: string, _kind: 'countdown' | 'confirm' | null) => true);
+  // Nothing here waits on a confirmation.
+  const pending = vi.fn(async (_label: string, _kind: 'direct' | 'confirm' | null) => true);
   store['requestPending'] = pending;
   const desks = (input: Record<string, unknown>): Promise<ToolOutcome> =>
     store['executeTool']('canvas_desks', input);
@@ -250,14 +250,14 @@ describe('canvas_desks', () => {
     expect(canvas.deskOf(cedar)).toBe(deskNamed('Main'));
   });
 
-  it('removes the desk in view after a preview, and its heir comes into view', async () => {
+  it('removes the desk in view at once, and its heir comes into view', async () => {
     const { canvas, desks, pending, names, inView, deskNamed, alpha } = setup();
     await desks({ action: 'create', name: 'Scratch', windows: ['note alpha'] });
     expect(inView()).toBe('Scratch');
     const removed = await desks({ action: 'remove' });
     expect(removed).toEqual({ content: 'Removed Scratch; note "alpha" went to Main.' });
-    // A desk with windows on it is previewed first, under the words of the reply.
-    expect(pending).toHaveBeenCalledWith(removed.content, 'countdown');
+    // A desk with windows on it goes without a preview: the developer's words named it.
+    expect(pending).not.toHaveBeenCalled();
     expect(names()).toEqual(['Main']);
     expect(inView()).toBe('Main');
     expect(canvas.deskOf(alpha)).toBe(deskNamed('Main'));
@@ -282,13 +282,13 @@ describe('canvas_desks', () => {
     expect(inView()).toBe('Main');
   });
 
-  it('cancels with the preview and changes nothing', async () => {
-    const { desks, pending, names } = setup();
+  it('changes nothing when a tainted turn is not confirmed', async () => {
+    const { store, desks, pending, names } = setup();
     await desks({ action: 'create', name: 'Scratch', windows: ['note alpha'] });
+    // The developer's words did not name the change, so it waits for their yes.
+    store['turnTainted'] = true;
     pending.mockResolvedValueOnce(false);
-    expect(await desks({ action: 'remove' })).toEqual({
-      content: 'The user cancelled the change.',
-    });
+    expect(await desks({ action: 'remove' })).toMatchObject({ cancelled: true });
     expect(names()).toEqual(['Main', 'Scratch']);
   });
 
