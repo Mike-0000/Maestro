@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  AudioLines,
   GitMerge,
   History,
   Loader2,
@@ -18,7 +19,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { getCanvasStore } from '@core/features/canvas/contributions/browser/app-stores';
 import { settingsViewDef } from '@core/features/settings/contributions/views';
 import { getTalkStore } from '@core/features/talk/contributions/browser/app-stores';
-import { getVoiceStore } from '@core/features/voice/contributions/browser/app-stores';
+import {
+  getDictationStore,
+  getVoiceStore,
+} from '@core/features/voice/contributions/browser/app-stores';
 import { getNavigation } from '@core/primitives/navigation/browser/navigation-selectors';
 import { useLocalStorage } from '@core/primitives/react-hooks/browser/useLocalStorage';
 import { cn } from '@core/primitives/styling/browser/cn';
@@ -30,6 +34,7 @@ import {
 import { getConductorStore } from '../../contributions/browser/app-stores';
 import { CallCard } from './call-card';
 import { ConductorLogPanel } from './conductor-log-panel';
+import { DictationPanel } from './dictation-panel';
 import { InvestigationCard } from './investigation-card';
 import { LocalUpdateCard } from './local-update-card';
 import { PendingActionCard } from './pending-action-card';
@@ -48,6 +53,7 @@ const REPLY_VISIBLE_MS = 10_000;
  */
 export const ConductorHud = observer(function ConductorHud() {
   const voice = getVoiceStore();
+  const dictation = getDictationStore();
   const conductor = getConductorStore();
   const [showLog, setShowLog] = useState(false);
   const [setupOpen, setSetupOpen] = useState(false);
@@ -91,6 +97,8 @@ export const ConductorHud = observer(function ConductorHud() {
     conductor.lastInvestigation !== null ||
     (replyVisible && conductor.reply !== '') ||
     error !== null ||
+    dictation.active ||
+    dictation.sentTo !== null ||
     showLog;
 
   return (
@@ -107,6 +115,7 @@ export const ConductorHud = observer(function ConductorHud() {
         <div className="flex items-center gap-2">
           <CommandBox />
           <MicButton />
+          <DictationButton />
           <LineIndicator />
           <div role="status" aria-live="polite" className="min-w-0 flex-1 overflow-hidden text-sm">
             <StatusLine />
@@ -161,6 +170,8 @@ export const ConductorHud = observer(function ConductorHud() {
             Ignored “{voice.ignoredUtterance}” (no wake phrase)
           </p>
         )}
+
+        <DictationPanel />
 
         <CallCard />
 
@@ -219,6 +230,40 @@ const MicButton = observer(function MicButton() {
       ) : (
         <Mic className="relative size-4" />
       )}
+    </button>
+  );
+});
+
+/** Dictation to the open agent, transcribed on this computer. Separate from the command mic. */
+const DictationButton = observer(function DictationButton() {
+  const dictation = getDictationStore();
+  const listening = dictation.phase === 'listening';
+  const scale = listening ? 1 + Math.min(0.35, dictation.level * 0.5) : 1;
+  return (
+    <button
+      type="button"
+      aria-label={listening ? 'Finish dictation and send' : 'Dictate to the open agent'}
+      aria-pressed={dictation.active}
+      title="Dictate to the open agent. Click, or tap Right Ctrl once; click or tap again to send. Runs on this computer."
+      disabled={dictation.phase === 'finishing'}
+      onClick={() => dictation.toggle()}
+      className={cn(
+        'relative flex size-9 shrink-0 items-center justify-center rounded-full transition-colors',
+        listening
+          ? 'bg-blue-600 text-white'
+          : dictation.active
+            ? 'bg-blue-500/20 text-blue-700 dark:text-blue-300'
+            : 'bg-background-secondary text-foreground hover:bg-background-tertiary'
+      )}
+    >
+      {listening && (
+        <span
+          aria-hidden
+          className="absolute inset-0 rounded-full bg-blue-600/40 transition-transform duration-75"
+          style={{ transform: `scale(${scale + 0.25})` }}
+        />
+      )}
+      <AudioLines className="relative size-4" />
     </button>
   );
 });

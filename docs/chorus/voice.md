@@ -10,6 +10,8 @@ model that can read, message, start, and plan across your agents.
 | --- | --- |
 | Hold to talk (command) | Hold **Right Ctrl**, speak, release |
 | Hold to dictate into the focused agent | Hold **Shift + Right Ctrl** |
+| Keep listening without holding (command) | Tap **Right Ctrl** twice; tap once more to send |
+| Dictate to the open agent, on this computer | Tap **Right Ctrl** once, or click the dictation button next to the mic; tap or click again to send |
 | Hold to talk from anywhere in Windows | **Right Ctrl** or **Right Alt**, if enabled in settings (off by default) |
 | Toggle listening from anywhere in Windows | **Ctrl + Alt + Space** (configurable); press again to send |
 | Click to talk | The mic button in the floating HUD, then **Send** (or click the mic again) |
@@ -22,6 +24,45 @@ Pausing never ends a recording: it runs until you release the hold key, press th
 again, or click **Send** (up to 5 minutes). Only hands-free listening stops on a pause. A toggled
 recording that was left open closes on its own: after 90 seconds with no speech at all it is
 dropped, and 90 seconds of quiet after you spoke sends what you said.
+
+## Dictation to the open agent
+
+The dictation button sits next to the mic button in the HUD and is separate from it. The mic
+talks to the conductor; dictation goes straight to the agent that is open, in your words.
+
+| Step | How |
+| --- | --- |
+| Start | Click the dictation button, or tap **Right Ctrl** once (or your global hold key) |
+| Watch | Your words appear in the dictation panel as you speak, and correct themselves as the sentence takes shape |
+| Send | Click **Send** or the button again, or tap the key again. The final text is sent to the open agent at once, with no cancel window |
+| Drop it | **Esc** or **Discard** |
+
+Transcription runs on this computer with NVIDIA's
+[Parakeet Unified English 0.6B](https://huggingface.co/nvidia/parakeet-unified-en-0.6b) (English
+only, with punctuation and capitals), through the same sherpa-onnx runtime as the offline voice.
+No audio or text leaves the machine and no API key is used. The model is not in the installer: the
+first time you start dictation the panel offers a one-time download of about 660 MB into the app
+profile. Each file is checked against a pinned SHA-256 before it is used. Once loaded the model
+holds about 700 MB of memory, and is released after ten minutes without dictation.
+
+The model transcribes whole recordings, so live text is done by transcribing the phrase you are
+saying again every quarter of a second (buffered streaming). A pause of about 0.7 seconds makes
+that phrase final; a phrase with no pause is cut at its quietest moment after 20 seconds.
+
+- A tap answers a call first: with a call on the line, one tap picks it up as before, and
+  dictation starts on a tap only when no call is waiting to be picked up.
+- If no agent is open, or the agent is at a permission prompt, nothing is sent: the words stay in
+  the panel with the reason, and **Send** (or a tap) tries again.
+- Dictation left open closes on its own: after two minutes with no speech at all it is dropped;
+  two quiet minutes after you spoke stops it and holds your words for you to send or discard.
+- The command microphone stays closed while dictation is listening, including hands-free.
+- The two-tap and hold presses are unchanged. Inside Maestro the key now waits 0.4 seconds after
+  a tap to see whether a second one follows, as the system-wide key already did.
+
+It was run against the real model on Linux (words about every quarter second, final text about
+0.1 seconds after stopping, on four CPU threads). It has not been run in the packaged Windows
+app yet: the microphone path, the download inside Electron, and speed on a slower CPU are
+unmeasured there.
 
 ## From your phone
 
@@ -418,8 +459,8 @@ Steering needs no pick-up:
 The most urgent call comes first (Jev's triage when it is on, otherwise permission prompts, then
 questions, then finished agents). A call you do not pick up lapses and the next one comes; the
 agent still shows as waiting, so "next" and "who needs me" work as before. An agent that calls
-more than four times in a minute is shown, not spoken. A tap with no call on the line does
-nothing, so a stray tap never opens the microphone. With no call on the line or waiting, "skip",
+more than four times in a minute is shown, not spoken. A tap with no call on the line starts
+[dictation to the open agent](#dictation-to-the-open-agent) instead. With no call on the line or waiting, "skip",
 "later" and "not now" are ordinary words again and go to the conductor. An agent that leaves the
 canvas takes its calls with it.
 

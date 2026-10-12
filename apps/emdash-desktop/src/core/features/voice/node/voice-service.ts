@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import type { Logger } from '@emdash/shared/logger';
 import type { ChorusCredentialId } from '@core/primitives/chorus-host/api/credentials';
 import type { ChorusHostServices } from '@core/primitives/chorus-host/api/host-services';
@@ -6,6 +7,8 @@ import { JsonSettingsFile } from '@core/primitives/chorus-host/node/json-setting
 import {
   DEFAULT_VOICE_SETTINGS,
   voiceSettingsSchema,
+  type DictationModelStatus,
+  type DictationResult,
   type SttEngineId,
   type Transcription,
   type VoiceSettings,
@@ -13,6 +16,7 @@ import {
 } from '../api/contract';
 import { HOLD_KEY_OFF, HoldComboTracker, holdComboKeycodes } from '../api/global-keys';
 import { HoldToTalkMachine, type HoldOutput } from '../api/hold-to-talk';
+import type { BufferedDictationStream } from './buffered-dictation';
 import { DeepgramSttEngine } from './engines/deepgram';
 import { DeepgramStream } from './engines/deepgram-stream';
 import { SttEngineError, type SttEngine } from './engines/engine';
@@ -20,6 +24,7 @@ import { OpenAiSttEngine } from './engines/openai';
 import { OpenRouterSttEngine } from './engines/openrouter';
 import { WhisperLocalSttEngine } from './engines/whisper-local';
 import { streamGeminiTts } from './gemini-tts';
+import { DICTATION_MODEL_NAME, DictationModel, LocalDictation } from './local-dictation';
 import { LocalTts } from './local-tts';
 import { OPENROUTER_TTS_MODELS, streamOpenRouterTts } from './openrouter-tts';
 
@@ -31,6 +36,8 @@ const MIN_WAV_BYTES = 44 + 6400;
  * records until Send for up to 5 minutes, so this leaves headroom above that.
  */
 const STREAM_MAX_MS = 6 * 60_000;
+/** Dictation has no length limit of its own; one left open this long was forgotten. */
+const DICTATION_MAX_MS = 30 * 60_000;
 
 export class VoiceService {
   readonly credentials: ChorusCredentials;
@@ -45,6 +52,11 @@ export class VoiceService {
     string,
     { stream: DeepgramStream; startedAt: number; timer: ReturnType<typeof setTimeout> }
   >();
+  private readonly dictation: LocalDictation;
+  private readonly dictations = new Map<
+    string,
+    { stream: BufferedDictationStream; timer: ReturnType<typeof setTimeout> }
+  >();
 
   constructor(
     private readonly host: ChorusHostServices,
@@ -54,6 +66,9 @@ export class VoiceService {
   ) {
     this.hold = new HoldToTalkMachine(onGlobalHold);
     this.credentials = new ChorusCredentials(host.secrets);
+    this.dictation = new LocalDictation(
+      new DictationModel(join(host.dataDir, 'models', DICTATION_MODEL_NAME))
+    );
     this.settings = JsonSettingsFile.inDir(
       host.dataDir,
       'voice-settings.json',
@@ -82,6 +97,8 @@ export class VoiceService {
   dispose(): void {
     for (const id of [...this.ttsRequests.keys()]) this.stopTts(id);
     for (const id of [...this.streams.keys()]) this.abortStream(id);
+    for (const id of [...this.dictations.keys()]) this.abortStream(id);
+    this.dictation.dispose();
     this.applyGlobalHold(HOLD_KEY_OFF);
     if (this.registeredShortcut) this.host.globalShortcuts.unregister(this.registeredShortcut);
     this.registeredShortcut = null;
@@ -224,7 +241,43 @@ export class VoiceService {
   }
 
   pushAudio(streamId: string, pcm: Uint8Array<ArrayBuffer>): void {
-    this.streams.get(streamId)?.stream.push(pcm);
+    const dictation = this.dictations.get(streamId);
+    if (dictation) dictation.stream.push(pcm);
+    else this.streams.get(streamId)?.stream.push(pcm);
+  }
+
+  dictationModel(): Promise<DictationModelStatus> {
+    return this.dictation.model.status();
+  }
+
+  downloadDictationModel(
+    onProgress: (status: DictationModelStatus) => void
+  ): Promise<DictationModelStatus> {
+    return this.dictation.model.start(onProgress);
+  }
+
+  /** Opens an on-device dictation stream; it never leaves this computer. */
+  async openDictation(onPartial: (streamId: string, text: string) => void): Promise<string> {
+    if (!(await this.dictation.model.ready())) {
+      throw new SttEngineError('not-configured', 'The dictation model is not downloaded yet.');
+    }
+    const streamId = crypto.randomUUID();
+    const stream = this.dictation.open((text) => onPartial(streamId, text));
+    const timer = setTimeout(() => this.abortStream(streamId), DICTATION_MAX_MS);
+    this.dictations.set(streamId, { stream, timer });
+    return streamId;
+  }
+
+  async closeDictation(streamId: string): Promise<DictationResult> {
+    const entry = this.dictations.get(streamId);
+    if (!entry) throw new SttEngineError('engine-failed', 'That dictation expired.');
+    this.dictations.delete(streamId);
+    clearTimeout(entry.timer);
+    const finishedAt = performance.now();
+    const text = (await entry.stream.finish()).trim();
+    const latencyMs = Math.round(performance.now() - finishedAt);
+    this.logger.info('voice: dictated', { latencyMs, chars: text.length });
+    return { text, latencyMs };
   }
 
   async closeStream(streamId: string): Promise<Transcription> {
@@ -246,6 +299,13 @@ export class VoiceService {
   }
 
   abortStream(streamId: string): void {
+    const dictation = this.dictations.get(streamId);
+    if (dictation) {
+      this.dictations.delete(streamId);
+      clearTimeout(dictation.timer);
+      dictation.stream.abort();
+      return;
+    }
     const entry = this.streams.get(streamId);
     if (!entry) return;
     this.streams.delete(streamId);

@@ -83,6 +83,23 @@ export const voiceErrorSchema = z.object({
 });
 export type VoiceError = z.infer<typeof voiceErrorSchema>;
 
+/** The on-device dictation model (NVIDIA Parakeet), fetched once on first use. */
+export const dictationModelStatusSchema = z.object({
+  state: z.enum(['missing', 'downloading', 'ready', 'failed']),
+  receivedBytes: z.number(),
+  totalBytes: z.number(),
+  /** Why the last download failed. */
+  message: z.string().optional(),
+});
+export type DictationModelStatus = z.infer<typeof dictationModelStatusSchema>;
+
+export const dictationResultSchema = z.object({
+  text: z.string(),
+  /** From the end of the audio to the final text. */
+  latencyMs: z.number(),
+});
+export type DictationResult = z.infer<typeof dictationResultSchema>;
+
 export const voiceStatusSchema = z.object({
   settings: voiceSettingsSchema,
   credentials: z.record(chorusCredentialIdSchema, z.boolean()),
@@ -98,7 +115,7 @@ export const voiceEventSchema = z.discriminatedUnion('type', [
   /** Global hold-to-talk (the key was held or released while any app was focused). */
   z.object({
     type: z.literal('global-hold'),
-    /** `tap`: a single quick press, which answers whatever is waiting for a spoken reply. */
+    /** `tap`: a single quick press. It answers a waiting call, or starts or sends dictation. */
     action: z.enum(['start', 'stop', 'cancel', 'tap']),
     intent: z.enum(['command', 'dictation']).optional(),
   }),
@@ -119,6 +136,8 @@ export const voiceEventSchema = z.discriminatedUnion('type', [
     pcm: z.string(),
     sampleRate: z.number().int().min(8000).max(48_000).optional(),
   }),
+  /** Download progress of the on-device dictation model. */
+  z.object({ type: z.literal('dictation-model'), status: dictationModelStatusSchema }),
   z.object({ type: z.literal('tts-done'), requestId: z.string() }),
   z.object({ type: z.literal('tts-error'), requestId: z.string() }),
 ]);
@@ -158,6 +177,23 @@ export const voiceContract = defineContract({
     error: voiceErrorSchema,
   }),
   abortStream: procedure({ input: z.object({ streamId: z.string() }), output: z.void() }),
+  getDictationModel: procedure({ input: z.void(), output: dictationModelStatusSchema }),
+  /** Starts the one-time model download; progress arrives as `dictation-model` events. */
+  downloadDictationModel: procedure({ input: z.void(), output: dictationModelStatusSchema }),
+  /**
+   * Opens an on-device dictation stream. Audio goes in through `pushAudio`, the text so far comes
+   * back as `partial` events, and `abortStream` drops it.
+   */
+  openDictation: fallible({
+    input: z.void(),
+    data: z.object({ streamId: z.string() }),
+    error: voiceErrorSchema,
+  }),
+  closeDictation: fallible({
+    input: z.object({ streamId: z.string() }),
+    data: dictationResultSchema,
+    error: voiceErrorSchema,
+  }),
   /** Starts abortable cloud or offline synthesis; audio is delivered on events. */
   startTts: procedure({
     input: z.object({ requestId: z.string().uuid(), text: z.string().min(1).max(1200) }),

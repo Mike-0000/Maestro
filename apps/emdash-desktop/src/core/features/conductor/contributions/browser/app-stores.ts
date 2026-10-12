@@ -1,5 +1,8 @@
 import { canvasStoreToken } from '@core/features/canvas/contributions/browser/app-stores';
-import { voiceStoreToken } from '@core/features/voice/contributions/browser/app-stores';
+import {
+  dictationStoreToken,
+  voiceStoreToken,
+} from '@core/features/voice/contributions/browser/app-stores';
 import {
   contributeScopedStore,
   getAppStores,
@@ -26,6 +29,8 @@ export const conductorAppStoreContributions: readonly AppScopedStoreContribution
       // Focus follows the view on screen (canvas, task view, or neither), not the canvas alone.
       seedWorkbenchView(readWorkbenchView);
       const conductor = new ConductorStore(canvas, stores.get(voiceStoreToken));
+      // Finished dictation goes straight to the agent in front.
+      stores.get(dictationStoreToken).setSender((text) => conductor.sendDictation(text));
       // Paired devices drive this conductor too; the bridge lives as long as the store.
       stopRemoteVoiceBridge?.();
       stopRemoteVoiceBridge = startRemoteVoiceBridge(conductor, canvas);

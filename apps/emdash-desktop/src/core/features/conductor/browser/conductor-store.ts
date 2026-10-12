@@ -694,7 +694,7 @@ export class ConductorStore {
     );
     this.voice.setVocabularyProvider(() => this.vocabulary());
     this.voice.setCaptureHandler?.((event) => this.onCapture(event));
-    // A tap of the talk key answers the call on the line; with none, it does nothing.
+    // A tap of the talk key answers the call on the line; with none, it starts dictation.
     this.voice.setTapGate?.(() => this.calls.canPickUp);
     void this.refreshStatus();
     void installedProviders();
@@ -862,6 +862,33 @@ export class ConductorStore {
         : null;
     } finally {
       this.calls.release(call.id);
+    }
+  }
+
+  /** The agent in front, which finished dictation is sent to; null when none is open. */
+  dictationTarget(): string | null {
+    const front = screenFocus(this.canvas).agentId;
+    const entry = front ? entryForConversation(this.canvas, front) : undefined;
+    return entry ? this.nameOf(entry) : null;
+  }
+
+  /**
+   * On-device dictation, finished: sends the words to the agent in front at once. The developer
+   * watched them appear and chose to send, so there is no cancel window.
+   */
+  async sendDictation(
+    text: string
+  ): Promise<{ ok: true; agentName: string } | { ok: false; message: string }> {
+    const front = screenFocus(this.canvas).agentId;
+    const entry = front ? entryForConversation(this.canvas, front) : undefined;
+    if (!entry) return { ok: false, message: 'No agent is open. Open one, then send.' };
+    const blocked = this.permissionBlock(entry);
+    if (blocked) return { ok: false, message: blocked };
+    try {
+      await sendToAgent(entry, text);
+      return { ok: true, agentName: this.nameOf(entry) };
+    } catch (error) {
+      return { ok: false, message: errorMessage(error) };
     }
   }
 

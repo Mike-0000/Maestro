@@ -8,7 +8,7 @@
  * more tap stops. Other keys do not cancel a latched utterance, since nothing is being held.
  *
  * A single tap that no second tap follows is reported as `tap`: it answers whatever is waiting
- * for a spoken reply, and does nothing when nothing is.
+ * for a spoken reply, and starts dictation to the open agent when nothing is.
  */
 
 export const HOLD_DELAY_MS = 180;

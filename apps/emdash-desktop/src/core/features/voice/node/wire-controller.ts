@@ -75,6 +75,34 @@ export function createVoiceWireController(options: {
       }
     },
     abortStream: ({ streamId }) => service.abortStream(streamId),
+    getDictationModel: () => service.dictationModel(),
+    downloadDictationModel: () =>
+      service.downloadDictationModel((status) =>
+        voiceEvents.emit(undefined, { type: 'dictation-model', status })
+      ),
+    openDictation: async () => {
+      try {
+        const streamId = await service.openDictation((id, text) =>
+          voiceEvents.emit(undefined, { type: 'partial', streamId: id, text })
+        );
+        return ok({ streamId });
+      } catch (error) {
+        if (error instanceof SttEngineError)
+          return err({ type: error.kind, message: error.message });
+        options.logger.error('voice: dictation could not start', { error });
+        return err({ type: 'engine-failed' as const, message: 'Dictation could not start.' });
+      }
+    },
+    closeDictation: async ({ streamId }) => {
+      try {
+        return ok(await service.closeDictation(streamId));
+      } catch (error) {
+        if (error instanceof SttEngineError)
+          return err({ type: error.kind, message: error.message });
+        options.logger.error('voice: dictation failed', { error });
+        return err({ type: 'engine-failed' as const, message: 'Dictation failed.' });
+      }
+    },
     startTts: ({ requestId, text }) =>
       service.startTts(requestId, text, (event) => {
         if (event.type === 'chunk') {
