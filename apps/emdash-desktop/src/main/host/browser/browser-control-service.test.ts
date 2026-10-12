@@ -317,4 +317,108 @@ describe('BrowserControlService', () => {
     expect(result).toMatchObject({ success: false, error: { type: 'origin-denied' } });
     expect(h.events.some((event) => event.type === 'open-request')).toBe(false);
   });
+
+  describe('public websites', () => {
+    const control = {
+      browserId: 'b-iso',
+      control: 'agents' as const,
+      publicOrigins: ['https://example.com'],
+      ...identity,
+    };
+    const navigate = (url: string) => ({
+      browserId: 'b-iso',
+      action: { kind: 'navigate' as const, url },
+    });
+
+    it('lets the conductor load an approved public origin when the setting is on', async () => {
+      const on = harness({ conductorPublicWeb: true });
+      on.bind('b-iso');
+      on.service.setControl(control);
+      const result = await on.service.act({ kind: 'conductor' }, navigate('https://example.com/a'));
+      expect(result.success).toBe(true);
+      expect(on.automation.act).toHaveBeenCalledTimes(1);
+    });
+
+    it('denies unapproved, insecure and private targets', async () => {
+      const on = harness({ conductorPublicWeb: true });
+      on.bind('b-iso');
+      on.service.setControl({
+        ...control,
+        publicOrigins: ['https://example.com', 'https://192.168.1.1', 'http://plain.example.com'],
+      });
+      for (const url of [
+        'https://other.example.org/',
+        'http://example.com/',
+        'https://192.168.1.1/',
+        'http://plain.example.com/',
+        'http://169.254.169.254/latest/meta-data/',
+      ]) {
+        const result = await on.service.act({ kind: 'conductor' }, navigate(url));
+        expect(result, url).toMatchObject({
+          success: false,
+          error: { type: 'origin-denied', url },
+        });
+      }
+      expect(on.automation.act).not.toHaveBeenCalled();
+      expect(on.events).toContainEqual(
+        expect.objectContaining({ type: 'automation', action: 'navigate', detail: 'blocked' })
+      );
+    });
+
+    it('denies approved origins while the setting is off', async () => {
+      h.service.setControl(control);
+      const result = await h.service.act({ kind: 'conductor' }, navigate('https://example.com/'));
+      expect(result).toMatchObject({ success: false, error: { type: 'origin-denied' } });
+      if (!result.success) expect(result.error.message).toContain('turned off');
+      expect(h.automation.act).not.toHaveBeenCalled();
+    });
+
+    it('never extends the approval to coding agents', async () => {
+      const on = harness({ conductorPublicWeb: true });
+      on.bind('b-iso');
+      on.service.setControl(control);
+      const result = await on.service.act(agent, navigate('https://example.com/'));
+      expect(result).toMatchObject({ success: false, error: { type: 'origin-denied' } });
+      expect(await on.service.requestOpen(agent, 'https://example.com/')).toMatchObject({
+        success: false,
+        error: { type: 'origin-denied' },
+      });
+      expect(on.service.describeTaskBrowser('t1')?.allowedOrigins).not.toContain(
+        'https://example.com'
+      );
+    });
+
+    it('holds page-initiated navigation to approved origins during a conductor lease', async () => {
+      const on = harness({ conductorPublicWeb: true });
+      const contents = on.bind('b-iso');
+      on.service.setControl(control);
+      await on.service.act({ kind: 'conductor' }, navigate('https://example.com/'));
+
+      const within = { preventDefault: vi.fn(), url: 'https://example.com/next' };
+      contents.fire('will-navigate', within);
+      expect(within.preventDefault).not.toHaveBeenCalled();
+
+      const away = { preventDefault: vi.fn(), url: 'https://tracker.example.net/' };
+      contents.fire('will-navigate', away);
+      expect(away.preventDefault).toHaveBeenCalled();
+      const redirect = {
+        preventDefault: vi.fn(),
+        url: 'http://10.0.0.1/admin',
+        isMainFrame: true,
+      };
+      contents.fire('will-redirect', redirect);
+      expect(redirect.preventDefault).toHaveBeenCalled();
+      expect(on.consoleBuffer.push).toHaveBeenCalledTimes(2);
+    });
+
+    it('holds an agent lease to the task origins even on a tile with approvals', async () => {
+      const on = harness({ conductorPublicWeb: true });
+      const contents = on.bind('b-iso');
+      on.service.setControl(control);
+      await on.service.act(agent, { browserId: 'b-iso', action: { kind: 'reload' } });
+      const event = { preventDefault: vi.fn(), url: 'https://example.com/' };
+      contents.fire('will-navigate', event);
+      expect(event.preventDefault).toHaveBeenCalled();
+    });
+  });
 });

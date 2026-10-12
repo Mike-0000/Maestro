@@ -5,6 +5,7 @@ import type { CanvasBrowserSettings } from '@core/features/canvas/contributions/
 import {
   describeNavigationDenial,
   evaluateNavigation,
+  evaluatePublicUrl,
   isIsolatedBrowserPartition,
   originKey,
   SlidingWindowLimiter,
@@ -18,6 +19,7 @@ import {
   type BrowserObserveInput,
   type BrowserOpenAccess,
   type BrowserOpenDenial,
+  type NavigationPolicy,
 } from '@core/primitives/browser/api';
 import type { BrowserAutomation } from './browser-automation';
 import type { BrowserConsoleBuffer } from './browser-console-buffer';
@@ -27,7 +29,8 @@ import type { BrowserWebContentsRegistry } from './browser-webcontents-registry'
  * Policy gate for model-driven browsing. Every conductor and agent call passes through here:
  * the browser must be an isolated-per-task tile, the actor must be allowed (conductor setting, or
  * an agent scoped to that same task), navigation stays on the task's dev-server origins, and calls
- * are rate limited. Acting needs the tile handed to agents; an agent may also watch (screenshot,
+ * are rate limited. The conductor alone may also load public https origins, when the setting is on
+ * and the user approved that origin for the tile. Acting needs the tile handed to agents; an agent may also watch (screenshot,
  * outline, text, console) its own task's tile while the user drives it, since watching changes
  * nothing. While a model holds the control lease, navigations the page starts on its own are held
  * to the same origin policy.
@@ -47,13 +50,22 @@ export type SetBrowserControlInput = BrowserTaskIdentity & {
   control: BrowserControl;
   /** Origins the user opened in this tile, admitted alongside dev-server origins. */
   origins?: string[];
+  /** Public origins the user approved for the conductor in this tile. */
+  publicOrigins?: string[];
 };
 
 type ControlEntry = BrowserTaskIdentity & {
   browserId: string;
   control: BrowserControl;
   origins: string[];
-  lease: { actorKey: string; actor: BrowserAutomationActor; until: number } | null;
+  publicOrigins: string[];
+  lease: {
+    actorKey: string;
+    actor: BrowserAutomationActor;
+    until: number;
+    /** The lease holder may be on approved public origins (conductor, setting on). */
+    publicWeb: boolean;
+  } | null;
 };
 
 type OpenAnswer = { browserId: string | null; denial?: BrowserOpenDenial };
@@ -131,6 +143,10 @@ export class BrowserControlService {
       taskId: input.taskId,
       control: input.control,
       origins: (input.origins ?? []).filter((origin) => originKey(origin) !== null).slice(0, 16),
+      publicOrigins: (input.publicOrigins ?? [])
+        .map((origin) => evaluatePublicUrl(origin))
+        .flatMap((decision) => (decision.ok ? [decision.origin] : []))
+        .slice(0, 16),
       lease: input.control === 'agents' ? (previous?.lease ?? null) : null,
     };
     this.entries.set(input.browserId, entry);
@@ -274,10 +290,11 @@ export class BrowserControlService {
   ): Promise<Result<BrowserActResult, BrowserAutomationError>> {
     const authorized = await this.authorize(scope, input.browserId, 'act');
     if (!authorized.success) return authorized;
-    const { entry, webContents } = authorized.data;
+    const { entry, webContents, settings } = authorized.data;
     const action = input.action;
+    const publicWeb = scope.kind === 'conductor' ? settings.conductorPublicWeb : null;
     if (action.kind === 'navigate') {
-      const decision = evaluateNavigation(action.url, this.policy(entry));
+      const decision = evaluateNavigation(action.url, this.policy(entry, publicWeb));
       if (!decision.ok) {
         this.emitAutomation(entry, scope, 'navigate', false, 'blocked');
         return err({
@@ -296,6 +313,7 @@ export class BrowserControlService {
       actorKey,
       actor: publicActor(scope),
       until: this.now() + CONTROL_LEASE_MS,
+      publicWeb: publicWeb === true,
     };
     try {
       const result = await this.deps.automation.act(webContents, action);
@@ -333,7 +351,12 @@ export class BrowserControlService {
     browserId: string,
     kind: 'observe' | 'act',
     options: { requireLive?: boolean } = {}
-  ): Promise<Result<{ entry: ControlEntry; webContents: WebContents }, BrowserAutomationError>> {
+  ): Promise<
+    Result<
+      { entry: ControlEntry; webContents: WebContents; settings: CanvasBrowserSettings },
+      BrowserAutomationError
+    >
+  > {
     const settings = await this.deps.getSettings();
     const denied = this.actorDenied(scope, settings);
     if (denied) return err(denied);
@@ -389,7 +412,7 @@ export class BrowserControlService {
         message: 'The browser is not live right now (suspended or its canvas is closed).',
       });
     }
-    return ok({ entry, webContents });
+    return ok({ entry, webContents, settings });
   }
 
   /** A bound webContents, asking the renderer to resume a suspended tile if needed. */
@@ -443,8 +466,18 @@ export class BrowserControlService {
     return partition !== null && isIsolatedBrowserPartition(partition);
   }
 
-  private policy(entry: ControlEntry) {
-    return { allowedOrigins: this.allowedOrigins(entry), reservedPorts: this.deps.reservedPorts() };
+  /**
+   * `publicWeb` is the conductor's public-web setting, or null for an actor that never gets
+   * public websites (coding agents).
+   */
+  private policy(entry: ControlEntry, publicWeb: boolean | null = null): NavigationPolicy {
+    return {
+      allowedOrigins: this.allowedOrigins(entry),
+      reservedPorts: this.deps.reservedPorts(),
+      ...(publicWeb === null
+        ? {}
+        : { publicWeb: publicWeb ? { approvedOrigins: entry.publicOrigins } : 'disabled' }),
+    };
   }
 
   private allowedOrigins(entry: ControlEntry): string[] {
@@ -476,7 +509,10 @@ export class BrowserControlService {
     const guard = (event: { preventDefault(): void }, url: string) => {
       const entry = leased();
       if (!entry) return;
-      const decision = evaluateNavigation(url, this.policy(entry));
+      const decision = evaluateNavigation(
+        url,
+        this.policy(entry, entry.lease?.publicWeb ? true : null)
+      );
       if (decision.ok) return;
       event.preventDefault();
       this.deps.consoleBuffer.push(browserId, {

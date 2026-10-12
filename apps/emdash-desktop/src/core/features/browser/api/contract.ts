@@ -89,6 +89,8 @@ export const browserContract = defineContract({
       taskId: z.string(),
       control: z.enum(['user', 'agents']),
       origins: z.array(z.string()).max(16).optional(),
+      /** Public origins the user approved for the conductor in this browser. */
+      publicOrigins: z.array(z.string()).max(16).optional(),
     }),
     data: z.void(),
     error: z.custom<BrowserAutomationError>(),

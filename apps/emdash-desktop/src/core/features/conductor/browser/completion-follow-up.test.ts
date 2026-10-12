@@ -256,7 +256,7 @@ describe('completion follow-ups', () => {
     const results = sentMessages(1).at(-1)!.content as Anthropic.Beta.BetaToolResultBlockParam[];
     expect(results.map((result) => result.is_error)).toEqual([true, true, true]);
     expect(String(results[0]!.content)).toContain('only lets the developer start that');
-    expect(String(results[2]!.content)).toContain('only opens');
+    expect(String(results[2]!.content)).toContain("agent's reply cannot send");
     expect(speech.announce).toHaveBeenCalledOnce();
   });
 

@@ -788,6 +788,37 @@ and a tile in "You" mode refused agents outright with a generic error. Now:
   token travels in the session env, never in argv. Other TUI providers and remote hosts get no
   server.
 
+### Public websites for the conductor (follow-up, 2026-10-11)
+
+The conductor could only load a task's dev-server origins and loopback. It can now also open
+public websites in a task's browser tile, under these conditions:
+
+- **Setting**: `canvasBrowser.conductorPublicWeb`, off by default ("Conductor can open public
+  websites" in Settings, Browser). It also needs `enabled` and `conductorControl`.
+- **URL policy** (`evaluatePublicUrl` in `src/core/primitives/browser/api/control-policy.ts`):
+  https only, no username or password in the URL, and a host on the public internet. Private
+  and link-local addresses (including cloud metadata), carrier-grade NAT, non-global IPv6
+  literals, single-label names and intranet suffixes (`.local`, `.internal`, ...) are refused.
+  Hosts are judged as written; DNS is not resolved.
+- **Per-site confirmation**: the first time a public origin is opened in a tile, the user gets a
+  `confirm` prompt naming the origin (`show_app` with a URL, or `use_app` navigate). Approvals
+  are per browser tile, capped at 16, kept in memory only, and dropped when the tile closes.
+- **Enforcement in main**: the renderer passes the approved origins with `setControl`
+  (`publicOrigins`); `BrowserControlService` re-validates them and admits them only for the
+  conductor while the setting is on. During a conductor lease, page-initiated navigations and
+  redirects are held to the task origins plus the approved public origins, so a redirect to
+  another host (`example.com` to `www.example.com`) is blocked until that origin is approved.
+- **Not for agents**: coding agents (`chorus-browser` MCP) keep the dev-server-only policy, and
+  an agent lease on a tile with approvals is still held to the task origins. A completion
+  follow-up turn cannot open a public website at all.
+- **Diagnostics**: denials return `origin-denied` with the reason in the message, emit an
+  `automation` event (`navigate` / `navigation-blocked`), and blocked page navigations are
+  written to the tile's console buffer.
+
+Known limits: an agent can still read or act on whatever page its task's tile shows, including a
+public page the conductor opened there; subresource requests are not filtered; a public name
+that resolves to a private address is not detected.
+
 ### Deferred or not done
 
 - Shift+Esc to take control back from a lease (Stop button and You toggle exist).

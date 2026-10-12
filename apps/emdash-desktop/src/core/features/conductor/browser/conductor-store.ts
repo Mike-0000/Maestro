@@ -5364,6 +5364,7 @@ export class ConductorStore {
       host: getCanvasBrowserHost(),
       requestPending: (label, kind) => this.requestPending(label, kind),
       resolveTask: (agent) => this.resolveAppTask(agent),
+      actingOnAgentOutput: () => this.followUpActive,
     });
     return this.appToolsInstance;
   }

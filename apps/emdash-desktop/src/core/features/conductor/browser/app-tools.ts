@@ -7,6 +7,8 @@ import type {
 import { isLocalAppUrl } from '@core/primitives/agents/api/completion-report';
 import {
   describeBrowserAction,
+  describePublicUrlDenial,
+  evaluatePublicUrl,
   formatActResult,
   formatAutomationError,
   formatObservation,
@@ -31,6 +33,8 @@ export type AppToolDeps = {
   requestPending(label: string, kind: 'direct' | 'confirm' | null): Promise<boolean>;
   /** Resolves the tool's `agent` argument (or the focus) to a task with a workspace. */
   resolveTask(agent: string | undefined): { task: AppTask } | { error: string };
+  /** The running turn acts on agent output (a completion follow-up), not on the user's words. */
+  actingOnAgentOutput?(): boolean;
 };
 
 /**
@@ -86,6 +90,7 @@ export class ConductorAppTools {
     const served = this.deps.host.devServerUrls(task)[0];
     const reported = this.reportedAppUrl(task.taskId);
     let url: string | undefined;
+    let publicOrigin: string | undefined;
     if (input.url) {
       const parsed = parseUseArgs(
         { action: 'navigate', url: input.url },
@@ -93,12 +98,11 @@ export class ConductorAppTools {
       );
       if (typeof parsed === 'string') return { content: parsed, isError: true };
       if (parsed.kind === 'navigate') url = parsed.url;
-      // Agent replies can name any URL; the canvas browser only opens the task's own app.
+      // Anything else is a public website: off unless enabled, and the user confirms each site.
       if (url && !isLocalAppUrl(url) && !sameOrigin(url, known ?? served)) {
-        return {
-          content: `Not opening ${url}: show_app only opens the task's app on this machine (localhost) or its current origin.`,
-          isError: true,
-        };
+        const admitted = await this.admitPublicUrl(task, url, existing);
+        if ('outcome' in admitted) return admitted.outcome;
+        publicOrigin = admitted.origin;
       }
     } else if (!known && !served && reported) {
       // No dev server detected (the agent started it itself): use the URL it reported.
@@ -106,6 +110,7 @@ export class ConductorAppTools {
     }
     this.deps.host.openForTask({ ...task, ...(url ? { url } : {}) });
     const entry = this.deps.canvas.browserForTask(task.taskId);
+    if (entry && publicOrigin) await this.deps.host.approvePublicOrigin(entry, publicOrigin);
     const shown = entry?.url && entry.url !== 'about:blank' ? ` at ${entry.url}` : '';
     const running = this.deps.host.appRunning(task)
       ? ''
@@ -145,6 +150,11 @@ export class ConductorAppTools {
     if ('outcome' in target) return target.outcome;
     const action = parseUseArgs(args, target.entry.url);
     if (typeof action === 'string') return { content: action, isError: true };
+    if (action.kind === 'navigate' && this.leavesTheApp(target.task, action.url)) {
+      const admitted = await this.admitPublicUrl(target.task, action.url, target.entry);
+      if ('outcome' in admitted) return admitted.outcome;
+      await this.deps.host.approvePublicOrigin(target.entry, admitted.origin);
+    }
     const approved = await this.approveDrive(target.entry, target.task, action);
     if (!approved) return { content: 'Cancelled by the user.' };
     const client = await getBrowserClient();
@@ -161,6 +171,47 @@ export class ConductorAppTools {
       if (url) return url;
     }
     return undefined;
+  }
+
+  /** A public https URL outside the task's own app; main judges every other URL. */
+  private leavesTheApp(task: AppTask, url: string): boolean {
+    if (!evaluatePublicUrl(url).ok) return false;
+    return !this.deps.host.devServerUrls(task).some((served) => sameOrigin(url, served));
+  }
+
+  /**
+   * The gate for sending a task's browser to a public website: never on agent output alone, only
+   * with the setting on, only for https hosts on the public internet, and only after the user
+   * confirmed that origin for this browser. Main enforces the same approval on every navigation.
+   */
+  private async admitPublicUrl(
+    task: AppTask,
+    url: string,
+    entry: BrowserTileEntry | undefined
+  ): Promise<{ origin: string } | { outcome: ToolOutcome }> {
+    const refuse = (content: string) => ({ outcome: { content, isError: true } });
+    if (this.deps.actingOnAgentOutput?.()) {
+      return refuse(
+        `Not opening ${url}: an agent's reply cannot send the browser to a public website. Offer it to the user; open it when they ask.`
+      );
+    }
+    const decision = evaluatePublicUrl(url);
+    if (!decision.ok)
+      return refuse(`Not opening it: ${describePublicUrlDenial(decision.reason, url)}`);
+    if (!(await this.deps.host.conductorPublicWebEnabled())) {
+      return refuse(
+        `Not opening ${url}: public websites are turned off. The user can turn on "Conductor can open public websites" in Settings, Browser. Do not retry until they have.`
+      );
+    }
+    const { origin } = decision;
+    if (entry && this.deps.host.publicOriginApproved(entry.browserId, origin)) return { origin };
+    const label = `Open the public website ${origin} in ${task.name}'s app browser`;
+    if (!(await this.deps.requestPending(label, 'confirm'))) {
+      return {
+        outcome: { content: `The user did not allow ${origin}. Do not retry.`, cancelled: true },
+      };
+    }
+    return { origin };
   }
 
   /** Forgets approvals (the user stopped the lease or took the app back). */
