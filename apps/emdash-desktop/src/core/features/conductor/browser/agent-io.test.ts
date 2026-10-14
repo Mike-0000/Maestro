@@ -44,6 +44,21 @@ describe('sendToLiveSession', () => {
     expect(mocks.sendInput.mock.calls[1]?.[0]).toEqual({ conversationId: 'conv-1', data: '\r' });
   });
 
+  it('waits long enough after the paste for Codex to take Enter as a submit', async () => {
+    vi.useFakeTimers();
+    try {
+      const sent = sendToLiveSession(entry({ providerId: 'codex' }), 'hello');
+      await vi.advanceTimersByTimeAsync(150);
+      expect(mocks.sendInput).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(400);
+      await expect(sent).resolves.toBe(true);
+      expect(mocks.sendInput.mock.calls[1]?.[0]).toEqual({ conversationId: 'conv-1', data: '\r' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('resolves false, having typed nothing, when the host has no such session', async () => {
     mocks.sendInput.mockResolvedValue(refused('not-found'));
 
