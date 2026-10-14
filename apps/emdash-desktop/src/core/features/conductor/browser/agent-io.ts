@@ -7,6 +7,12 @@ import { buildPromptInjectionPayload } from '@core/primitives/prompt-injection/a
 
 /** Pause between a bracketed paste and Enter so TUIs finish ingesting the paste first. */
 const SUBMIT_DELAY_MS = 80;
+/**
+ * Codex treats an Enter that follows a burst of input within ~120ms as part of the paste and
+ * inserts a newline instead of submitting. On Windows the paste reaches it as a keystroke burst,
+ * so it needs a longer pause than other TUIs before Enter counts as a submit.
+ */
+const CODEX_SUBMIT_DELAY_MS = 500;
 const ESC = '\x1b';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -31,9 +37,13 @@ function pastePayload(entry: AgentTileEntry, text: string): string {
   });
 }
 
-async function pressEnterAfterPaste(conversationId: string): Promise<void> {
-  await sleep(SUBMIT_DELAY_MS);
-  await sendRaw(conversationId, '\r');
+function submitDelayMs(providerId: string | undefined): number {
+  return providerId === 'codex' ? CODEX_SUBMIT_DELAY_MS : SUBMIT_DELAY_MS;
+}
+
+async function pressEnterAfterPaste(entry: AgentTileEntry): Promise<void> {
+  await sleep(submitDelayMs(entry.providerId));
+  await sendRaw(entry.conversationId, '\r');
 }
 
 /**
@@ -51,7 +61,7 @@ export async function sendToLiveSession(
   const refused = await writeInput(entry.conversationId, pastePayload(entry, text));
   if (refused === 'not-found') return false;
   if (refused) throw new Error(`The agent did not accept input (${refused}).`);
-  if (submit) await pressEnterAfterPaste(entry.conversationId);
+  if (submit) await pressEnterAfterPaste(entry);
   return true;
 }
 
@@ -77,7 +87,7 @@ export async function sendToAgent(
   }
   if (!entry.sessionActive) throw new Error(`${entry.taskName} is not running. Resume it first.`);
   await sendRaw(entry.conversationId, pastePayload(entry, text));
-  if (submit) await pressEnterAfterPaste(entry.conversationId);
+  if (submit) await pressEnterAfterPaste(entry);
 }
 
 /** Presses Enter in an agent (submits dictated text). */
