@@ -115,13 +115,12 @@ export class SqliteNotificationStore implements NotificationStore {
     try {
       await this.db.delete(notifications).where(lt(notifications.createdAt, options.olderThan));
 
-      const overflow = await this.db
+      // Slice in JS: drizzle emits a bare OFFSET when no LIMIT is set, which SQLite rejects.
+      const newestFirst = await this.db
         .select({ id: notifications.id })
         .from(notifications)
-        .orderBy(desc(notifications.createdAt))
-        .offset(options.maxRows);
-      await this.remove(overflow.map((row) => row.id));
-      return ok<void>();
+        .orderBy(desc(notifications.createdAt));
+      return await this.remove(newestFirst.slice(options.maxRows).map((row) => row.id));
     } catch (error) {
       return err(error instanceof Error ? error.message : String(error));
     }

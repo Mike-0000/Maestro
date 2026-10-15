@@ -44,6 +44,11 @@ export function createRegisteredRoot(options: CreateRegisteredRootOptions): Regi
     runScan: (signal, operation) => options.scanLimiter.run(signal, operation),
     runWatchStart: (signal, operation) => options.watchLimiter.run(signal, operation),
     onError: options.onError,
+    onEntryCapReached: (rootPath, maxEntries) =>
+      options.onError?.(
+        'file-search root has more paths than the index keeps; the rest are not searchable',
+        { rootPath, maxEntries }
+      ),
   });
   void index.reconcile().catch((error: unknown) => {
     if (!options.scope.signal.aborted) {

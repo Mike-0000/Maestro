@@ -13,37 +13,61 @@ function targetPlatform(platform?: Platform): Platform {
   return 'linux';
 }
 
+export type CommandPathProbe =
+  | { ok: true; paths: string[] }
+  /** The lookup itself failed (timed out, crashed, was killed): says nothing about the binary. */
+  | { ok: false; message: string };
+
 /**
- * Resolves all absolute paths for a command binary in PATH order.
- * Uses `where` on Windows (which already lists all matches) and `which -a` on
- * macOS/Linux. Returns an empty array when the command is not found.
+ * Looks up all absolute paths for a command binary in PATH order, telling "not on PATH" apart from
+ * a lookup that failed. Uses `where` on Windows (which already lists all matches) and `which -a`
+ * on macOS/Linux; both exit 1 when nothing matches. Any other failure, such as a timeout, a crash,
+ * or endpoint security killing the process, is a failed probe, not a missing binary.
  *
- * The first entry is the PATH winner (same result as resolveCommandPath).
+ * The first path is the PATH winner (same result as resolveCommandPath).
+ */
+export async function probeCommandPaths(
+  command: string,
+  ctx: IExecutionContext,
+  platform?: Platform
+): Promise<CommandPathProbe> {
+  const windows = targetPlatform(platform) === 'windows';
+  try {
+    const { stdout } = windows
+      ? await ctx.exec('where', [command], { timeout: WHICH_TIMEOUT_MS })
+      : await ctx.exec('which', ['-a', command], { timeout: WHICH_TIMEOUT_MS });
+    return {
+      ok: true,
+      paths: stdout
+        .trim()
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean),
+    };
+  } catch (error) {
+    if (exitCodeOf(error) === 1) return { ok: true, paths: [] };
+    return { ok: false, message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function exitCodeOf(error: unknown): unknown {
+  if (typeof error !== 'object' || error === null) return undefined;
+  if ('exitCode' in error) return error.exitCode;
+  if ('code' in error) return error.code;
+  return undefined;
+}
+
+/**
+ * Resolves all absolute paths for a command binary in PATH order. Returns an empty array when the
+ * command is not found or the lookup fails; use probeCommandPaths to tell those apart.
  */
 export async function resolveAllCommandPaths(
   command: string,
   ctx: IExecutionContext,
   platform?: Platform
 ): Promise<string[]> {
-  const plat = targetPlatform(platform);
-  try {
-    if (plat === 'windows') {
-      const { stdout } = await ctx.exec('where', [command], { timeout: WHICH_TIMEOUT_MS });
-      return stdout
-        .trim()
-        .split('\n')
-        .map((s) => s.trim())
-        .filter(Boolean);
-    }
-    const { stdout } = await ctx.exec('which', ['-a', command], { timeout: WHICH_TIMEOUT_MS });
-    return stdout
-      .trim()
-      .split('\n')
-      .map((s) => s.trim())
-      .filter(Boolean);
-  } catch {
-    return [];
-  }
+  const probe = await probeCommandPaths(command, ctx, platform);
+  return probe.ok ? probe.paths : [];
 }
 
 /**

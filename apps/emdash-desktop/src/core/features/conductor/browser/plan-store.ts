@@ -7,8 +7,8 @@ import { getConductorClient } from '../api/browser/client';
 import type { ConflictReport } from '../api/contract';
 import { SIZE_TOKEN_RANGE, type SubtaskSize } from '../api/jev';
 import { findPlanOverlaps, scopedPrompt, type PlanInput, type PlanSubtask } from '../api/plan';
+import { matchInstalledProvider, type InstalledProvider } from '../api/provider-match';
 import { deliverPromptWhenReady } from './deferred-prompt';
-import type { InstalledProvider } from './roster';
 import { entryForConversation } from './roster';
 import { resolveSpokenProject, spawnAgentTask, startAgentSession } from './spawn';
 
@@ -155,12 +155,12 @@ export class PlanStore {
     if (titles.size !== input.subtasks.length) {
       return { ok: false, reason: 'Subtask titles must be unique.' };
     }
-    const installed = new Set(options.providers.map((provider) => provider.id));
+    const installed = options.providers;
     for (const subtask of input.subtasks) {
-      if (installed.size > 0 && !installed.has(subtask.provider)) {
+      if (installed.length > 0 && !matchInstalledProvider(subtask.provider, installed)) {
         return {
           ok: false,
-          reason: `Provider "${subtask.provider}" is not installed. Use one of: ${[...installed].join(', ')}.`,
+          reason: `Provider "${subtask.provider}" is not installed. Use one of: ${installed.map((provider) => provider.id).join(', ')}.`,
         };
       }
       if (subtask.sequential_after && !titles.has(subtask.sequential_after)) {
@@ -195,6 +195,7 @@ export class PlanStore {
       projectName,
       subtasks: input.subtasks.map((subtask) => ({
         ...subtask,
+        provider: matchInstalledProvider(subtask.provider, installed)?.id ?? subtask.provider,
         state: subtask.sequential_after ? 'waiting' : 'pending',
       })),
       status: 'proposed',

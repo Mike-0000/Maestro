@@ -32,9 +32,10 @@ import {
   aptInstallPackagesCommand,
 } from '#services/host-dependencies/api/apt-commands';
 import {
+  probeCommandPaths,
   probeHostElevation,
-  resolveAllCommandPaths,
   resolveRealpath,
+  type CommandPathProbe,
 } from '#services/host-dependencies/api/runtime/probe';
 import {
   aptBatchElevation,
@@ -165,7 +166,8 @@ export class HostDependenciesRuntime {
     const definition = this.definitions.get(id);
     if (!definition) return err({ type: 'unknown-dependency', id });
     if (selection) return resolveOverride(id, selection, this.deps.exec);
-    return resolveAutoSelection(id, await this.enumerate(definition));
+    const { candidates, probeError } = await this.enumerate(definition);
+    return probeError ? err(probeError) : resolveAutoSelection(id, candidates);
   }
 
   async setSelection(
@@ -543,11 +545,13 @@ export class HostDependenciesRuntime {
     if (!definition) return err({ type: 'unknown-dependency', id });
     const selections = await this.loadSelections();
     if (!selections.success) return err(selections.error);
-    const candidates = await this.enumerate(definition);
+    const { candidates, probeError } = await this.enumerate(definition);
     const selection = selections.data[id] ?? null;
     const resolved = selection
       ? await resolveOverride(id, selection, this.deps.exec)
-      : resolveAutoSelection(id, candidates);
+      : probeError
+        ? err(probeError)
+        : resolveAutoSelection(id, candidates);
     const view: HostDependencyView = {
       hostId: this.deps.hostId,
       definition,
@@ -566,12 +570,30 @@ export class HostDependenciesRuntime {
     return ok(view);
   }
 
-  private async enumerate(definition: HostDependencyDefinition): Promise<PathCandidate[]> {
+  /**
+   * Every binary of the dependency on PATH. A lookup that failed (rather than found nothing) is
+   * retried once; when it still fails and nothing was found, `probeError` says so, so a slow or
+   * killed `where` is never reported as the binary being missing.
+   */
+  private async enumerate(
+    definition: HostDependencyDefinition
+  ): Promise<{ candidates: PathCandidate[]; probeError?: HostDependencyError }> {
     const candidates: PathCandidate[] = [];
     const seen = new Set<string>();
+    let failure: string | undefined;
     for (const command of definition.binaryNames) {
-      const paths = await resolveAllCommandPaths(command, this.deps.exec);
-      for (const path of paths) {
+      let probe: CommandPathProbe = await probeCommandPaths(command, this.deps.exec);
+      if (!probe.ok) probe = await probeCommandPaths(command, this.deps.exec);
+      if (!probe.ok) {
+        failure ??= probe.message;
+        this.deps.logger?.warn('Host dependency PATH lookup failed', {
+          id: definition.id,
+          command,
+          error: probe.message,
+        });
+        continue;
+      }
+      for (const path of probe.paths) {
         const realpath = await resolveRealpath(path, this.deps.exec);
         const identity = executablePathIdentityKey(realpath);
         if (seen.has(identity)) continue;
@@ -584,7 +606,16 @@ export class HostDependenciesRuntime {
         });
       }
     }
-    return candidates;
+    if (candidates.length === 0 && failure !== undefined) {
+      return {
+        candidates,
+        probeError: {
+          type: 'io',
+          message: `Could not look up ${definition.binaryNames.join(', ')} on PATH: ${failure}`,
+        },
+      };
+    }
+    return { candidates };
   }
 
   private async loadSelections(): Promise<

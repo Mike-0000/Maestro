@@ -7,6 +7,7 @@ import {
   type RuntimeResolveError,
 } from '@emdash/core/services/runtime-broker/api';
 import { err, ok, type Result } from '@emdash/shared';
+import { log } from '@emdash/shared/logger';
 import {
   ProjectProvider,
   type GitRepositoryFetchPort,
@@ -82,13 +83,43 @@ export type CreateProjectProviderDependencies = {
   migrateAppWorktreeRoot?: () => Promise<void>;
 };
 
+/** A step of session-open slower than this is logged, since the log keeps warnings only. */
+const SLOW_STEP_MS = 5_000;
+
+export type CreateProviderProgress = {
+  /** The step running now, or the last one that finished; reported when session-open times out. */
+  step: string;
+  /** Milliseconds each finished step took, in order. */
+  timings: Array<[step: string, ms: number]>;
+};
+
 export async function createProvider(
   dependencies: CreateProjectProviderDependencies,
-  project: Project
+  project: Project,
+  options: { signal?: AbortSignal; progress?: CreateProviderProgress } = {}
 ): Promise<Result<ProjectProvider, CreateProviderError>> {
+  const progress = options.progress ?? { step: 'start', timings: [] };
+  const step = async <T>(name: string, work: () => Promise<T>): Promise<T> => {
+    options.signal?.throwIfAborted();
+    progress.step = name;
+    const startedAt = performance.now();
+    try {
+      return await work();
+    } finally {
+      const ms = Math.round(performance.now() - startedAt);
+      progress.timings.push([name, ms]);
+      if (ms >= SLOW_STEP_MS) {
+        log.warn('createProvider: slow session-open step', {
+          projectId: project.id,
+          step: name,
+          ms,
+        });
+      }
+    }
+  };
   try {
     const host = projectHostRef(project);
-    const runtime = await dependencies.runtimes.client(host);
+    const runtime = await step('runtime-client', () => dependencies.runtimes.client(host));
     if (!runtime.success) throw runtimeResolveErrorAsError(runtime.error);
     const git = runtime.data.git;
     const filesClient = runtime.data.files;
@@ -96,7 +127,9 @@ export async function createProvider(
     const projectFiles = filesClientScope(filesClient, project.path);
     const repository = repositorySelector(project.path);
     const checkout = checkoutSelector(project.path);
-    const repositoryInspection = await git.inspectPath({ path: hostPathFromNative(project.path) });
+    const repositoryInspection = await step('git-inspect-path', () =>
+      git.inspectPath({ path: hostPathFromNative(project.path) })
+    );
     const hasRepository =
       !repositoryInspection.success || repositoryInspection.data.kind === 'repository';
     const gitInspector = {
@@ -171,10 +204,14 @@ export async function createProvider(
         },
       }
     );
-    await settings.ensure();
-    await migrateProjectSettingsOnAttachment(project, settings, runtime.data.workspaceRegistry, {
-      migrateAppWorktreeRoot: dependencies.migrateAppWorktreeRoot,
-    });
+    await step('settings-ensure', () => settings.ensure());
+    await step('settings-migrate', () =>
+      migrateProjectSettingsOnAttachment(project, settings, runtime.data.workspaceRegistry, {
+        migrateAppWorktreeRoot: dependencies.migrateAppWorktreeRoot,
+      })
+    );
+    options.signal?.throwIfAborted();
+    progress.step = 'construct';
 
     const repositoryService = dependencies.createGitRepository(git, repository, () =>
       resolveProjectEffectiveSettings({ settings, repoFacts, projectId: project.id })

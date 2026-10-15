@@ -22,6 +22,7 @@ import {
 } from '@core/primitives/agents/api';
 import { resolveTaskBranchName, type CreateTaskParams } from '@core/primitives/tasks/api';
 import { matchProject, projectMatchError } from '../api/project-match';
+import { matchInstalledProvider } from '../api/provider-match';
 import { buildSpawnWorkspaceConfig } from '../api/spawn-workspace';
 
 export type SpawnRequest = {
@@ -49,6 +50,15 @@ export function agentMetadata(): Promise<AgentMetadata[]> {
       throw error;
     });
   return metadataCache;
+}
+
+/**
+ * The provider id a loose reference ("Claude", "Claude Code") means among every known provider,
+ * installed or not, or the reference itself when none matches (spawnAgentTask then reports it).
+ */
+export async function resolveProviderId(reference: string): Promise<string> {
+  const metadata = await agentMetadata().catch(() => []);
+  return matchInstalledProvider(reference, metadata)?.id ?? reference.trim();
 }
 
 /** Lowercase kebab-case, ASCII only, for branch names. */
@@ -126,8 +136,12 @@ export async function spawnAgentTask(request: SpawnRequest): Promise<SpawnResult
   });
 
   const metadata = await agentMetadata();
-  const agent = metadata.find((candidate) => candidate.id === request.providerId);
-  if (!agent) throw new Error(`Unknown agent provider "${request.providerId}".`);
+  // Models and speech name providers loosely ("Claude", "Claude Code"); match id or name in any case.
+  const agent = matchInstalledProvider(request.providerId, metadata);
+  if (!agent) {
+    const known = metadata.map((candidate) => candidate.id).join(', ');
+    throw new Error(`Unknown agent provider "${request.providerId}". Known providers: ${known}.`);
+  }
   const canDeliverPrompt = agentSupportsInitialPromptDelivery(agent.capabilities);
 
   const taskId = crypto.randomUUID();
@@ -141,7 +155,7 @@ export async function spawnAgentTask(request: SpawnRequest): Promise<SpawnResult
       name: request.taskName,
       initialConversation: {
         id: conversationId,
-        provider: request.providerId,
+        provider: agent.id,
         title: request.title ?? nextDefaultConversationTitle([]),
         autoApprove: false,
         type: 'pty',
@@ -150,12 +164,35 @@ export async function spawnAgentTask(request: SpawnRequest): Promise<SpawnResult
     },
     workspaceConfig,
   };
-  await taskManager.createTask(params);
+  try {
+    await taskManager.createTask(params);
+  } catch (error) {
+    // A timed-out createTask call can still have created the task in the main process. Starting
+    // that task beats reporting a failure and leaving it idle on the canvas, where a retry would
+    // add a second one.
+    if (!(await taskWasCreated(request.projectId, taskId))) throw error;
+  }
   return { taskId, conversationId, promptDeferred: Boolean(prompt) && !canDeliverPrompt };
 }
 
 const START_POLL_MS = 400;
 const START_TIMEOUT_MS = 90_000;
+const CREATED_CHECK_TIMEOUT_MS = 15_000;
+
+/** Whether the task list from the main process shows the task, waiting a little for it to arrive. */
+async function taskWasCreated(
+  projectId: string,
+  taskId: string,
+  timeoutMs = CREATED_CHECK_TIMEOUT_MS
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const task = getTaskStore(projectId, taskId);
+    if (task && task.state !== 'unregistered') return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, START_POLL_MS));
+  }
+}
 
 /**
  * Starts an agent's terminal session without opening its task view: provisions the task workspace

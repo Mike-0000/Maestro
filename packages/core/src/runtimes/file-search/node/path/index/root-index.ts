@@ -24,6 +24,12 @@ import { WatchSupervisor, type WatchSupervisorHealth } from './watch-supervisor'
 
 const WATCH_DEBOUNCE_MS = 50;
 const SCAN_WRITE_BATCH_SIZE = 500;
+/**
+ * Paths one root indexes at most. Generated output that is not excluded by name (render caches,
+ * browser profiles) can run to hundreds of thousands of files, and every rebuild rewrites them
+ * all; past this the scan stops and the root is searchable over what it has.
+ */
+export const DEFAULT_MAX_ROOT_ENTRIES = 200_000;
 
 type RunLimited = <T>(signal: AbortSignal, operation: () => Promise<T>) => Promise<T>;
 
@@ -38,7 +44,9 @@ type RootIndexOptions = Readonly<{
   runWatchStart: RunLimited;
   watchRetrySchedule?: RetrySchedule;
   degradedPollMs?: number;
+  maxEntries?: number;
   onError?: (context: string, error: unknown) => void;
+  onEntryCapReached?: (rootPath: string, maxEntries: number) => void;
 }>;
 
 export type RootIndexFailure =
@@ -63,6 +71,7 @@ export class RootIndex {
   private eventQueue: Promise<void> = Promise.resolve();
   private reconcileRun: Run<void> | undefined;
   private trailingReconcileRequested = false;
+  private entryCapReported = false;
   private readonly currentStatus: Cell<RootIndexStatus> = cell(
     { kind: 'building' },
     { equals: sameSteadyStatus }
@@ -190,12 +199,22 @@ export class RootIndex {
   }
 
   private async populateBuild(build: PathIndexBuild, signal: AbortSignal): Promise<void> {
+    const maxEntries = this.options.maxEntries ?? DEFAULT_MAX_ROOT_ENTRIES;
+    let count = 0;
     let batch: PathIndexEntry[] = [];
     for await (const entry of this.options.scanner.scan(
       this.options.root.rootPath,
       ROOT_RELATIVE_PATH,
       { signal, exclusions: this.options.exclusions }
     )) {
+      if (count >= maxEntries) {
+        if (!this.entryCapReported) {
+          this.entryCapReported = true;
+          this.options.onEntryCapReached?.(this.options.root.rootPath, maxEntries);
+        }
+        break;
+      }
+      count += 1;
       batch.push(entry);
       if (batch.length < SCAN_WRITE_BATCH_SIZE) continue;
       build.append(batch);

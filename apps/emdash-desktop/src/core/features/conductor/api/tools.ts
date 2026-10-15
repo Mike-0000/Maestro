@@ -43,7 +43,10 @@ export const conductorToolSchemas = {
   answer_permission: z.object({ agent: agentRef, decision: z.enum(['allow', 'deny']) }),
   spawn_agent: z.object({
     project: z.string().optional(),
-    provider: z.string().min(1),
+    provider: z
+      .string()
+      .min(1)
+      .describe('Provider id in lowercase, such as "claude" or "codex"; not its display name.'),
     task_name: z.string().min(1).max(80),
     prompt: z.string(),
     worktree: z
