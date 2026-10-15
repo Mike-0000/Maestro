@@ -64,7 +64,7 @@ export function lineInstructions(replies: TalkReplies, standing = ''): string {
 /** The conductor's code check, which is offered only while a check can run. */
 const CODE_CHECK_TOOL = 'investigate';
 
-/** The conductor's tools as they are, in the Realtime API's shape. */
+/** The conductor's tools as they are, as Grok Voice's function tools. */
 export function lineTools(options: { codeChecks?: boolean } = {}): TalkTool[] {
   return conductorToolDefinitions()
     .filter((tool) => options.codeChecks === true || tool.name !== CODE_CHECK_TOOL)
@@ -74,11 +74,6 @@ export function lineTools(options: { codeChecks?: boolean } = {}): TalkTool[] {
       description: tool.description ?? '',
       parameters: tool.input_schema as Record<string, unknown>,
     }));
-}
-
-/** The instruction for a sentence the voice must say as written. */
-export function sayExactly(text: string): string {
-  return `Say exactly this to the developer, word for word, and nothing else: ${JSON.stringify(text)}`;
 }
 
 /** Asked of a session that is about to be replaced. */

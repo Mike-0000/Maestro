@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   acceleratorFromCodes,
+  acceleratorFromStored,
   acceleratorLabel,
   HoldComboTracker,
   holdComboFromCodes,
@@ -141,5 +142,19 @@ describe('HoldComboTracker', () => {
     vi.advanceTimersByTime(HOLD_DELAY_MS);
     expect(outputs).toEqual([{ type: 'start', intent: 'dictation' }]);
     vi.useRealTimers();
+  });
+});
+
+describe('acceleratorFromStored', () => {
+  it.each([
+    ['Scroll Lock', 'Scrolllock'],
+    ['Ctrl + Alt + Space', 'Control+Alt+Space'],
+    ['Win + Numpad 5', 'Super+num5'],
+    ['Ctrl + Numpad +', 'Control+numadd'],
+    ['Control+Alt+Space', 'Control+Alt+Space'],
+    ['Scrolllock', 'Scrolllock'],
+    ['  ', ''],
+  ])('turns %j into %j', (stored, accelerator) => {
+    expect(acceleratorFromStored(stored)).toBe(accelerator);
   });
 });

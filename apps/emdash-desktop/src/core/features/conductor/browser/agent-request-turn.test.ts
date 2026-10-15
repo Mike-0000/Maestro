@@ -54,6 +54,7 @@ vi.mock('@core/primitives/logging/browser/logger', () => ({
 vi.mock('./spawn', () => ({
   agentMetadata: vi.fn(async () => []),
   resolveProjectId: vi.fn(() => 'another-project'),
+  resolveSpokenProject: vi.fn(() => ({ ok: true, id: 'another-project' })),
   spawnAgentTask: mocks.spawnAgentTask,
   startAgentSession: mocks.startAgentSession,
 }));
@@ -240,6 +241,47 @@ beforeEach(() => {
 });
 
 describe('agent requests in the conductor', () => {
+  it('decides with what the developer said lately, on the talk line too', async () => {
+    const { store, speech, receive } = setup();
+    store['ledger'].noteRecord({
+      at: new Date().toISOString(),
+      utterance: 'Tell Zulu to use the X drive save.',
+      route: 'line',
+      actions: [],
+      reply: 'Sent.',
+      latencyMs: 1,
+    });
+    store['rememberLineTurn']('Tell Zulu to use the X drive save.', [], 'Sent.');
+    const asked = spawnRequest();
+    mocks.runTurn.mockResolvedValueOnce(text('Left it for now.'));
+
+    await receive(asked);
+    await vi.waitFor(() => expect(speech.announce).toHaveBeenCalled());
+
+    const messages = sentMessages(0);
+    const history = JSON.stringify(messages.slice(0, -1));
+    expect(history).toContain(
+      '[Talk line] The developer said: “Tell Zulu to use the X drive save.”'
+    );
+    const event = lastUserText(messages);
+    expect(event).toContain('Recent conductor activity');
+    expect(event).toContain('Tell Zulu to use the X drive save.');
+  });
+
+  it('waits while the developer is speaking, and decides once their words are in', async () => {
+    const { store, receive } = setup();
+    store['captureStarts'].set('capture-1', Date.now());
+    const asked = spawnRequest();
+    mocks.runTurn.mockResolvedValueOnce(text('Decided.'));
+
+    await receive(asked);
+    await Promise.resolve();
+    expect(mocks.runTurn).not.toHaveBeenCalled();
+
+    store['onCapture']({ type: 'end', interactionId: 'capture-1', reason: 'transcribed' });
+    await vi.waitFor(() => expect(mocks.runTurn).toHaveBeenCalledTimes(1));
+  });
+
   it('lets the model approve a spawn request and starts the agent exactly as asked', async () => {
     const { store, speech, receive, acks } = setup();
     const asked = spawnRequest();

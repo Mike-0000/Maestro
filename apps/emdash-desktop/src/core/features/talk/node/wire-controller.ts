@@ -12,7 +12,8 @@ export function createTalkWireController(options: {
   return createController(talkContract, {
     getStatus: () => service.status(),
     updateSettings: (patch) => service.updateSettings(patch),
-    openCall: (input) => service.openCall(input),
-    recordUsage: ({ model, tokens }) => service.recordUsage(model, tokens),
+    openSession: (input) => service.openSession(input),
+    recordUsage: ({ model, tokens, seconds, textInputs }) =>
+      service.recordUsage(model, tokens, { seconds, textInputs }),
   });
 }

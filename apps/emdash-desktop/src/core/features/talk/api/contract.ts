@@ -2,16 +2,17 @@ import { defineContract, fallible, procedure } from '@emdash/wire/rpc';
 import { z } from 'zod';
 
 /**
- * The talk line: one realtime voice session between the developer and Maestro. While it is open
- * its model is the conductor: it hears the developer and acts through the conductor's tools. The
- * renderer owns
- * the WebRTC connection (it has the microphone and the speaker); the main process owns the API
- * key, sets the session up, and keeps count of what it costs. No key or token ever reaches the
- * renderer: it sends its connection offer here and gets the provider's answer back.
+ * The talk line: one realtime voice session between the developer and Maestro, on xAI's Grok
+ * Voice. While it is open its model is the conductor: it hears the developer and acts through the
+ * conductor's tools. The renderer owns the WebSocket (it has the microphone and the speaker); the
+ * main process owns the API key, decides what the session is, and keeps count of what it costs.
+ * The key never reaches the renderer: it gets a short-lived client secret that only opens one
+ * connection, which is what xAI provides for browsers.
  */
 export const talkDomain = 'talk' as const;
 
-export const talkEffortSchema = z.enum(['minimal', 'low', 'medium', 'high']);
+/** Grok Voice reasons (`high`, its default) or does not (`none`). */
+export const talkEffortSchema = z.enum(['none', 'high']);
 
 /**
  * When the line hears the developer. `key`: while the talk key is held, and for a moment after
@@ -53,16 +54,42 @@ export type TalkSettings = z.infer<typeof talkSettingsSchema>;
 
 export const DEFAULT_TALK_SETTINGS: TalkSettings = {
   enabled: false,
-  model: 'gpt-realtime-2.1',
-  voice: 'marin',
-  effort: 'low',
+  // Pinned, as xAI advises for production; `grok-voice-latest` follows new releases.
+  model: 'grok-voice-3.0',
+  voice: 'eve',
+  effort: 'high',
   listening: 'key',
   windowSec: 6,
   talkOver: false,
   dailyUsd: 5,
-  transcriptionModel: 'gpt-transcribe',
+  transcriptionModel: 'grok-transcribe',
   replies: 'brief',
 };
+
+/** The built-in Grok voices; a cloned voice's id works too. */
+export const TALK_VOICES = ['eve', 'ara', 'rex', 'sal', 'leo'] as const;
+
+/**
+ * Settings saved for the OpenAI Realtime line name a model, voice and transcription model xAI
+ * does not have, and efforts it does not take. They are moved to Grok Voice's; everything else
+ * the developer chose is kept. Anything that is not a settings object is left to the schema.
+ */
+export function migrateTalkSettings(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+  const settings = { ...(raw as Record<string, unknown>) };
+  const model = settings.model;
+  if (typeof model !== 'string' || !model.startsWith('grok-voice')) {
+    settings.model = DEFAULT_TALK_SETTINGS.model;
+    settings.voice = DEFAULT_TALK_SETTINGS.voice;
+  }
+  if (settings.transcriptionModel !== DEFAULT_TALK_SETTINGS.transcriptionModel) {
+    settings.transcriptionModel = DEFAULT_TALK_SETTINGS.transcriptionModel;
+  }
+  const effort = settings.effort;
+  if (effort === 'minimal' || effort === 'low') settings.effort = 'none';
+  else if (effort === 'medium') settings.effort = 'high';
+  return settings;
+}
 
 export const talkTokensSchema = z.object({
   textIn: z.number().min(0),
@@ -79,13 +106,15 @@ export const talkUsageSchema = z.object({
   usd: z.number(),
   responses: z.number(),
   sessions: z.number(),
+  /** Seconds a session was open: Grok Voice bills by the minute. Absent from older files. */
+  seconds: z.number().min(0).default(0),
   tokens: talkTokensSchema,
 });
 export type TalkUsage = z.infer<typeof talkUsageSchema>;
 
 export const talkStatusSchema = z.object({
   settings: talkSettingsSchema,
-  /** An OpenAI key is stored or set in the environment. */
+  /** An xAI key is stored or set in the environment. */
   hasKey: z.boolean(),
   usageToday: talkUsageSchema,
   /** Today's spend has reached the daily limit. */
@@ -107,7 +136,7 @@ export const talkErrorSchema = z.object({
 });
 export type TalkError = z.infer<typeof talkErrorSchema>;
 
-/** A function the voice model may call, in the Realtime API's own shape. */
+/** A function the voice model may call, in the Realtime API's own shape, which xAI shares. */
 export const talkToolSchema = z.object({
   type: z.literal('function'),
   name: z.string().min(1).max(64),
@@ -124,25 +153,38 @@ export const talkContract = defineContract({
   getStatus: procedure({ input: z.void(), output: talkStatusSchema }),
   updateSettings: procedure({ input: talkSettingsSchema.partial(), output: talkStatusSchema }),
   /**
-   * Sets a session up: forwards the renderer's WebRTC offer to the provider with the stored key
-   * and the session's instructions and tools, and returns the provider's answer.
+   * Sets a session up: mints a short-lived client secret with the stored key, and returns it with
+   * where to connect and the session the renderer must configure, built here from the settings
+   * and the given instructions and tools.
    */
-  openCall: fallible({
+  openSession: fallible({
     input: z.object({
-      sdp: z.string().min(1).max(200_000),
       instructions: z.string().min(1).max(TALK_INSTRUCTIONS_MAX_CHARS),
       tools: z.array(talkToolSchema).max(TALK_TOOLS_MAX),
     }),
     data: z.object({
-      sdp: z.string(),
+      url: z.string(),
+      /** Opens one connection, and expires at `expiresAt` (Unix seconds). */
+      clientSecret: z.string(),
+      expiresAt: z.number(),
+      /** The body of the first `session.update`. */
+      session: z.record(z.string(), z.unknown()),
       model: z.string(),
       voice: z.string(),
     }),
     error: talkErrorSchema,
   }),
-  /** Adds one response's tokens to today's count and says whether the line may go on. */
+  /**
+   * Adds what the line used since it last reported (a response's tokens, the seconds it was
+   * open, the text it sent) to today's count, and says whether the line may go on.
+   */
   recordUsage: procedure({
-    input: z.object({ model: z.string().max(80), tokens: talkTokensSchema }),
+    input: z.object({
+      model: z.string().max(80),
+      tokens: talkTokensSchema,
+      seconds: z.number().min(0).max(86_400).optional(),
+      textInputs: z.number().int().min(0).max(100_000).optional(),
+    }),
     output: talkStatusSchema,
   }),
 });

@@ -4,6 +4,7 @@ import { observer } from 'mobx-react-lite';
 import { useEffect, useState } from 'react';
 import { getCanvasStore } from '@core/features/canvas/contributions/browser/app-stores';
 import { getMachinesClient } from '@core/features/machines/api/browser/client';
+import { TALK_VOICES } from '@core/features/talk/api/contract';
 import { TALK_MODELS } from '@core/features/talk/api/usage';
 import { getTalkStore } from '@core/features/talk/contributions/browser/app-stores';
 import {
@@ -128,14 +129,17 @@ const EFFORT_LABELS = {
 
 type Effort = keyof typeof EFFORT_LABELS;
 
-/** The efforts offered for the voice line's realtime model. */
+/** The efforts Grok Voice takes: it reasons, or it does not. */
 const TALK_EFFORT_LABELS = {
-  low: 'Low',
-  medium: 'Medium',
+  none: 'Off',
   high: 'High',
 } as const;
 
 type TalkEffort = keyof typeof TALK_EFFORT_LABELS;
+
+function isTalkEffort(value: string): value is TalkEffort {
+  return value in TALK_EFFORT_LABELS;
+}
 
 export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
   const voice = getVoiceStore();
@@ -244,6 +248,13 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
           label="OpenAI"
           description="Speech-to-text with gpt-4o-transcribe."
           present={credentials?.openai}
+        />
+        <KeyRow
+          id="xai"
+          label="xAI"
+          description="The realtime voice conductor, on Grok Voice. XAI_API_KEY also works."
+          present={credentials?.xai}
+          onSaved={() => void getTalkStore().refreshStatus()}
         />
         <KeyRow
           id="deepgram"
@@ -1040,8 +1051,8 @@ const TalkLineSettings = observer(function TalkLineSettings() {
         label="Use a realtime voice model as the conductor"
         description={
           status && !status.hasKey
-            ? 'Needs an OpenAI API key (API keys, above). While it is on, a realtime voice model is the conductor: it hears you directly, answers aloud, and messages, starts and manages agents itself. Confirmations stay as they are.'
-            : `While it is on, a realtime voice model is the conductor: it hears you directly, answers aloud, and messages, starts and manages agents itself. Confirmations stay as they are, and typed commands go to it too. If the line is down or over its limit, the text conductor answers. Audio and the state it is told go to OpenAI while the line is open. Line: ${state}.`
+            ? 'Needs an xAI API key (API keys, above). While it is on, Grok Voice is the conductor: it hears you directly, answers aloud, and messages, starts and manages agents itself. Confirmations stay as they are.'
+            : `While it is on, Grok Voice is the conductor: it hears you directly, answers aloud, and messages, starts and manages agents itself. Confirmations stay as they are, and typed commands go to it too. If the line is down or over its limit, the text conductor answers. Audio and the state it is told go to xAI while the line is open, and xAI bills each minute it is open, used or not. Line: ${state}.`
         }
         control={
           <Switch
@@ -1053,7 +1064,7 @@ const TalkLineSettings = observer(function TalkLineSettings() {
       />
       <SettingsRow
         label="Voice model"
-        description="The full model reads state more reliably; mini costs about a quarter. Changing it reopens the line."
+        description="grok-voice-3.0 stays on that release; grok-voice-latest moves to each new one. Both cost the same. Changing it reopens the line."
         control={
           <Select.Root
             value={settings?.model ?? ''}
@@ -1076,20 +1087,45 @@ const TalkLineSettings = observer(function TalkLineSettings() {
         }
       />
       <SettingsRow
-        label="Voice effort"
-        description="How much the voice model reasons before it answers. Higher follows instructions more closely; lower answers sooner and costs less. Changing it reopens the line."
+        label="Voice"
+        description="Grok's built-in voices. Changing it reopens the line."
         control={
           <Select.Root
-            value={settings?.effort ?? 'low'}
+            value={settings?.voice ?? ''}
             disabled={!settings}
-            onValueChange={(effort) => {
-              if (effort) void talk.updateSettings({ effort });
+            onValueChange={(voice) => {
+              if (voice) void talk.updateSettings({ voice });
             }}
           >
             <Select.Trigger className="w-[140px]">
-              <Select.Value>
-                {settings ? (TALK_EFFORT_LABELS[settings.effort as TalkEffort] ?? 'Minimal') : ''}
-              </Select.Value>
+              <Select.Value>{settings?.voice ?? ''}</Select.Value>
+            </Select.Trigger>
+            <Select.Content align="end">
+              {/* A cloned voice set in the settings file is offered as it is. */}
+              {[...new Set([...TALK_VOICES, ...(settings ? [settings.voice] : [])])].map(
+                (voice) => (
+                  <Select.Item key={voice} value={voice}>
+                    {voice}
+                  </Select.Item>
+                )
+              )}
+            </Select.Content>
+          </Select.Root>
+        }
+      />
+      <SettingsRow
+        label="Voice effort"
+        description="Whether the voice model reasons before it answers. High follows instructions and multi-step requests more closely; off answers sooner. The cost is the same. Changing it reopens the line."
+        control={
+          <Select.Root
+            value={settings?.effort ?? 'high'}
+            disabled={!settings}
+            onValueChange={(effort) => {
+              if (effort && isTalkEffort(effort)) void talk.updateSettings({ effort });
+            }}
+          >
+            <Select.Trigger className="w-[140px]">
+              <Select.Value>{settings ? TALK_EFFORT_LABELS[settings.effort] : ''}</Select.Value>
             </Select.Trigger>
             <Select.Content align="end">
               {Object.entries(TALK_EFFORT_LABELS).map(([id, label]) => (
@@ -1157,8 +1193,8 @@ const TalkLineSettings = observer(function TalkLineSettings() {
         label="Daily limit (US dollars)"
         description={
           usage
-            ? `Spent today: $${usage.usd.toFixed(2)} over ${usage.responses} responses and ${usage.sessions} sessions. At the limit the line closes until tomorrow and the text conductor takes over. 0 is no limit.`
-            : '0 is no limit.'
+            ? `Spent today: $${usage.usd.toFixed(2)} over ${Math.round(usage.seconds / 60)} minutes open, ${usage.responses} responses and ${usage.sessions} sessions. Grok Voice is $0.08 a minute the line is open. At the limit the line closes until tomorrow and the text conductor takes over. 0 is no limit.`
+            : 'Grok Voice is $0.08 a minute the line is open. 0 is no limit.'
         }
         control={
           <CommitInput

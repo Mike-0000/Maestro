@@ -145,6 +145,21 @@ export class ActivityLedger {
     };
   }
 
+  /** What the conductor typed into an agent lately, by its exact name, oldest first. */
+  sentTo(agent: string): string[] {
+    const wanted = agent.toLowerCase();
+    return this.turns.flatMap((turn) =>
+      turn.actions.flatMap((action) =>
+        action.tool === 'send_to_agent' &&
+        action.text &&
+        !action.status &&
+        action.agent?.toLowerCase() === wanted
+          ? [action.text]
+          : []
+      )
+    );
+  }
+
   clear(): void {
     this.turns = [];
   }
@@ -182,7 +197,7 @@ export class ActivityLedger {
           : `replied “${clip(turn.reply, CONTEXT_TEXT_CHARS)}”`;
       // What was sent already quotes the developer when the text went through unchanged.
       const said =
-        sends.length > 0 && turn.route !== 'llm'
+        sends.length > 0 && turn.route !== 'llm' && turn.route !== 'line'
           ? ''
           : `you said “${clip(turn.said, CONTEXT_SAID_CHARS)}” → `;
       lines.push(`- ${formatAgo(turn.at, now)}: ${said}${did}`);

@@ -147,6 +147,42 @@ const ACCELERATOR_LABELS: Readonly<Record<string, string>> = {
   numdec: 'Numpad .',
 };
 
+const LABEL_ACCELERATORS: Readonly<Record<string, string>> = {
+  ctrl: 'Control',
+  control: 'Control',
+  win: 'Super',
+  alt: 'Alt',
+  shift: 'Shift',
+  enter: 'Return',
+  'num lock': 'Numlock',
+  'scroll lock': 'Scrolllock',
+  'caps lock': 'Capslock',
+  'numpad +': 'numadd',
+  'numpad -': 'numsub',
+  'numpad *': 'nummult',
+  'numpad /': 'numdiv',
+  'numpad .': 'numdec',
+};
+
+/**
+ * The Electron accelerator for a stored shortcut, which may hold its display label instead
+ * ("Scroll Lock", "Ctrl + Alt + Space"): Electron refuses a label, and a shortcut saved that way
+ * never registered at all. An accelerator comes back unchanged.
+ */
+export function acceleratorFromStored(stored: string): string {
+  const trimmed = stored.trim();
+  if (!trimmed) return '';
+  const tokens = trimmed.includes(' + ') ? trimmed.split(' + ') : trimmed.split(/\+(?=.)/u);
+  return tokens
+    .map((token) => {
+      const lower = token.trim().toLowerCase();
+      const numpad = /^numpad (\d)$/u.exec(lower);
+      if (numpad?.[1]) return `num${numpad[1]}`;
+      return LABEL_ACCELERATORS[lower] ?? token.trim();
+    })
+    .join('+');
+}
+
 /** Human-readable form of a stored accelerator, e.g. `Control+Alt+Space` -> `Ctrl + Alt + Space`. */
 export function acceleratorLabel(accelerator: string): string {
   return accelerator

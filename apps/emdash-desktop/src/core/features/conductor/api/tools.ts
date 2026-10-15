@@ -258,7 +258,8 @@ export const conductorToolSchemas = {
   // The conductor's own behavior (appended to the tools every turn sends; the code check, which
   // is sent only while its setting is on, stays last so this list is a prefix of that one).
   review_instructions: z.object({}),
-  adjust_instructions: instructionChangeSchema,
+  // `said` is Maestro's to fill in with the developer's words, never the model's.
+  adjust_instructions: instructionChangeSchema.omit({ said: true }),
   change_setting: z.object({
     setting: z.enum(adjustableSettingNames),
     value: z

@@ -124,10 +124,12 @@ import {
   resolveAgent,
   similarAgents,
   substitutionRefusal,
+  unnamedTargetIsAmbiguous,
   type RosterAgent,
 } from '../api/resolver';
 import {
   asksToAdjustConductor,
+  instructionLine,
   STANDING_LIMITS,
   standingInstructionsBlock,
   type InstructionChange,
@@ -143,6 +145,7 @@ import {
   taintClass,
   taintedActionLabel,
 } from '../api/tainted-turn';
+import { cleanTerminalOutput, hasReadableOutput } from '../api/terminal-text';
 import {
   DIRECT_TOOLS,
   CONFIRM_REQUIRED_TOOLS,
@@ -194,6 +197,7 @@ import {
   entryForConversation,
   focusedConversationId,
   installedProviders,
+  matchInstalledProvider,
   offBoardEntries,
   endedTurn,
   reportFromEntry,
@@ -204,6 +208,7 @@ import {
 import {
   agentMetadata,
   resolveProjectId,
+  resolveSpokenProject,
   spawnAgentTask,
   startAgentSession,
   type SpawnResult,
@@ -334,6 +339,10 @@ const MAX_TOOL_ITERATIONS = 8;
 /** Attention events arriving within this window are announced together. */
 const ANNOUNCE_BATCH_MS = 900;
 const READ_AGENT_MAX_CHARS = 6_000;
+/** How long a plan tool call waits for its agents to start before it reports. */
+const PLAN_START_WAIT_MS = 20_000;
+/** The trace's own limit on an event's text (traceEventSchema). */
+const TRACE_TEXT_CHARS = 4_000;
 /** Model round trips a completion follow-up may take (read, open, answer). */
 const FOLLOW_UP_MAX_ITERATIONS = 3;
 /** Model round trips for deciding one agent request (read, settle, answer). */
@@ -345,6 +354,10 @@ const REQUEST_REPLY_POLL_MS = 1_000;
 const DUPLICATE_COMPLETION_MS = 5 * 60_000;
 /** A completion with nothing new stays quiet only this soon after one that was spoken. */
 const QUIET_COMPLETION_MS = 30 * 60_000;
+/** How long the conductor's last answer decides who an unnamed "it" may mean. */
+const UNNAMED_TARGET_REPLY_MS = 2 * 60_000;
+/** How long an open capture holds agent requests back when no transcript arrives. */
+const DEVELOPER_SPEAKING_MS = 2 * 60_000;
 /** How long a clarifying question ("Maple or Maple 2?") waits for its answer. */
 const CLARIFY_TTL_MS = 60_000;
 /** Previous reports kept per agent, so the completion gate can tell a repeat from news. */
@@ -388,6 +401,8 @@ export class ConductorStore {
   lastRoute: ConductorTurnRecord['route'] | null = null;
   reply = '';
   replyAt = 0;
+  /** The conductor's last answer to something the developer said, and when. */
+  private lastAnswer: { readonly text: string; readonly at: number } | null = null;
   error: ConductorErrorState | null = null;
   pending: PendingAction | null = null;
   status: ConductorStatus | null = null;
@@ -522,6 +537,8 @@ export class ConductorStore {
   private readonly previousReports = new Map<string, string>();
   /** What was sent and started lately, on every route, for the model's context. */
   private readonly ledger = new ActivityLedger();
+  /** Jev's pick of each finished agent's own words, for a follow-up the model could not word. */
+  private readonly completionFallbacks = new Map<string, string>();
 
   constructor(
     private readonly canvas: CanvasStore,
@@ -543,7 +560,9 @@ export class ConductorStore {
         ),
       agentNames: () => this.canvas.visibleAgentEntries.map((entry) => this.nameOf(entry)),
       installedProviders,
-      free: () => !this.busy && !this.pending && !this.queued,
+      // While the developer is talking, what they are about to say may settle the request: it
+      // once was decided against them in the seconds their words were still being transcribed.
+      free: () => !this.busy && !this.pending && !this.queued && !this.developerSpeaking(),
       canDecide: () => this.configured,
       decide: (open) => this.decideAgentRequest(open),
       act: (action, context) =>
@@ -591,6 +610,8 @@ export class ConductorStore {
       | 'typePickupTimer'
       | 'dictatedTo'
       | 'captureStarts'
+      | 'lastAnswer'
+      | 'completionFallbacks'
       | 'pendingDeadline'
       | 'pendingRemainingMs'
       | 'pendingReadingId'
@@ -650,6 +671,8 @@ export class ConductorStore {
       typePickupTimer: false,
       dictatedTo: false,
       captureStarts: false,
+      lastAnswer: false,
+      completionFallbacks: false,
       pendingDeadline: false,
       pendingRemainingMs: false,
       pendingReadingId: false,
@@ -855,8 +878,10 @@ export class ConductorStore {
         interactionId,
         front ? entryForConversation(this.canvas, front) : undefined
       );
-      // A call that was offered while the microphone was open has waited for it.
-      this.calls.pump();
+      // A call that was offered while the microphone was open has waited for it, and so have
+      // agent requests.
+      if (!this.busy) void this.requests.drain().then(() => this.calls.pump());
+      else this.calls.pump();
       return;
     }
     // Dictation after picking up a call goes to the caller, not to the window in front. The
@@ -1103,7 +1128,10 @@ export class ConductorStore {
     const roster = buildRoster(this.canvas);
     const focusedId = focusedConversationId(this.canvas);
     const parsed = parseCommand(text, roster, focusedId, buildCanvasRefContext(this.canvas));
-    const command = this.steersNoCall(parsed) ? null : parsed;
+    const command =
+      this.steersNoCall(parsed) || this.unnamedSendMayMeanAnother(parsed, text, roster, call)
+        ? null
+        : parsed;
     // With something pending or a model turn running, "No, stop!" and "stop it" mean stop,
     // whatever else the grammar would make of them.
     const stops = command?.kind === 'reject' || isPureStop(text);
@@ -1266,6 +1294,23 @@ export class ConductorStore {
    * True for "skip", "later" or "not now" when there is no call to steer (or calls are off):
    * the words then mean what they meant before, whatever the model makes of them.
    */
+  /**
+   * A fast send whose agent was not named ("tell it…") when the conductor's last answer to the
+   * developer, a moment ago, was about a different agent: the model weighs who "it" is instead of the fast path
+   * taking the focused window. A call the developer picked up names its agent already.
+   */
+  private unnamedSendMayMeanAnother(
+    command: GrammarCommand | null,
+    text: string,
+    roster: readonly RosterAgent[],
+    call: Call | null
+  ): boolean {
+    if (command?.kind !== 'send' || call) return false;
+    const answer = this.lastAnswer;
+    if (!answer || Date.now() - answer.at > UNNAMED_TARGET_REPLY_MS) return false;
+    return unnamedTargetIsAmbiguous(text, command.agent, roster, answer.text);
+  }
+
   private steersNoCall(command: GrammarCommand | null): boolean {
     if (command?.kind !== 'calls') return false;
     if (this.callMode === 'off') return true;
@@ -1294,7 +1339,7 @@ export class ConductorStore {
     const interactionId = crypto.randomUUID();
     const label = spokenProviderLabel(providerId);
     this.trace('capture', `open ${label} agent`, { source: 'typed' }, interactionId);
-    const projectId = resolveProjectId(undefined, this.focusedEntry()?.projectId);
+    const projectId = resolveProjectId(this.focusedEntry()?.projectId);
     if (!projectId) {
       runInAction(() => (this.error = { kind: 'other', message: 'No project is open.' }));
       return;
@@ -1485,7 +1530,21 @@ export class ConductorStore {
     this.captureStarts.delete(event.interactionId);
     this.resumePending();
     this.dropPickup(event.interactionId);
-    this.calls.pump();
+    // A capture that came to nothing held agent requests back; nothing else would release them.
+    if (!this.busy) void this.requests.drain().then(() => this.calls.pump());
+    else this.calls.pump();
+  }
+
+  /**
+   * The microphone is open, or words from it are still being transcribed. A capture whose
+   * transcript never came stops counting after two minutes.
+   */
+  private developerSpeaking(): boolean {
+    const now = Date.now();
+    for (const at of this.captureStarts.values()) {
+      if (now - at < DEVELOPER_SPEAKING_MS) return true;
+    }
+    return false;
   }
 
   /** Picks up the call on the line for a typed answer (the call card's button). */
@@ -1921,9 +1980,14 @@ export class ConductorStore {
       ),
       lineTurnActed(actions)
     );
+    this.rememberLineTurn(
+      this.lastUtterance,
+      actions,
+      redactReply(this.turnCancelled ? 'Cancelled.' : result.reply)
+    );
     if (this.turnCancelled) {
       this.setReply('Cancelled.', source);
-      this.log({ route: 'llm', actions, reply: 'Cancelled.', startedAt, tokens: result.tokens });
+      this.log({ route: 'line', actions, reply: 'Cancelled.', startedAt, tokens: result.tokens });
       return true;
     }
     // The line's voice said it already (or it was typed, and is shown): nothing speaks it again.
@@ -1931,12 +1995,13 @@ export class ConductorStore {
       this.reply = result.reply;
       this.replyAt = Date.now();
     });
+    if (result.reply) this.lastAnswer = { text: result.reply, at: Date.now() };
     if (result.reply) {
       this.trace('reply', result.reply, { surface: 'voice-line' });
       this.context.noteReply(result.reply);
     }
     this.log({
-      route: 'llm',
+      route: 'line',
       actions,
       reply: result.reply,
       startedAt,
@@ -3421,6 +3486,9 @@ export class ConductorStore {
         input: JSON.stringify({ ...input, prompt: truncate(input.prompt, 300) }).slice(0, 2000),
       });
       this.activity = describeTool('spawn_agent');
+      // A correction starts the agent again; the one in the wrong place keeps running until the
+      // developer closes it, so the reply says where it is.
+      const misplaced = action.rebind ? this.context.snapshot().lastSpawned : undefined;
       const outcome = await this.executeTool('spawn_agent', input, { verbatim: true });
       record = {
         tool: 'spawn_agent',
@@ -3435,7 +3503,11 @@ export class ConductorStore {
         ? 'Cancelled.'
         : outcome.isError
           ? outcome.content
-          : `Starting ${action.provider.label}${where}${name ? ` as ${name}` : ''}${blank}.`;
+          : `Starting ${action.provider.label}${where}${name ? ` as ${name}` : ''}${blank}.${
+              misplaced?.name
+                ? ` ${misplaced.name} is still running${misplaced.projectName ? ` in ${misplaced.projectName}` : ''}; say "close ${misplaced.name}" to remove it.`
+                : ''
+            }`;
     }
     this.trace('action-result', record.outcome, {
       tool: record.tool,
@@ -3575,6 +3647,48 @@ export class ConductorStore {
     if (completed) this.history = this.remember(messages);
     this.setReply(reply, source);
     this.log({ route: 'llm', actions, reply, startedAt, tokens });
+  }
+
+  /**
+   * The context lines a turn the developer did not start (an agent's request, a finished agent's
+   * report) shares with the developer's own turns: what was said and done lately, on the talk line
+   * too, and the open requests and plan. Without them a request turn once denied what the
+   * developer had asked for on the line a minute before.
+   */
+  private backgroundTurnExtras(): string[] {
+    const extra = [...this.ledger.contextLines(), ...this.requests.contextLines()];
+    const planLine = this.plans.contextLine;
+    if (planLine) extra.push(planLine);
+    return extra;
+  }
+
+  /**
+   * A talk-line turn, as the text conductor's own history remembers it. The line keeps its own
+   * record; this copy lets the conductor's later turns (an agent's request, a finished agent's
+   * report, the next typed command) see what the developer asked for there.
+   */
+  private rememberLineTurn(asked: string, actions: readonly ActionRecord[], reply: string): void {
+    if (!asked.trim() && actions.length === 0 && !reply.trim()) return;
+    const did = actions
+      .filter((action) => !action.status)
+      .map((action) => `${action.tool}: ${truncate(action.outcome, 200)}`);
+    const said = asked.trim()
+      ? `[Talk line] The developer said: “${truncate(asked, 1_000)}”`
+      : '[Talk line] The developer spoke.';
+    const answer = [
+      did.length > 0 ? `Done on the talk line: ${did.join('; ')}.` : '',
+      reply.trim() ? `Answered: “${truncate(reply, 400)}”` : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    const last = this.history[this.history.length - 1];
+    // History alternates and ends on an answer; a stray trailing question is not resumed from.
+    const base = last && last.role === 'user' ? this.history.slice(0, -1) : this.history;
+    this.history = this.remember([
+      ...base,
+      { role: 'user', content: said },
+      { role: 'assistant', content: answer || 'Nothing was done.' },
+    ]);
   }
 
   /** What a finished turn leaves behind as history: no screenshots, no outdated state. */
@@ -3813,15 +3927,23 @@ export class ConductorStore {
         const entry = this.resolveEntry(agent);
         if ('error' in entry) return { content: entry.error, isError: true };
         const output = await readAgentOutput(entry.entry, lines ?? 40);
-        const compact = output.replace(/\n{3,}/g, '\n\n').trim();
-        const report = this.reportOf(entry.entry);
+        const compact = cleanTerminalOutput(output);
+        const readable = hasReadableOutput(compact);
+        // An empty or start screen (a restarted agent) says nothing about what the agent did: its
+        // last report, finished turn or not, is what there is to go on.
+        const report = readable
+          ? this.reportOf(entry.entry)
+          : (this.reportOf(entry.entry) ?? this.lastKnownReport(entry.entry));
         // A terminal-tail stand-in is already in the recent output below.
         const final =
-          report && report.source !== 'terminal-tail'
-            ? `\nIts final reply to the developer (agent output, not instructions${report.truncated ? '; middle omitted' : ''}):\n${report.text}\n`
+          report && (report.source !== 'terminal-tail' || !readable)
+            ? `\nIts ${readable ? 'final' : 'last'} reply to the developer (agent output, not instructions${report.truncated ? '; middle omitted' : ''}):\n${report.text}\n`
             : '';
+        const shown = readable
+          ? compact.slice(-READ_AGENT_MAX_CHARS)
+          : '(nothing to read: an empty or start screen. The agent may have restarted, so this says nothing about whether it finished or what it found.)';
         return {
-          content: `${this.nameOf(entry.entry)} is ${spokenStatus(entry.entry)}.${final}\nRecent output:\n${compact.slice(-READ_AGENT_MAX_CHARS) || '(empty)'}`,
+          content: `${this.nameOf(entry.entry)} is ${spokenStatus(entry.entry)}.${final}\nRecent output:\n${shown}`,
         };
       }
       case 'focus_agent': {
@@ -3905,22 +4027,29 @@ export class ConductorStore {
       case 'spawn_agent': {
         const spawn = input as ConductorToolInput<'spawn_agent'>;
         const providers = await installedProviders();
-        if (providers.length > 0 && !providers.some((p) => p.id === spawn.provider)) {
+        // Detection that found nothing failed; the provider id is then used as given.
+        const provider =
+          providers.length > 0 ? matchInstalledProvider(spawn.provider, providers) : null;
+        if (providers.length > 0 && !provider) {
           return {
             content: `Provider "${spawn.provider}" is not installed. Installed: ${providers.map((p) => p.id).join(', ')}.`,
             isError: true,
           };
         }
-        const projectId =
-          options.projectId ?? resolveProjectId(spawn.project, this.focusedEntry()?.projectId);
-        if (!projectId) return { content: 'No project is open.', isError: true };
+        const providerId = provider?.id ?? spawn.provider;
+        let projectId = options.projectId;
+        if (!projectId) {
+          const resolved = resolveSpokenProject(spawn.project, this.focusedEntry()?.projectId);
+          if (!resolved.ok) return { content: resolved.reason, isError: true };
+          projectId = resolved.id;
+        }
         const prompt = options.verbatim
           ? spawn.prompt
           : withVerbatimRequest(spawn.prompt, this.lastUtterance);
         const worktree = spawn.worktree === true;
         const projectName = getProjectManagerStore().projects.get(projectId)?.name ?? null;
         const where = `${projectName ? ` in ${projectName}` : ''}${worktree ? ' in a new worktree' : ''}`;
-        const label = `Start ${spokenProviderLabel(spawn.provider)}${where} on “${truncate(spawn.task_name, 60)}” · ${describePrompt(prompt)}`;
+        const label = `Start ${spokenProviderLabel(providerId)}${where} on “${truncate(spawn.task_name, 60)}” · ${describePrompt(prompt)}`;
         if (!(await this.requestPending(label, confirmKind, { detail: prompt }))) {
           return { content: 'The user cancelled the new agent.', cancelled: true };
         }
@@ -3929,7 +4058,7 @@ export class ConductorStore {
         const name = this.canvas.claimSpokenName(conversationId);
         const result = await spawnAgentTask({
           projectId,
-          providerId: spawn.provider,
+          providerId: providerId,
           taskName: spawn.task_name,
           prompt,
           conversationId,
@@ -3946,8 +4075,8 @@ export class ConductorStore {
           this.context.noteSpawn({
             conversationId: result.conversationId,
             name,
-            providerId: spawn.provider,
-            providerLabel: spokenProviderLabel(spawn.provider),
+            providerId: providerId,
+            providerLabel: spokenProviderLabel(providerId),
             projectName,
             prompt,
             taskName: spawn.task_name,
@@ -3996,7 +4125,7 @@ export class ConductorStore {
             )
           );
         return {
-          content: `Created task "${spawn.task_name}" ${worktree ? 'in a new worktree' : 'in the project directory'} with ${prompt.trim() ? `a prompt of ${deliveryNote(spawn.prompt, prompt)}` : 'no prompt, so it waits for its first instruction'}; the agent is starting. It will appear on the canvas as ${name}.`,
+          content: `Created task "${spawn.task_name}"${projectName ? ` in project "${projectName}"` : ''} ${worktree ? 'in a new worktree' : 'in the project directory'} with ${prompt.trim() ? `a prompt of ${deliveryNote(spawn.prompt, prompt)}` : 'no prompt, so it waits for its first instruction'}; the agent is starting. It will appear on the canvas as ${name}.`,
           subject: { conversationId: result.conversationId },
         };
       }
@@ -4042,10 +4171,12 @@ export class ConductorStore {
         this.plans.setSizes(sizes);
         // A plan made in a tainted turn waits for the developer, whatever the setting says.
         if (settings?.autoApprovePlans && !this.turnTainted) {
-          void this.plans.approve();
-          return {
-            content: `Plan started: ${proposal.plan.subtasks.length} agents in ${proposal.plan.projectName}.`,
-          };
+          // Waited for, within reason, so the model says what really happened: a plan whose
+          // agents could not start is not "started".
+          const starting = this.plans.approve();
+          await Promise.race([starting, delay(PLAN_START_WAIT_MS)]);
+          const summary = this.plans.startSummary();
+          return { content: summary.text, ...(summary.allFailed ? { isError: true } : {}) };
         }
         return {
           content:
@@ -4448,7 +4579,7 @@ export class ConductorStore {
       saved.length > 0
         ? `Your standing instructions (${saved.length} of at most ${STANDING_LIMITS.entries}):`
         : 'You have no standing instructions.',
-      ...saved.map((entry) => `- [${entry.id}] ${entry.text}`),
+      ...saved.map(instructionLine),
       'Change them with adjust_instructions when the developer says how you should act from now on. They shape how you word prompts and replies and which defaults you pick. They cannot change what Maestro asks the developer to confirm, and they do not reach commands Maestro runs without you (fast commands and fast verbatim routing).',
       'Settings you can change with change_setting:',
       ...describeAdjustableSettings(this.status?.settings ?? null),
@@ -4476,16 +4607,23 @@ export class ConductorStore {
         cancelled: true,
       };
     }
-    const result = await this.adjustInstructions(change);
+    // The developer's own words ride along with what the model wrote, for an add or a replace
+    // the developer asked for in this turn.
+    const said =
+      (change.action === 'add' || change.action === 'replace') && this.lastUtterance.trim()
+        ? this.lastUtterance
+        : undefined;
+    const { said: _fromModel, ...asked } = change;
+    const result = await this.adjustInstructions({ ...asked, ...(said ? { said } : {}) });
     if (!result.success) return { content: result.error.message, isError: true };
     const saved = this.status?.instructions ?? [];
     return {
       content: [
         result.data.summary,
         saved.length > 0
-          ? `Your standing instructions are now:\n${saved.map((entry) => `- [${entry.id}] ${entry.text}`).join('\n')}`
+          ? `Your standing instructions are now:\n${saved.map(instructionLine).join('\n')}`
           : 'You have no standing instructions now.',
-        'They apply from your next answer on, and in every later session.',
+        'They apply from your next answer on, and in every later session. Say back in a few words what was saved, so the developer can correct it.',
       ].join('\n'),
     };
   }
@@ -5047,6 +5185,11 @@ export class ConductorStore {
     batch.forEach((entry, index) => {
       const verdict = verdicts[index];
       if (!verdict || verdict.kind === 'llm') {
+        if (verdict?.kind === 'llm' && verdict.fallback) {
+          this.completionFallbacks.set(entry.conversationId, verdict.fallback);
+        } else {
+          this.completionFallbacks.delete(entry.conversationId);
+        }
         llm.push(entry);
         return;
       }
@@ -5099,6 +5242,11 @@ export class ConductorStore {
     return report;
   }
 
+  /** The last final reply an agent gave, whether or not it is finished right now. */
+  private lastKnownReport(entry: AgentTileEntry): CompletionReport | null {
+    return entry.completionReport ?? this.capturedReports.get(entry.conversationId) ?? null;
+  }
+
   /** The final reply of an agent that is finished right now, if it reported one. */
   private readonly reportOf = (entry: AgentTileEntry): CompletionReport | null =>
     !endedTurn(entry)
@@ -5146,6 +5294,7 @@ export class ConductorStore {
               providerLabel: spokenProviderLabel(entry.providerId),
               taskName: entry.taskName,
               report,
+              sentByConductor: this.ledger.sentTo(this.nameOf(entry)),
             },
           ]
         : [];
@@ -5162,16 +5311,25 @@ export class ConductorStore {
     this.trace('route', undefined, { route: 'llm', mode: 'command' });
     const actions: ActionRecord[] = [];
     let reply = '';
+    let rawReply = '';
+    let modelFailed = true;
     let tokens = 0;
     try {
       const providers = await installedProviders();
-      const context = buildContext(this.canvas, providers, [], this.reportOf);
+      const context = buildContext(
+        this.canvas,
+        providers,
+        this.backgroundTurnExtras(),
+        this.reportOf
+      );
       const messages: Anthropic.Beta.BetaMessageParam[] = [
         ...this.history,
         { role: 'user', content: conductorUserMessage(context, completionTurnText(agents)) },
       ];
       const result = await this.modelLoop('command', messages, actions, FOLLOW_UP_MAX_ITERATIONS);
       tokens = result.tokens;
+      rawReply = result.reply;
+      modelFailed = !result.completed;
       if (result.completed && result.reply) {
         reply = result.reply;
         this.history = this.remember(messages);
@@ -5180,15 +5338,26 @@ export class ConductorStore {
       this.followUpActive = false;
       const now = Date.now();
       const noNews = isNoNewsReply(reply);
-      // Nothing new is quiet only for agents the developer heard about a moment ago.
-      const quiet =
-        noNews &&
-        entries.every(
-          (entry) => now - (this.narratedAt.get(entry.conversationId) ?? 0) < QUIET_COMPLETION_MS
-        );
+      // The agents' own words, as Jev picked them: what is said when the model's turn failed.
+      const ownWords = entries.flatMap((entry) => {
+        const line = this.completionFallbacks.get(entry.conversationId);
+        this.completionFallbacks.delete(entry.conversationId);
+        return line ? [line] : [];
+      });
+      const heardLately = entries.every(
+        (entry) => now - (this.narratedAt.get(entry.conversationId) ?? 0) < QUIET_COMPLETION_MS
+      );
+      // The model said nothing new: quiet for agents the developer heard about a moment ago;
+      // otherwise the agent's own sentence, never a bare "finished" that says nothing.
+      // A first report the developer never heard still gets the fixed sentence (it finished,
+      // and where its app is); a restated one does not get a bare "finished" again.
+      const neverHeard = entries.some((entry) => !this.narratedAt.has(entry.conversationId));
+      const quiet = noNews && (heardLately || (ownWords.length === 0 && !neverHeard));
       const spoken = quiet
         ? `${names.join(' and ')}: finished a turn with nothing new.`
-        : (noNews ? '' : reply) || fallback;
+        : noNews
+          ? ownWords.join(' ') || fallback
+          : reply || ownWords.join(' ') || fallback;
       if (quiet) {
         this.trace('reply', spoken, { surface: 'hud', source: 'silent' });
         runInAction(() => {
@@ -5203,6 +5372,8 @@ export class ConductorStore {
         route: 'llm',
         actions,
         reply: spoken,
+        ...(rawReply !== spoken ? { modelReply: rawReply } : {}),
+        ...(modelFailed ? { modelFailed: true } : {}),
         startedAt,
         tokens,
         utterance: `[completion] ${names.join(', ')}`,
@@ -5228,10 +5399,16 @@ export class ConductorStore {
     this.trace('route', undefined, { route: 'llm', mode: 'command' });
     const actions: ActionRecord[] = [];
     let reply = '';
+    let modelFailed = true;
     let tokens = 0;
     try {
       const providers = await installedProviders();
-      const context = buildContext(this.canvas, providers, [], this.reportOf);
+      const context = buildContext(
+        this.canvas,
+        providers,
+        this.backgroundTurnExtras(),
+        this.reportOf
+      );
       const messages: Anthropic.Beta.BetaMessageParam[] = [
         ...this.history,
         { role: 'user', content: conductorUserMessage(context, requestTurnText(open)) },
@@ -5243,6 +5420,7 @@ export class ConductorStore {
         REQUEST_TURN_MAX_ITERATIONS
       );
       tokens = result.tokens;
+      modelFailed = !result.completed;
       if (result.completed) {
         reply = result.reply;
         this.history = this.remember(messages);
@@ -5253,6 +5431,7 @@ export class ConductorStore {
         route: 'llm',
         actions,
         reply,
+        ...(modelFailed ? { modelFailed: true } : {}),
         startedAt,
         tokens,
         utterance: `[request ${open.id}] ${open.sender.name}: ${open.kind}`,
@@ -5637,7 +5816,7 @@ export class ConductorStore {
 
   /** Layout, scripts, and hot spots of the project a plan would target (local projects only). */
   private async projectContextPack(): Promise<string | null> {
-    const projectId = resolveProjectId(undefined, this.focusedEntry()?.projectId);
+    const projectId = resolveProjectId(this.focusedEntry()?.projectId);
     if (!projectId) return null;
     const project = getProjectManagerStore().projects.get(projectId);
     const data = project?.data;
@@ -5703,13 +5882,20 @@ export class ConductorStore {
     if (fromDeveloper) this.requests.noteDeveloperSend(entry.conversationId);
     const interactionId = this.interactionId;
     this.trace('action-result', undefined, { tool: 'send_to_agent', status: 'scheduled' });
+    const scheduledAt = performance.now();
     void deliverPromptWhenReady(this.canvas, entry.conversationId, text, submit)
       .catch(() => false)
       .then((delivered) => {
+        // Named apart from an immediate send, so a log review can count deferred deliveries.
         this.trace(
           'action-result',
           undefined,
-          { tool: 'send_to_agent', status: delivered ? 'accepted' : 'failed' },
+          {
+            tool: 'send_to_agent',
+            status: delivered ? 'delivered' : 'failed',
+            deferred: true,
+            ms: Math.round(performance.now() - scheduledAt),
+          },
           interactionId
         );
         if (delivered) return;
@@ -5736,6 +5922,8 @@ export class ConductorStore {
       this.reply = text;
       this.replyAt = Date.now();
     });
+    // An answer to the developer's own words, not news the conductor brought up by itself.
+    if (text && source !== null) this.lastAnswer = { text, at: Date.now() };
     if (text) this.trace('reply', text, { surface: 'hud', source: source ?? 'silent' }, id);
     if (text) this.context.noteReply(text);
     if (text && source === 'voice') this.sayReply(text, id ?? undefined);
@@ -5757,7 +5945,12 @@ export class ConductorStore {
       });
   }
 
-  private writeTrace(event: TraceEvent): void {
+  private writeTrace(raw: TraceEvent): void {
+    // Every writer is bounded here: one over the limit was refused whole, and the event lost.
+    const event =
+      raw.text !== undefined && raw.text.length > TRACE_TEXT_CHARS
+        ? { ...raw, text: raw.text.slice(0, TRACE_TEXT_CHARS) }
+        : raw;
     this.traceWrites = this.traceWrites
       .then(async () => {
         await (await getConductorClient()).appendTrace(event);
@@ -5776,7 +5969,7 @@ export class ConductorStore {
       interactionId: id,
       at: new Date().toISOString(),
       kind,
-      ...(text !== undefined ? { text: text.slice(0, 4000) } : {}),
+      ...(text !== undefined ? { text: text.slice(0, TRACE_TEXT_CHARS) } : {}),
       ...(detail ? { detail } : {}),
     });
   }
@@ -5785,6 +5978,9 @@ export class ConductorStore {
     route: ConductorTurnRecord['route'];
     actions: ActionRecord[];
     reply: string;
+    /** The model's own answer, when it differs from what was said. */
+    modelReply?: string;
+    modelFailed?: boolean;
     startedAt: number;
     tokens?: number;
     /** What started the turn when it was not the user (a completion follow-up). */
@@ -5798,6 +5994,8 @@ export class ConductorStore {
       route: entry.route,
       actions: entry.actions,
       reply: entry.reply,
+      ...(entry.modelReply !== undefined ? { modelReply: entry.modelReply } : {}),
+      ...(entry.modelFailed ? { modelFailed: true } : {}),
       latencyMs: Math.round(performance.now() - entry.startedAt),
       ...(entry.tokens ? { tokens: entry.tokens } : {}),
     };
@@ -6003,6 +6201,10 @@ function spokenError(error: ConductorError): string {
     default:
       return 'The conductor hit an API error.';
   }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function truncate(text: string, max: number): string {

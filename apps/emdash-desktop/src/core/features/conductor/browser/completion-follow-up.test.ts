@@ -52,6 +52,7 @@ vi.mock('@core/primitives/logging/browser/logger', () => ({
 vi.mock('./spawn', () => ({
   agentMetadata: vi.fn(async () => []),
   resolveProjectId: vi.fn(),
+  resolveSpokenProject: vi.fn(() => ({ ok: false, reason: 'No project is open.' })),
   spawnAgentTask: vi.fn(),
   startAgentSession: vi.fn(),
 }));
@@ -302,6 +303,26 @@ describe('completion follow-ups', () => {
       agent({ completionReport: buildCompletionReport('Still running, step 28 of 31.') }),
     ]);
     expect(mocks.runTurn).toHaveBeenCalledTimes(2);
+    expect(speech.announce).toHaveBeenCalledTimes(1);
+    expect(store.reply).toBe('Zulu: finished a turn with nothing new.');
+  });
+
+  it('stays on the HUD, never a bare "finished", when nothing is new long after the last word', async () => {
+    const { store, speech, announce } = setup(agent());
+    mocks.runTurn
+      .mockResolvedValueOnce(text('Zulu started the build loop; it is at step 28 of 31.'))
+      .mockResolvedValueOnce(text('NO_NEWS'));
+    await announce();
+    // The developer heard about Zulu well over half an hour ago.
+    const now = Date.now();
+    const later = vi.spyOn(Date, 'now').mockReturnValue(now + 31 * 60_000);
+    try {
+      await announce([
+        agent({ completionReport: buildCompletionReport('Still running, step 28 of 31.') }),
+      ]);
+    } finally {
+      later.mockRestore();
+    }
     expect(speech.announce).toHaveBeenCalledTimes(1);
     expect(store.reply).toBe('Zulu: finished a turn with nothing new.');
   });

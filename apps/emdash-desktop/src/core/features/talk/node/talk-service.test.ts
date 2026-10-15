@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { secret, type Secret } from '@emdash/shared';
@@ -32,158 +32,239 @@ const logger = {
 
 let dataDir: string;
 let secrets: MemorySecrets;
-const savedKey = process.env.OPENAI_API_KEY;
+const savedKey = process.env.XAI_API_KEY;
 
 function service(request: typeof fetch = vi.fn()): TalkService {
   return new TalkService({ secrets, dataDir } as unknown as ChorusHostServices, logger, request);
 }
 
-const offer = { sdp: 'v=0 offer', instructions: 'Be brief.', tools: [] };
+const asked = { instructions: 'Be brief.', tools: [] };
+
+function minted(value = 'xai-secret-1', expiresAt = 1_800_000_000) {
+  return vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => {
+    return new Response(JSON.stringify({ value, expires_at: expiresAt }), { status: 200 });
+  });
+}
 
 beforeEach(() => {
   dataDir = mkdtempSync(join(tmpdir(), 'talk-service-'));
   secrets = new MemorySecrets();
-  delete process.env.OPENAI_API_KEY;
+  delete process.env.XAI_API_KEY;
 });
 
 afterEach(() => {
   rmSync(dataDir, { recursive: true, force: true });
-  if (savedKey === undefined) delete process.env.OPENAI_API_KEY;
-  else process.env.OPENAI_API_KEY = savedKey;
+  if (savedKey === undefined) delete process.env.XAI_API_KEY;
+  else process.env.XAI_API_KEY = savedKey;
 });
 
-describe('TalkService.openCall', () => {
+describe('TalkService.openSession', () => {
   it('opens nothing while the line is off, and contacts nobody', async () => {
     const request = vi.fn();
-    const result = await service(request).openCall(offer);
+    const result = await service(request).openSession(asked);
     expect(result).toMatchObject({ success: false, error: { type: 'disabled' } });
     expect(request).not.toHaveBeenCalled();
   });
 
-  it('needs a key', async () => {
+  it('needs an xAI key', async () => {
     const talk = service();
     await talk.updateSettings({ enabled: true });
-    expect(await talk.openCall(offer)).toMatchObject({
+    expect(await talk.openSession(asked)).toMatchObject({
       success: false,
       error: { type: 'not-configured' },
     });
     expect((await talk.status()).hasKey).toBe(false);
   });
 
-  it('forwards the offer with the key and the session, and returns the answer', async () => {
-    await secrets.setSecret('chorus.credential.openai', secret('sk-test', 'openai'));
-    const request = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => {
-      return new Response('v=0 answer', { status: 201 });
-    });
-    const talk = service(request as unknown as typeof fetch);
-    await talk.updateSettings({ enabled: true, voice: 'cedar' });
+  it('takes the key from XAI_API_KEY when none is stored', async () => {
+    process.env.XAI_API_KEY = 'xai-env';
+    expect((await service().status()).hasKey).toBe(true);
+  });
 
-    const result = await talk.openCall({
-      ...offer,
+  it('mints a short-lived client secret with the key, and returns it with the session', async () => {
+    await secrets.setSecret('chorus.credential.xai', secret('xai-test', 'xai'));
+    const request = minted();
+    const talk = service(request as unknown as typeof fetch);
+    await talk.updateSettings({ enabled: true, voice: 'rex' });
+
+    const result = await talk.openSession({
+      ...asked,
       tools: [{ type: 'function', name: 'read_agent', description: 'Reads.', parameters: {} }],
     });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       success: true,
-      data: { sdp: 'v=0 answer', model: DEFAULT_TALK_SETTINGS.model, voice: 'cedar' },
+      data: {
+        url: 'wss://api.x.ai/v1/realtime?model=grok-voice-3.0',
+        clientSecret: 'xai-secret-1',
+        expiresAt: 1_800_000_000,
+        model: 'grok-voice-3.0',
+        voice: 'rex',
+        session: {
+          model: 'grok-voice-3.0',
+          instructions: 'Be brief.',
+          voice: 'rex',
+          tools: [{ name: 'read_agent' }],
+        },
+      },
     });
     const [url, init = {}] = request.mock.calls[0]!;
-    expect(url).toBe('https://api.openai.com/v1/realtime/calls');
+    expect(url).toBe('https://api.x.ai/v1/realtime/client_secrets');
     expect(init.method).toBe('POST');
-    expect((init.headers as Record<string, string>).authorization).toBe('Bearer sk-test');
-    const form = init.body as FormData;
-    expect(form.get('sdp')).toBe('v=0 offer');
-    const session = JSON.parse(String(form.get('session')));
-    expect(session).toMatchObject({
-      type: 'realtime',
-      model: DEFAULT_TALK_SETTINGS.model,
-      instructions: 'Be brief.',
-      tools: [{ name: 'read_agent' }],
-      audio: { output: { voice: 'cedar' } },
-    });
+    expect((init.headers as Record<string, string>).authorization).toBe('Bearer xai-test');
+    expect(JSON.parse(String(init.body))).toEqual({ expires_after: { seconds: 120 } });
+    // The key itself is never handed back.
+    expect(JSON.stringify(result)).not.toContain('xai-test');
     expect((await talk.status()).usageToday.sessions).toBe(1);
   });
 
-  it('reports a rejected key, a rate limit, and an unreachable provider', async () => {
-    await secrets.setSecret('chorus.credential.openai', secret('sk-test', 'openai'));
+  it('reports a rejected key, a rate limit, a missing secret, and an unreachable provider', async () => {
+    await secrets.setSecret('chorus.credential.xai', secret('xai-test', 'xai'));
     const respond = (status: number, body = '') =>
       vi.fn(async () => new Response(body, { status })) as unknown as typeof fetch;
 
     const rejected = service(respond(401));
     await rejected.updateSettings({ enabled: true });
-    expect(await rejected.openCall(offer)).toMatchObject({ error: { type: 'rejected-key' } });
+    expect(await rejected.openSession(asked)).toMatchObject({ error: { type: 'rejected-key' } });
 
-    expect(await service(respond(429)).openCall(offer)).toMatchObject({
+    expect(await service(respond(429)).openSession(asked)).toMatchObject({
       error: { type: 'rate-limited' },
     });
     expect(
-      await service(respond(400, JSON.stringify({ error: { message: 'bad session' } }))).openCall(
-        offer
-      )
-    ).toMatchObject({ error: { type: 'api-error', message: 'OpenAI error 400: bad session' } });
+      await service(
+        respond(400, JSON.stringify({ error: { message: 'bad request' } }))
+      ).openSession(asked)
+    ).toMatchObject({ error: { type: 'api-error', message: 'xAI error 400: bad request' } });
+    expect(
+      await service(respond(400, JSON.stringify({ error: 'no such team' }))).openSession(asked)
+    ).toMatchObject({ error: { type: 'api-error', message: 'xAI error 400: no such team' } });
+    expect(await service(respond(200, '{}')).openSession(asked)).toMatchObject({
+      error: { type: 'api-error', message: 'xAI sent no client secret.' },
+    });
 
     const down = service(
       vi.fn(async () => {
         throw new Error('network');
       }) as unknown as typeof fetch
     );
-    expect(await down.openCall(offer)).toMatchObject({ error: { type: 'unreachable' } });
+    expect(await down.openSession(asked)).toMatchObject({ error: { type: 'unreachable' } });
   });
 
   it('refuses a new session once the daily limit is spent', async () => {
-    await secrets.setSecret('chorus.credential.openai', secret('sk-test', 'openai'));
-    const request = vi.fn(async () => new Response('answer', { status: 200 }));
+    await secrets.setSecret('chorus.credential.xai', secret('xai-test', 'xai'));
+    const request = minted();
     const talk = service(request as unknown as typeof fetch);
-    await talk.updateSettings({ enabled: true, dailyUsd: 0.01 });
-    // One million uncached text tokens on the default model is four dollars.
-    const status = await talk.recordUsage(DEFAULT_TALK_SETTINGS.model, {
-      ...NO_TOKENS,
-      textIn: 1_000_000,
+    await talk.updateSettings({ enabled: true, dailyUsd: 0.05 });
+    // An hour open is $4.80.
+    const status = await talk.recordUsage(DEFAULT_TALK_SETTINGS.model, NO_TOKENS, {
+      seconds: 3_600,
     });
     expect(status.overBudget).toBe(true);
-    expect(status.usageToday.usd).toBeCloseTo(4, 5);
+    expect(status.usageToday.usd).toBeCloseTo(4.8, 5);
 
-    expect(await talk.openCall(offer)).toMatchObject({ error: { type: 'over-budget' } });
+    expect(await talk.openSession(asked)).toMatchObject({ error: { type: 'over-budget' } });
     expect(request).not.toHaveBeenCalled();
   });
 });
 
+describe('TalkService settings', () => {
+  it('moves settings saved for the OpenAI line to Grok Voice, and keeps the rest', async () => {
+    writeFileSync(
+      join(dataDir, 'talk-settings.json'),
+      JSON.stringify({
+        ...DEFAULT_TALK_SETTINGS,
+        enabled: true,
+        model: 'gpt-realtime-2.1',
+        voice: 'marin',
+        effort: 'low',
+        transcriptionModel: 'gpt-transcribe',
+        dailyUsd: 12,
+        listening: 'open',
+      })
+    );
+    const { settings } = await service().status();
+    expect(settings).toMatchObject({
+      enabled: true,
+      model: 'grok-voice-3.0',
+      voice: 'eve',
+      effort: 'none',
+      transcriptionModel: 'grok-transcribe',
+      dailyUsd: 12,
+      listening: 'open',
+    });
+  });
+
+  it('keeps a Grok voice that was chosen', async () => {
+    writeFileSync(
+      join(dataDir, 'talk-settings.json'),
+      JSON.stringify({ model: 'grok-voice-latest', voice: 'leo', effort: 'medium' })
+    );
+    expect((await service().status()).settings).toMatchObject({
+      model: 'grok-voice-latest',
+      voice: 'leo',
+      effort: 'high',
+    });
+  });
+});
+
 describe('TalkService usage', () => {
-  it('adds up responses written at the same time without losing one', async () => {
+  it('adds up reports written at the same time without losing one', async () => {
     const talk = service();
     await Promise.all(
       Array.from({ length: 5 }, () =>
-        talk.recordUsage('gpt-realtime-2.1-mini', { ...NO_TOKENS, audioOut: 1_000 })
+        talk.recordUsage(
+          'grok-voice-3.0',
+          { ...NO_TOKENS, textIn: 1_000 },
+          { seconds: 12, textInputs: 1 }
+        )
       )
     );
     const { usageToday } = await talk.status();
     expect(usageToday.responses).toBe(5);
-    expect(usageToday.tokens.audioOut).toBe(5_000);
-    expect(usageToday.usd).toBeCloseTo((5_000 / 1_000_000) * 20, 8);
+    expect(usageToday.seconds).toBe(60);
+    expect(usageToday.tokens.textIn).toBe(5_000);
+    expect(usageToday.usd).toBeCloseTo(0.08 + 5 * 0.004, 8);
+  });
+
+  it('counts the clock of an open line as time, not as a response', async () => {
+    const talk = service();
+    const { usageToday } = await talk.recordUsage('grok-voice-3.0', NO_TOKENS, { seconds: 30 });
+    expect(usageToday).toMatchObject({ responses: 0, seconds: 30 });
+    expect(usageToday.usd).toBeCloseTo(0.04, 8);
+  });
+
+  it('reads a usage file written before time was counted', async () => {
+    const day = new Date().toISOString().slice(0, 10);
+    writeFileSync(
+      join(dataDir, 'talk-usage.json'),
+      JSON.stringify({ day, usd: 1.5, responses: 3, sessions: 1, tokens: NO_TOKENS })
+    );
+    expect((await service().status()).usageToday).toMatchObject({ usd: 1.5, seconds: 0 });
   });
 });
 
 describe('sessionConfig', () => {
-  it('lets Maestro decide who answers each turn', () => {
-    const config = sessionConfig(DEFAULT_TALK_SETTINGS, 'x', []) as {
-      audio: { input: { turn_detection: Record<string, unknown> } };
-      reasoning?: unknown;
-    };
-    expect(config.audio.input.turn_detection).toEqual({
-      type: 'semantic_vad',
-      create_response: false,
-      interrupt_response: false,
+  it('takes turns by hand, so Maestro decides who answers each turn', () => {
+    const config = sessionConfig(DEFAULT_TALK_SETTINGS, 'x', []);
+    expect(config).toMatchObject({
+      model: 'grok-voice-3.0',
+      voice: 'eve',
+      reasoning: { effort: 'high' },
+      turn_detection: { type: null },
+      audio: {
+        input: {
+          format: { type: 'audio/pcm', rate: 24_000 },
+          transcription: { model: 'grok-transcribe' },
+        },
+        output: { format: { type: 'audio/pcm', rate: 24_000 } },
+      },
     });
-    expect(config.reasoning).toEqual({ effort: 'low' });
   });
 
-  it('interrupts by voice only when talk-over is on, and sends effort only to models that take it', () => {
-    const config = sessionConfig(
-      { ...DEFAULT_TALK_SETTINGS, talkOver: true, model: 'gpt-realtime-1.5' },
-      'x',
-      []
-    ) as { audio: { input: { turn_detection: Record<string, unknown> } }; reasoning?: unknown };
-    expect(config.audio.input.turn_detection.interrupt_response).toBe(true);
-    expect(config.reasoning).toBeUndefined();
+  it('sends the effort as Grok takes it, and nothing OpenAI-only', () => {
+    const config = sessionConfig({ ...DEFAULT_TALK_SETTINGS, effort: 'none' }, 'x', []);
+    expect(config.reasoning).toEqual({ effort: 'none' });
+    expect(config).not.toHaveProperty('type');
+    expect(config).not.toHaveProperty('tool_choice');
   });
 });

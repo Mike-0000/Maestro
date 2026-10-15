@@ -51,26 +51,19 @@ describe('tokensFromUsage', () => {
 });
 
 describe('talkCostUsd', () => {
-  const reply = {
-    textIn: 0,
-    cachedTextIn: 12_000,
-    audioIn: 40,
-    cachedAudioIn: 0,
-    textOut: 50,
-    audioOut: 160,
-  };
-
-  it('prices a spoken reply at about two cents on the full model and under a cent on mini', () => {
-    expect(talkCostUsd('gpt-realtime-2.1', reply)).toBeCloseTo(0.01752, 5);
-    expect(talkCostUsd('gpt-realtime-2.1-mini', reply)).toBeCloseTo(0.00444, 5);
+  it('prices an open minute at eight cents, and each text input at four tenths of a cent', () => {
+    expect(talkCostUsd('grok-voice-3.0', { seconds: 60, textInputs: 0 })).toBeCloseTo(0.08, 8);
+    expect(talkCostUsd('grok-voice-3.0', { seconds: 90, textInputs: 5 })).toBeCloseTo(0.14, 8);
+    expect(talkCostUsd('grok-voice-latest', { seconds: 3_600, textInputs: 0 })).toBeCloseTo(4.8, 8);
   });
 
   it('costs a model it does not know as the most expensive one', () => {
-    expect(talkCostUsd('some-future-model', reply)).toBe(talkCostUsd('gpt-realtime-2.1', reply));
+    const used = { seconds: 120, textInputs: 3 };
+    expect(talkCostUsd('some-future-model', used)).toBe(talkCostUsd('grok-voice-3.0', used));
   });
 
   it('never returns a negative or invalid amount', () => {
-    expect(talkCostUsd('gpt-realtime-2.1', NO_TOKENS)).toBe(0);
-    expect(talkCostUsd('gpt-realtime-2.1', { ...NO_TOKENS, textIn: Number.NaN })).toBe(0);
+    expect(talkCostUsd('grok-voice-3.0', { seconds: 0, textInputs: 0 })).toBe(0);
+    expect(talkCostUsd('grok-voice-3.0', { seconds: Number.NaN, textInputs: -2 })).toBe(0);
   });
 });

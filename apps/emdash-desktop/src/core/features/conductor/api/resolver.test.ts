@@ -5,6 +5,7 @@ import {
   normalizeSpoken,
   phoneticKey,
   resolveAgent,
+  unnamedTargetIsAmbiguous,
   type RosterAgent,
 } from './resolver';
 
@@ -298,5 +299,30 @@ describe('resolveAgent descriptions', () => {
     expect(resolveAgent('Sure', sure, null)).toMatchObject({ agent: { id: 'iris' } });
     expect(resolveAgent('Sure', sure, null, 'name').kind).toBe('none');
     expect(resolveAgent('the latest agent in chorus', projects, null, 'name').kind).toBe('none');
+  });
+});
+
+describe('unnamedTargetIsAmbiguous', () => {
+  const agents: RosterAgent[] = [
+    { id: 'iris', name: 'Iris', providerLabel: 'Claude', taskName: 'Enhanced audio research' },
+    { id: 'jasper', name: 'Jasper', providerLabel: 'Codex', taskName: 'Order submission restart' },
+  ];
+  const iris = agents[0]!;
+  const waiting = 'Jasper is waiting for you to sign in to PCBWay and Protolabs.';
+
+  it('flags "tell it" when the last words were about another agent', () => {
+    expect(
+      unnamedTargetIsAmbiguous('Tell it that I signed in to both.', iris, agents, waiting)
+    ).toBe(true);
+  });
+
+  it('keeps the fast path when the agent is named, or was the one talked about', () => {
+    expect(unnamedTargetIsAmbiguous('Tell Iris that I signed in.', iris, agents, waiting)).toBe(
+      false
+    );
+    expect(
+      unnamedTargetIsAmbiguous('Tell it to go on.', iris, agents, 'Iris and Jasper are done.')
+    ).toBe(false);
+    expect(unnamedTargetIsAmbiguous('Tell it to go on.', iris, agents, 'Sent.')).toBe(false);
   });
 });

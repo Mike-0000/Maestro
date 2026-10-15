@@ -10,7 +10,7 @@ import { findPlanOverlaps, scopedPrompt, type PlanInput, type PlanSubtask } from
 import { deliverPromptWhenReady } from './deferred-prompt';
 import type { InstalledProvider } from './roster';
 import { entryForConversation } from './roster';
-import { resolveProjectId, spawnAgentTask, startAgentSession } from './spawn';
+import { resolveSpokenProject, spawnAgentTask, startAgentSession } from './spawn';
 
 export type SubtaskState =
   | 'pending'
@@ -140,8 +140,17 @@ export class PlanStore {
         reason: `Plans are limited to ${options.maxAgents} agents; merge subtasks and propose again.`,
       };
     }
-    const projectId = resolveProjectId(input.project, options.preferredProjectId);
-    if (!projectId) return { ok: false, reason: 'No project is open. Ask the user to open one.' };
+    const project = resolveSpokenProject(input.project, options.preferredProjectId);
+    if (!project.ok) {
+      return {
+        ok: false,
+        reason:
+          project.reason === 'No project is open.'
+            ? 'No project is open. Ask the user to open one.'
+            : project.reason,
+      };
+    }
+    const projectId = project.id;
     const titles = new Set(input.subtasks.map((subtask) => subtask.title));
     if (titles.size !== input.subtasks.length) {
       return { ok: false, reason: 'Subtask titles must be unique.' };
@@ -209,6 +218,33 @@ export class PlanStore {
       if (subtask.state === 'pending') await this.spawn(subtask);
     }
     this.startRadar();
+  }
+
+  /**
+   * How the plan's start went, for the model that started it: which agents are running, and which
+   * failed and why. A plan once reported "started" while every agent in it had failed.
+   */
+  startSummary(): { text: string; allFailed: boolean } {
+    const plan = this.plan;
+    if (!plan) return { text: 'There is no plan.', allFailed: true };
+    const failed = plan.subtasks.filter((subtask) => subtask.state === 'failed');
+    const starting = plan.subtasks.filter(
+      (subtask) => subtask.state === 'pending' || subtask.state === 'spawning'
+    );
+    const waiting = plan.subtasks.filter((subtask) => subtask.state === 'waiting');
+    const running = plan.subtasks.length - failed.length - starting.length - waiting.length;
+    const parts = [
+      `Plan in ${plan.projectName}: ${running} of ${plan.subtasks.length} agents started`,
+    ];
+    if (starting.length > 0) parts.push(`${starting.length} still starting`);
+    if (waiting.length > 0) parts.push(`${waiting.length} waiting for an earlier subtask`);
+    let text = `${parts.join(', ')}.`;
+    if (failed.length > 0) {
+      text += ` Failed to start: ${failed
+        .map((subtask) => `"${subtask.title}" (${subtask.error ?? 'unknown error'})`)
+        .join('; ')}. Tell the developer.`;
+    }
+    return { text, allFailed: failed.length === plan.subtasks.length };
   }
 
   /** Attaches Jev's per-subtask size estimates to the proposed plan. */

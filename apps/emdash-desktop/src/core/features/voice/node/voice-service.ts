@@ -14,7 +14,12 @@ import {
   type VoiceSettings,
   type VoiceStatus,
 } from '../api/contract';
-import { HOLD_KEY_OFF, HoldComboTracker, holdComboKeycodes } from '../api/global-keys';
+import {
+  acceleratorFromStored,
+  HOLD_KEY_OFF,
+  HoldComboTracker,
+  holdComboKeycodes,
+} from '../api/global-keys';
 import { HoldToTalkMachine, type HoldOutput } from '../api/hold-to-talk';
 import type { BufferedDictationStream } from './buffered-dictation';
 import { DeepgramSttEngine } from './engines/deepgram';
@@ -356,7 +361,7 @@ export class VoiceService {
   private async applyGlobalShortcut(accelerator: string): Promise<void> {
     if (this.registeredShortcut) this.host.globalShortcuts.unregister(this.registeredShortcut);
     this.registeredShortcut = null;
-    const trimmed = accelerator.trim();
+    const trimmed = acceleratorFromStored(accelerator);
     if (!trimmed) return;
     try {
       if (this.host.globalShortcuts.register(trimmed, this.onGlobalToggle)) {

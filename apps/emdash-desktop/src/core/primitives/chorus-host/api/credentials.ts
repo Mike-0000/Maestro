@@ -8,6 +8,7 @@ export const chorusCredentialIds = [
   'typesafe',
   'openrouter',
   'gemini',
+  'xai',
 ] as const;
 export const chorusCredentialIdSchema = z.enum(chorusCredentialIds);
 export type ChorusCredentialId = z.infer<typeof chorusCredentialIdSchema>;

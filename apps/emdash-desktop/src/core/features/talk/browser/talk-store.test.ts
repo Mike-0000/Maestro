@@ -9,7 +9,7 @@ import type { TalkClient } from '../api/browser/client';
 import { DEFAULT_TALK_SETTINGS, type TalkSettings, type TalkStatus } from '../api/contract';
 import { NO_TOKENS } from '../api/usage';
 import { ROLLOVER_INPUT_TOKENS } from '../api/world-feed';
-import type { RealtimeEvent, SessionDeps, SessionState } from './realtime-session';
+import type { LineSessionDeps, RealtimeEvent, SessionState } from './grok-voice-session';
 import { TalkStore, type LineCapture, type SessionLike, type TalkDeps } from './talk-store';
 
 // The line end to end against a stand-in for the provider: its model is the conductor, every
@@ -24,7 +24,14 @@ function status(settings: Partial<TalkSettings> = {}, overrides: Partial<TalkSta
   return {
     settings: { ...DEFAULT_TALK_SETTINGS, enabled: true, ...settings },
     hasKey: true,
-    usageToday: { day: '2026-10-10', usd: 0, responses: 0, sessions: 0, tokens: NO_TOKENS },
+    usageToday: {
+      day: '2026-10-10',
+      usd: 0,
+      responses: 0,
+      sessions: 0,
+      seconds: 0,
+      tokens: NO_TOKENS,
+    },
     overBudget: false,
     ...overrides,
   } satisfies TalkStatus;
@@ -32,7 +39,7 @@ function status(settings: Partial<TalkSettings> = {}, overrides: Partial<TalkSta
 
 type FakeSession = SessionLike & {
   sent: RealtimeEvent[];
-  deps: Omit<SessionDeps, 'createPeer'>;
+  deps: LineSessionDeps;
   emit(event: RealtimeEvent): void;
   drop(): void;
 };
@@ -40,17 +47,26 @@ type FakeSession = SessionLike & {
 function harness(settings: Partial<TalkSettings> = {}) {
   const sessions: FakeSession[] = [];
   let current = status(settings);
-  const openCall = vi.fn(async (_input: { instructions: string; tools: { name: string }[] }) => ({
-    success: true as const,
-    data: { sdp: 'answer', model: 'm', voice: 'v' },
-  }));
+  const openSession = vi.fn(
+    async (_input: { instructions: string; tools: { name: string }[] }) => ({
+      success: true as const,
+      data: {
+        url: 'wss://example.test/realtime',
+        clientSecret: 'secret',
+        expiresAt: 0,
+        session: {},
+        model: 'm',
+        voice: 'v',
+      },
+    })
+  );
   const client = {
     getStatus: vi.fn(async () => current),
     updateSettings: vi.fn(async (patch: Partial<TalkSettings>) => {
       current = { ...current, settings: { ...current.settings, ...patch } };
       return current;
     }),
-    openCall,
+    openSession,
     recordUsage: vi.fn(async () => current),
   };
   const room = observable({ speaking: false, capturing: false, muted: false });
@@ -110,7 +126,7 @@ function harness(settings: Partial<TalkSettings> = {}) {
         sent: [],
         deps: sessionDeps,
         open: async () => {
-          await sessionDeps.exchange('offer');
+          await sessionDeps.connect();
           (session as { state: SessionState }).state = 'open';
           sessionDeps.onState('open');
         },
@@ -238,7 +254,7 @@ describe('opening the line', () => {
 
     expect(store.line).toBe('open');
     expect(track.enabled).toBe(false);
-    const call = client.openCall.mock.calls[0]![0];
+    const call = client.openSession.mock.calls[0]![0];
     expect(call.instructions).toContain('You are the conductor inside Maestro');
     expect(call.instructions).toContain('On the voice line');
     const tools = call.tools.map((tool) => tool.name);
@@ -265,7 +281,7 @@ describe('opening the line', () => {
 
   it('does not open when the provider refuses, and says why', async () => {
     const { store, client } = harness();
-    client.openCall.mockResolvedValueOnce({
+    client.openSession.mockResolvedValueOnce({
       success: false,
       error: { type: 'rejected-key', message: 'The OpenAI API key was rejected.' },
     } as never);
@@ -275,7 +291,7 @@ describe('opening the line', () => {
     expect(store.error).toBe('The OpenAI API key was rejected.');
     // A rejected key does not fix itself: no retry is scheduled.
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(client.openCall).toHaveBeenCalledTimes(1);
+    expect(client.openSession).toHaveBeenCalledTimes(1);
     store.dispose();
   });
 
@@ -542,10 +558,8 @@ describe('a turn of the model', () => {
     });
     expect(session.sent[1]).toMatchObject({ item: { id: 'state_2', role: 'system' } });
     expect(session.sent[2]).toEqual({ type: 'conversation.item.delete', item_id: 'state_1' });
-    expect(session.sent[3]).toEqual({
-      type: 'response.create',
-      response: { output_modalities: ['audio'] },
-    });
+    // Aloud is the provider's default.
+    expect(session.sent[3]).toEqual({ type: 'response.create' });
 
     said(session, 'Atlas is running the tests.');
     expect(conductor.showVoiceReply).toHaveBeenLastCalledWith('Atlas is running the tests.');
@@ -563,7 +577,7 @@ describe('a turn of the model', () => {
     const typed = line().turn({ text: 'hi', context: 'c', spoken: false });
     expect(session.sent.at(-1)).toEqual({
       type: 'response.create',
-      response: { output_modalities: ['text'] },
+      response: { modalities: ['text'] },
     });
     session.emit({ type: 'response.output_text.done', text: 'Hello.' });
     responseDone(session);
@@ -573,7 +587,7 @@ describe('a turn of the model', () => {
     void line().turn({ text: 'hi', context: 'c', spoken: true });
     expect(session.sent.at(-1)).toEqual({
       type: 'response.create',
-      response: { output_modalities: ['text'] },
+      response: { modalities: ['text'] },
     });
     store.dispose();
   });
@@ -652,7 +666,7 @@ describe('a turn of the model', () => {
     store.dispose();
   });
 
-  it('hands a screenshot to the model with the result', async () => {
+  it('tells the model a screenshot was left out, since it takes no images', async () => {
     const { store, open, line, conductor } = harness();
     const session = await open();
     conductor.lineTool.mockResolvedValueOnce({
@@ -663,8 +677,12 @@ describe('a turn of the model', () => {
     toolCall(session, 'c1', 'look_at_app');
     await settle();
     expect(session.sent.at(-1)).toMatchObject({
-      item: { content: [{ type: 'input_image', image_url: 'data:image/jpeg;base64,AAAA' }] },
+      item: {
+        type: 'function_call_output',
+        output: 'Screenshot taken.\n\n[An image left out: the voice model cannot see images.]',
+      },
     });
+    expect(JSON.stringify(session.sent)).not.toContain('input_image');
     store.dispose();
   });
 
@@ -949,14 +967,20 @@ describe('an exchange that is over', () => {
 });
 
 describe('the voice', () => {
-  it('says a sentence as written, outside the conversation and with no tools', async () => {
+  it('says a sentence as written, by the provider and not the model', async () => {
     const { store, open, line } = harness();
     const session = await open();
     const reading = line().say('Atlas finished.');
-    expect(session.sent[0]).toMatchObject({
-      type: 'response.create',
-      response: { conversation: 'none', tool_choice: 'none', metadata: { purpose: 'say' } },
-    });
+    expect(session.sent).toEqual([
+      {
+        type: 'conversation.item.create',
+        item: {
+          type: 'force_message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: 'Atlas finished.' }],
+        },
+      },
+    ]);
     session.emit({ type: 'output_audio_buffer.started' });
     expect(store.speaking).toBe(true);
     session.emit({ type: 'output_audio_buffer.stopped' });
@@ -1108,7 +1132,7 @@ describe('the daily limit', () => {
     await vi.advanceTimersByTimeAsync(ECHO_TAIL);
     expect(store.micOpen).toBe(true);
 
-    await store.updateSettings({ model: 'gpt-realtime-2.1-mini' });
+    await store.updateSettings({ model: 'grok-voice-latest' });
     await settle();
     expect(sessions).toHaveLength(2);
     store.dispose();
@@ -1117,14 +1141,14 @@ describe('the daily limit', () => {
   it('answers briefly unless told otherwise, and reopens to answer the other way', async () => {
     const { store, open, sessions, client } = harness();
     await open();
-    const brief = client.openCall.mock.calls[0]![0].instructions;
+    const brief = client.openSession.mock.calls[0]![0].instructions;
     expect(brief).toContain('say nothing before or while you call them');
     expect(brief).not.toContain('one or two short sentences');
 
     await store.updateSettings({ replies: 'normal' });
     await settle();
     expect(sessions).toHaveLength(2);
-    const normal = client.openCall.mock.calls[1]![0].instructions;
+    const normal = client.openSession.mock.calls[1]![0].instructions;
     expect(normal).toContain('one or two short sentences');
     expect(normal).not.toContain('say nothing before or while you call them');
     store.dispose();
@@ -1133,7 +1157,7 @@ describe('the daily limit', () => {
   it('gives the open session new standing instructions without a new connection', async () => {
     const { store, open, sessions, client, standing, conductor } = harness();
     const session = await open();
-    const opened = client.openCall.mock.calls[0]![0].instructions;
+    const opened = client.openSession.mock.calls[0]![0].instructions;
     expect(opened).not.toContain('Standing instructions');
 
     runInAction(() => standing.set('Standing instructions from the developer:\n- [i1] Be open.'));
@@ -1141,17 +1165,97 @@ describe('the daily limit', () => {
     expect(sessions).toHaveLength(1);
     const update = session.sent.find((event) => event.type === 'session.update');
     expect(update?.session).toEqual({
-      type: 'realtime',
       instructions: `${opened}\n\nStanding instructions from the developer:\n- [i1] Be open.`,
     });
     expect(conductor.traceLine).toHaveBeenCalledWith('instructed', expect.anything());
 
     // The next session opens with them, and is not told twice.
-    await store.updateSettings({ model: 'gpt-realtime-2.1-mini' });
+    await store.updateSettings({ model: 'grok-voice-latest' });
     await settle();
     expect(sessions).toHaveLength(2);
-    expect(client.openCall.mock.calls[1]![0].instructions).toContain('- [i1] Be open.');
+    expect(client.openSession.mock.calls[1]![0].instructions).toContain('- [i1] Be open.');
     expect(sentTypes(sessions[1]!)).not.toContain('session.update');
+    store.dispose();
+  });
+});
+
+describe('on Grok Voice', () => {
+  it('tells a sentence said as written from the turn that waits behind it', async () => {
+    const { store, open, line } = harness();
+    const session = await open();
+    const reading = line().say('Atlas finished.');
+    const result = line().turn({ text: 'hi', context: 'c', spoken: true });
+    // One voice at a time: the turn is not asked for while the sentence is said.
+    expect(sentTypes(session)).not.toContain('response.create');
+
+    // A force message's response carries no metadata; it is still the sentence's.
+    session.emit({ type: 'response.created', response: { id: 'say-1', metadata: null } });
+    session.emit({
+      type: 'response.done',
+      response: { id: 'say-1', status: 'completed', output: [{ type: 'message' }] },
+    });
+    session.emit({ type: 'output_audio_buffer.started', response_id: 'say-1' });
+    session.emit({ type: 'output_audio_buffer.stopped', response_id: 'say-1' });
+    await expect(reading).resolves.toBe(true);
+    expect(sentTypes(session).at(-1)).toBe('response.create');
+
+    session.emit({ type: 'response.created', response: { id: 'turn-1', metadata: null } });
+    said(session, 'Hello.');
+    session.emit({
+      type: 'response.done',
+      response: { id: 'turn-1', status: 'completed', output: [{ type: 'message' }] },
+    });
+    await expect(result).resolves.toMatchObject({ reply: 'Hello.', completed: true });
+    store.dispose();
+  });
+
+  it('reports each minute it is open, and the text it sent, for the daily limit', async () => {
+    const { store, open, line, client } = harness();
+    await open();
+    line().note('[Conductor] Atlas finished.');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(client.recordUsage).toHaveBeenLastCalledWith({
+      model: DEFAULT_TALK_SETTINGS.model,
+      tokens: NO_TOKENS,
+      seconds: 60,
+      // The state it was given on opening, and the note.
+      textInputs: 2,
+    });
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    store.dispose();
+    await settle();
+    expect(client.recordUsage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ seconds: 15, textInputs: 0 })
+    );
+  });
+
+  it('closes for the day when the time it was open spends the limit', async () => {
+    const { store, open, client } = harness();
+    await open();
+    client.recordUsage.mockResolvedValueOnce(status({}, { overBudget: true }));
+    await vi.advanceTimersByTimeAsync(60_000);
+    await settle();
+    expect(store.line).toBe('off');
+    expect(store.error).toBe("Today's talk line limit is used up.");
+    store.dispose();
+  });
+
+  it('carries a summary over that came only as written text', async () => {
+    const { store, open, line, sessions } = harness();
+    const session = await open();
+    const result = line().turn({ text: 'hi', context: 'c', spoken: false });
+    responseDone(session, { inputTokens: ROLLOVER_INPUT_TOKENS });
+    await result;
+    session.emit({ type: 'response.output_text.done', text: 'They were rebasing Atlas.' });
+    session.emit({
+      type: 'response.done',
+      response: { status: 'completed', metadata: { purpose: 'rollover' }, output: [] },
+    });
+    await settle();
+    expect(sessions).toHaveLength(2);
+    const carried = sessions[1]!.sent[1] as { item?: { content?: { text: string }[] } };
+    expect(carried.item?.content?.[0]?.text).toContain('They were rebasing Atlas.');
     store.dispose();
   });
 });

@@ -36,7 +36,11 @@ export type CompletionCandidate = {
 export type CompletionVerdict =
   | { kind: 'silent'; hud: string; reason: string }
   | { kind: 'speak'; text: string; reason: string }
-  | { kind: 'llm'; reason: string };
+  /**
+   * The model words it. `fallback` is the agent's own question or best sentence, said when the
+   * model's turn fails: a bare "finished" says nothing about what the agent reported.
+   */
+  | { kind: 'llm'; reason: string; fallback?: string };
 
 /** Report text as speakable sentences: markdown, code, and fragments removed. */
 export function reportSentences(text: string): string[] {
@@ -143,11 +147,6 @@ export function interpretCompletionGate(
   agents: readonly CompletionCandidate[]
 ): CompletionVerdict[] {
   return agents.map((agent, i) => {
-    const kind = choiceOf(answers, `a${i}_kind`);
-    if (!kind) return { kind: 'llm', reason: 'no-answer' };
-    if ((noulOf(answers, `a${i}_followup`) ?? 0) >= 0.5) {
-      return { kind: 'llm', reason: 'follow-up-requested' };
-    }
     const sentences = gate.sentences[i] ?? [];
     const pick = (id: string): string | null => {
       const answer = choiceOf(answers, id);
@@ -156,6 +155,19 @@ export function interpretCompletionGate(
       return index === null ? null : (sentences[index] ?? null);
     };
     const best = pick(`a${i}_best`);
+    const asked = pick(`a${i}_question`);
+    const fallback = asked
+      ? spokenLine(`${agent.name} asks:`, asked)
+      : best
+        ? spokenLine(`${agent.name}:`, best)
+        : null;
+    const llm = (reason: string): CompletionVerdict =>
+      fallback ? { kind: 'llm', reason, fallback } : { kind: 'llm', reason };
+    const kind = choiceOf(answers, `a${i}_kind`);
+    if (!kind) return llm('no-answer');
+    if ((noulOf(answers, `a${i}_followup`) ?? 0) >= 0.5) {
+      return llm('follow-up-requested');
+    }
     const novel = noulOf(answers, `a${i}_novel`);
     const confident = kind.confidence >= COMPLETION_CONFIDENCE;
     const quiet = (reason: string): CompletionVerdict => ({
@@ -174,16 +186,13 @@ export function interpretCompletionGate(
     ) {
       return quiet('repeat');
     }
-    if (!confident) return { kind: 'llm', reason: 'low-confidence' };
-    if (agent.report.source === 'terminal-tail') return { kind: 'llm', reason: 'terminal-tail' };
-    if (choice === 'terminal_prompt_only') return { kind: 'llm', reason: 'terminal-only' };
-    if (choice === 'needs_decision') {
-      const question = pick(`a${i}_question`);
-      if (question) {
-        return { kind: 'speak', text: spokenLine(`${agent.name} asks:`, question), reason: choice };
-      }
+    if (!confident) return llm('low-confidence');
+    if (agent.report.source === 'terminal-tail') return llm('terminal-tail');
+    if (choice === 'terminal_prompt_only') return llm('terminal-only');
+    if (choice === 'needs_decision' && asked) {
+      return { kind: 'speak', text: spokenLine(`${agent.name} asks:`, asked), reason: choice };
     }
-    if (!best) return { kind: 'llm', reason: 'no-sentence' };
+    if (!best) return llm('no-sentence');
     const prefix = choice === 'blocked_or_failed' ? `${agent.name} is stuck:` : `${agent.name}:`;
     return { kind: 'speak', text: spokenLine(prefix, best), reason: choice };
   });

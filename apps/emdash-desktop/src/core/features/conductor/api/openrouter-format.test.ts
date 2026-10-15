@@ -112,7 +112,7 @@ describe('toOpenAiMessages standing instructions', () => {
       {
         role: 'system',
         content: [
-          { type: 'text', text: 'SYS', cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: 'SYS', cache_control: { type: 'ephemeral', ttl: '1h' } },
           { type: 'text', text: 'STAND' },
         ],
       },
@@ -125,10 +125,52 @@ describe('toOpenAiMessages caching', () => {
     expect(toOpenAiMessages('SYS', [], { cacheSystem: true })).toEqual([
       {
         role: 'system',
-        content: [{ type: 'text', text: 'SYS', cache_control: { type: 'ephemeral' } }],
+        content: [{ type: 'text', text: 'SYS', cache_control: { type: 'ephemeral', ttl: '1h' } }],
       },
     ]);
     expect(toOpenAiMessages('SYS', [])).toEqual([{ role: 'system', content: 'SYS' }]);
+  });
+
+  it('marks the current turn start and the one before it, only when asked', () => {
+    const conversation = [
+      { role: 'user' as const, content: 'first turn' },
+      { role: 'assistant' as const, content: 'done' },
+      { role: 'user' as const, content: '<context>\n</context>\n\nsecond turn' },
+      {
+        role: 'assistant' as const,
+        content: [{ type: 'tool_use' as const, id: 't1', name: 'list_agents', input: {} }],
+      },
+      {
+        role: 'user' as const,
+        content: [{ type: 'tool_result' as const, tool_use_id: 't1', content: 'Atlas' }],
+      },
+    ];
+    const out = toOpenAiMessages('SYS', conversation, {
+      cacheSystem: true,
+      cacheConversation: true,
+    });
+    expect(out[1]).toEqual({
+      role: 'user',
+      content: [{ type: 'text', text: 'first turn', cache_control: { type: 'ephemeral' } }],
+    });
+    expect(out[2]).toEqual({ role: 'assistant', content: 'done' });
+    expect(out[3]).toEqual({
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text: '<context>\n</context>\n\nsecond turn',
+          cache_control: { type: 'ephemeral' },
+        },
+      ],
+    });
+    expect(out[5]).toEqual({ role: 'tool', tool_call_id: 't1', content: 'Atlas' });
+    // Three breakpoints in all: the prompt and two turn starts.
+    expect(JSON.stringify(out).match(/cache_control/g)).toHaveLength(3);
+    expect(toOpenAiMessages('SYS', conversation)[1]).toEqual({
+      role: 'user',
+      content: 'first turn',
+    });
   });
 
   it('asks for a breakpoint for Anthropic models only', () => {

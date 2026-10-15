@@ -156,9 +156,17 @@ export function nowLine(now: number): string {
   return `Now: ${text} (the developer's local time).`;
 }
 
-/** ISO timestamp to epoch ms; undefined when absent or unreadable. */
+/** A date and time with no zone after it, as SQLite's CURRENT_TIMESTAMP writes it (UTC). */
+const ZONELESS = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)$/;
+
+/**
+ * Timestamp to epoch ms; undefined when absent or unreadable. A timestamp with no zone is UTC
+ * (the database writes `2026-10-11 16:40:28`), never the developer's local time: read as local,
+ * every agent's age was off by the developer's UTC offset.
+ */
 export function epoch(iso: string | null | undefined): number | undefined {
   if (!iso) return undefined;
-  const value = Date.parse(iso);
+  const zoneless = ZONELESS.exec(iso.trim());
+  const value = Date.parse(zoneless ? `${zoneless[1]}T${zoneless[2]}Z` : iso);
   return Number.isNaN(value) ? undefined : value;
 }

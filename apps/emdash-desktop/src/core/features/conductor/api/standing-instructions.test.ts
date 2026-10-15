@@ -28,6 +28,36 @@ function saved(...texts: string[]): StandingInstructionsFile {
 }
 
 describe('standing instructions', () => {
+  it("keeps the developer's own words beside the model's, and shows both", () => {
+    const result = applyInstructionChange(
+      EMPTY_STANDING_INSTRUCTIONS,
+      {
+        action: 'add',
+        text: 'Approve agent requests the developer asks me to approve.',
+        said: "Make sure everything gets approved. I don't want you to be denying things.",
+      },
+      now
+    );
+    expect(result.ok).toBe(true);
+    const entries = result.ok ? result.file.entries : [];
+    expect(entries[0]?.said).toBe(
+      "Make sure everything gets approved. I don't want you to be denying things."
+    );
+    expect(standingInstructionsBlock(entries)).toContain(
+      "- [i1] Approve agent requests the developer asks me to approve. (the developer's words: “Make sure everything gets approved. I don't want you to be denying things.”)"
+    );
+    const replaced = applyInstructionChange(
+      result.ok ? result.file : EMPTY_STANDING_INSTRUCTIONS,
+      { action: 'replace', id: 'i1', text: 'Approve every agent request.' },
+      now
+    );
+    expect(replaced.ok && replaced.file.entries[0]).toEqual({
+      id: 'i1',
+      text: 'Approve every agent request.',
+      at: now.toISOString(),
+    });
+  });
+
   it('saves an instruction on one line under an id that is never reused', () => {
     const first = saved('Keep prompts\n\n  open-ended.', 'Use Codex for reviews.');
     expect(first.entries).toEqual([

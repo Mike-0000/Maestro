@@ -43,6 +43,7 @@ import {
   toOpenAiMessages,
   toOpenAiTools,
 } from '../api/openrouter-format';
+import { PREFIX_CACHE, withConversationBreakpoints } from '../api/prompt-cache';
 import {
   applyInstructionChange,
   EMPTY_STANDING_INSTRUCTIONS,
@@ -94,11 +95,12 @@ function startsWithAny(model: string, prefixes: readonly string[]): boolean {
 
 /**
  * Cache the stable prefix: tools render before the system prompt, so a breakpoint on the last
- * tool plus one on the system prompt covers the whole static prefix.
+ * tool plus one on the system prompt covers the whole static prefix. Both are kept an hour (see
+ * prompt-cache.ts).
  */
 function withCacheBreakpoint(tools: Anthropic.Beta.BetaTool[]): Anthropic.Beta.BetaTool[] {
   const lastTool = tools[tools.length - 1];
-  if (lastTool) lastTool.cache_control = { type: 'ephemeral' };
+  if (lastTool) lastTool.cache_control = PREFIX_CACHE;
   return tools;
 }
 
@@ -312,21 +314,15 @@ export class ConductorService {
             }
           : {}),
         // The fixed prompt keeps its own breakpoint: standing instructions come after it, so
-        // changing them never costs the cached tools and prompt.
+        // changing them never costs the cached tools and prompt. They need no breakpoint of
+        // their own: the conversation's breakpoints after them cache them too, and the four
+        // allowed are tools, prompt, and the two in the conversation.
         system: [
-          { type: 'text', text: CONDUCTOR_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
-          ...(standing
-            ? [
-                {
-                  type: 'text' as const,
-                  text: standing,
-                  cache_control: { type: 'ephemeral' as const },
-                },
-              ]
-            : []),
+          { type: 'text', text: CONDUCTOR_SYSTEM_PROMPT, cache_control: PREFIX_CACHE },
+          ...(standing ? [{ type: 'text' as const, text: standing }] : []),
         ],
         tools: this.toolsFor(settings),
-        messages,
+        messages: withConversationBreakpoints(messages),
       });
       const turnUsage = {
         inputTokens:
@@ -491,6 +487,7 @@ export class ConductorService {
         max_tokens: mode === 'plan' ? 16000 : 4096,
         messages: toOpenAiMessages(CONDUCTOR_SYSTEM_PROMPT, messages, {
           cacheSystem: cachesByBreakpoint(settings.openrouterModel),
+          cacheConversation: cachesByBreakpoint(settings.openrouterModel),
           standing: await this.standingBlock(),
         }),
         tools: toOpenAiTools(this.toolsFor(settings)),
