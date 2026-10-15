@@ -8,11 +8,17 @@ import { buildPromptInjectionPayload } from '@core/primitives/prompt-injection/a
 /** Pause between a bracketed paste and Enter so TUIs finish ingesting the paste first. */
 const SUBMIT_DELAY_MS = 80;
 /**
- * Codex treats an Enter that follows a burst of input within ~120ms as part of the paste and
- * inserts a newline instead of submitting. On Windows the paste reaches it as a keystroke burst,
- * so it needs a longer pause than other TUIs before Enter counts as a submit.
+ * Codex turns an Enter that arrives while it is still reading a paste into a newline instead of a
+ * submit. On Windows the paste reaches it as a keystroke burst, and a long one can take longer to
+ * read than any fixed pause, so Codex gets a longer pause and then a check that the turn started.
  */
 const CODEX_SUBMIT_DELAY_MS = 500;
+/** How long Codex gets to show its working status after Enter before Enter is pressed again. */
+const CODEX_SUBMIT_CHECK_MS = 1_500;
+const CODEX_SUBMIT_ATTEMPTS = 3;
+/** Codex's status line reads "Working (… • esc to interrupt)" while a turn runs. */
+const CODEX_WORKING = /to interrupt/i;
+const CODEX_STATUS_ROWS = 12;
 const ESC = '\x1b';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -37,13 +43,35 @@ function pastePayload(entry: AgentTileEntry, text: string): string {
   });
 }
 
-function submitDelayMs(providerId: string | undefined): number {
-  return providerId === 'codex' ? CODEX_SUBMIT_DELAY_MS : SUBMIT_DELAY_MS;
+async function pressEnterAfterPaste(entry: AgentTileEntry): Promise<void> {
+  if (entry.providerId === 'codex') return submitCodexPaste(entry);
+  await sleep(SUBMIT_DELAY_MS);
+  await sendRaw(entry.conversationId, '\r');
 }
 
-async function pressEnterAfterPaste(entry: AgentTileEntry): Promise<void> {
-  await sleep(submitDelayMs(entry.providerId));
-  await sendRaw(entry.conversationId, '\r');
+/** Whether Codex's screen shows a running turn; null when its terminal cannot be read. */
+async function codexIsWorking(entry: AgentTileEntry): Promise<boolean | null> {
+  const session = conversationRegistry.get(entry.taskId)?.sessions.get(entry.conversationId);
+  if (!session) return null;
+  await session.connect().catch(() => {});
+  const terminal = session.pty?.terminal;
+  if (!terminal) return null;
+  return CODEX_WORKING.test(readTerminalTail(terminal, CODEX_STATUS_ROWS).join('\n'));
+}
+
+/**
+ * Presses Enter until Codex starts the turn. An Enter it read as part of the paste only added a
+ * newline, so another one submits. Enter is pressed again only while no turn runs, so it can never
+ * answer a permission prompt the turn raised.
+ */
+async function submitCodexPaste(entry: AgentTileEntry): Promise<void> {
+  await sleep(CODEX_SUBMIT_DELAY_MS);
+  for (let attempt = 0; attempt < CODEX_SUBMIT_ATTEMPTS; attempt++) {
+    await sendRaw(entry.conversationId, '\r');
+    if (attempt === CODEX_SUBMIT_ATTEMPTS - 1) return;
+    await sleep(CODEX_SUBMIT_CHECK_MS);
+    if ((await codexIsWorking(entry)) !== false) return;
+  }
 }
 
 /**
