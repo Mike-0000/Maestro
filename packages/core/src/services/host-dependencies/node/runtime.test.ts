@@ -553,6 +553,38 @@ describe('HostDependenciesRuntime snapshot query', () => {
   });
 });
 
+describe('HostDependenciesRuntime.resolve', () => {
+  it('reports a binary that is not on PATH as missing', async () => {
+    const { exec } = createFakeExec({});
+    const result = await createRuntime(exec).resolve('fake-agent');
+    expect(result).toMatchObject({ success: false, error: { type: 'missing' } });
+  });
+
+  it('reports a failed PATH lookup as an error, not as a missing binary', async () => {
+    const { exec } = createFakeExec({ lookupFails: true });
+    const result = await createRuntime(exec).resolve('fake-agent');
+    expect(result).toMatchObject({
+      success: false,
+      error: { type: 'io', message: expect.stringContaining('which -a timed out') },
+    });
+    const lookups = vi
+      .mocked(exec.exec)
+      .mock.calls.filter(([command, args]) => command === 'which' && args?.[0] === '-a');
+    expect(lookups).toHaveLength(2);
+  });
+
+  it('resolves when a failed PATH lookup succeeds on retry', async () => {
+    const { exec } = createFakeExec({
+      dependencyProbe: ({ call }) => {
+        if (call === 1) throw new Error('where crashed');
+        return '/usr/local/bin/fake-agent';
+      },
+    });
+    const result = await createRuntime(exec).resolve('fake-agent');
+    expect(result).toMatchObject({ success: true, data: { path: '/usr/local/bin/fake-agent' } });
+  });
+});
+
 describe('HostDependenciesRuntime.refresh', () => {
   it.each([
     ['root', 'root'],
@@ -567,6 +599,11 @@ describe('HostDependenciesRuntime.refresh', () => {
     expect(result.success && result.data.hostElevation).toBe(expected);
   });
 });
+
+/** `which` and `where` exit 1 when nothing matches. */
+function notOnPath(): Error {
+  return Object.assign(new Error('not found'), { exitCode: 1 });
+}
 
 function npmOption() {
   return {
@@ -616,6 +653,8 @@ function createFakeExec(options: {
   binaryName?: string;
   streamOutput?: string;
   resolvedPath?: string;
+  /** `which -a` itself fails (timeout, crash) instead of exiting 1. */
+  lookupFails?: boolean;
   dependencyProbe?: (context: {
     call: number;
     installed: boolean;
@@ -651,10 +690,11 @@ function createFakeExec(options: {
             call: ++dependencyProbeCall,
             installed,
           });
-          if (!path) throw new Error('not found');
+          if (!path) throw notOnPath();
           return { stdout: `${path}\n`, stderr: '' };
         }
-        if (!installed) throw new Error('not found');
+        if (options.lookupFails) throw new Error('which -a timed out');
+        if (!installed) throw notOnPath();
         return { stdout: `${resolvedPath}\n`, stderr: '' };
       }
       if (command === 'realpath' && args[0] === resolvedPath) {

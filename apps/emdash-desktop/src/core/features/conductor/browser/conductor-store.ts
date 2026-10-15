@@ -116,6 +116,7 @@ import { ConversationContext } from '../api/jev-router/context';
 import { thresholdsFrom, type RouterAction } from '../api/jev-router/policy';
 import { answersDetail, layoutBypass, looksLikeSttArtifact } from '../api/jev-router/trace';
 import { deliveryNote, describePrompt, withVerbatimRequest } from '../api/prompt-fidelity';
+import { matchInstalledProvider } from '../api/provider-match';
 import {
   candidateLabels,
   departedName,
@@ -197,7 +198,6 @@ import {
   entryForConversation,
   focusedConversationId,
   installedProviders,
-  matchInstalledProvider,
   offBoardEntries,
   endedTurn,
   reportFromEntry,
@@ -208,6 +208,7 @@ import {
 import {
   agentMetadata,
   resolveProjectId,
+  resolveProviderId,
   resolveSpokenProject,
   spawnAgentTask,
   startAgentSession,
@@ -4027,7 +4028,8 @@ export class ConductorStore {
       case 'spawn_agent': {
         const spawn = input as ConductorToolInput<'spawn_agent'>;
         const providers = await installedProviders();
-        // Detection that found nothing failed; the provider id is then used as given.
+        // Detection that found nothing failed; spawnAgentTask then resolves the reference against
+        // every known provider, so "Claude" still means claude.
         const provider =
           providers.length > 0 ? matchInstalledProvider(spawn.provider, providers) : null;
         if (providers.length > 0 && !provider) {
@@ -4036,7 +4038,7 @@ export class ConductorStore {
             isError: true,
           };
         }
-        const providerId = provider?.id ?? spawn.provider;
+        const providerId = provider?.id ?? (await resolveProviderId(spawn.provider));
         let projectId = options.projectId;
         if (!projectId) {
           const resolved = resolveSpokenProject(spawn.project, this.focusedEntry()?.projectId);

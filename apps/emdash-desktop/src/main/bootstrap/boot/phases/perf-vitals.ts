@@ -1,6 +1,8 @@
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { startVitalsReporting, type ProcessVitals } from '@emdash/shared/perf/node';
 import { app } from 'electron';
 import type { DesktopRuntimes } from '@main/gateway/desktop-runtimes';
+import { log } from '@main/lib/logger';
 import { telemetryService } from '@main/lib/telemetry';
 
 /** Slow steady cadence: 12 reports/hour per process in sampled sessions. */
@@ -27,6 +29,40 @@ export function startPerfVitalsTelemetry(runtimes: DesktopRuntimes): void {
       });
     },
   });
+}
+
+const STALL_SAMPLE_MS = 10_000;
+const STALL_WATCH_MS = 5 * 60_000;
+const STALL_LOG_THRESHOLD_MS = 1_000;
+
+/**
+ * Logs main-process event-loop stalls during the first minutes after launch, when projects attach
+ * and every wire call has a timeout. The log keeps warnings only, so this is how a startup where
+ * all wire calls time out together shows whether the main thread itself was blocked. Local only:
+ * nothing is sent anywhere, and it stops on its own.
+ */
+export function startStartupStallLog(): void {
+  // Its own histogram: the shared vitals sampler resets the spawn counters telemetry reports.
+  const loopDelay = monitorEventLoopDelay({ resolution: 20 });
+  loopDelay.enable();
+  const startedAt = Date.now();
+  const timer = setInterval(() => {
+    const sinceLaunchMs = Date.now() - startedAt;
+    const maxDelayMs = Math.round(loopDelay.max / 1e6);
+    if (maxDelayMs >= STALL_LOG_THRESHOLD_MS) {
+      log.warn('main: event loop stalled during startup', {
+        sinceLaunchMs,
+        loopDelayMaxMs: maxDelayMs,
+        loopDelayP99Ms: Math.round(loopDelay.percentile(99) / 1e6),
+      });
+    }
+    loopDelay.reset();
+    if (sinceLaunchMs >= STALL_WATCH_MS) {
+      clearInterval(timer);
+      loopDelay.disable();
+    }
+  }, STALL_SAMPLE_MS);
+  timer.unref();
 }
 
 /**

@@ -43,6 +43,9 @@ vi.mock('@core/primitives/logging/browser/logger', () => ({
 vi.mock('./spawn', () => ({
   agentMetadata: vi.fn(async () => []),
   resolveProjectId: vi.fn(() => 'proj'),
+  resolveProviderId: vi.fn(async (reference: string) =>
+    /^claude( code)?$/i.test(reference.trim()) ? 'claude' : reference
+  ),
   resolveSpokenProject: vi.fn(() => ({ ok: true, id: 'proj' })),
   spawnAgentTask: mocks.spawnAgentTask,
   startAgentSession: vi.fn(async () => false),
@@ -130,6 +133,19 @@ describe('spawn_agent routing', () => {
     });
     expect(missing).toMatchObject({ isError: true });
     vi.mocked(installedProviders).mockResolvedValue([]);
+  });
+
+  it('resolves a loosely named provider against every known one when detection failed', async () => {
+    vi.mocked(installedProviders).mockResolvedValue([]);
+    const { store } = setup();
+    const outcome = await store['executeTool']('spawn_agent', {
+      ...spawnInput,
+      provider: 'Claude',
+    });
+    expect(outcome.isError).toBeFalsy();
+    expect(mocks.spawnAgentTask).toHaveBeenLastCalledWith(
+      expect.objectContaining({ providerId: 'claude' })
+    );
   });
 
   it('refuses a project name it cannot place, instead of guessing one', async () => {

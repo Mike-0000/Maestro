@@ -103,6 +103,39 @@ describe('RootIndex', () => {
     ]);
   });
 
+  it('stops indexing a root at its entry cap and reports it once', async () => {
+    const rootPath = await createRoot();
+    for (const name of ['a.ts', 'b.ts', 'c.ts', 'd.ts']) {
+      await writeFile(path.join(rootPath, name), name);
+    }
+    const store = createStore();
+    const root = store.upsertRoot({ rootKey: 'root-key', rootPath }).root;
+    const scope = createScope({ label: 'root-index-cap-test' });
+    const capped: Array<[string, number]> = [];
+    const index = new RootIndex({
+      root,
+      store,
+      watcher: new FakeWatchService(),
+      scanner: new NodePathScanner(),
+      exclusions: new DefaultFileSearchExclusions({ caseSensitive: true }),
+      scope,
+      runScan: async (_signal, operation) => operation(),
+      runWatchStart: async (_signal, operation) => operation(),
+      maxEntries: 2,
+      onEntryCapReached: (cappedRoot, max) => capped.push([cappedRoot, max]),
+    });
+    cleanups.push(() => scope.dispose());
+
+    await index.reconcile();
+    await index.reconcile();
+
+    expect(hits(store)).toEqual([
+      { path: 'a.ts', kind: 'file' },
+      { path: 'b.ts', kind: 'file' },
+    ]);
+    expect(capped).toEqual([[rootPath, 2]]);
+  });
+
   it('does not scan or write update-only batches once the index is healthy', async () => {
     const rootPath = await createRoot();
     await writeFile(path.join(rootPath, 'changed.ts'), 'before');

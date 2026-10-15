@@ -16,6 +16,7 @@ import type {
 } from '../path/index/path-index-store';
 import type { StoredFileSearchRoot } from '../root/registered-root';
 import type { FileSearchRootUpsertResult, RootCatalogStore } from '../root/root-registry';
+import { reclaimFreePages } from './compaction';
 import { pathEntries, registeredRoots } from './schema';
 import type { FileSearchDb } from './store';
 
@@ -120,6 +121,7 @@ export class SqliteFileSearchStore implements RootCatalogStore, PathIndexStore {
         });
         state = 'published';
         this.activeBuildRootIds.delete(rootId);
+        reclaimFreePages(this.handle.connection);
       },
       discard: () => {
         if (state !== 'open') return;
@@ -132,6 +134,7 @@ export class SqliteFileSearchStore implements RootCatalogStore, PathIndexStore {
           state = 'discarded';
           this.activeBuildRootIds.delete(rootId);
         }
+        reclaimFreePages(this.handle.connection);
       },
     };
   }

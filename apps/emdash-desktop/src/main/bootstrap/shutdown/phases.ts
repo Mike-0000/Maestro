@@ -57,16 +57,18 @@ function criticalPhases(services: QuitCleanupServices): Phase<void>[] {
       run: () => appScope.dispose(),
     },
     {
+      // Before the database closes: it clears lastSessionId from the KV table, and a value left
+      // behind makes the next launch report this quit as a crash.
+      name: 'telemetry-service',
+      run: () => telemetryService.dispose(),
+    },
+    {
       name: 'database',
       run: () => closeAppDb(),
     },
     {
       name: 'editor-buffers',
       run: async () => services.editorBuffers.dispose(),
-    },
-    {
-      name: 'telemetry-service',
-      run: () => telemetryService.dispose(),
     },
   ];
 }

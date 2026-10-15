@@ -334,7 +334,10 @@ export class AgentPluginHost {
 
     const resolved = await this.dependencies.resolve(providerId);
     if (resolved.success) return resolved.data.path;
-    throw new Error(`Provider '${providerId}' CLI could not be resolved: ${resolved.error.type}`);
+    const detail = 'message' in resolved.error ? ` (${resolved.error.message})` : '';
+    throw new Error(
+      `Provider '${providerId}' CLI could not be resolved: ${resolved.error.type}${detail}`
+    );
   }
 
   private async checkAuthStatusUncached(

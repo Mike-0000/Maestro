@@ -84,7 +84,7 @@ afterEach(() => {
 });
 
 describe('quit cleanup phases', () => {
-  it('closes the database after app scope and before telemetry', async () => {
+  it('closes the database after app scope and after telemetry clears its session keys', async () => {
     configureQuitCleanupServices({
       automations: { stop: mocks.automationsStop },
       editorBuffers: { dispose: mocks.editorBuffersDispose },
@@ -109,8 +109,8 @@ describe('quit cleanup phases', () => {
     expect(mocks.appScopeDispose.mock.invocationCallOrder[0]!).toBeLessThan(
       mocks.closeAppDb.mock.invocationCallOrder[0]!
     );
-    expect(mocks.closeAppDb.mock.invocationCallOrder[0]!).toBeLessThan(
-      mocks.telemetryDispose.mock.invocationCallOrder[0]!
+    expect(mocks.telemetryDispose.mock.invocationCallOrder[0]!).toBeLessThan(
+      mocks.closeAppDb.mock.invocationCallOrder[0]!
     );
     expect(mocks.closeAppDb.mock.invocationCallOrder[0]!).toBeLessThan(
       mocks.projectsDispose.mock.invocationCallOrder[0]!
