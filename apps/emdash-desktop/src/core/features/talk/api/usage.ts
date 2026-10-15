@@ -1,9 +1,12 @@
 /**
- * What a realtime response cost. The Realtime API bills each response for the whole conversation
- * it was given, at separate rates for text and audio and for the part of the input the provider
- * had cached. Prices are US dollars per million tokens, from OpenAI's pricing page on 2026-10-10;
- * a model that is not listed is costed as the most expensive one, so the cap errs towards
- * stopping early.
+ * What the talk line costs. Grok Voice bills a session by the minute, plus a small charge for
+ * each text input; prices are US dollars, from xAI's pricing page on 2026-10-14. xAI does not say
+ * whether a minute is one of connection or of audio, so the line counts every second a session
+ * is open, which errs towards stopping early. A model that is not listed is costed as the most
+ * expensive one, for the same reason.
+ *
+ * Responses still report tokens. They cost nothing on their own, but they say how full the
+ * session is, which decides when it is replaced by a fresh one.
  */
 
 export type TalkTokens = {
@@ -25,52 +28,38 @@ export const NO_TOKENS: TalkTokens = {
   audioOut: 0,
 };
 
-type Prices = TalkTokens;
+/** What a stretch of the line used that is billed. */
+export type TalkBilled = {
+  /** Seconds a session was open. */
+  readonly seconds: number;
+  /** Text messages sent into the conversation: notes, state, typed requests, set sentences. */
+  readonly textInputs: number;
+};
+
+type Prices = { readonly perMinute: number; readonly perTextInput: number };
+
+const GROK_VOICE_PRICES: Prices = { perMinute: 0.08, perTextInput: 0.004 };
 
 const PRICES: Record<string, Prices> = {
-  'gpt-realtime-2.1': {
-    textIn: 4,
-    cachedTextIn: 0.4,
-    audioIn: 32,
-    cachedAudioIn: 0.4,
-    textOut: 24,
-    audioOut: 64,
-  },
-  'gpt-realtime-2.1-mini': {
-    textIn: 0.6,
-    cachedTextIn: 0.06,
-    audioIn: 10,
-    cachedAudioIn: 0.3,
-    textOut: 2.4,
-    audioOut: 20,
-  },
-  'gpt-realtime-1.5': {
-    textIn: 4,
-    cachedTextIn: 0.4,
-    audioIn: 32,
-    cachedAudioIn: 0.4,
-    textOut: 16,
-    audioOut: 64,
-  },
+  'grok-voice-3.0': GROK_VOICE_PRICES,
+  'grok-voice-latest': GROK_VOICE_PRICES,
 };
 
-const FALLBACK_PRICES: Prices = {
-  textIn: 4,
-  cachedTextIn: 0.4,
-  audioIn: 32,
-  cachedAudioIn: 0.4,
-  textOut: 24,
-  audioOut: 64,
-};
+const FALLBACK_PRICES: Prices = GROK_VOICE_PRICES;
 
-/** Models offered in settings, cheapest and fastest last. */
+/** Models offered in settings: the pinned release first, then the alias that follows releases. */
 export const TALK_MODELS = Object.keys(PRICES);
 
-/** Dollars for one response's tokens on `model`. */
-export function talkCostUsd(model: string, tokens: TalkTokens): number {
+function amount(value: number): number {
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+/** Dollars for what the line used on `model`. */
+export function talkCostUsd(model: string, billed: TalkBilled): number {
   const prices = PRICES[model] ?? FALLBACK_PRICES;
-  const keys = Object.keys(prices) as (keyof TalkTokens)[];
-  const total = keys.reduce((sum, key) => sum + (tokens[key] / 1_000_000) * prices[key], 0);
+  const total =
+    (amount(billed.seconds) / 60) * prices.perMinute +
+    Math.floor(amount(billed.textInputs)) * prices.perTextInput;
   return Number.isFinite(total) && total > 0 ? total : 0;
 }
 
@@ -91,10 +80,10 @@ function count(value: unknown): number {
 }
 
 /**
- * The `usage` object of a `response.done` event as billable token counts. Cached tokens are a
- * subset of the input tokens, so they are taken out of the uncached counts. Anything missing or
- * malformed counts as zero; when a response does not split its input, all of it is costed as
- * text.
+ * The `usage` object of a `response.done` event as token counts. Grok Voice reports only input
+ * and output totals, which count as text; a fuller split is read when one is there. Cached
+ * tokens are a subset of the input tokens, so they are taken out of the uncached counts.
+ * Anything missing or malformed counts as zero.
  */
 export function tokensFromUsage(usage: unknown): TalkTokens {
   if (!usage || typeof usage !== 'object') return NO_TOKENS;

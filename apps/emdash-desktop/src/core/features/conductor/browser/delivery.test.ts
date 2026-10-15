@@ -44,6 +44,7 @@ vi.mock('@core/primitives/logging/browser/logger', () => ({
 vi.mock('./spawn', () => ({
   agentMetadata: vi.fn(async () => []),
   resolveProjectId: vi.fn(),
+  resolveSpokenProject: vi.fn(() => ({ ok: false, reason: 'No project is open.' })),
   spawnAgentTask: vi.fn(),
   startAgentSession: mocks.startAgentSession,
 }));

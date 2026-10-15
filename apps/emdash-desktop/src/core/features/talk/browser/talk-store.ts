@@ -12,15 +12,15 @@ import { log } from '@core/primitives/logging/browser/logger';
 import type { TalkClient } from '../api/browser/client';
 import type { TalkSettings, TalkStatus } from '../api/contract';
 import { isEcho, neverEcho, recentSpoken, type Spoken } from '../api/echo-guard';
-import { inputSize, tokensFromUsage } from '../api/usage';
-import {
-  lineInstructions,
-  lineTools,
-  ROLLOVER_INSTRUCTIONS,
-  sayExactly,
-} from '../api/voice-prompt';
+import { inputSize, NO_TOKENS, tokensFromUsage, type TalkTokens } from '../api/usage';
+import { lineInstructions, lineTools, ROLLOVER_INSTRUCTIONS } from '../api/voice-prompt';
 import { carriedOver, feedSnapshot, needsRollover } from '../api/world-feed';
-import type { RealtimeEvent, SessionDeps, SessionState } from './realtime-session';
+import type {
+  LineSessionDeps,
+  RealtimeEvent,
+  SessionGrant,
+  SessionState,
+} from './grok-voice-session';
 
 /** What the line needs from the conductor (kept structural so it tests without one). */
 export interface TalkConductorPort {
@@ -83,7 +83,7 @@ export type TalkDeps = {
   client(): Promise<TalkClient>;
   conductor: TalkConductorPort;
   voice: TalkVoicePort;
-  createSession(deps: Omit<SessionDeps, 'createPeer'>): SessionLike;
+  createSession(deps: LineSessionDeps): SessionLike;
   /** Opens the microphone for the line. The track starts disabled. */
   microphone(): Promise<MediaStreamTrack>;
   /** Plays the provider's voice; null stops playing. */
@@ -114,6 +114,8 @@ const SEAL_MS = 1_500;
 const TRANSCRIPT_WAIT_MS = 4_000;
 /** A response that has not finished after this long is given up. */
 const RESPONSE_MAX_MS = 60_000;
+/** An open line reports the time it has been open this often: it is billed by the minute. */
+const CLOCK_MS = 60_000;
 /** A turn may go back to the model with tool results this many times. */
 const MAX_ROUNDS = 12;
 const RETRY_MS = 30_000;
@@ -218,6 +220,11 @@ export class TalkStore {
   private hearing = false;
   private speechAt = 0;
   private openedAt = 0;
+  /** Since when the time the line was open has not been reported; 0 while it is not open. */
+  private billedSince = 0;
+  /** Text inputs sent since the last report: each one is billed. */
+  private textInputs = 0;
+  private clockTimer: ReturnType<typeof setInterval> | null = null;
   private inputTokens = 0;
   private hold: Hold | null = null;
   /** Captures whose words are still being read: the model is not asked again until they are. */
@@ -236,6 +243,10 @@ export class TalkStore {
   private heard: (() => readonly string[]) | null = null;
   private itemSeq = 0;
   private saying: Saying | null = null;
+  /** The responses that said a sentence as written, until they are done. */
+  private readonly sayResponses = new Set<string>();
+  /** What a summary for a fresh session wrote, should its response not list it. */
+  private rollText = '';
   private readonly handledCalls = new Set<string>();
   /** The message that holds the conductor's state, replaced before each turn. */
   private stateItem: string | null = null;
@@ -286,6 +297,9 @@ export class TalkStore {
       | 'hearing'
       | 'speechAt'
       | 'openedAt'
+      | 'billedSince'
+      | 'textInputs'
+      | 'clockTimer'
       | 'inputTokens'
       | 'hold'
       | 'reading'
@@ -298,6 +312,8 @@ export class TalkStore {
       | 'heard'
       | 'itemSeq'
       | 'saying'
+      | 'sayResponses'
+      | 'rollText'
       | 'handledCalls'
       | 'stateItem'
       | 'stateSeq'
@@ -326,6 +342,9 @@ export class TalkStore {
       hearing: false,
       speechAt: false,
       openedAt: false,
+      billedSince: false,
+      textInputs: false,
+      clockTimer: false,
       inputTokens: false,
       hold: false,
       reading: false,
@@ -338,6 +357,8 @@ export class TalkStore {
       heard: false,
       itemSeq: false,
       saying: false,
+      sayResponses: false,
+      rollText: false,
       handledCalls: false,
       stateItem: false,
       stateSeq: false,
@@ -480,7 +501,8 @@ export class TalkStore {
       this.hushed = this.deps.voice.capturing || this.deps.voice.muted;
       const session = this.deps.createSession({
         track,
-        exchange: (sdp) => this.exchange(sdp),
+        connect: () => this.connect(),
+        interrupt: this.settings?.talkOver === true,
         onEvent: (event) => this.onEvent(event),
         onState: (state) => this.onSessionState(session, state),
         onRemoteStream: (stream) => {
@@ -495,6 +517,9 @@ export class TalkStore {
       const context = await this.deps.conductor.lineContext();
       if (this.session !== session) return;
       this.openedAt = this.now();
+      this.billedSince = this.openedAt;
+      this.textInputs = 0;
+      this.clockTimer = setInterval(() => void this.recordUsage(NO_TOKENS), CLOCK_MS);
       this.inputTokens = 0;
       this.retries = 0;
       this.setState(context);
@@ -516,18 +541,18 @@ export class TalkStore {
     }
   }
 
-  /** Trades the offer for the provider's answer, through the main process. */
-  private async exchange(sdp: string): Promise<string> {
+  /** Has the main process set a session up: where to connect, with what, and as whom. */
+  private async connect(): Promise<SessionGrant> {
     const client = await this.deps.client();
     const instructions = this.instructions();
     this.instructed = instructions;
-    const result = await client.openCall({
-      sdp,
+    const result = await client.openSession({
       instructions,
       tools: lineTools({ codeChecks: this.deps.conductor.codeChecksReady }),
     });
     if (!result.success) throw new TalkOpenError(result.error.type, result.error.message);
-    return result.data.sdp;
+    const { url, clientSecret, session } = result.data;
+    return { url, clientSecret, session };
   }
 
   /** Who the line's model is right now: the conductor, with the developer's standing instructions. */
@@ -547,10 +572,7 @@ export class TalkStore {
     if (this.line !== 'open') return;
     const instructions = this.instructions();
     if (instructions === this.instructed) return;
-    const sent = this.send({
-      type: 'session.update',
-      session: { type: 'realtime', instructions },
-    });
+    const sent = this.send({ type: 'session.update', session: { instructions } });
     if (!sent) return;
     this.instructed = instructions;
     this.deps.conductor.traceLine('instructed', { chars: instructions.length });
@@ -582,6 +604,11 @@ export class TalkStore {
   /** Closes the session and everything that depends on it. */
   private shut(next: 'off' | 'down', message: string | null = null): void {
     const wasOpen = this.line === 'open';
+    // The time it was open is billed whatever ends it.
+    if (this.clockTimer) clearInterval(this.clockTimer);
+    this.clockTimer = null;
+    if (this.billedSince > 0) void this.recordUsage(NO_TOKENS);
+    this.billedSince = 0;
     const session = this.session;
     this.session = null;
     session?.close();
@@ -600,6 +627,7 @@ export class TalkStore {
     this.loose.clear();
     this.transcripts.clear();
     this.handledCalls.clear();
+    this.sayResponses.clear();
     this.past = [];
     this.closed = 0;
     this.heard = null;
@@ -830,10 +858,12 @@ export class TalkStore {
     }
     turn.owed = false;
     const aloud = turn.spoken && !this.deps.voice.muted;
-    const sent = this.send({
-      type: 'response.create',
-      response: { output_modalities: [aloud ? 'audio' : 'text'] },
-    });
+    // Aloud is the provider's default: the voice with its transcript.
+    const sent = this.send(
+      aloud
+        ? { type: 'response.create' }
+        : { type: 'response.create', response: { modalities: ['text'] } }
+    );
     if (!sent) {
       this.endTurn(turn, { reply: DROPPED_REPLY, completed: false });
       return;
@@ -925,22 +955,19 @@ export class TalkStore {
     if (!this.ready || this.saying || this.turn?.responding || voice.muted || voice.capturing) {
       return Promise.resolve(false);
     }
+    // Grok's force message: the provider says the text itself, word for word, and the model is
+    // never asked. The sentence may quote an agent, and saying it can never turn into doing
+    // something. It stays in the conversation as something the voice said.
     const sent = this.send({
-      type: 'response.create',
-      response: {
-        // Outside the conversation: the sentence is Maestro's, not the model's own answer.
-        conversation: 'none',
-        input: [],
-        output_modalities: ['audio'],
-        instructions: sayExactly(text),
-        // The sentence may quote an agent. Saying it must never turn into doing something.
-        tool_choice: 'none',
-        metadata: { purpose: 'say' },
+      type: 'conversation.item.create',
+      item: {
+        type: 'force_message',
+        role: 'assistant',
+        content: [{ type: 'output_text', text }],
       },
     });
     if (!sent) return Promise.resolve(false);
     this.noteSpoken(text);
-    this.sendNote(`[Maestro told the developer] ${text}`);
     return new Promise<boolean>((resolve) => {
       const timer = setTimeout(() => {
         // Nothing was heard in time: stop it, and let the caller say it another way.
@@ -1004,7 +1031,9 @@ export class TalkStore {
   }
 
   private send(event: RealtimeEvent): boolean {
-    return this.session?.send(event) ?? false;
+    const sent = this.session?.send(event) ?? false;
+    if (sent && isTextInput(event)) this.textInputs++;
+    return sent;
   }
 
   // ── What the provider tells the line ────────────────────────────────────────
@@ -1159,6 +1188,7 @@ export class TalkStore {
   private onWritten(text: string): void {
     const part = text.trim();
     const turn = this.turn;
+    if (part && !turn && this.rolling) this.rollText = `${this.rollText} ${part}`.trim();
     if (!part || !turn) return;
     turn.said.push(part);
     this.deps.conductor.showVoiceReply(turn.said.join(' '));
@@ -1195,24 +1225,14 @@ export class TalkStore {
     const outputId = `out_${++this.itemSeq}`;
     this.send({
       type: 'conversation.item.create',
-      item: { id: outputId, type: 'function_call_output', call_id: callId, output: result.output },
+      item: {
+        id: outputId,
+        type: 'function_call_output',
+        call_id: callId,
+        output: withoutImages(result),
+      },
     });
     turn?.items.push(outputId);
-    for (const image of result.images ?? []) {
-      const imageId = `img_${++this.itemSeq}`;
-      turn?.items.push(imageId);
-      this.send({
-        type: 'conversation.item.create',
-        item: {
-          id: imageId,
-          type: 'message',
-          role: 'user',
-          content: [
-            { type: 'input_image', image_url: `data:${image.mediaType};base64,${image.data}` },
-          ],
-        },
-      });
-    }
     if (!turn || this.turn !== turn) return;
     turn.owed = true;
     this.advance();
@@ -1222,9 +1242,13 @@ export class TalkStore {
     const created = (response ?? {}) as { id?: unknown; metadata?: { purpose?: unknown } | null };
     if (typeof created.id !== 'string') return;
     const purpose = created.metadata?.purpose;
-    if (purpose === 'say') {
-      if (this.saying) this.saying.responseId = created.id;
-    } else if (purpose === undefined && this.turn?.responding && !this.turn.responseId) {
+    if (purpose !== undefined && purpose !== null) return;
+    // A force message carries no metadata. While a sentence waits to be said no turn asks for a
+    // response, so one that starts now is the sentence.
+    if (this.saying && !this.saying.responseId && !this.turn?.responding) {
+      this.saying.responseId = created.id;
+      this.sayResponses.add(created.id);
+    } else if (this.turn?.responding && !this.turn.responseId) {
       this.turn.responseId = created.id;
     }
   }
@@ -1275,7 +1299,8 @@ export class TalkStore {
       metadata?: { purpose?: unknown } | null;
       output?: unknown;
     };
-    const purpose = done.metadata?.purpose;
+    const id = str(done.id);
+    const purpose = this.sayResponses.delete(id) ? 'say' : done.metadata?.purpose;
     const tokens = tokensFromUsage(done.usage);
     void this.recordUsage(tokens);
     if (purpose === 'say') {
@@ -1286,7 +1311,8 @@ export class TalkStore {
       // A summary that comes after the line gave up waiting belongs to nothing: the session
       // has been taking turns again.
       if (!this.rolling) return;
-      if (done.status === 'completed') void this.replace(responseText(done.output));
+      const summary = responseText(done.output) || this.rollText;
+      if (done.status === 'completed') void this.replace(summary);
       else this.endRollover();
       return;
     }
@@ -1295,7 +1321,6 @@ export class TalkStore {
     const turn = this.turn;
     if (!turn) return;
     // A response an earlier turn gave up on says nothing about this one.
-    const id = str(done.id);
     if (turn.responseId && id && id !== turn.responseId) return;
     turn.items.push(...itemIds(done.output));
     if (callsTools(done.output)) {
@@ -1318,11 +1343,24 @@ export class TalkStore {
     });
   }
 
-  private async recordUsage(tokens: ReturnType<typeof tokensFromUsage>): Promise<void> {
+  /** Reports what the line used since it last did: tokens, and the time and text it is billed. */
+  private async recordUsage(tokens: TalkTokens): Promise<void> {
     const model = this.settings?.model;
     if (!model) return;
+    const now = this.now();
+    const seconds = this.billedSince > 0 ? Math.max(0, (now - this.billedSince) / 1000) : 0;
+    if (this.billedSince > 0) this.billedSince = now;
+    const textInputs = this.textInputs;
+    this.textInputs = 0;
     try {
-      const status = await (await this.deps.client()).recordUsage({ model, tokens });
+      const status = await (
+        await this.deps.client()
+      ).recordUsage({
+        model,
+        tokens,
+        seconds,
+        textInputs,
+      });
       runInAction(() => (this.status = status));
       if (status.overBudget && this.line !== 'off') {
         this.deps.conductor.traceLine('over-budget', { usd: status.usageToday.usd });
@@ -1435,13 +1473,14 @@ export class TalkStore {
     if (this.saying || this.loose.size > 0 || this.deps.voice.capturing) return;
     if (!needsRollover(this.inputTokens, this.now() - this.openedAt)) return;
     this.rolling = true;
+    this.rollText = '';
+    // Grok has no response outside the conversation: the summary is the session's last answer,
+    // and the session is replaced right after it.
     const asked = this.send({
       type: 'response.create',
       response: {
-        conversation: 'none',
-        output_modalities: ['text'],
+        modalities: ['text'],
         instructions: ROLLOVER_INSTRUCTIONS,
-        tool_choice: 'none',
         metadata: { purpose: 'rollover' },
       },
     });
@@ -1487,6 +1526,21 @@ class TalkOpenError extends Error {
 
 function str(value: unknown): string {
   return typeof value === 'string' ? value : '';
+}
+
+/** True for an event that puts text into the conversation, which xAI bills per input. */
+function isTextInput(event: RealtimeEvent): boolean {
+  if (event.type !== 'conversation.item.create') return false;
+  const type = (event.item as { type?: unknown } | undefined)?.type;
+  return type === 'message' || type === 'force_message' || type === 'function_call_output';
+}
+
+/** A tool's result as text. Grok Voice takes no images, so it is told what it cannot see. */
+function withoutImages(result: LineToolResult): string {
+  const count = result.images?.length ?? 0;
+  if (count === 0) return result.output;
+  const images = count === 1 ? 'An image' : `${count} images`;
+  return `${result.output}\n\n[${images} left out: the voice model cannot see images.]`;
 }
 
 function parseArguments(raw: string): unknown {

@@ -17,7 +17,7 @@ import {
 } from '@core/features/conductor/api/voice-line';
 import { TALK_INSTRUCTIONS_MAX_CHARS, TALK_TOOLS_MAX } from './contract';
 import { ECHO_WINDOW_MS, isEcho, neverEcho, recentSpoken } from './echo-guard';
-import { lineInstructions, lineTools, sayExactly } from './voice-prompt';
+import { lineInstructions, lineTools } from './voice-prompt';
 import {
   carriedOver,
   feedSnapshot,
@@ -136,7 +136,6 @@ describe('what the line is given', () => {
       expect(instructions).toContain('pass on every requirement they gave');
       expect(instructions.length).toBeLessThan(TALK_INSTRUCTIONS_MAX_CHARS);
     }
-    expect(sayExactly('Sent to "Atlas".')).toContain(JSON.stringify('Sent to "Atlas".'));
   });
 
   it("ends with the developer's standing instructions, and still fits with all of them", () => {

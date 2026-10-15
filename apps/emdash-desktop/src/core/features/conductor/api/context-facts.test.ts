@@ -170,4 +170,10 @@ describe('nowLine and epoch', () => {
     expect(epoch(null)).toBeUndefined();
     expect(epoch('not a date')).toBeUndefined();
   });
+
+  it('reads a timestamp with no zone as UTC, not local time', () => {
+    expect(epoch('2026-10-08 23:18:00')).toBe(NOW);
+    expect(epoch('2026-10-08T23:18:00')).toBe(NOW);
+    expect(epoch('2026-10-08 23:18:00.000')).toBe(NOW);
+  });
 });

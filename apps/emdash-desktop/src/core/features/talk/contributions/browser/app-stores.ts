@@ -7,7 +7,8 @@ import {
   type AppScopedStoreContribution,
 } from '@core/primitives/scoped-stores/browser';
 import { getTalkClient } from '../../api/browser/client';
-import { RealtimeSession, type PeerLike } from '../../browser/realtime-session';
+import { GrokVoiceSession, type SocketLike } from '../../browser/grok-voice-session';
+import { createLineAudio } from '../../browser/line-audio';
 import { TalkStore } from '../../browser/talk-store';
 
 export const talkStoreToken = scopedStoreToken<TalkStore>('talk');
@@ -57,10 +58,11 @@ export const talkAppStoreContributions: readonly AppScopedStoreContribution[] = 
         conductor: stores.get(conductorStoreToken),
         voice: stores.get(voiceStoreToken),
         createSession: (deps) =>
-          new RealtimeSession({
+          new GrokVoiceSession({
             ...deps,
-            // The browser's connection has more than the session uses; it is used as is.
-            createPeer: () => new RTCPeerConnection() as unknown as PeerLike,
+            // The browser's socket has more than the session uses; it is used as is.
+            createSocket: (url, protocols) => new WebSocket(url, protocols) as SocketLike,
+            createAudio: createLineAudio,
           }),
         microphone,
         play,

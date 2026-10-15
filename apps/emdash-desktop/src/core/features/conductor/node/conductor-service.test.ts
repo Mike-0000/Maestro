@@ -146,14 +146,23 @@ describe('ConductorService.runTurn', () => {
     expect(body.thinking).toEqual({ type: 'adaptive' });
     expect(body.output_config).toEqual({ effort: 'low' });
     expect(body.fallbacks).toEqual([{ model: 'claude-opus-4-8' }]);
-    expect(body.messages).toEqual(userTurn);
+    // The one message is the turn's start and the conversation's last: one breakpoint on it.
+    expect(body.messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: userTurn[0]!.content, cache_control: { type: 'ephemeral' } },
+        ],
+      },
+    ]);
 
     const tools = body.tools as { name: string; cache_control?: unknown }[];
     expect(tools.map((tool) => tool.name)).toContain('propose_plan');
-    expect(tools.at(-1)?.cache_control).toEqual({ type: 'ephemeral' });
+    // The fixed prefix is kept an hour: turns are often more than five minutes apart.
+    expect(tools.at(-1)?.cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
     expect(tools.slice(0, -1).every((tool) => tool.cache_control === undefined)).toBe(true);
     const system = body.system as { cache_control?: unknown }[];
-    expect(system[0]?.cache_control).toEqual({ type: 'ephemeral' });
+    expect(system[0]?.cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
   });
 
   it('uses plan effort and a larger budget for plans', async () => {
@@ -264,7 +273,10 @@ describe('ConductorService.runTurn via OpenRouter', () => {
     expect(request?.body.reasoning).toEqual({ effort: 'high' });
     const messages = request?.body.messages as { role: string }[];
     expect(messages[0]?.role).toBe('system');
-    expect(messages[1]).toEqual(userTurn[0]);
+    expect(messages[1]).toEqual({
+      role: 'user',
+      content: [{ type: 'text', text: userTurn[0]!.content, cache_control: { type: 'ephemeral' } }],
+    });
     const tools = request?.body.tools as { type: string; function: { name: string } }[];
     expect(tools.map((tool) => tool.function.name)).toContain('propose_plan');
     expect(result.success).toBe(true);
@@ -587,7 +599,8 @@ describe('ConductorService standing instructions', () => {
     // The fixed prompt is the same bytes with the same marker, so its cache is kept.
     expect(system[0]).toEqual(plain[0]);
     expect(system[1]?.text).toContain('- [i1] Keep prompts to agents short and open-ended.');
-    expect(system[1]?.cache_control).toEqual({ type: 'ephemeral' });
+    // No breakpoint of their own: the conversation's breakpoints after them cache them.
+    expect(system[1]?.cache_control).toBeUndefined();
   });
 
   it('refuses a change it cannot make, keeps overlapping changes, and redacts secrets', async () => {

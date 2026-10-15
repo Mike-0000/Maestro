@@ -201,7 +201,8 @@ export type ConflictReport = z.infer<typeof conflictReportSchema>;
 export const conductorTurnRecordSchema = z.object({
   at: z.string(),
   utterance: z.string(),
-  route: z.enum(['grammar', 'jev', 'llm']),
+  /** 'line': the realtime talk line's model ran the turn, not the text conductor. */
+  route: z.enum(['grammar', 'jev', 'llm', 'line']),
   actions: z.array(
     z.object({
       tool: z.string(),
@@ -212,6 +213,13 @@ export const conductorTurnRecordSchema = z.object({
     })
   ),
   reply: z.string(),
+  /**
+   * What the model itself answered, when that is not what was said (NO_NEWS, or nothing at all
+   * from a turn that failed), so a log review can tell a quiet model from a failed one.
+   */
+  modelReply: z.string().optional(),
+  /** Set when the model's turn did not complete (an error, a timeout, or no answer). */
+  modelFailed: z.boolean().optional(),
   latencyMs: z.number(),
   tokens: z.number().optional(),
 });

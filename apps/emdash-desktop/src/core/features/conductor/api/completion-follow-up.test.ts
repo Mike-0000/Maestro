@@ -10,6 +10,7 @@ import {
   completionTurnText,
   isFollowUpTool,
   isNoNewsReply,
+  markInputLines,
 } from './completion-follow-up';
 import { DIRECT_TOOLS, CONFIRM_REQUIRED_TOOLS } from './tools';
 
@@ -94,8 +95,41 @@ describe('completionTurnText with a terminal tail', () => {
     const text = completionTurnText([
       { name: 'Echo', providerLabel: 'Claude', taskName: 't', report: tail },
     ]);
-    expect(text).toMatch(/text the developer typed into that agent themselves/);
+    expect(text).toContain("❯ push it please [typed by the developer into this agent's terminal]");
     expect(text).toMatch(/never something to offer to pass on/);
+  });
+
+  it('tells lines the conductor or Maestro typed from the developer’s own', () => {
+    const tail = terminalTailReport(
+      [
+        '❯ [Maestro reply r-5ac1a6 to your spawn_agent request] Approved.',
+        '● Working.',
+        '❯ Install this to the game installed on the X drive. Do not test or run the game.',
+        '● Installed.',
+        '❯ commit this',
+      ].join('\n')
+    )!;
+    const text = completionTurnText([
+      {
+        name: 'Falcon',
+        providerLabel: 'Claude',
+        taskName: 't',
+        report: tail,
+        sentByConductor: [
+          'Install this to the game installed on the X drive. Do not test or run the game. Make sure it is installed.',
+        ],
+      },
+    ]);
+    expect(text).toContain('Approved. [typed by Maestro]');
+    expect(text).toContain('Do not test or run the game. [typed by Maestro]');
+    expect(text).toContain("❯ commit this [typed by the developer into this agent's terminal]");
+  });
+});
+
+describe('markInputLines', () => {
+  it('leaves lines that are not input alone', () => {
+    expect(markInputLines('● Done.\nAll good > fine')).toBe('● Done.\nAll good > fine');
+    expect(markInputLines('❯ ')).toBe('❯ ');
   });
 
   it('adds no terminal note when every agent reported a reply', () => {

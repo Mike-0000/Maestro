@@ -114,4 +114,30 @@ describe('interpretCompletionGate', () => {
     });
     expect(verdict({})).toMatchObject({ kind: 'llm', reason: 'no-answer' });
   });
+
+  it("hands Claude the agent's own question or best sentence to fall back on", () => {
+    const agent = candidate(REPORT);
+    const { gate, option } = gateFor(agent);
+    const lowConfidence = interpretCompletionGate(
+      {
+        a0_kind: choice('needs_decision', 0.5),
+        a0_best: choice(option(1)),
+        a0_question: choice(option(2)),
+        a0_followup: noul(0.1),
+      },
+      gate,
+      [agent]
+    )[0];
+    expect(lowConfidence).toEqual({
+      kind: 'llm',
+      reason: 'low-confidence',
+      fallback: 'Maple asks: Should I also update the docs?',
+    });
+    const noQuestion = interpretCompletionGate(
+      { a0_kind: choice('done_with_result', 0.5), a0_best: choice(option(1)) },
+      gate,
+      [agent]
+    )[0];
+    expect(noQuestion).toMatchObject({ fallback: 'Maple: All 42 tests pass now.' });
+  });
 });

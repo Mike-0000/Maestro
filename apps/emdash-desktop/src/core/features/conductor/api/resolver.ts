@@ -138,6 +138,33 @@ export function isDeictic(reference: string): boolean {
   return DEICTIC.has(spoken) || (spoken === '' && WINDOW_NOUN.test(raw));
 }
 
+/**
+ * True when an utterance that leaves its agent unnamed ("tell it…") would go to the focused agent,
+ * while the conductor's last words were about another agent and not the focused one. The developer
+ * then most likely means the agent they just heard about: once, "tell it I signed in" went to the
+ * focused Iris while the conductor had just said Jasper was waiting for that sign-in.
+ */
+export function unnamedTargetIsAmbiguous(
+  utterance: string,
+  target: RosterAgent,
+  roster: readonly RosterAgent[],
+  lastReply: string
+): boolean {
+  const said = ` ${normalizeSpoken(utterance)} `;
+  const named = (agent: RosterAgent) => {
+    const name = normalizeSpoken(agent.name);
+    return name !== '' && said.includes(` ${name} `);
+  };
+  if (named(target)) return false;
+  const heard = ` ${normalizeSpoken(lastReply)} `;
+  const mentioned = (agent: RosterAgent) => {
+    const name = normalizeSpoken(agent.name);
+    return name !== '' && heard.includes(` ${name} `);
+  };
+  if (mentioned(target)) return false;
+  return roster.some((agent) => agent.id !== target.id && mentioned(agent));
+}
+
 function digitsOf(text: string): string {
   return (text.match(/\d+/g) ?? []).join(' ');
 }

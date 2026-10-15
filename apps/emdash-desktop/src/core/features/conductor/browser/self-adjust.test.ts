@@ -59,6 +59,7 @@ vi.mock('@core/primitives/logging/browser/logger', () => ({
 vi.mock('./spawn', () => ({
   agentMetadata: vi.fn(async () => []),
   resolveProjectId: vi.fn(),
+  resolveSpokenProject: vi.fn(() => ({ ok: false, reason: 'No project is open.' })),
   spawnAgentTask: vi.fn(),
   startAgentSession: vi.fn(),
 }));
@@ -246,7 +247,12 @@ describe('adjust_instructions', () => {
 
     await store.handleUtterance(WISH, 'typed');
 
-    expect(mocks.adjustInstructions).toHaveBeenCalledWith({ action: 'add', text: SAVED.text });
+    // The developer's own words ride along with what the model wrote.
+    expect(mocks.adjustInstructions).toHaveBeenCalledWith({
+      action: 'add',
+      text: SAVED.text,
+      said: WISH,
+    });
     expect(store.pending).toBeNull();
     expect(lastResult()).toContain('Saved as i1');
     expect(lastResult()).toContain('They apply from your next answer on');

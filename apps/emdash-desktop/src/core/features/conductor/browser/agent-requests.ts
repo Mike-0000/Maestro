@@ -6,6 +6,7 @@ import {
   relayedReplyText,
   REQUEST_TURN_ANSWER_CHARS,
   REQUEST_TURN_NOTE_CHARS,
+  deniedContextLines,
   requestContextLines,
   requestReplyText,
   validateAgentRequest,
@@ -97,6 +98,9 @@ export const WATCH_MS = 2 * 60 * 60_000;
 const MISSED_QUESTION_MS = 24 * 60 * 60_000;
 const MAX_MISSED_QUESTIONS = 6;
 const MAX_WATCHED_AGENTS = 50;
+/** How long the developer may still overrule a denied request by approving it. */
+export const OVERRULE_MS = 15 * 60_000;
+const MAX_DENIED = 20;
 const MAX_WATCHES_PER_AGENT = 4;
 
 const ACCEPTED_TAIL =
@@ -157,6 +161,11 @@ export class AgentRequestDesk {
   private readonly missed = new Map<string, { readonly sentence: string; readonly at: number }>();
   /** The request a model turn is deciding right now; that turn may settle no other. */
   private decidingId: string | null = null;
+  /**
+   * Requests denied lately, by id: the developer may still overrule a denial ("approve it after
+   * all"), which once could not be undone at all.
+   */
+  private readonly denied = new Map<string, { readonly open: OpenRequest; readonly at: number }>();
 
   constructor(
     private readonly host: AgentRequestHost,
@@ -439,6 +448,16 @@ export class AgentRequestDesk {
       outcome: { content, isError: true },
       spoken: content,
     });
+    const overruled = !inRequestTurn && decision === 'approve' ? this.reopenDenied(id) : null;
+    if (overruled) {
+      const words = plainText(message ?? '').trim();
+      return this.resolve(
+        overruled,
+        'approve',
+        words || 'The developer overruled the earlier denial: go ahead.',
+        false
+      );
+    }
     const open = this.find(id);
     if (!open) {
       const ids = [...this.open.keys()];
@@ -499,6 +518,7 @@ export class AgentRequestDesk {
     if (decision === 'deny') {
       open.verdict = 'I said no.';
       this.settle(open, { status: 'denied', by, detail: note });
+      this.rememberDenied(open);
       return {
         outcome: { content: `Denied ${request.id}; ${sender.name} is being told.` },
         spoken: `Told ${sender.name} no.`,
@@ -643,7 +663,48 @@ export class AgentRequestDesk {
   /** Open requests for the conductor's context block. */
   contextLines(): string[] {
     const views = [...this.open.values()].flatMap((open) => this.view(open) ?? []);
-    return requestContextLines(views, this.now());
+    const lines = requestContextLines(views, this.now());
+    const denied = this.recentlyDenied().flatMap(({ open, at }) => {
+      const view = this.view(open);
+      return view ? [{ ...view, at }] : [];
+    });
+    return [...lines, ...deniedContextLines(denied, this.now())];
+  }
+
+  private rememberDenied(open: OpenRequest): void {
+    // Only a request whose approval runs an action can be approved again later.
+    if (!open.valid.spec.action) return;
+    this.denied.set(open.valid.request.id, { open, at: this.now() });
+    for (const [id, entry] of this.denied) {
+      if (this.now() - entry.at > OVERRULE_MS || this.denied.size > MAX_DENIED) {
+        this.denied.delete(id);
+      }
+    }
+  }
+
+  private recentlyDenied(): { readonly open: OpenRequest; readonly at: number }[] {
+    return [...this.denied.values()].filter((entry) => this.now() - entry.at <= OVERRULE_MS);
+  }
+
+  /**
+   * Puts a request denied in the last few minutes back on the open list, waiting for the
+   * developer, so their approval runs it as if it had never been denied. Returns its id, or null
+   * when no such request is known.
+   */
+  private reopenDenied(id: string): string | null {
+    if (this.find(id)) return null;
+    const wanted = id.trim().toLowerCase();
+    const key = this.denied.has(wanted) ? wanted : `r-${wanted}`;
+    const entry = this.denied.get(key);
+    this.denied.delete(key);
+    if (!entry || this.now() - entry.at > OVERRULE_MS) return null;
+    const { open } = entry;
+    if (!this.host.entryFor(open.valid.request.from.conversationId)) return null;
+    open.state = 'awaiting-developer';
+    open.asked = open.asked ?? { sentence: '', at: entry.at };
+    open.timer = null;
+    this.open.set(key, open);
+    return key;
   }
 
   dispose(): void {
@@ -651,6 +712,7 @@ export class AgentRequestDesk {
       if (open.timer) clearTimeout(open.timer);
     }
     this.open.clear();
+    this.denied.clear();
     this.watches.clear();
   }
 

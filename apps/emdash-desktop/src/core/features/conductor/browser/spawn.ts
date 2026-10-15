@@ -21,6 +21,7 @@ import {
   type AgentMetadata,
 } from '@core/primitives/agents/api';
 import { resolveTaskBranchName, type CreateTaskParams } from '@core/primitives/tasks/api';
+import { matchProject, projectMatchError } from '../api/project-match';
 import { buildSpawnWorkspaceConfig } from '../api/spawn-workspace';
 
 export type SpawnRequest = {
@@ -62,24 +63,40 @@ export function slugify(text: string): string {
   return slug || 'task';
 }
 
-/** Resolves a spoken project reference to a project id, defaulting to the only/first project. */
-export function resolveProjectId(
-  reference: string | undefined,
-  preferredId?: string
-): string | null {
-  const available = [...getProjectManagerStore().projects.values()].filter((project) =>
+function availableProjects() {
+  return [...getProjectManagerStore().projects.values()].filter((project) =>
     asAvailableProject(project)
   );
-  if (available.length === 0) return null;
+}
+
+/**
+ * The project a spoken reference names, or why it names none. With no reference: the preferred
+ * project when it is open, else the first. A reference that matches no open project, or several,
+ * is an error to put to the developer, never a silent pick.
+ */
+export function resolveSpokenProject(
+  reference: string | undefined,
+  preferredId?: string
+): { ok: true; id: string } | { ok: false; reason: string } {
+  const available = availableProjects();
+  if (available.length === 0) return { ok: false, reason: 'No project is open.' };
   if (reference?.trim()) {
-    const wanted = reference.trim().toLowerCase();
-    const match =
-      available.find((project) => (project.name ?? '').toLowerCase() === wanted) ??
-      available.find((project) => (project.name ?? '').toLowerCase().includes(wanted));
-    if (match) return match.id;
+    const named = available.map((project) => ({ id: project.id, name: project.name ?? '' }));
+    const match = matchProject(reference, named);
+    if (match.kind === 'match') return { ok: true, id: match.id };
+    return { ok: false, reason: projectMatchError(reference.trim(), match, named) };
   }
-  if (preferredId && available.some((project) => project.id === preferredId)) return preferredId;
-  return available[0]?.id ?? null;
+  if (preferredId && available.some((project) => project.id === preferredId)) {
+    return { ok: true, id: preferredId };
+  }
+  const first = available[0];
+  return first ? { ok: true, id: first.id } : { ok: false, reason: 'No project is open.' };
+}
+
+/** The default project: the preferred one when it is open, else the first open project. */
+export function resolveProjectId(preferredId?: string): string | null {
+  const result = resolveSpokenProject(undefined, preferredId);
+  return result.ok ? result.id : null;
 }
 
 /**

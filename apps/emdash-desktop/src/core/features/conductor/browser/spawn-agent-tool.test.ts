@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CanvasStore } from '@core/features/canvas/api/browser/stores/canvas-store';
 import { DEFAULT_CONDUCTOR_SETTINGS, type ConductorStatus } from '../api/contract';
 import { ConductorStore, type ConductorVoicePort } from './conductor-store';
+import { installedProviders } from './roster';
 import type * as Roster from './roster';
+import { resolveSpokenProject } from './spawn';
 
 // How the conductor routes a voice spawn_agent: the project directory by default, a separate
 // worktree only when the model passes worktree: true for an explicit request.
@@ -41,6 +43,7 @@ vi.mock('@core/primitives/logging/browser/logger', () => ({
 vi.mock('./spawn', () => ({
   agentMetadata: vi.fn(async () => []),
   resolveProjectId: vi.fn(() => 'proj'),
+  resolveSpokenProject: vi.fn(() => ({ ok: true, id: 'proj' })),
   spawnAgentTask: mocks.spawnAgentTask,
   startAgentSession: vi.fn(async () => false),
 }));
@@ -89,7 +92,7 @@ describe('spawn_agent routing', () => {
     expect(mocks.spawnAgentTask).toHaveBeenCalledWith(
       expect.objectContaining({ projectId: 'proj', providerId: 'claude', worktree: false })
     );
-    expect(outcome.content).toContain('in the project directory');
+    expect(outcome.content).toContain('in project "Chorus" in the project directory');
     expect(requestPending.mock.calls[0]![0]).toMatch(/^Start Claude in Chorus on “Fix login”/);
     expect(requestPending.mock.calls[0]![0]).not.toContain('worktree');
   });
@@ -103,6 +106,45 @@ describe('spawn_agent routing', () => {
     );
     expect(outcome.content).toContain('in a new worktree');
     expect(requestPending.mock.calls[0]![0]).toContain('in a new worktree');
+  });
+
+  it('takes a provider named in any case, or by its product name', async () => {
+    vi.mocked(installedProviders).mockResolvedValue([
+      { id: 'claude', name: 'Claude Code' },
+      { id: 'codex', name: 'Codex' },
+    ]);
+    const { store } = setup();
+    for (const provider of ['Claude', 'Claude Code']) {
+      const outcome = await store['executeTool']('spawn_agent', { ...spawnInput, provider });
+      expect(outcome.isError).toBeFalsy();
+    }
+    for (const call of [1, 2]) {
+      expect(mocks.spawnAgentTask).toHaveBeenNthCalledWith(
+        call,
+        expect.objectContaining({ providerId: 'claude' })
+      );
+    }
+    const missing = await store['executeTool']('spawn_agent', {
+      ...spawnInput,
+      provider: 'Gemini',
+    });
+    expect(missing).toMatchObject({ isError: true });
+    vi.mocked(installedProviders).mockResolvedValue([]);
+  });
+
+  it('refuses a project name it cannot place, instead of guessing one', async () => {
+    vi.mocked(resolveSpokenProject).mockReturnValueOnce({
+      ok: false,
+      reason: '"Maestro" could mean "Wearable Maestro Trigger" or "Maestro (WSL)".',
+    });
+    const { store } = setup();
+    const outcome = await store['executeTool']('spawn_agent', {
+      ...spawnInput,
+      project: 'Maestro',
+    });
+    expect(outcome).toMatchObject({ isError: true });
+    expect(outcome.content).toContain('could mean');
+    expect(mocks.spawnAgentTask).not.toHaveBeenCalled();
   });
 
   it('starts an agent with no task when the prompt is empty', async () => {

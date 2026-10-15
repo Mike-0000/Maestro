@@ -15,6 +15,7 @@ import {
   MAX_OPEN_REQUESTS_PER_AGENT,
   MAX_REQUESTS_PER_WINDOW,
   newlyCompleted,
+  OVERRULE_MS,
   WATCH_MS,
   type AgentRequestHost,
 } from './agent-requests';
@@ -614,7 +615,8 @@ describe('spawn_agent', () => {
     await desk.drain();
     expect(host.decide).toHaveBeenCalledTimes(2);
     expect(overlapped).toBe(false);
-    expect(desk.contextLines()).toEqual([]);
+    // Both are settled: none is open, though both stay listed as denied, for an overrule.
+    expect(desk.contextLines().join('\n')).not.toContain('Open requests');
   });
 
   it('gives up on a request the conductor never got free to decide', async () => {
@@ -700,6 +702,44 @@ describe('spawn_agent', () => {
     expect(sent[0]!.text).toContain('Requests from agents were turned off.');
     expect(acts).toEqual([]);
     expect(desk.awaitingDeveloper).toBe(false);
+  });
+});
+
+describe('overruling a denial', () => {
+  it('lets the developer approve a request the conductor denied minutes ago', async () => {
+    const { receive, desk, decideWith, sent, acts, state } = setup();
+    decideWith(async (open) => {
+      await desk.answer(open.id, 'deny', 'Not approved yet.', true);
+      return '';
+    });
+    const asked = spawn();
+    await receive(asked);
+    expect(acts).toEqual([]);
+    expect(desk.contextLines().join('\n')).toContain(`${asked.id} from Atlas, denied`);
+
+    state.now += 5 * 60_000;
+    const outcome = await desk.answer(asked.id, 'approve', undefined, false);
+    expect(outcome.isError).toBeFalsy();
+    expect(acts).toHaveLength(1);
+    expect(sent.at(-1)!.text).toContain('Approved by the developer');
+    expect(sent.at(-1)!.text).toContain('overruled the earlier denial');
+    // Once is enough: it is no longer listed, and a second approval finds nothing.
+    expect(desk.contextLines()).toEqual([]);
+    expect((await desk.answer(asked.id, 'approve', undefined, false)).isError).toBe(true);
+  });
+
+  it('does not reopen a denial once it is old, or for the request turn itself', async () => {
+    const { receive, desk, decideWith, acts, state } = setup();
+    decideWith(async (open) => {
+      await desk.answer(open.id, 'deny', 'No.', true);
+      return '';
+    });
+    const asked = spawn();
+    await receive(asked);
+    expect((await desk.answer(asked.id, 'approve', undefined, true)).isError).toBe(true);
+    state.now += OVERRULE_MS + 1;
+    expect((await desk.answer(asked.id, 'approve', undefined, false)).isError).toBe(true);
+    expect(acts).toEqual([]);
   });
 });
 

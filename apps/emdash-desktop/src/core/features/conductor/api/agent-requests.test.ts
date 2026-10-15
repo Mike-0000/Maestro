@@ -277,6 +277,9 @@ describe('what the conductor reads and writes', () => {
       expect(text).toContain('Do not ask the developer and do not leave it open');
       expect(text).toContain('never tell Atlas the developer said or approved anything');
     }
+    for (const text of [action, asked]) {
+      expect(text).toContain('never deny or answer against an instruction the developer gave');
+    }
     expect(action).toContain('Approve when it is a sensible next step');
     expect(action).toContain('computer use to a Codex agent');
     expect(asked).toContain('Use decision "answer" with message as your answer');

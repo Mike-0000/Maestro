@@ -52,7 +52,7 @@ export async function routerInput(
   const focused = roster.find((agent) => agent.id === focusedId) ?? null;
   const projects = availableProjects();
   const focusedEntry = focusedId ? entryForConversation(canvas, focusedId) : undefined;
-  const defaultProjectId = resolveProjectId(undefined, focusedEntry?.projectId);
+  const defaultProjectId = resolveProjectId(focusedEntry?.projectId);
   return {
     utterance,
     roster,

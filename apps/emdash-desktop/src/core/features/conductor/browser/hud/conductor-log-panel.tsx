@@ -59,8 +59,14 @@ export function ConductorLogPanel({
               “{record.utterance}”
             </span>
             <span className="shrink-0 text-[10px] text-foreground-muted tabular-nums">
-              {record.route === 'grammar' ? 'instant' : record.route === 'jev' ? 'Jev' : 'Claude'} ·{' '}
-              {record.latencyMs} ms
+              {record.route === 'grammar'
+                ? 'instant'
+                : record.route === 'jev'
+                  ? 'Jev'
+                  : record.route === 'line'
+                    ? 'talk line'
+                    : 'Claude'}{' '}
+              · {record.latencyMs} ms
               {record.tokens ? ` · ${record.tokens.toLocaleString()} tok` : ''}
             </span>
           </div>
