@@ -27,6 +27,8 @@ const OPEN_TIMEOUT_MS = 15_000;
  * is made; a session outlives it. Short, so a secret that leaks is useless soon after.
  */
 const CLIENT_SECRET_TTL_S = 120;
+/** xAI's own search tools, which run on its side: the line sees only what the model says. */
+const SEARCH_TOOLS = [{ type: 'web_search' }, { type: 'x_search' }] as const;
 /** The sample rate of the line's audio both ways: xAI's default, and no resampling at its end. */
 export const TALK_SAMPLE_RATE = 24_000;
 
@@ -238,7 +240,9 @@ export function sessionConfig(
   return {
     ...own,
     instructions,
-    tools,
+    // Built-in tools are off unless they are listed, and this list replaces any a custom agent
+    // was given, so search is asked for here.
+    tools: settings.webSearch ? [...tools, ...SEARCH_TOOLS] : tools,
     // Turns are taken by hand. Grok's server VAD always answers by itself; Maestro decides when a
     // turn is the developer's (the talk key was released, or the words were read and are neither
     // an echo nor noise) and asks for the answer then. The renderer finds where speech starts

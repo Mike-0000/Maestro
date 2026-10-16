@@ -104,7 +104,7 @@ describe('TalkService.openSession', () => {
           model: 'grok-voice-3.0',
           instructions: 'Be brief.',
           voice: 'rex',
-          tools: [{ name: 'read_agent' }],
+          tools: [{ name: 'read_agent' }, { type: 'web_search' }, { type: 'x_search' }],
         },
       },
     });
@@ -304,5 +304,26 @@ describe('sessionConfig', () => {
     expect(config.reasoning).toEqual({ effort: 'none' });
     expect(config).not.toHaveProperty('type');
     expect(config).not.toHaveProperty('tool_choice');
+  });
+
+  it("adds xAI's web and X search after Maestro's tools, and leaves them out when it is off", () => {
+    const tool = {
+      type: 'function' as const,
+      name: 'list_agents',
+      description: '',
+      parameters: {},
+    };
+    expect(sessionConfig(DEFAULT_TALK_SETTINGS, 'x', [tool]).tools).toEqual([
+      tool,
+      { type: 'web_search' },
+      { type: 'x_search' },
+    ]);
+    const off = sessionConfig({ ...DEFAULT_TALK_SETTINGS, webSearch: false }, 'x', [tool]);
+    expect(off.tools).toEqual([tool]);
+  });
+
+  it('sends search to a custom voice agent too, since its tools are replaced', () => {
+    const config = sessionConfig({ ...DEFAULT_TALK_SETTINGS, agentId: 'agent_abcd' }, 'x', []);
+    expect(config.tools).toEqual([{ type: 'web_search' }, { type: 'x_search' }]);
   });
 });

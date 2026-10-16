@@ -27,6 +27,9 @@ export const talkListeningSchema = z.enum(['key', 'open']);
 export const talkRepliesSchema = z.enum(['brief', 'normal']);
 export type TalkReplies = z.infer<typeof talkRepliesSchema>;
 
+/** Most a voice style may say: enough for a paragraph, small beside the instructions. */
+export const TALK_VOICE_STYLE_MAX_CHARS = 1_000;
+
 export const talkSettingsSchema = z.object({
   /** Off: no session is ever opened and nothing here costs anything. */
   enabled: z.boolean(),
@@ -57,6 +60,17 @@ export const talkSettingsSchema = z.object({
    * refused would reset every talk setting; `openSession` refuses one that is not an agent id.
    */
   agentId: z.string().max(100),
+  /**
+   * Lets the voice model search the web and X itself, with xAI's built-in `web_search` and
+   * `x_search` tools. xAI bills each search on top of the line's minutes.
+   */
+  webSearch: z.boolean(),
+  /**
+   * How the voice should sound, in the developer's words ('' for none): tone, pace, manner. It
+   * changes how the line speaks, never what it does or reports. The open session follows a
+   * change from its next answer.
+   */
+  voiceStyle: z.string().max(TALK_VOICE_STYLE_MAX_CHARS),
 });
 export type TalkSettings = z.infer<typeof talkSettingsSchema>;
 
@@ -73,6 +87,8 @@ export const DEFAULT_TALK_SETTINGS: TalkSettings = {
   transcriptionModel: 'grok-transcribe',
   replies: 'brief',
   agentId: '',
+  webSearch: true,
+  voiceStyle: '',
 };
 
 /** What an xAI voice agent id looks like: `agent_` and letters, digits, `_` or `-`. */
@@ -91,7 +107,7 @@ export function talkLineModel(settings: Pick<TalkSettings, 'agentId' | 'model'>)
   return agent ? agent : settings.model;
 }
 
-/** The built-in Grok voices; a cloned voice's id works too. */
+/** The built-in Grok voices; a custom voice's id from xAI's Custom Voices API works too. */
 export const TALK_VOICES = ['eve', 'ara', 'rex', 'sal', 'leo'] as const;
 
 /**

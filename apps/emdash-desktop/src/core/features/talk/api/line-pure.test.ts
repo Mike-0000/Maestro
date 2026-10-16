@@ -158,6 +158,27 @@ describe('what the line is given', () => {
     }
   });
 
+  it('tells the model it can search only when it has the search tools', () => {
+    for (const replies of ['brief', 'normal'] as const) {
+      expect(lineInstructions(replies)).not.toContain('web_search');
+      expect(lineInstructions(replies, '', { webSearch: false })).toBe(lineInstructions(replies));
+      const searching = lineInstructions(replies, 'Standing.', { webSearch: true });
+      expect(searching).toContain('You can search the web (web_search) and X (x_search)');
+      expect(searching.endsWith('\n\nStanding.')).toBe(true);
+    }
+  });
+
+  it("puts the developer's voice style after the built-in rules and before standing ones", () => {
+    const style = 'Speak with a laid-back skater vibe.';
+    for (const replies of ['brief', 'normal'] as const) {
+      expect(lineInstructions(replies, '', { voiceStyle: '  ' })).toBe(lineInstructions(replies));
+      const styled = lineInstructions(replies, 'Standing.', { voiceStyle: ` ${style} ` });
+      expect(styled.startsWith(lineInstructions(replies))).toBe(true);
+      expect(styled.endsWith(`${style}\n\nStanding.`)).toBe(true);
+      expect(styled).toContain('It shapes your tone, pace and wording only');
+    }
+  });
+
   it('keeps the text conductor reading the prompt it always had', () => {
     expect(CONDUCTOR_SYSTEM_PROMPT).toBe(`${CONDUCTOR_RULES}\n\n${CONDUCTOR_REPLY_RULES}`);
     expect(CONDUCTOR_SYSTEM_PROMPT).toContain('\n\nHow to reply:\n- Your final text is spoken');

@@ -581,6 +581,10 @@ session, or over its daily limit. Those need an Anthropic or OpenRouter key, as 
 | --- | --- |
 | Custom voice agent | An agent made in xAI's Voice Agent Builder, by its id (`agent_…`). The line connects to it (`?agent_id=`) instead of the voice model, and uses the agent's own model, voice and effort. Maestro still sends the conductor's instructions, its tools, hand-taken turns and its audio format, so the line acts as it does without one. Empty (the default) uses the voice model |
 | Voice model | `grok-voice-3.0` (default, pinned) or `grok-voice-latest`. Not used while a custom voice agent is set |
+| Voice | A built-in Grok voice. Not used while a custom voice agent is set |
+| Custom voice | A voice id from xAI's Custom Voices API, such as a clone of your own voice; the line speaks in it instead of a built-in voice. Empty goes back to the default voice |
+| Voice style | How the voice should sound, in your words (tone, pace, manner). It is added after the built-in rules, changes how Maestro speaks but not what it does or reports, and reaches the open line from its next answer |
+| Web and X search | On by default. Gives the line xAI's built-in `web_search` and `x_search` tools, for news and facts from outside your projects. Each search is billed by xAI on top of the minutes |
 | Listen without the talk key | Keeps the microphone open all the time. Off, Maestro hears you while you hold the key and for a moment after it speaks |
 | Seconds the microphone stays open | The follow-up window after Maestro speaks; 0 means the microphone opens only with the talk key |
 | Speak over the voice to stop it | Keeps the microphone open while the voice speaks. Use it with headphones, or if echo cancellation holds on your speakers. Off, the talk key stops the voice |
