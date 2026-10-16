@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createBoundExec, ExecError, type BoundExec } from '@emdash/core/services/exec/api';
@@ -49,7 +50,16 @@ export type ScoutRunInput = {
   /** Already passed through `scoutModel`. */
   model: string;
   timeoutMs: number;
+  /**
+   * The scout's settings file. With extra folders, a sibling file named for that set of folders
+   * is used instead, so scouts with different folders never share one file.
+   */
   settingsPath: string;
+  /**
+   * Folders outside `cwd` the scout may also read, already checked by `usableScoutFolders`.
+   * They reach the CLI through the settings file and the prompt, never the command line.
+   */
+  extraFolders?: readonly string[];
   signal: AbortSignal;
   /**
    * CLI versions that passed the containment self-test. A run on any other version is stopped
@@ -111,7 +121,9 @@ export async function runScout(
     return failed({ reason: 'unsupported-cli', message: 'Claude Code was not found.' });
   }
   if (input.signal.aborted) return failed(CANCELLED);
-  if (!(await ensureScoutSettings(input.settingsPath))) {
+  const extraFolders = input.extraFolders ?? [];
+  const settingsPath = scoutSettingsPath(input.settingsPath, extraFolders);
+  if (!(await ensureScoutSettings(settingsPath, extraFolders))) {
     return failed({
       reason: 'preflight',
       message: "The scout's settings file could not be written.",
@@ -177,8 +189,8 @@ export async function runScout(
   const exec = (deps.exec ?? createBoundExec)({ file: input.cli, cwd: input.cwd, env: input.env });
   const execution = Promise.resolve()
     .then(() =>
-      exec.execStreaming(scoutArgs(input), onChunk, {
-        input: scoutPrompt(input.question),
+      exec.execStreaming(scoutArgs({ model: input.model, settingsPath }), onChunk, {
+        input: scoutPrompt(input.question, extraFolders),
         timeoutMs: input.timeoutMs,
         signal: input.signal,
         windowsHide: true,
@@ -273,14 +285,29 @@ function isSpawnError(error: unknown): boolean {
 let settingsWrites: Promise<unknown> = Promise.resolve();
 
 /**
- * Makes the scout's settings file hold exactly the deny list. It is checked before every run and
- * rewritten whenever it differs, so an edited or damaged file cannot widen what a scout reads.
- * False when it could not be written: the run must then not start.
+ * The settings file for a set of extra folders: the base file when there are none, otherwise a
+ * sibling named for the set, so two scouts with different folders cannot rewrite each other's.
  */
-export function ensureScoutSettings(settingsPath: string): Promise<boolean> {
+export function scoutSettingsPath(base: string, extraFolders: readonly string[]): string {
+  if (extraFolders.length === 0) return base;
+  const id = createHash('sha256').update(extraFolders.join('\u0000')).digest('hex').slice(0, 12);
+  const extension = path.extname(base);
+  return `${base.slice(0, base.length - extension.length)}-${id}${extension}`;
+}
+
+/**
+ * Makes the scout's settings file hold exactly the deny list (and the extra folders it is for).
+ * It is checked before every run and rewritten whenever it differs, so an edited or damaged file
+ * cannot widen what a scout reads. False when it could not be written: the run must then not
+ * start.
+ */
+export function ensureScoutSettings(
+  settingsPath: string,
+  extraFolders: readonly string[] = []
+): Promise<boolean> {
   // One at a time: scouts start together, and two renames onto one file can collide.
   const next = settingsWrites.then(async () => {
-    const wanted = scoutSettingsContent();
+    const wanted = scoutSettingsContent(extraFolders);
     const current = await readFile(settingsPath, 'utf8').catch(() => null);
     if (current === wanted) return true;
     try {

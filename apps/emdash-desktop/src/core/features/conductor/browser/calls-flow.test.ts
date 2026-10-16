@@ -977,6 +977,38 @@ describe('the voice line as the conductor', () => {
     store.dispose();
   });
 
+  it('tells the line a call its voice could not say, once', async () => {
+    const atlas = agent('atlas');
+    const { store, speech: spoken, announce } = setup([atlas]);
+    const talk = line();
+    talk.say.mockResolvedValue(false);
+    store.setTalkLine(talk);
+    await announce([atlas]);
+    await settle();
+    const said = spoken.spoken.at(-1)?.text ?? '';
+    expect(said).not.toBe('');
+    const told = talk.note.mock.calls.filter(([note]) => String(note).includes(said));
+    expect(told).toEqual([[`[Maestro told the developer] ${said}`]]);
+    expect(talk.spoke).toHaveBeenCalledWith(said);
+    store.dispose();
+  });
+
+  it('tells the line what a fast command did without it', async () => {
+    const atlas = agent('atlas');
+    const { store } = setup([atlas]);
+    const talk = line();
+    talk.ready.mockReturnValue(false);
+    store.setTalkLine(talk);
+    await store.handleUtterance('hold my calls', 'typed');
+    await settle();
+    expect(talk.note).toHaveBeenCalledWith(
+      expect.stringContaining(
+        '[Conductor] Handled without you: the developer said “hold my calls”.'
+      )
+    );
+    store.dispose();
+  });
+
   it('reads a permission call in the system voice even with a line open', async () => {
     const bravo = agent('bravo', {
       status: 'awaiting-input',

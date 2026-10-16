@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import type { PluginFs } from '@emdash/core/services/agent-plugins/api/plugins';
 import { parse as parseToml } from 'smol-toml';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { CODEX_CONFIG_PATH, CODEX_LEGACY_HOOKS_PATH, buildCodexHookConfig } from './hooks';
 
 function createMemoryFs(initial: Record<string, string> = {}): PluginFs & {
@@ -222,4 +222,110 @@ hooks = [{ type = "command", command = "echo user-toml" }]
     expect(legacy).toContain('echo user-stop');
     expect(legacy).not.toContain('EMDASH_HOOK_PORT');
   });
+
+  it.skipIf(process.platform === 'win32')(
+    "posts Codex's Stop payload, with its final reply, as a stop event",
+    async () => {
+      const fs = createMemoryFs();
+      await buildCodexHookConfig().writeHooks(fs, []);
+      const command = codexHookCommands(await fs.read(CODEX_CONFIG_PATH)).Stop[0];
+
+      const payload = '{"turn_id":"t-1","last_assistant_message":"Done: published 2.0.0."}';
+      const result = spawnSync(
+        '/bin/sh',
+        ['-c', `curl() { printf '%s\n' "$*"; cat; }; ${command}`],
+        {
+          encoding: 'utf8',
+          input: payload,
+          env: {
+            PATH: process.env.PATH ?? '',
+            EMDASH_HOOK_PORT: '1234',
+            EMDASH_HOOK_NONCE: 'nonce',
+            EMDASH_PTY_ID: 'pty-1',
+          },
+        }
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('X-Emdash-Event-Type: stop');
+      expect(result.stdout.endsWith(payload)).toBe(true);
+    }
+  );
+
+  it('reads the final reply from a Stop payload and still accepts the older stop signals', () => {
+    const { parseHookEvent } = buildCodexHookConfig();
+
+    expect(parseHookEvent('stop', { last_assistant_message: 'Done.' })).toMatchObject({
+      kind: 'status',
+      type: 'stop',
+      lastAssistantMessage: 'Done.',
+    });
+    expect(parseHookEvent('notification', { notification_type: 'idle_prompt' })).toEqual({
+      kind: 'status',
+      type: 'stop',
+    });
+    expect(parseHookEvent('notification', { type: 'agent-turn-complete' })).toEqual({
+      kind: 'status',
+      type: 'stop',
+    });
+  });
+
+  describe('on Windows', () => {
+    const platform = process.platform;
+    afterEach(() => {
+      Object.defineProperty(process, 'platform', { value: platform });
+    });
+
+    it('starts PowerShell directly, since Codex runs hooks in Windows PowerShell 5.1', async () => {
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      const oldWrapper =
+        'cmd.exe /d /c set EMDASH_HOOK_MARKER=EMDASH_HOOK_CONFIG_VERSION=1 EMDASH_HOOK_PORT&&powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand AAAA';
+      const fs = createMemoryFs({
+        [CODEX_CONFIG_PATH]: `[[hooks.Stop]]
+[[hooks.Stop.hooks]]
+type = "command"
+command = "${oldWrapper}"
+
+[[hooks.Stop]]
+[[hooks.Stop.hooks]]
+type = "command"
+command = "echo user-stop"
+`,
+      });
+      const hooks = buildCodexHookConfig();
+
+      await hooks.writeHooks(fs, []);
+      await hooks.writeHooks(fs, []);
+
+      const commands = codexHookCommands(await fs.read(CODEX_CONFIG_PATH));
+      expect(commands.Stop).toHaveLength(2);
+      expect(commands.Stop[0]).toBe('echo user-stop');
+      for (const event of ['Stop', 'PermissionRequest', 'SessionStart'] as const) {
+        const command = commands[event].at(-1) ?? '';
+        expect(command).toMatch(
+          /^powershell\.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand /
+        );
+        expect(command).not.toContain('&&');
+      }
+      await expect(hooks.getHooksInstalled(fs)).resolves.toBe(true);
+
+      await hooks.deleteHooks(fs);
+      expect(codexHookCommands(await fs.read(CODEX_CONFIG_PATH)).Stop).toEqual(['echo user-stop']);
+    });
+  });
 });
+
+function codexHookCommands(
+  raw: string | null
+): Record<'Stop' | 'PermissionRequest' | 'SessionStart', string[]> {
+  const config = parseToml(raw ?? '') as {
+    hooks: Record<string, Array<{ hooks: Array<{ command: string }> }> | undefined>;
+  };
+  const commands = (event: string) =>
+    (config.hooks[event] ?? []).flatMap((group) => group.hooks.map((hook) => hook.command));
+  return {
+    Stop: commands('Stop'),
+    PermissionRequest: commands('PermissionRequest'),
+    SessionStart: commands('SessionStart'),
+  };
+}

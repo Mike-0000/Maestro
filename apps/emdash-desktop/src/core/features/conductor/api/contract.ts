@@ -93,6 +93,13 @@ export const conductorSettingsSchema = z.object({
   investigationDailyUsd: z.number().min(0),
   /** The one-time hint that offers code checks has been shown. */
   investigationOfferShown: z.boolean(),
+  /**
+   * Folders outside the project that a code check may also read, read-only, each chosen by the
+   * developer. Any list of strings is accepted here, because a value this schema refused would
+   * reset every conductor setting; the main process checks each folder before a check runs and
+   * leaves out one it refuses (a drive root, the home folder, a hidden folder).
+   */
+  investigationFolders: z.array(z.string()),
 });
 export type ConductorSettings = z.infer<typeof conductorSettingsSchema>;
 
@@ -123,13 +130,14 @@ export const DEFAULT_CONDUCTOR_SETTINGS: ConductorSettings = {
   investigationsPerDay: 100,
   investigationDailyUsd: 2,
   investigationOfferShown: false,
+  investigationFolders: [],
 };
 
 /**
  * Build-time switch for the code-checks settings group and its one-time hint. While it is false
  * the feature cannot be turned on from the app; the setting's own default stays off either way.
  */
-export const CODE_CHECKS_UI: boolean = false;
+export const CODE_CHECKS_UI: boolean = true;
 
 export const conductorUsageSchema = z.object({
   day: z.string(),
@@ -373,6 +381,13 @@ export const investigationResultSchema = z.object({
   /** The folder the scout read, by its base name. The full path stays in the main process. */
   folderName: z.string(),
   outcomes: z.array(investigationOutcomeSchema).min(1).max(INVESTIGATION_LIMITS.questions),
+  /** The developer's extra folders the scout could also read, by their base names. */
+  alsoRead: z.array(z.string()).optional(),
+  /**
+   * `windows-copy`: the project lives in a WSL distro, and the scout read its live mirror on a
+   * Windows drive, which holds the same files except ones git ignores.
+   */
+  source: z.enum(['project', 'windows-copy']).optional(),
 });
 export type InvestigationResult = z.infer<typeof investigationResultSchema>;
 
@@ -389,6 +404,68 @@ export const investigationErrorSchema = z.object({
   message: z.string(),
 });
 export type InvestigationError = z.infer<typeof investigationErrorSchema>;
+
+/** Size limits on a project lookup: names only, so the result stays small and file text stays out. */
+export const LOOKUP_LIMITS = {
+  terms: 5,
+  termChars: 80,
+  /** File paths whose name matches a term. */
+  pathHits: 8,
+  /** Files whose text mentions a term, most mentions first. */
+  fileHits: 8,
+} as const;
+
+export const lookupInputSchema = z.object({
+  /** An id, never a path: the main process resolves the folder on whichever host it lives. */
+  target: investigationInputSchema.shape.target,
+  terms: z
+    .array(
+      z
+        .string()
+        .trim()
+        .min(2)
+        .max(LOOKUP_LIMITS.termChars)
+        .refine((term) => !/[\0\r\n]/u.test(term), 'A term is one line.')
+    )
+    .min(1)
+    .max(LOOKUP_LIMITS.terms),
+});
+export type LookupInput = z.infer<typeof lookupInputSchema>;
+
+export const lookupTermResultSchema = z.object({
+  term: z.string(),
+  /** Project-relative paths of files whose path contains the term. */
+  paths: z.array(z.string()).max(LOOKUP_LIMITS.pathHits),
+  /** Project-relative files whose text mentions the term, with how many lines do. */
+  files: z
+    .array(z.object({ path: z.string(), lines: z.number().int().min(1) }))
+    .max(LOOKUP_LIMITS.fileHits),
+  /** Every file whose text mentions the term, including those not listed. */
+  filesTotal: z.number().int().min(0),
+  /** False when the search stopped at its limit before reading every file. */
+  complete: z.boolean(),
+});
+export type LookupTermResult = z.infer<typeof lookupTermResultSchema>;
+
+export const lookupResultSchema = z.object({
+  /** The folder searched, by its base name. */
+  folderName: z.string(),
+  terms: z.array(lookupTermResultSchema).min(1).max(LOOKUP_LIMITS.terms),
+});
+export type LookupResult = z.infer<typeof lookupResultSchema>;
+
+export const lookupErrorSchema = z.object({
+  type: z.enum(['disabled', 'not-found', 'failed']),
+  message: z.string(),
+});
+export type LookupError = z.infer<typeof lookupErrorSchema>;
+
+/** Whether a folder may be added to the code checks' extra folders, and as which real path. */
+export const folderCheckSchema = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), path: z.string() }),
+  z.object({ ok: z.literal(false), reason: z.string() }),
+]);
+export type FolderCheck = z.infer<typeof folderCheckSchema>;
 
 export const conductorContract = defineContract({
   /** One Jev (System One) evaluation: typed questions about a state, answered in parallel. */
@@ -480,6 +557,22 @@ export const conductorContract = defineContract({
    * and returns the new status. It takes seconds: call it with `{ timeoutMs: 0 }`.
    */
   recheckInvestigator: procedure({ input: z.void(), output: conductorStatusSchema }),
+  /**
+   * A project lookup: where a name appears in a project's file paths and file text, on any host
+   * (this computer, WSL, SSH). Names and counts only, never file contents. A live job because a
+   * first search of a large or remote project can take seconds.
+   */
+  findInProject: liveJob({
+    input: lookupInputSchema,
+    progress: z.object({ done: z.number().int().min(0) }),
+    result: lookupResultSchema,
+    error: lookupErrorSchema,
+  }),
+  /** Checks a folder the developer wants code checks to read as well, before it is saved. */
+  checkInvestigationFolder: procedure({
+    input: z.object({ path: z.string() }),
+    output: folderCheckSchema,
+  }),
 });
 
 export type ConductorContract = typeof conductorContract;

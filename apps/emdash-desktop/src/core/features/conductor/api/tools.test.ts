@@ -107,11 +107,25 @@ describe('conductor tools', () => {
     expect(CONFIRM_REQUIRED_TOOLS.has('canvas_desks')).toBe(false);
   });
 
-  it('keeps the code-check tool last, behind no confirmation', () => {
-    // Last of 46: the tool list without it is then a plain prefix of the list with it. A tool
-    // added later goes just before it, and this moves with it.
-    expect(conductorToolNames.at(-1)).toBe('investigate');
-    expect(conductorToolNames).toHaveLength(46);
+  it('keeps the code-check and lookup tools last, behind no confirmation', () => {
+    // Last of 47: the tool list without them is then a plain prefix of the list with them. A
+    // tool added later goes just before them, and this moves with it.
+    expect(conductorToolNames.slice(-2)).toEqual(['investigate', 'find_in_project']);
+    expect(conductorToolNames).toHaveLength(47);
+    const lookup = conductorToolSchemas.find_in_project;
+    expect(lookup.safeParse({ terms: ['talk line', 'talkLine'], project: 'chorus' }).success).toBe(
+      true
+    );
+    expect(lookup.safeParse({ terms: [] }).success).toBe(false);
+    expect(lookup.safeParse({ terms: ['a'] }).success).toBe(false);
+    expect(lookup.safeParse({ terms: Array.from({ length: 6 }, () => 'term') }).success).toBe(
+      false
+    );
+    for (const name of ['investigate', 'find_in_project'] as const) {
+      expect(DIRECT_TOOLS.has(name)).toBe(false);
+      expect(CONFIRM_REQUIRED_TOOLS.has(name)).toBe(false);
+      expect(isFollowUpTool(name)).toBe(false);
+    }
     const investigate = conductorToolSchemas.investigate;
     expect(investigate.safeParse({ questions: ['Is there a retry helper?'] }).success).toBe(true);
     expect(

@@ -65,6 +65,42 @@ export function encodeWav(samples: Float32Array, sampleRate = STT_SAMPLE_RATE): 
   return new Uint8Array(buffer);
 }
 
+/**
+ * Decodes a mono 16-bit PCM WAV (as `encodeWav` writes it) to float samples in [-1, 1]. Returns
+ * null for any other layout, so callers never feed a recognizer audio it cannot read.
+ */
+export function decodeWav(bytes: Uint8Array): { samples: Float32Array; sampleRate: number } | null {
+  if (bytes.byteLength < 12) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const ascii = (offset: number) =>
+    String.fromCharCode(...bytes.subarray(offset, Math.min(offset + 4, bytes.byteLength)));
+  if (ascii(0) !== 'RIFF' || ascii(8) !== 'WAVE') return null;
+  let sampleRate = 0;
+  let pcm16Mono = false;
+  let offset = 12;
+  while (offset + 8 <= bytes.byteLength) {
+    const id = ascii(offset);
+    const size = view.getUint32(offset + 4, true);
+    const body = offset + 8;
+    if (id === 'fmt ' && size >= 16 && body + 16 <= bytes.byteLength) {
+      pcm16Mono =
+        view.getUint16(body, true) === 1 &&
+        view.getUint16(body + 2, true) === 1 &&
+        view.getUint16(body + 14, true) === 16;
+      sampleRate = view.getUint32(body + 4, true);
+    } else if (id === 'data') {
+      if (!pcm16Mono || sampleRate <= 0) return null;
+      const count = Math.floor(Math.min(size, bytes.byteLength - body) / 2);
+      const samples = new Float32Array(count);
+      for (let i = 0; i < count; i++) samples[i] = view.getInt16(body + i * 2, true) / 32768;
+      return { samples, sampleRate };
+    }
+    // Chunks are padded to an even length.
+    offset = body + size + (size & 1);
+  }
+  return null;
+}
+
 /** Root-mean-square level of a chunk, 0..1. */
 export function rms(samples: Float32Array): number {
   if (samples.length === 0) return 0;

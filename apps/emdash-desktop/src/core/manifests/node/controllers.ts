@@ -495,7 +495,16 @@ export const desktopNodeControllers = {
       createVoiceWireController({ host: chorus, logger, scope }).controller,
   },
   conductor: {
-    create: ({ agentDependencies, chorus, logger, providerSettings, scope, workspaceIdentity }) =>
+    create: ({
+      agentDependencies,
+      chorus,
+      logger,
+      providerSettings,
+      scope,
+      search,
+      ssh,
+      workspaceIdentity,
+    }) =>
       createConductorWireController({
         host: chorus,
         logger,
@@ -512,6 +521,26 @@ export const desktopNodeControllers = {
           providerEnv: async () => (await providerSettings.getItem('claude'))?.env ?? {},
           // The object itself: its methods use `this`, so they are not passed detached.
           identity: workspaceIdentity,
+          // A WSL project is read through the Windows folder its live mirror keeps the same.
+          wslMirrors: () => ssh.machines.getWslMirrors(),
+        },
+        lookup: {
+          searchFiles: async (workspaceId, query, limit) =>
+            (await search.searchFiles(workspaceId, query, limit)).map((hit) => hit.relativePath),
+          searchContent: async (workspaceId, query, limit, signal) => {
+            const result = await search.searchContent(
+              { workspaceId, query, limit },
+              { jobId: 'conductor-lookup', signal, progress: () => {} }
+            );
+            if (!result.success) return null;
+            return {
+              files: result.data.files.map((file) => ({
+                path: file.path,
+                lines: file.matches.length,
+              })),
+              complete: result.data.complete,
+            };
+          },
         },
       }),
   },

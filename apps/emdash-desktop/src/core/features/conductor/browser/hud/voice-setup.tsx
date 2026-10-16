@@ -1,8 +1,11 @@
 import { CheckCircle2, Loader2, Mic, X } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { settingsViewDef } from '@core/features/settings/contributions/views';
-import { getVoiceStore } from '@core/features/voice/contributions/browser/app-stores';
+import {
+  getDictationStore,
+  getVoiceStore,
+} from '@core/features/voice/contributions/browser/app-stores';
 import { getNavigation } from '@core/primitives/navigation/browser/navigation-selectors';
 import { cn } from '@core/primitives/styling/browser/cn';
 
@@ -29,11 +32,19 @@ export const VoiceSetupPanel = observer(function VoiceSetupPanel({
   onClose: () => void;
 }) {
   const voice = getVoiceStore();
+  const dictation = getDictationStore();
   const [test, setTest] = useState<TestState>({ kind: 'idle' });
   const settings = voice.settings;
+  const local = settings?.localTranscriber ?? false;
+  useEffect(() => {
+    if (local) void dictation.refreshModel();
+  }, [local, dictation]);
   if (!settings) return null;
   const engine = settings.engine;
-  const keyReady = engine === 'whisper-local' || Boolean(voice.status?.credentials[engine]);
+  const keyReady = local
+    ? dictation.model?.state === 'ready'
+    : engine === 'whisper-local' || Boolean(voice.status?.credentials[engine]);
+  const engineName = local ? 'NVIDIA Parakeet on this computer' : ENGINE_NAMES[engine];
   const finish = () => {
     void voice.updateSettings({ onboarded: true });
     onClose();
@@ -70,12 +81,14 @@ export const VoiceSetupPanel = observer(function VoiceSetupPanel({
       </header>
 
       <ol className="space-y-3 text-xs">
-        <Step done={Boolean(keyReady)} title={`Speech engine: ${ENGINE_NAMES[engine]}`}>
+        <Step done={Boolean(keyReady)} title={`Speech engine: ${engineName}`}>
           {keyReady ? (
             'Ready.'
           ) : (
             <>
-              Needs an API key, or pick local whisper.cpp.{' '}
+              {local
+                ? 'Needs the Parakeet model download.'
+                : 'Needs an API key, or pick local whisper.cpp.'}{' '}
               <button
                 type="button"
                 className="font-medium text-blue-600 hover:underline dark:text-blue-400"

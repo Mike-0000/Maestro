@@ -3,11 +3,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { ExecError } from '@emdash/core/services/exec/api';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { scoutArgs } from './claude-scout';
+import { scoutArgs, scoutPrompt } from './claude-scout';
 import { scoutSettingsContent } from './scout-deny';
 import {
   ensureScoutSettings,
   runScout,
+  scoutSettingsPath,
   WATCHDOG_GRACE_MS,
   WATCHDOG_STOP_MS,
   type ScoutRunInput,
@@ -127,6 +128,26 @@ describe('runScout', () => {
     await writeFile(settingsPath, '{ "permissions": { "allow": ["Read(**)"] } }');
     expect((await runScout(input(), fake)).status).toBe('answered');
     expect(await readFile(settingsPath, 'utf8')).toBe(scoutSettingsContent());
+  });
+
+  it('gives extra folders their own settings file and names them in the prompt only', async () => {
+    const extra = ['/home/dev/notes'];
+    const own = scoutSettingsPath(settingsPath, extra);
+    expect(own).not.toBe(settingsPath);
+    expect(path.dirname(own)).toBe(path.dirname(settingsPath));
+    expect(scoutSettingsPath(settingsPath, [])).toBe(settingsPath);
+    const fake = fakeScoutExec(async (_call, emit) => {
+      expect(await readFile(own, 'utf8')).toBe(scoutSettingsContent(extra));
+      emit(scoutStream(ANSWERED_EVENTS));
+    });
+    expect((await runScout(input({ extraFolders: extra }), fake)).status).toBe('answered');
+    const [call] = fake.calls;
+    expect(call?.args).toEqual(scoutArgs({ model: 'haiku', settingsPath: own }));
+    expect(call?.args.join(' ')).not.toContain('/home/dev/notes');
+    expect(call?.options.input).toBe(
+      scoutPrompt('Is there a retry helper in this project?', extra)
+    );
+    expect(call?.options.input).toContain('  - /home/dev/notes');
   });
 
   it('does not start when the settings file cannot be written', async () => {

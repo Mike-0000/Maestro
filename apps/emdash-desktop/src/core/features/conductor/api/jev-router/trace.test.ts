@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { answersDetail, layoutBypass, looksLikeSttArtifact, normalizedEntropy } from './trace';
+import {
+  answersDetail,
+  layoutBypass,
+  lookupBypass,
+  looksLikeSttArtifact,
+  normalizedEntropy,
+} from './trace';
 
 describe('answersDetail', () => {
   it('flattens answers and collapses meta nouls', () => {
@@ -48,5 +54,34 @@ describe('looksLikeSttArtifact', () => {
     ).toBe(true);
     expect(looksLikeSttArtifact("I'm sorry, focus Maple")).toBe(false);
     expect(looksLikeSttArtifact('Sure, send that to Maple')).toBe(false);
+  });
+});
+
+describe('lookupBypass', () => {
+  it('sends an explicit ask to look first to the model', () => {
+    for (const text of [
+      'start a Claude agent to fix the desk switching, check the code first',
+      'look in the code first and then tell Atlas what to change',
+      'look it up before you write the prompt',
+      'before you send it to Maple, look up what the mirror is',
+      'investigate first, then spin up an agent',
+      'find out what Jev does first and then start a Codex agent on it',
+      'check the codebase first',
+    ]) {
+      expect(lookupBypass(text), text).toBe(true);
+    }
+  });
+
+  it('leaves ordinary commands to Jev', () => {
+    for (const text of [
+      'start a Claude agent to fix the desk switching',
+      'tell Atlas to run the tests first',
+      'check on Maple',
+      'look at Atlas',
+      'investigate why the build fails',
+      'focus the first agent',
+    ]) {
+      expect(lookupBypass(text), text).toBe(false);
+    }
   });
 });

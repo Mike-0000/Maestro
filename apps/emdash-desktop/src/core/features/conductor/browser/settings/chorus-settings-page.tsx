@@ -4,7 +4,7 @@ import { observer } from 'mobx-react-lite';
 import { useEffect, useState } from 'react';
 import { getCanvasStore } from '@core/features/canvas/contributions/browser/app-stores';
 import { getMachinesClient } from '@core/features/machines/api/browser/client';
-import { TALK_VOICES } from '@core/features/talk/api/contract';
+import { isTalkAgentId, TALK_VOICES } from '@core/features/talk/api/contract';
 import { TALK_MODELS } from '@core/features/talk/api/usage';
 import { getTalkStore } from '@core/features/talk/contributions/browser/app-stores';
 import {
@@ -14,9 +14,15 @@ import {
   holdComboFromCodes,
   holdComboLabel,
 } from '@core/features/voice/api/global-keys';
-import { getVoiceStore } from '@core/features/voice/contributions/browser/app-stores';
+import {
+  getDictationStore,
+  getVoiceStore,
+} from '@core/features/voice/contributions/browser/app-stores';
 import type { ChorusCredentialId } from '@core/primitives/chorus-host/api/credentials';
-import { copyTextToClipboard } from '@core/primitives/desktop-host/browser/host-client';
+import {
+  copyTextToClipboard,
+  getHostClient,
+} from '@core/primitives/desktop-host/browser/host-client';
 import { getConductorClient } from '../../api/browser/client';
 import { CODE_CHECKS_UI, type SystemChecks } from '../../api/contract';
 import { STANDING_LIMITS, type InstructionChange } from '../../api/standing-instructions';
@@ -141,13 +147,48 @@ function isTalkEffort(value: string): value is TalkEffort {
   return value in TALK_EFFORT_LABELS;
 }
 
+/** The Parakeet model behind "Transcribe on this computer": its state, and fetching it. */
+const LocalTranscriberModel = observer(function LocalTranscriberModel() {
+  const dictation = getDictationStore();
+  const model = dictation.model;
+  if (!model) return <span className="text-xs text-foreground-muted">Checking the model…</span>;
+  if (model.state === 'ready') {
+    return <span className="text-xs text-foreground-muted">The Parakeet model is ready.</span>;
+  }
+  if (model.state === 'downloading') {
+    const percent =
+      model.totalBytes > 0 ? Math.round((model.receivedBytes / model.totalBytes) * 100) : 0;
+    return (
+      <span className="text-xs text-foreground-muted tabular-nums" role="status">
+        Downloading the Parakeet model: {percent}%
+      </span>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <span className="text-amber-700 dark:text-amber-300" role="status">
+        {model.state === 'failed'
+          ? `Download failed: ${model.message ?? 'unknown error'}`
+          : 'Model not downloaded: voice commands will fail until it is.'}
+      </span>
+      <Button variant="secondary" size="xs" onClick={() => void dictation.downloadModel()}>
+        {model.state === 'failed'
+          ? 'Try again'
+          : `Download (${Math.round(model.totalBytes / 1_000_000)} MB)`}
+      </Button>
+    </div>
+  );
+});
+
 export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
   const voice = getVoiceStore();
   const conductor = getConductorStore();
+  const dictation = getDictationStore();
   useEffect(() => {
     void voice.refreshStatus();
     void conductor.refreshStatus();
-  }, [voice, conductor]);
+    void dictation.refreshModel();
+  }, [voice, conductor, dictation]);
 
   const voiceSettings = voice.settings;
   const conductorSettings = conductor.settings;
@@ -299,6 +340,27 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
             </Select.Root>
           }
         />
+        <SettingsRow
+          label="Transcribe on this computer"
+          description="Off by default. Transcribe voice commands locally with NVIDIA Parakeet (the dictation model) instead of the speech-to-text engine above; the text goes straight to the conductor and no audio is sent to a transcription API. English only."
+          control={
+            <Switch
+              checked={voiceSettings?.localTranscriber ?? false}
+              disabled={!voiceSettings}
+              onCheckedChange={(localTranscriber) => {
+                void voice.updateSettings({ localTranscriber });
+                if (localTranscriber) void dictation.refreshModel();
+              }}
+            />
+          }
+        />
+        {voiceSettings?.localTranscriber && (
+          <SettingsRow
+            label="Parakeet model"
+            description="A one-time download; after that, transcription works offline."
+            control={<LocalTranscriberModel />}
+          />
+        )}
         {voiceSettings?.engine === 'whisper-local' && (
           <SettingsRow
             label="whisper-server URL"
@@ -890,8 +952,81 @@ const StandingInstructionSettings = observer(function StandingInstructionSetting
 const INVESTIGATOR_MODELS = { haiku: 'Haiku (fast, cheap)', sonnet: 'Sonnet' } as const;
 
 /**
- * Code checks: a read-only Claude Code process that answers the conductor's questions about a
- * project's files. Hidden until the gates in docs/conductor-subagent-plan.md pass.
+ * Extra folders a code check may read besides the project. Each one is checked in the main
+ * process before it is saved, and again before every check.
+ */
+const CodeCheckFolders = observer(function CodeCheckFolders() {
+  const conductor = getConductorStore();
+  const folders = conductor.settings?.investigationFolders ?? [];
+  const [message, setMessage] = useState('');
+  const [adding, setAdding] = useState(false);
+  const add = async () => {
+    if (adding) return;
+    setAdding(true);
+    setMessage('');
+    try {
+      const chosen = await (
+        await getHostClient()
+      ).openSelectDirectoryDialog({
+        title: 'Add a folder for code checks',
+        message: 'Choose a folder the conductor may also read, read-only.',
+      });
+      if (!chosen) return;
+      const check = await (await getConductorClient()).checkInvestigationFolder({ path: chosen });
+      if (!check.ok) {
+        setMessage(check.reason);
+        return;
+      }
+      if (folders.includes(check.path)) return;
+      await conductor.updateSettings({ investigationFolders: [...folders, check.path] });
+    } catch {
+      setMessage('The folder could not be added.');
+    } finally {
+      setAdding(false);
+    }
+  };
+  return (
+    <>
+      <SettingsRow
+        label="Extra folders"
+        description={`Folders outside the project that code checks may also read, read-only: another repository, a notes folder. A whole drive, the home folder, and hidden or settings folders are refused, and secret files are never read. ${folders.length === 0 ? 'None: code checks read only the project.' : ''}${message ? ` ${message}` : ''}`}
+        control={
+          <Button
+            variant="secondary"
+            size="xs"
+            disabled={!conductor.settings || adding}
+            onClick={() => void add()}
+          >
+            {adding ? 'Choosing…' : 'Add folder…'}
+          </Button>
+        }
+      />
+      {folders.map((folder) => (
+        <SettingsRow
+          key={folder}
+          label={<span className="font-mono text-xs break-all">{folder}</span>}
+          control={
+            <Button
+              variant="secondary"
+              size="xs"
+              onClick={() =>
+                void conductor.updateSettings({
+                  investigationFolders: folders.filter((other) => other !== folder),
+                })
+              }
+            >
+              Remove
+            </Button>
+          }
+        />
+      ))}
+    </>
+  );
+});
+
+/**
+ * Code checks and project lookups: a read-only Claude Code process that answers the conductor's
+ * questions about a project's files, and a search that finds where a name appears in one.
  */
 const CodeCheckSettings = observer(function CodeCheckSettings() {
   const conductor = getConductorStore();
@@ -920,7 +1055,7 @@ const CodeCheckSettings = observer(function CodeCheckSettings() {
     <SettingsSection title="Code checks">
       <SettingsRow
         label="Let the conductor read project files"
-        description={`Lets the conductor read a project's files through Claude Code, read-only, to check facts before it plans. File contents go to Anthropic through your Claude Code login. A short self-test runs when you turn this on and after Claude Code updates. ${state}`}
+        description={`Lets the conductor look things up in a project before it writes a prompt or a plan: it finds where a name you used appears (any project, file names only), and reads files through Claude Code, read-only, to understand what you mean. A WSL project is read through its Windows copy. File contents go to Anthropic through your Claude Code login. A short self-test runs when you turn this on and after Claude Code updates. ${state}`}
         control={
           <Switch
             checked={settings?.investigations ?? false}
@@ -1014,9 +1149,10 @@ const CodeCheckSettings = observer(function CodeCheckSettings() {
           />
         }
       />
+      <CodeCheckFolders />
       <SettingsRow
         label="Check Claude Code again"
-        description="Runs the self-test: that the scout cannot read outside the project, cannot read secret files, and runs no project hooks."
+        description="Runs the self-test: that the scout cannot read outside the project and its extra folders, cannot read secret files in either, and runs no project hooks."
         control={
           <Button variant="secondary" size="xs" disabled={checking} onClick={recheck}>
             {checking ? 'Checking…' : 'Check again'}
@@ -1044,6 +1180,7 @@ const TalkLineSettings = observer(function TalkLineSettings() {
   const status = talk.status;
   const settings = status?.settings ?? null;
   const usage = status?.usageToday;
+  const agentId = settings?.agentId.trim() ?? '';
   const state = `${LINE_STATE_LABELS[talk.line]}${talk.error ? `: ${talk.error}` : ''}`;
   return (
     <SettingsSection title="Realtime voice conductor (experimental)">
@@ -1063,12 +1200,30 @@ const TalkLineSettings = observer(function TalkLineSettings() {
         }
       />
       <SettingsRow
+        label="Custom voice agent"
+        description={`An agent you made in xAI's Voice Agent Builder, by its id (agent_…). The line then runs on that agent's model and voice instead of the two below; Maestro still gives it the conductor's instructions and tools, so it acts the same. Empty uses the model below. Changing it reopens the line.${agentId && !isTalkAgentId(agentId) ? ' This is not an agent id: the line will not open until it is fixed or cleared.' : ''}`}
+        control={
+          <CommitInput
+            value={agentId}
+            ariaLabel="Custom voice agent id"
+            placeholder="agent_…"
+            className="w-56 font-mono text-xs"
+            allowEmpty
+            onCommit={(value) => void talk.updateSettings({ agentId: value })}
+          />
+        }
+      />
+      <SettingsRow
         label="Voice model"
-        description="grok-voice-3.0 stays on that release; grok-voice-latest moves to each new one. Both cost the same. Changing it reopens the line."
+        description={
+          agentId
+            ? 'Not used while a custom voice agent is set: the agent has its own.'
+            : 'grok-voice-3.0 stays on that release; grok-voice-latest moves to each new one. Both cost the same. Changing it reopens the line.'
+        }
         control={
           <Select.Root
             value={settings?.model ?? ''}
-            disabled={!settings}
+            disabled={!settings || agentId !== ''}
             onValueChange={(model) => {
               if (model) void talk.updateSettings({ model });
             }}
@@ -1088,11 +1243,15 @@ const TalkLineSettings = observer(function TalkLineSettings() {
       />
       <SettingsRow
         label="Voice"
-        description="Grok's built-in voices. Changing it reopens the line."
+        description={
+          agentId
+            ? 'Not used while a custom voice agent is set: the agent speaks in its own voice.'
+            : "Grok's built-in voices. Changing it reopens the line."
+        }
         control={
           <Select.Root
             value={settings?.voice ?? ''}
-            disabled={!settings}
+            disabled={!settings || agentId !== ''}
             onValueChange={(voice) => {
               if (voice) void talk.updateSettings({ voice });
             }}
@@ -1115,11 +1274,15 @@ const TalkLineSettings = observer(function TalkLineSettings() {
       />
       <SettingsRow
         label="Voice effort"
-        description="Whether the voice model reasons before it answers. High follows instructions and multi-step requests more closely; off answers sooner. The cost is the same. Changing it reopens the line."
+        description={
+          agentId
+            ? 'Not used while a custom voice agent is set: the agent keeps its own setting.'
+            : 'Whether the voice model reasons before it answers. High follows instructions and multi-step requests more closely; off answers sooner. The cost is the same. Changing it reopens the line.'
+        }
         control={
           <Select.Root
             value={settings?.effort ?? 'high'}
-            disabled={!settings}
+            disabled={!settings || agentId !== ''}
             onValueChange={(effort) => {
               if (effort && isTalkEffort(effort)) void talk.updateSettings({ effort });
             }}

@@ -8,12 +8,21 @@ export const sttEngineIds = ['openai', 'deepgram', 'whisper-local', 'openrouter'
 export const sttEngineIdSchema = z.enum(sttEngineIds);
 export type SttEngineId = z.infer<typeof sttEngineIdSchema>;
 
+/** What wrote a transcript: a cloud or whisper.cpp engine, or Parakeet on this computer. */
+export const transcriptionEngineSchema = z.enum([...sttEngineIds, 'parakeet-local']);
+export type TranscriptionEngine = z.infer<typeof transcriptionEngineSchema>;
+
 export const voiceSettingsSchema = z.object({
   engine: sttEngineIdSchema,
   /** whisper.cpp `whisper-server` base URL for the local engine. */
   whisperUrl: z.string(),
   /** Audio-input model used for speech-to-text when the engine is openrouter. */
   openrouterSttModel: z.string(),
+  /**
+   * Opt-in: transcribe every utterance on this computer with the dictation model (NVIDIA
+   * Parakeet) instead of `engine`; no audio is sent to a speech-to-text API.
+   */
+  localTranscriber: z.boolean(),
   language: z.string(),
   /** Electron accelerator for the global toggle-to-talk shortcut; empty disables it. */
   globalShortcut: z.string(),
@@ -52,6 +61,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   engine: 'openai',
   whisperUrl: 'http://127.0.0.1:8178',
   openrouterSttModel: 'google/gemini-3.5-flash-lite',
+  localTranscriber: false,
   language: 'en',
   globalShortcut: 'Control+Alt+Space',
   globalHoldKey: 'off',
@@ -69,7 +79,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
 
 export const transcriptionSchema = z.object({
   text: z.string(),
-  engine: sttEngineIdSchema,
+  engine: transcriptionEngineSchema,
   /** Server-side transcription latency. */
   latencyMs: z.number(),
   /** Confidence of the chosen STT alternative, only when supplied by the provider. */

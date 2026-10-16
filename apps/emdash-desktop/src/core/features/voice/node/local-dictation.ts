@@ -187,7 +187,8 @@ export class LocalDictation {
     this.model.dispose();
   }
 
-  private async transcribe(samples: Float32Array): Promise<string> {
+  /** One whole recording (16 kHz mono samples) to text; loads the model when it is not. */
+  async transcribe(samples: Float32Array): Promise<string> {
     const recognizer = await this.load();
     const stream = recognizer.createStream();
     stream.acceptWaveform({ samples, sampleRate: STT_SAMPLE_RATE });

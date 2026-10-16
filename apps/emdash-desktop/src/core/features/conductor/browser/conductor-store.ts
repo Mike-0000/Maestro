@@ -42,6 +42,7 @@ import {
 import {
   isRequestTurnTool,
   plainText,
+  requestLineSummary,
   requestTurnText,
   requestTurnToolRefusal,
   type OpenRequestView,
@@ -94,7 +95,7 @@ import {
   pruneScreenshots,
   trimHistory,
 } from '../api/history';
-import { formatInvestigationResult } from '../api/investigation-format';
+import { formatInvestigationResult, formatLookupResult } from '../api/investigation-format';
 import {
   interpretPermissionRisk,
   interpretPlanReview,
@@ -114,7 +115,12 @@ import {
 } from '../api/jev-router/completion';
 import { ConversationContext } from '../api/jev-router/context';
 import { thresholdsFrom, type RouterAction } from '../api/jev-router/policy';
-import { answersDetail, layoutBypass, looksLikeSttArtifact } from '../api/jev-router/trace';
+import {
+  answersDetail,
+  layoutBypass,
+  lookupBypass,
+  looksLikeSttArtifact,
+} from '../api/jev-router/trace';
 import { deliveryNote, describePrompt, withVerbatimRequest } from '../api/prompt-fidelity';
 import { matchInstalledProvider } from '../api/provider-match';
 import {
@@ -160,6 +166,7 @@ import {
   isLineInstantTool,
   LINE_TOOL_MAX_CHARS,
   briefSize,
+  lineEventNote,
   lineRecord,
   lineTurnActed,
   wordCount,
@@ -186,7 +193,7 @@ import { ConductorAppTools, type AppTask } from './app-tools';
 import { CallDesk } from './call-desk';
 import { deliverPromptWhenReady } from './deferred-prompt';
 import { focusSpawnedAgent } from './focus-spawned-agent';
-import { runInvestigation, type InvestigationRun } from './investigation-client';
+import { runInvestigation, runProjectLookup, type InvestigationRun } from './investigation-client';
 import { jevDecide, type JevOutcome } from './jev';
 import { routeUtterance, routerInput } from './jev-router';
 import { PlanStore } from './plan-store';
@@ -309,6 +316,9 @@ type DeskReply = {
 
 /** How long an explicit confirmation waits before it lapses. */
 const CONFIRM_TIMEOUT_MS = 30_000;
+/** A sentence the line's model was told once is not told again for this long. */
+const TOLD_LINE_MS = 2 * 60_000;
+
 /** A call picked up for typing goes back on the line when nothing was typed for this long. */
 const TYPE_PICKUP_MS = 60_000;
 /** "Send it" means the caller dictation was typed into for this long, then the window in front. */
@@ -317,6 +327,8 @@ const DICTATION_SEND_MS = 45_000;
 const PLAN_SEEN_MS = 500;
 /** Code checks one turn may make. */
 const MAX_CHECKS_PER_TURN = 2;
+/** Project lookups one turn may make: cheap, but each is a model round trip. */
+const MAX_LOOKUPS_PER_TURN = 4;
 /** A code check still running after this long is announced. */
 const INTERIM_CHECK_MS = 3_000;
 const CHECKING_CODE = 'Checking the code.';
@@ -494,6 +506,11 @@ export class ConductorStore {
   private lineTools: Promise<unknown> = Promise.resolve();
   /** Turns for which a reply that names no action still rests on agent text the line read. */
   private lineAgentText = 0;
+  /**
+   * What the line's model was told Maestro said outside its turns, and when: a sentence is told
+   * once, whether by the announcement or by the record of the turn that made it.
+   */
+  private readonly toldLine = new Map<string, number>();
   private investigationAbort: AbortController | null = null;
   /**
    * What the model said beside its code check, shown and spoken while the check runs. When it is
@@ -504,6 +521,8 @@ export class ConductorStore {
   private midTurnWords: string[] = [];
   /** Code checks the running turn has made; a turn may make two. */
   private turnInvestigations = 0;
+  /** Project lookups the running turn has made; a turn may make four. */
+  private turnLookups = 0;
   /** The trace id of what happens on the line outside any one turn. */
   private readonly lineTraceId = crypto.randomUUID();
 
@@ -630,12 +649,14 @@ export class ConductorStore {
       | 'interim'
       | 'midTurnWords'
       | 'turnInvestigations'
+      | 'turnLookups'
       | 'lineHeard'
       | 'lineActions'
       | 'lineTurn'
       | 'lineTurns'
       | 'lineTools'
       | 'lineAgentText'
+      | 'toldLine'
       | 'canvas'
       | 'voice'
       | 'history'
@@ -691,12 +712,14 @@ export class ConductorStore {
       interim: false,
       midTurnWords: false,
       turnInvestigations: false,
+      turnLookups: false,
       lineHeard: false,
       lineActions: false,
       lineTurn: false,
       lineTurns: false,
       lineTools: false,
       lineAgentText: false,
+      toldLine: false,
       canvas: false,
       voice: false,
       history: false,
@@ -1397,6 +1420,7 @@ export class ConductorStore {
     this.turnReadAgentText = false;
     this.turnSaidAt = Number.POSITIVE_INFINITY;
     this.turnInvestigations = 0;
+    this.turnLookups = 0;
     this.interim = null;
     this.midTurnWords = [];
     const next = this.queued;
@@ -1474,19 +1498,18 @@ export class ConductorStore {
 
   private async speakCall(call: Call): Promise<void> {
     if (!this.voice.speak) {
-      this.talkLine?.spoke(call.text);
+      this.tellLine(call.text);
       this.voice.announce(call.text);
       return;
     }
     const interaction = call.interactionId ? { interactionId: call.interactionId } : {};
     if (call.kind !== 'permission') {
-      await this.speakAloud(call.text, { attention: true, ...interaction });
+      await this.speakAloud(call.text, { attention: true, tell: true, ...interaction });
       return;
     }
     // A permission prompt is read by the system voice: no network wait, nothing reworded. The
     // voice line is told, so it can answer a question about it.
-    this.talkLine?.note(`[Maestro told the developer] ${call.text}`);
-    this.talkLine?.spoke(call.text);
+    this.tellLine(call.text);
     await this.voice.speak(call.text, { voice: 'system', attention: true, ...interaction });
   }
 
@@ -1666,6 +1689,48 @@ export class ConductorStore {
     return this.status?.investigator?.state === 'ready';
   }
 
+  /**
+   * True while project lookups are turned on. They need no Claude Code, so they work whenever
+   * the setting is on, even while code checks are unavailable.
+   */
+  get projectLookupsOn(): boolean {
+    return this.status?.settings?.investigations === true;
+  }
+
+  /** The `find_in_project` tool: where names appear in a project, by path and by mentions. */
+  private async findInProjectTool(
+    input: ConductorToolInput<'find_in_project'>
+  ): Promise<ToolOutcome> {
+    if (!this.projectLookupsOn) {
+      return { content: 'Project lookups are turned off in Settings.', isError: true };
+    }
+    if (this.turnLookups >= MAX_LOOKUPS_PER_TURN) {
+      return {
+        content: 'Four lookups is the limit for one request. Go on with what you have.',
+        isError: true,
+      };
+    }
+    const target = this.investigationTarget(input);
+    if ('error' in target) return { content: target.error, isError: true };
+    this.turnLookups++;
+    const abort = new AbortController();
+    this.investigationAbort = abort;
+    runInAction(() => (this.activity = 'Looking it up…'));
+    try {
+      const run = await runProjectLookup(
+        { target: target.target, terms: input.terms },
+        { signal: abort.signal }
+      );
+      if ('cancelled' in run)
+        return { content: 'The developer cancelled the lookup.', cancelled: true };
+      if (!run.success) return { content: run.error.message, isError: true };
+      // File names only: nothing from inside a file reaches the model, so the turn stays as it was.
+      return { content: formatLookupResult(run.data) };
+    } finally {
+      if (this.investigationAbort === abort) this.investigationAbort = null;
+    }
+  }
+
   /** The `investigate` tool: a read-only scout answers questions about a project's files. */
   private async investigateTool(input: ConductorToolInput<'investigate'>): Promise<ToolOutcome> {
     if (this.turnInvestigations >= MAX_CHECKS_PER_TURN) {
@@ -1688,9 +1753,13 @@ export class ConductorStore {
     return { content: formatInvestigationResult(run.data) };
   }
 
-  /** Where a code check looks: an agent's own folder, or a local project. */
+  /**
+   * Where a code check or lookup looks: an agent's own folder, or a project. Projects on other
+   * machines are offered too: a lookup works on any host, and the main process reads a WSL
+   * project's Windows copy for a code check, or says why it cannot.
+   */
   private investigationTarget(
-    input: ConductorToolInput<'investigate'>
+    input: ConductorToolInput<'investigate'> | ConductorToolInput<'find_in_project'>
   ): { target: InvestigationInput['target']; label: string } | { error: string } {
     if (input.agent) {
       const resolved = this.resolveEntry(input.agent);
@@ -1700,7 +1769,7 @@ export class ConductorStore {
       return { target: { workspaceId: resolved.entry.workspaceId }, label: `${name}'s folder` };
     }
     const locals = [...getProjectManagerStore().projects.values()]
-      .filter((project) => project.data?.type === 'local')
+      .filter((project) => project.data !== undefined && project.data !== null)
       .map((project) => ({ id: project.id, name: project.name ?? project.id }));
     const listed = locals.map((project) => project.name).join(', ') || 'none';
     const pick = (project: { id: string; name: string }) => ({
@@ -1719,7 +1788,7 @@ export class ConductorStore {
       return {
         error:
           matches.length === 0
-            ? `No local project matches "${input.project}". Local projects: ${listed}.`
+            ? `No project matches "${input.project}". Projects: ${listed}.`
             : `"${input.project}" matches several projects: ${matches.map((project) => project.name).join(', ')}. Ask which one.`,
       };
     }
@@ -1729,7 +1798,7 @@ export class ConductorStore {
     if (chosen) return pick(chosen);
     const [single] = locals;
     if (!preferred && locals.length === 1 && single) return pick(single);
-    return { error: `Which project? Local projects: ${listed}.` };
+    return { error: `Which project? Projects: ${listed}.` };
   }
 
   /** Runs one check as a live job, showing its progress and letting the developer stop it. */
@@ -2038,6 +2107,9 @@ export class ConductorStore {
     if (name === 'investigate' && !this.codeChecksReady) {
       return { output: 'Code checks are not available right now.' };
     }
+    if (name === 'find_in_project' && !this.projectLookupsOn) {
+      return { output: 'Project lookups are turned off.' };
+    }
     if (this.lineHeard && !isLineInstantTool(name)) await this.lineHeard;
     if (over()) return noTurn;
     if (this.turnCancelled) return { output: 'The developer said stop. Nothing more was done.' };
@@ -2092,15 +2164,47 @@ export class ConductorStore {
     this.trace('line', undefined, { status, ...detail }, this.lineTraceId);
   }
 
-  /** Says a sentence with the line's voice when a line is open, else with the usual one. */
+  /**
+   * Says a sentence with the line's voice when a line is open, else with the usual one. Said by
+   * the line's voice, the sentence is in its conversation; with `tell`, the line's model is told
+   * a sentence a local voice says (a call, which no turn records).
+   */
   private async speakAloud(
     text: string,
-    options: { attention?: boolean; interactionId?: string } = {}
+    {
+      tell = false,
+      ...options
+    }: { attention?: boolean; interactionId?: string; tell?: boolean } = {}
   ): Promise<void> {
     if (this.talkLine?.ready() && (await this.talkLine.say(text))) return;
     // Said by a local voice: the line is told, so it does not take the sentence for speech.
-    this.talkLine?.spoke(text);
+    if (tell) this.tellLine(text);
+    else this.talkLine?.spoke(text);
     await this.voice.speak?.(text, options);
+  }
+
+  /**
+   * Tells the line's model a sentence Maestro said to the developer outside its turns (a call,
+   * an announcement), so it can answer a question about it, and marks it as Maestro's own words
+   * should the microphone pick it up.
+   */
+  private tellLine(text: string): void {
+    const line = this.talkLine;
+    if (!line) return;
+    line.spoke(text);
+    if (this.alreadyToldLine(text)) return;
+    line.note(redactReply(`[Maestro told the developer] ${text}`));
+  }
+
+  /** True when the line heard `text` from Maestro a moment ago; notes it as heard otherwise. */
+  private alreadyToldLine(text: string): boolean {
+    const now = Date.now();
+    for (const [told, at] of this.toldLine) {
+      if (now - at > TOLD_LINE_MS) this.toldLine.delete(told);
+    }
+    if (this.toldLine.has(text)) return true;
+    this.toldLine.set(text, now);
+    return false;
   }
 
   /** "Skip", "later", "hold my calls", "stay with Atlas". */
@@ -3318,6 +3422,11 @@ export class ConductorStore {
       });
       return { handled: false };
     }
+    // "Check the code first": the developer wants the model to look before it acts.
+    if (this.projectLookupsOn && lookupBypass(text)) {
+      this.trace('jev', undefined, { purpose: 'route', status: 'skipped', reason: 'lookup-cue' });
+      return { handled: false };
+    }
     // Short layout talk the grammar missed needs the model's canvas tools, not Jev's actions.
     if (layoutBypass(text, LAYOUT_CUES.test(text))) {
       this.trace('jev', undefined, { purpose: 'route', status: 'skipped', reason: 'layout-cue' });
@@ -3610,7 +3719,7 @@ export class ConductorStore {
     const investigator = this.status?.investigator;
     if (investigator?.state === 'ready') {
       extra.push(
-        "Code checks: investigate can read the current project's files, read-only, about 10 to 20 seconds per question."
+        "Code checks: investigate can read a project's files on this computer (and a WSL project's Windows copy), read-only, about 10 to 20 seconds per question."
       );
     } else if (investigator?.state === 'unavailable') {
       extra.push(
@@ -3913,6 +4022,8 @@ export class ConductorStore {
     switch (name) {
       case 'investigate':
         return this.investigateTool(input as ConductorToolInput<'investigate'>);
+      case 'find_in_project':
+        return this.findInProjectTool(input as ConductorToolInput<'find_in_project'>);
       case 'review_instructions':
         return { content: this.describeSelf() };
       case 'adjust_instructions':
@@ -5437,6 +5548,7 @@ export class ConductorStore {
         startedAt,
         tokens,
         utterance: `[request ${open.id}] ${open.sender.name}: ${open.kind}`,
+        about: requestLineSummary(open),
       });
       this.finishTurn();
     }
@@ -5481,7 +5593,7 @@ export class ConductorStore {
     });
     this.context.noteReply(text);
     if (interactionId) this.trace('reply', text, { surface: 'announce' }, interactionId);
-    this.talkLine?.spoke(text);
+    this.tellLine(text);
     this.voice.announce(text);
   }
 
@@ -5989,6 +6101,8 @@ export class ConductorStore {
     utterance?: string;
     /** The voice line ran the turn, so it needs no telling. */
     onLine?: boolean;
+    /** What started the turn when Maestro did, as the voice line is told it. */
+    about?: string;
   }): void {
     const record: ConductorTurnRecord = {
       at: new Date().toISOString(),
@@ -6003,14 +6117,18 @@ export class ConductorStore {
     };
     // A dropped transcription artifact is not something the developer said.
     if (entry.reply !== DIDNT_CATCH) this.ledger.noteRecord(record);
-    // The voice line is told what happened without it (a fast command, an agent's request), so
-    // "why?" and "to whom?" have an answer.
-    if (this.talkLine && !entry.onLine && entry.reply && entry.reply !== DIDNT_CATCH) {
-      this.talkLine.note(
-        redactReply(
-          `[Conductor] Asked: “${truncate(record.utterance, 300)}”. Result: ${truncate(entry.reply, 400)}`
-        )
-      );
+    // The voice line is told what happened without it (a fast command, an agent's request the
+    // text model decided, a finished agent's report): what started it, what was done and what
+    // was said, so "why?", "to whom?" and "what did you approve?" have an answer.
+    if (this.talkLine && !entry.onLine && entry.reply !== DIDNT_CATCH) {
+      const note = lineEventNote({
+        said: record.utterance,
+        ...(entry.about ? { about: entry.about } : {}),
+        actions: entry.actions,
+        reply: entry.reply,
+        told: !entry.reply || !this.alreadyToldLine(entry.reply),
+      });
+      if (note) this.talkLine.note(redactReply(note));
     }
     void getConductorClient()
       .then((client) => client.appendLog(record))
@@ -6074,6 +6192,8 @@ function describeTool(name: string): string {
       return 'Reading agent output…';
     case 'investigate':
       return 'Checking the code…';
+    case 'find_in_project':
+      return 'Looking it up…';
     case 'send_to_agent':
       return 'Sending…';
     case 'spawn_agent':

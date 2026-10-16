@@ -111,3 +111,21 @@ describe('checkEvidence', () => {
     ).toEqual([{ path: 'src/retry.ts', quote: RETRY_LINE, found: false }]);
   });
 });
+
+describe('checkEvidence with extra folders', () => {
+  it('finds a quote in an extra folder and still refuses a denied file there', async () => {
+    const notes = path.join(root, 'notes');
+    await mkdir(notes, { recursive: true });
+    await writeFile(path.join(notes, 'plan.md'), `${RETRY_LINE}\n`);
+    await writeFile(path.join(notes, '.env'), `${SECRET_LINE}\n`);
+    const items = [
+      { path: path.join(notes, 'plan.md'), quote: RETRY_LINE },
+      { path: path.join(notes, '.env'), quote: SECRET_LINE },
+      { path: path.join(root, 'elsewhere', 'outside.ts'), quote: RETRY_LINE },
+    ];
+    const without = await checkEvidence(project, items);
+    expect(without.map((item) => item.found)).toEqual([false, false, false]);
+    const withNotes = await checkEvidence(project, items, [notes]);
+    expect(withNotes.map((item) => item.found)).toEqual([true, false, false]);
+  });
+});

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { isScoutDenied, SCOUT_DENY, scoutDenyRules, scoutSettingsContent } from './scout-deny';
+import {
+  claudeRulePath,
+  isScoutDenied,
+  SCOUT_DENY,
+  scoutDenyRules,
+  scoutSettingsContent,
+} from './scout-deny';
 
 describe('the scout deny list', () => {
   it('denies secret files at the root and at any depth', () => {
@@ -92,5 +98,33 @@ describe('the scout deny list', () => {
 
   it('makes a settings file that holds the deny list and nothing else', () => {
     expect(JSON.parse(scoutSettingsContent())).toEqual({ permissions: { deny: scoutDenyRules() } });
+  });
+});
+
+describe('extra folders', () => {
+  it('writes an absolute folder the way permission rules name it', () => {
+    expect(claudeRulePath('/home/dev/notes', 'linux')).toBe('//home/dev/notes');
+    expect(claudeRulePath('/home/dev/notes/', 'darwin')).toBe('//home/dev/notes');
+    expect(claudeRulePath('C:\\Users\\dev\\notes', 'win32')).toBe('//c/Users/dev/notes');
+    expect(claudeRulePath('D:/work/', 'win32')).toBe('//d/work');
+  });
+
+  it('anchors every deny pattern at each extra folder as well', () => {
+    const base = scoutDenyRules();
+    const rules = scoutDenyRules(['/home/dev/notes'], 'linux');
+    expect(rules.slice(0, base.length)).toEqual(base);
+    expect(rules).toContain('Read(//home/dev/notes/.env)');
+    expect(rules).toContain('Read(//home/dev/notes/**/.env)');
+    expect(rules).toContain('Read(//home/dev/notes/**/.ssh/**)');
+    expect(rules).toHaveLength(base.length * 2);
+  });
+
+  it('lists the folders as additional directories in the settings file', () => {
+    expect(JSON.parse(scoutSettingsContent(['/home/dev/notes'], 'linux'))).toEqual({
+      permissions: {
+        deny: scoutDenyRules(['/home/dev/notes'], 'linux'),
+        additionalDirectories: ['/home/dev/notes'],
+      },
+    });
   });
 });

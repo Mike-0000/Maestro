@@ -3,6 +3,7 @@ import {
   base64ToBytes,
   bytesToBase64,
   concatFloat32,
+  decodeWav,
   downsample,
   encodeWav,
   pcm16Bytes,
@@ -104,5 +105,24 @@ describe('stripWakePhrase', () => {
     expect(stripWakePhrase('coursework is due', 'chorus')).toBeNull();
     expect(stripWakePhrase('chorused along', 'chorus')).toBeNull();
     expect(stripWakePhrase('Horus: help', 'chorus')).toBe('help');
+  });
+});
+
+describe('decodeWav', () => {
+  it('reads back what encodeWav wrote', () => {
+    const decoded = decodeWav(encodeWav(new Float32Array([0, 0.5, -0.5, 1, -1])));
+    expect(decoded?.sampleRate).toBe(16_000);
+    const samples = Array.from(decoded?.samples ?? []);
+    expect(samples).toHaveLength(5);
+    expect(samples[1]).toBeCloseTo(0.5, 3);
+    expect(samples[2]).toBeCloseTo(-0.5, 3);
+    expect(samples[4]).toBe(-1);
+  });
+
+  it('rejects bytes that are not a mono 16-bit PCM WAV', () => {
+    expect(decodeWav(new Uint8Array(100))).toBeNull();
+    const stereo = encodeWav(new Float32Array(4));
+    new DataView(stereo.buffer).setUint16(22, 2, true);
+    expect(decodeWav(stereo)).toBeNull();
   });
 });

@@ -33,18 +33,59 @@ export const SCOUT_DENY = {
  * The `permissions.deny` entries for Claude Code. Its `Read` rules also cover `Grep` and `Glob`.
  * Each pattern is given twice, anchored at the working directory and at any depth, so the list
  * does not depend on how one form treats the root.
+ *
+ * A relative rule only reaches into the working directory, so each extra folder gets the same
+ * patterns again, anchored at its absolute path.
  */
-export function scoutDenyRules(): string[] {
+export function scoutDenyRules(
+  extraFolders: readonly string[] = [],
+  platform: NodeJS.Platform = process.platform
+): string[] {
   const patterns = [
     ...SCOUT_DENY.files,
     ...SCOUT_DENY.directories.map((directory) => `${directory}/**`),
   ];
-  return patterns.flatMap((pattern) => [`Read(./${pattern})`, `Read(**/${pattern})`]);
+  const rules = patterns.flatMap((pattern) => [`Read(./${pattern})`, `Read(**/${pattern})`]);
+  for (const folder of extraFolders) {
+    const root = claudeRulePath(folder, platform);
+    rules.push(
+      ...patterns.flatMap((pattern) => [`Read(${root}/${pattern})`, `Read(${root}/**/${pattern})`])
+    );
+  }
+  return rules;
 }
 
-/** The exact content of the scout's settings file: a deny list and nothing else. */
-export function scoutSettingsContent(): string {
-  return `${JSON.stringify({ permissions: { deny: scoutDenyRules() } }, null, 2)}\n`;
+/**
+ * An absolute folder as Claude Code's permission rules write it: `//` and the path in POSIX
+ * form. On Windows the drive letter becomes the first segment, so `C:\Users\me` is
+ * `//c/Users/me`. The containment self-test proves on each computer that the form is honoured.
+ * Only folders that passed `checkScoutFolder` reach here: absolute, with a drive on Windows.
+ */
+export function claudeRulePath(
+  folder: string,
+  platform: NodeJS.Platform = process.platform
+): string {
+  if (platform === 'win32') {
+    const [, letter = '', rest = ''] = /^([A-Za-z]):[\\/]*(.*)$/.exec(folder) ?? [];
+    const tail = rest.replace(/\\/g, '/').replace(/\/+$/, '');
+    return `//${letter.toLowerCase()}${tail ? `/${tail}` : ''}`;
+  }
+  return `/${folder.replace(/\/+$/, '')}`;
+}
+
+/**
+ * The exact content of a scout's settings file: the deny list and, when the developer allowed
+ * extra folders, those folders as additional working directories. Nothing else.
+ */
+export function scoutSettingsContent(
+  extraFolders: readonly string[] = [],
+  platform: NodeJS.Platform = process.platform
+): string {
+  const permissions =
+    extraFolders.length > 0
+      ? { deny: scoutDenyRules(extraFolders, platform), additionalDirectories: [...extraFolders] }
+      : { deny: scoutDenyRules() };
+  return `${JSON.stringify({ permissions }, null, 2)}\n`;
 }
 
 /** File systems that fold case, where `.ENV` is the same file as `.env`. */

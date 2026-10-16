@@ -4,7 +4,15 @@ import { quoteArg } from '#primitives/exec/api';
 export type HookCommandOptions = {
   platform?: NodeJS.Platform;
   stdoutJson?: Record<string, unknown>;
+  /**
+   * How a Windows command starts PowerShell. `cmd` (the default) chains a marker `set` and
+   * PowerShell with `&&`; `powershell` starts PowerShell directly, for agents that run hook
+   * commands through Windows PowerShell 5.1, which has no `&&` and fails the whole line.
+   */
+  windowsLauncher?: WindowsHookLauncher;
 };
+
+export type WindowsHookLauncher = 'cmd' | 'powershell';
 
 export const EMDASH_MARKER = 'EMDASH_HOOK_PORT';
 export const EMDASH_HOOK_CONFIG_VERSION = 1;
@@ -15,7 +23,21 @@ export const EMDASH_HOOK_POSIX_GUARD =
 /** Filter out emdash-managed entries from a hook array. */
 export function filterUserHooks<T>(entries: T[], stringify?: (entry: T) => string): T[] {
   const toStr = stringify ?? JSON.stringify;
-  return entries.filter((entry) => !toStr(entry).includes(EMDASH_MARKER));
+  return entries.filter((entry) => !isEmdashHookText(toStr(entry)));
+}
+
+const ENCODED_COMMAND = /-EncodedCommand\s+([A-Za-z0-9+/]+=*)/gi;
+
+/**
+ * Whether hook config text holds an emdash-managed command. A command that starts PowerShell
+ * directly carries the marker only inside its encoded script, so that script is read too.
+ */
+export function isEmdashHookText(text: string): boolean {
+  if (text.includes(EMDASH_MARKER)) return true;
+  for (const match of text.matchAll(ENCODED_COMMAND)) {
+    if (Buffer.from(match[1], 'base64').toString('utf16le').includes(EMDASH_MARKER)) return true;
+  }
+  return false;
 }
 
 // ── Internal helpers ────────────────────────────────────────────────────────
@@ -43,7 +65,8 @@ function makePosixHookPostCommand(eventType: string, payload: HookPostPayload): 
 function makeWindowsHookPostCommand(
   eventType: string,
   payload: HookPostPayload,
-  stdoutJson?: Record<string, unknown>
+  stdoutJson?: Record<string, unknown>,
+  launcher: WindowsHookLauncher = 'cmd'
 ): string {
   // The agent writes UTF-8, which Windows PowerShell decodes with the console code page and would
   // post as Latin-1, garbling every non-ASCII character. Encoding the text back with the code
@@ -68,11 +91,21 @@ function makeWindowsHookPostCommand(
   return makeWindowsPowerShellHookCommand(
     stdoutJson === undefined
       ? script
-      : `try { ${script} } finally { [Console]::Out.WriteLine(${quotePowerShellString(JSON.stringify(stdoutJson))}) }`
+      : `try { ${script} } finally { [Console]::Out.WriteLine(${quotePowerShellString(JSON.stringify(stdoutJson))}) }`,
+    launcher
   );
 }
 
-export function makeWindowsPowerShellHookCommand(script: string): string {
+export function makeWindowsPowerShellHookCommand(
+  script: string,
+  launcher: WindowsHookLauncher = 'cmd'
+): string {
+  if (launcher === 'powershell') {
+    // One plain command that every shell runs the same way: PowerShell 5.1, pwsh, cmd.exe and
+    // Git Bash. The markers ride inside the encoded script, where isEmdashHookText finds them.
+    const encoded = Buffer.from(`<# ${EMDASH_HOOK_VERSION_MARKER} #> ${script}`, 'utf16le');
+    return `powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand ${encoded.toString('base64')}`;
+  }
   const encoded = Buffer.from(script, 'utf16le').toString('base64');
   // A silent `set` no-op embeds both markers so hook-config cleanup can find
   // our entries. No `>NUL`: an outer shell (Git Bash/PowerShell) parses the
@@ -92,7 +125,7 @@ export function makeHookPostCommand(
   opts: HookCommandOptions
 ): string {
   if ((opts.platform ?? process.platform) === 'win32') {
-    return makeWindowsHookPostCommand(eventType, payload, opts.stdoutJson);
+    return makeWindowsHookPostCommand(eventType, payload, opts.stdoutJson, opts.windowsLauncher);
   }
   const command = makePosixHookPostCommand(eventType, payload);
   return opts.stdoutJson === undefined

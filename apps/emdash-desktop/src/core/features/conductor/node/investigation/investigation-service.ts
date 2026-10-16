@@ -1,6 +1,6 @@
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
-import { isLocalHostRef, type HostRef } from '@emdash/core/primitives/host/api';
+import { isLocalHostRef, sshConnectionIdOf, type HostRef } from '@emdash/core/primitives/host/api';
 import { err, ok, type Result } from '@emdash/shared';
 import { createConcurrencyLimiter } from '@emdash/shared/concurrency';
 import type { Logger } from '@emdash/shared/logger';
@@ -10,6 +10,7 @@ import {
   INVESTIGATION_LIMITS,
   investigationInputSchema,
   type ConductorSettings,
+  type FolderCheck,
   type InvestigationError,
   type InvestigationOutcome,
   type InvestigationProgress,
@@ -25,12 +26,15 @@ import {
 } from './containment-self-test';
 import { checkEvidence } from './evidence';
 import { scoutEnv } from './scout-env';
+import { checkScoutFolder, usableScoutFolders, type FolderCheckOptions } from './scout-folders';
 import { runScout, type ScoutRun } from './scout-runner';
 
 /**
  * Code checks in the main process: the conductor's `investigate` job. It decides whether a check
- * may run (the setting, the limits, a local folder, a usable Claude Code), runs up to three
- * scouts at once across the app, and hands back answers whose quotes it has looked up itself.
+ * may run (the setting, the limits, a folder on this computer, a usable Claude Code), runs up to
+ * three scouts at once across the app, and hands back answers whose quotes it has looked up
+ * itself. A project in a WSL distro is read through its live mirror on a Windows drive, when it
+ * has one.
  *
  * It owns no files but the scout's own two under `<dataDir>/scout`. Settings and usage belong to
  * `ConductorService`, which this class reads and writes through.
@@ -57,9 +61,27 @@ export type InvestigationPorts = {
     resolve(workspaceId: string): Promise<InvestigationFolder | null>;
     resolveProject(projectId: string): Promise<InvestigationFolder | null>;
   };
+  /** Live mirrors between Windows folders and WSL distros; none where there is no WSL. */
+  wslMirrors?(): Promise<readonly ScoutMirror[]>;
 };
 
-export type InvestigationFolder = { readonly host: HostRef; readonly path: string };
+export type InvestigationFolder = {
+  readonly workspaceId: string;
+  readonly host: HostRef;
+  readonly path: string;
+};
+
+/** What a code check needs to know of a WSL mirror. */
+export type ScoutMirror = {
+  /** The machine the distro is, which is the host id of its projects. */
+  readonly machineId: string | null;
+  /** The copy's absolute path inside the distro. */
+  readonly linuxPath: string;
+  /** The project folder on a Windows drive. */
+  readonly windowsPath: string;
+  /** The first run, which makes the copy match the Windows folder, is done. */
+  readonly seeded: boolean;
+};
 
 export type InvestigationJobContext = {
   signal: AbortSignal;
@@ -79,6 +101,7 @@ export type InvestigationServiceOptions = {
   /** Replaced in tests. */
   runScout?: typeof runScout;
   runSelfTest?: typeof runContainmentSelfTest;
+  folderOptions?: FolderCheckOptions;
 };
 
 /** What one scout needs besides its folder and question. */
@@ -97,6 +120,7 @@ export class InvestigationService {
   private readonly now: () => number;
   private readonly runScout: typeof runScout;
   private readonly runSelfTest: typeof runContainmentSelfTest;
+  private readonly folderOptions: FolderCheckOptions;
   private readonly settingsPath: string;
   private readonly record: SelfTestRecord;
   private readonly slots = createConcurrencyLimiter(MAX_SCOUTS);
@@ -119,6 +143,7 @@ export class InvestigationService {
     this.now = options.now ?? Date.now;
     this.runScout = options.runScout ?? runScout;
     this.runSelfTest = options.runSelfTest ?? runContainmentSelfTest;
+    this.folderOptions = options.folderOptions ?? {};
     this.settingsPath = path.join(options.dataDir, 'scout', 'claude-settings.json');
     this.record = new SelfTestRecord(path.join(options.dataDir, 'scout', 'self-test.json'));
   }
@@ -162,6 +187,11 @@ export class InvestigationService {
     });
   }
 
+  /** Whether a folder may be added to the extra folders, from Settings. */
+  checkFolder(folder: string): Promise<FolderCheck> {
+    return checkScoutFolder(folder, this.folderOptions);
+  }
+
   async run(
     input: unknown,
     context: InvestigationJobContext
@@ -192,16 +222,25 @@ export class InvestigationService {
         ? await this.ports.identity.resolveProject(target.projectId)
         : await this.ports.identity.resolve(target.workspaceId);
     if (!folder) return err({ type: 'not-found', message: 'That project was not found.' });
-    if (!isLocalHostRef(folder.host)) {
+    const readable = await this.readableFolder(folder);
+    if (!readable) {
       return err({
         type: 'not-local',
-        message: 'Code checks only work for projects on this computer.',
+        message:
+          'Code checks read folders on this computer, and this project is on another machine with no Windows copy. find_in_project still works there.',
       });
     }
-    const cwd = folder.path;
+    const { cwd, source } = readable;
     if (!(await stat(cwd).catch(() => null))?.isDirectory()) {
       return err({ type: 'not-found', message: 'The project folder no longer exists.' });
     }
+    const extra = await usableScoutFolders(settings.investigationFolders, cwd, this.folderOptions);
+    if (extra.refused.length > 0) {
+      this.logger.warn('conductor: code checks left out extra folders', {
+        refused: extra.refused,
+      });
+    }
+    const extraFolders = extra.folders;
 
     const marked = this.activeMark();
     if (marked) return err({ type: 'unavailable', message: marked.reason });
@@ -231,7 +270,14 @@ export class InvestigationService {
     try {
       const setup = await this.setup(cli, settings);
       const attempt = async (): Promise<ScoutRun[]> => {
-        const runs = await this.askAll(setup, cwd, questions, signal, context.progress, asked);
+        const runs = await this.askAll(
+          { ...setup, extraFolders },
+          cwd,
+          questions,
+          signal,
+          context.progress,
+          asked
+        );
         costUsd += runs.reduce((sum, run) => sum + run.costUsd, 0);
         return runs;
       };
@@ -264,18 +310,43 @@ export class InvestigationService {
 
       this.noteFailures(runs);
       const outcomes = await Promise.all(
-        runs.map((run, index) => toOutcome(questions[index] ?? '', run, cwd))
+        runs.map((run, index) => toOutcome(questions[index] ?? '', run, cwd, extraFolders))
       );
-      return ok({ model: setup.model, folderName: path.basename(cwd), outcomes });
+      return ok({
+        model: setup.model,
+        folderName: path.basename(cwd),
+        outcomes,
+        ...(extraFolders.length > 0 ? { alsoRead: extraFolders.map(baseName) } : {}),
+        ...(source === 'windows-copy' ? { source } : {}),
+      });
     } finally {
       this.reserved -= questions.length;
       if (asked.size > 0 || costUsd > 0) await this.recordUsage(asked.size, costUsd);
     }
   }
 
+  /**
+   * The folder a scout reads for a project or workspace: the folder itself on this computer, or
+   * for a WSL project, the Windows folder its live mirror keeps the same. Null for any other host.
+   */
+  private async readableFolder(
+    folder: InvestigationFolder
+  ): Promise<{ cwd: string; source: 'project' | 'windows-copy' } | null> {
+    if (isLocalHostRef(folder.host)) return { cwd: folder.path, source: 'project' };
+    const machineId = sshConnectionIdOf(folder.host);
+    if (!machineId || !this.ports.wslMirrors) return null;
+    const mirrors = await this.ports.wslMirrors().catch((error: unknown) => {
+      this.logger.warn('conductor: could not list WSL mirrors for a code check', { error });
+      return [];
+    });
+    // Mirrors exist only on Windows; the native path module keeps tests elsewhere honest.
+    const cwd = mirroredWindowsPath(mirrors, machineId, folder.path, path);
+    return cwd === null ? null : { cwd, source: 'windows-copy' };
+  }
+
   /** Every question at once, each behind the app-wide limit on running scouts. */
   private async askAll(
-    setup: ScoutSetup,
+    setup: ScoutSetup & { extraFolders: readonly string[] },
     cwd: string,
     questions: readonly string[],
     jobSignal: AbortSignal,
@@ -415,6 +486,37 @@ export class InvestigationService {
   }
 }
 
+/**
+ * The Windows folder that mirrors a folder in a WSL distro: the mirror's own folder, or a folder
+ * inside it. Only a mirror whose first copy is done counts; before that the two can differ.
+ */
+export function mirroredWindowsPath(
+  mirrors: readonly ScoutMirror[],
+  machineId: string,
+  linuxFolder: string,
+  windowsPath: Pick<typeof path, 'join'> = path.win32
+): string | null {
+  const wanted = path.posix.normalize(linuxFolder).replace(/\/+$/, '');
+  for (const mirror of mirrors) {
+    if (mirror.machineId !== machineId || !mirror.seeded) continue;
+    const root = path.posix.normalize(mirror.linuxPath).replace(/\/+$/, '');
+    if (wanted !== root && !wanted.startsWith(`${root}/`)) continue;
+    const inside = wanted.slice(root.length).split('/').filter(Boolean);
+    if (inside.some((segment) => segment === '..')) continue;
+    return windowsPath.join(mirror.windowsPath, ...inside);
+  }
+  return null;
+}
+
+function baseName(folder: string): string {
+  return (
+    folder
+      .split(/[\\/]+/)
+      .filter(Boolean)
+      .at(-1) ?? folder
+  );
+}
+
 function isUnverified(run: ScoutRun): boolean {
   return run.status === 'failed' && run.reason === 'unverified-version';
 }
@@ -427,7 +529,8 @@ function isUnverified(run: ScoutRun): boolean {
 async function toOutcome(
   question: string,
   run: ScoutRun,
-  cwd: string
+  cwd: string,
+  extraFolders: readonly string[]
 ): Promise<InvestigationOutcome> {
   if (run.status === 'failed') {
     return {
@@ -438,7 +541,7 @@ async function toOutcome(
       durationMs: run.durationMs,
     };
   }
-  const evidence = await checkEvidence(cwd, run.answer.evidence);
+  const evidence = await checkEvidence(cwd, run.answer.evidence, extraFolders);
   return {
     status: 'answered',
     question,

@@ -58,6 +58,19 @@ export function layoutBypass(text: string, layoutCue: boolean): boolean {
 }
 
 /**
+ * The developer asked the conductor to look something up before it acts ("check the code
+ * first", "look it up before you write the prompt"). Jev would bind the action and run it at
+ * once, so such an utterance goes to the model, which can look first. Only an explicit ask
+ * counts: a term the developer did not explain is the model's call, not a routing rule.
+ */
+export function lookupBypass(text: string): boolean {
+  return LOOKUP_CUES.test(text);
+}
+
+const LOOKUP_CUES =
+  /\b(?:(?:check|look (?:at|in|into|through)|search|read|dig into)\s+(?:the |our |my )?(?:code|codebase|repo|repository|project files)\s+first|(?:check|look(?: it| that| this)? up|look into it|investigate|research)\s+(?:it |that |this )?(?:first|before (?:you|writing|sending|starting|you write|you send|you start))|before (?:you )?(?:write|send|start|spawn)\w*\b[^.]*\b(?:check|look (?:it |that )?up|look (?:at|in|into) the code|investigate)|find out what (?:that|this|it|\w+) (?:is|means|does)\b[^.]*\bfirst)/i;
+
+/**
  * Obvious speech-to-text hallucinations (assistant-style apologies and video outros), caught
  * without a Jev round trip so they never reach Claude as a command.
  */

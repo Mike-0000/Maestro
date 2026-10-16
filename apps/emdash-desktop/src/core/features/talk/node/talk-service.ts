@@ -6,7 +6,9 @@ import { ChorusCredentials } from '@core/primitives/chorus-host/node/credentials
 import { JsonSettingsFile } from '@core/primitives/chorus-host/node/json-settings-file';
 import {
   DEFAULT_TALK_SETTINGS,
+  isTalkAgentId,
   migrateTalkSettings,
+  talkLineModel,
   talkSettingsSchema,
   talkUsageSchema,
   type TalkError,
@@ -114,6 +116,14 @@ export class TalkService {
         message: 'Add an xAI API key in Settings → Voice & Conductor to use the talk line.',
       });
     }
+    const agentId = settings.agentId.trim();
+    if (agentId && !isTalkAgentId(agentId)) {
+      return err({
+        type: 'invalid-agent',
+        message:
+          'The custom voice agent id is not one xAI gives out (agent_ and letters or digits). Fix or clear it in Settings → Voice & Conductor.',
+      });
+    }
     const usage = await this.usageToday();
     if (settings.dailyUsd > 0 && usage.usd >= settings.dailyUsd) {
       return err({
@@ -151,13 +161,17 @@ export class TalkService {
       return err({ type: 'api-error', message: 'xAI sent no client secret.' });
     }
     await this.updateUsage((current) => ({ ...current, sessions: current.sessions + 1 }));
+    // A custom agent is reached by its id and brings its own model and voice.
+    const target = agentId
+      ? `agent_id=${encodeURIComponent(agentId)}`
+      : `model=${encodeURIComponent(settings.model)}`;
     return ok({
-      url: `${REALTIME_URL}?model=${encodeURIComponent(settings.model)}`,
+      url: `${REALTIME_URL}?${target}`,
       clientSecret: minted.value,
       expiresAt: minted.expiresAt,
       session: sessionConfig(settings, input.instructions, input.tools),
-      model: settings.model,
-      voice: settings.voice,
+      model: talkLineModel(settings),
+      voice: agentId ? '' : settings.voice,
     });
   }
 
@@ -208,18 +222,23 @@ export class TalkService {
 /**
  * The session the provider runs: who it is, what it may call, how it sounds, and how turns are
  * taken. It is the body of the renderer's first `session.update`.
+ *
+ * With a custom agent, its model, voice and reasoning are left as the agent has them. The rest is
+ * sent all the same: the line is the conductor only with Maestro's instructions and tools, and
+ * only takes turns and plays audio correctly with Maestro's turn-taking and audio format.
  */
 export function sessionConfig(
   settings: TalkSettings,
   instructions: string,
   tools: readonly TalkTool[]
 ): Record<string, unknown> {
+  const own = settings.agentId.trim()
+    ? {}
+    : { model: settings.model, voice: settings.voice, reasoning: { effort: settings.effort } };
   return {
-    model: settings.model,
+    ...own,
     instructions,
-    voice: settings.voice,
     tools,
-    reasoning: { effort: settings.effort },
     // Turns are taken by hand. Grok's server VAD always answers by itself; Maestro decides when a
     // turn is the developer's (the talk key was released, or the words were read and are neither
     // an echo nor noise) and asks for the answer then. The renderer finds where speech starts

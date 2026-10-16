@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { hostRef, LOCAL_HOST_REF } from '@emdash/core/primitives/host/api';
@@ -12,7 +12,12 @@ import {
   type InvestigationProgress,
 } from '../../api/contract';
 import { SCOUT_PROFILE, type SelfTestOutcome, type SelfTestScout } from './containment-self-test';
-import { InvestigationService, type InvestigationFolder } from './investigation-service';
+import {
+  InvestigationService,
+  mirroredWindowsPath,
+  type InvestigationFolder,
+  type ScoutMirror,
+} from './investigation-service';
 import type { ScoutRun, ScoutRunInput } from './scout-runner';
 
 const VERSION = '2.1.296';
@@ -88,11 +93,17 @@ function harness(settingsOverrides: Partial<ConductorSettings> = {}) {
     clock: 1_000_000,
     cli: CLI as string | null,
     folders: {
-      project: { host: LOCAL_HOST_REF, path: project },
-      workspace: { host: LOCAL_HOST_REF, path: project },
-      remote: { host: hostRef('remote', 'ssh-1'), path: '/srv/app' },
-      deleted: { host: LOCAL_HOST_REF, path: path.join(dir, 'deleted') },
+      project: { workspaceId: 'w-project', host: LOCAL_HOST_REF, path: project },
+      workspace: { workspaceId: 'workspace', host: LOCAL_HOST_REF, path: project },
+      remote: { workspaceId: 'w-remote', host: hostRef('remote', 'ssh-1'), path: '/srv/app' },
+      wsl: {
+        workspaceId: 'w-wsl',
+        host: hostRef('remote', 'wsl-1'),
+        path: '/home/dev/emdash/repositories/app',
+      },
+      deleted: { workspaceId: 'w-deleted', host: LOCAL_HOST_REF, path: path.join(dir, 'deleted') },
     } as Record<string, InvestigationFolder>,
+    mirrors: [] as ScoutMirror[],
     selfTest: { status: 'passed', version: VERSION, costUsd: 0.003 } as SelfTestOutcome,
   };
   const conductor = {
@@ -110,6 +121,7 @@ function harness(settingsOverrides: Partial<ConductorSettings> = {}) {
       resolve: vi.fn(async (id: string) => state.folders[id] ?? null),
       resolveProject: vi.fn(async (id: string) => state.folders[id] ?? null),
     },
+    wslMirrors: vi.fn(async () => state.mirrors),
   };
   // Like the real runner: a version with no recorded pass does not get to answer.
   const runScout = vi.fn(async (input: ScoutRunInput): Promise<ScoutRun> => {
@@ -119,7 +131,12 @@ function harness(settingsOverrides: Partial<ConductorSettings> = {}) {
     return answered();
   });
   const runSelfTest = vi.fn(async (scout: SelfTestScout): Promise<SelfTestOutcome> => {
-    await scout({ cwd: project, question: 'self-test question', onOutput: () => {} });
+    await scout({
+      cwd: project,
+      question: 'self-test question',
+      extraFolders: [],
+      onOutput: () => {},
+    });
     return state.selfTest;
   });
   const service = new InvestigationService({
@@ -184,6 +201,51 @@ describe('InvestigationService.run', () => {
       error: { type: 'not-found', message: 'The project folder no longer exists.' },
     });
     expect(h.runScout).toHaveBeenCalledTimes(2);
+  });
+
+  it('reads a WSL project through the Windows folder its mirror keeps the same', async () => {
+    await verified();
+    const h = harness();
+    h.state.mirrors = [
+      {
+        machineId: 'wsl-1',
+        linuxPath: '/home/dev/emdash/repositories/app',
+        windowsPath: project,
+        seeded: true,
+      },
+    ];
+    const result = await h.run({ target: { projectId: 'wsl' } });
+    expect(result).toMatchObject({ success: true, data: { source: 'windows-copy' } });
+    expect(h.runScout).toHaveBeenCalledWith(expect.objectContaining({ cwd: project }));
+  });
+
+  it('refuses a WSL project whose mirror has not finished its first copy', async () => {
+    const h = harness();
+    h.state.mirrors = [
+      {
+        machineId: 'wsl-1',
+        linuxPath: '/home/dev/emdash/repositories/app',
+        windowsPath: project,
+        seeded: false,
+      },
+    ];
+    expect(await h.run({ target: { projectId: 'wsl' } })).toMatchObject({
+      success: false,
+      error: { type: 'not-local' },
+    });
+    expect(h.runScout).not.toHaveBeenCalled();
+  });
+
+  it('passes the extra folders it accepts, and leaves out the ones it refuses', async () => {
+    await verified();
+    const notes = path.join(dir, 'notes');
+    await mkdir(notes);
+    const h = harness({ investigationFolders: [notes, '/', 'relative/folder'] });
+    const result = await h.run();
+    expect(result).toMatchObject({ success: true, data: { alsoRead: ['notes'] } });
+    expect(h.runScout).toHaveBeenCalledWith(
+      expect.objectContaining({ extraFolders: [await realpath(notes)] })
+    );
   });
 
   it('refuses a project on a remote host', async () => {
@@ -691,5 +753,30 @@ describe('InvestigationService.investigatorStatus', () => {
     expect((await h.run()).success).toBe(true);
     // Well inside the minute a path is normally kept for.
     expect(h.ports.resolveCli).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('mirroredWindowsPath', () => {
+  const mirror: ScoutMirror = {
+    machineId: 'wsl-1',
+    linuxPath: '/home/dev/repos/app/',
+    windowsPath: 'C:\\Github\\app',
+    seeded: true,
+  };
+
+  it('maps the mirror folder and folders inside it on the same machine', () => {
+    expect(mirroredWindowsPath([mirror], 'wsl-1', '/home/dev/repos/app')).toBe('C:\\Github\\app');
+    expect(mirroredWindowsPath([mirror], 'wsl-1', '/home/dev/repos/app/src')).toBe(
+      'C:\\Github\\app\\src'
+    );
+  });
+
+  it('maps nothing outside the mirror, on another machine, or before its first copy', () => {
+    expect(mirroredWindowsPath([mirror], 'wsl-1', '/home/dev/repos/app-2')).toBeNull();
+    expect(mirroredWindowsPath([mirror], 'wsl-1', '/home/dev/repos')).toBeNull();
+    expect(mirroredWindowsPath([mirror], 'ssh-1', '/home/dev/repos/app')).toBeNull();
+    expect(
+      mirroredWindowsPath([{ ...mirror, seeded: false }], 'wsl-1', '/home/dev/repos/app')
+    ).toBeNull();
   });
 });

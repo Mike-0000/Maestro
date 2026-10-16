@@ -413,22 +413,23 @@ describe('ConductorService code checks', () => {
   const marked = (tools: SentTool[]) =>
     tools.filter((tool) => tool.cache_control !== undefined).map((tool) => tool.name);
 
-  it('sends the investigate tool only while the setting is on, each list with its own marker', async () => {
+  it('sends the code-check and lookup tools only while the setting is on, each list with its own marker', async () => {
     await withKey();
     const conductor = service();
 
     await conductor.runTurn('command', userTurn);
     const off = captured[0]?.body.tools as SentTool[];
     expect(off.map((tool) => tool.name)).not.toContain('investigate');
+    expect(off.map((tool) => tool.name)).not.toContain('find_in_project');
     expect(marked(off)).toEqual([off.at(-1)?.name]);
 
     await conductor.updateSettings({ investigations: true });
     await conductor.runTurn('command', userTurn);
     const on = captured[1]?.body.tools as SentTool[];
-    expect(on.at(-1)?.name).toBe('investigate');
-    expect(marked(on)).toEqual(['investigate']);
-    // Everything before it is the other list, minus that list's own marker.
-    expect(on.slice(0, -1).map((tool) => tool.name)).toEqual(off.map((tool) => tool.name));
+    expect(on.slice(-2).map((tool) => tool.name)).toEqual(['investigate', 'find_in_project']);
+    expect(marked(on)).toEqual(['find_in_project']);
+    // Everything before them is the other list, minus that list's own marker.
+    expect(on.slice(0, -2).map((tool) => tool.name)).toEqual(off.map((tool) => tool.name));
 
     await conductor.updateSettings({ investigations: false });
     await conductor.runTurn('command', userTurn);
@@ -450,8 +451,8 @@ describe('ConductorService code checks', () => {
     expect(names(0)).not.toContain('investigate');
     await conductor.updateSettings({ investigations: true });
     await conductor.runTurn('command', userTurn);
-    expect(names(1).at(-1)).toBe('investigate');
-    expect(names(1).slice(0, -1)).toEqual(names(0));
+    expect(names(1).slice(-2)).toEqual(['investigate', 'find_in_project']);
+    expect(names(1).slice(0, -2)).toEqual(names(0));
   });
 
   it('reports the investigator as off until one is attached, then asks it with the settings', async () => {

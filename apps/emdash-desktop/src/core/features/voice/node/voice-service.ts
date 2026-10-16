@@ -11,6 +11,7 @@ import {
   type DictationResult,
   type SttEngineId,
   type Transcription,
+  type TranscriptionEngine,
   type VoiceSettings,
   type VoiceStatus,
 } from '../api/contract';
@@ -21,6 +22,7 @@ import {
   holdComboKeycodes,
 } from '../api/global-keys';
 import { HoldToTalkMachine, type HoldOutput } from '../api/hold-to-talk';
+import { decodeWav, STT_SAMPLE_RATE } from '../api/wav';
 import type { BufferedDictationStream } from './buffered-dictation';
 import { DeepgramSttEngine } from './engines/deepgram';
 import { DeepgramStream } from './engines/deepgram-stream';
@@ -231,7 +233,9 @@ export class VoiceService {
     onPartial: (streamId: string, text: string, confidence?: number) => void
   ): Promise<string | null> {
     const settings = await this.settings.read();
-    if (settings.engine !== 'deepgram' || !settings.streaming) return null;
+    if (settings.localTranscriber || settings.engine !== 'deepgram' || !settings.streaming) {
+      return null;
+    }
     const key = await this.credentials.get('deepgram');
     if (!key) return null;
     const streamId = crypto.randomUUID();
@@ -323,20 +327,55 @@ export class VoiceService {
       throw new SttEngineError('empty-audio', 'That was too short to transcribe.');
     }
     const settings = await this.settings.read();
-    const engine = this.engines[settings.engine];
     const started = performance.now();
-    const result = await engine.transcribe({ audio, vocabulary, language: settings.language });
+    let engineId: TranscriptionEngine;
+    let result: string | { text: string; confidence?: number };
+    if (settings.localTranscriber) {
+      engineId = 'parakeet-local';
+      result = await this.transcribeLocally(audio);
+    } else {
+      const engine = this.engines[settings.engine];
+      engineId = engine.id;
+      result = await engine.transcribe({ audio, vocabulary, language: settings.language });
+    }
     const text = typeof result === 'string' ? result : result.text;
     const latencyMs = Math.round(performance.now() - started);
-    this.logger.info('voice: transcribed', { engine: engine.id, latencyMs, chars: text.length });
+    this.logger.info('voice: transcribed', { engine: engineId, latencyMs, chars: text.length });
     return {
       text,
-      engine: engine.id,
+      engine: engineId,
       latencyMs,
       ...(typeof result !== 'string' && result.confidence !== undefined
         ? { confidence: result.confidence }
         : {}),
     };
+  }
+
+  /**
+   * Transcribes an uploaded utterance with the on-device Parakeet model. It never falls back to a
+   * cloud engine: the developer chose to keep audio on this computer, so a missing or broken model
+   * is reported instead.
+   */
+  private async transcribeLocally(audio: Uint8Array): Promise<string> {
+    if (!(await this.dictation.model.ready())) {
+      throw new SttEngineError(
+        'not-configured',
+        'The local Parakeet speech model is not downloaded. Download it in Settings → Voice, or turn off “Transcribe on this computer”.'
+      );
+    }
+    const decoded = decodeWav(audio);
+    if (!decoded || decoded.sampleRate !== STT_SAMPLE_RATE) {
+      throw new SttEngineError('engine-failed', 'The recording is not 16 kHz mono audio.');
+    }
+    try {
+      return (await this.dictation.transcribe(decoded.samples)).trim();
+    } catch (error) {
+      this.logger.error('voice: local Parakeet transcription failed', { error });
+      throw new SttEngineError(
+        'engine-failed',
+        'Local Parakeet transcription failed. Try again, re-download the model, or turn off “Transcribe on this computer”.'
+      );
+    }
   }
 
   /** Starts or stops the system-wide key hook for global hold-to-talk. */

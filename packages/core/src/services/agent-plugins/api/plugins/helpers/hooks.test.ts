@@ -6,6 +6,7 @@ import {
   EMDASH_MARKER,
   EMDASH_HOOK_VERSION_MARKER,
   filterUserHooks,
+  isEmdashHookText,
   makeNotificationHookCommand,
   makeStdinHookCommand,
   makeWindowsPowerShellHookCommand,
@@ -107,6 +108,40 @@ describe('hook command helpers', () => {
       )
     ).toBe(true);
     expect(filterUserHooks([{ command }])).toHaveLength(0);
+  });
+
+  it('starts PowerShell directly for agents whose hook shell is Windows PowerShell 5.1', () => {
+    // PowerShell 5.1 has no `&&`: the cmd.exe launcher fails there before anything is posted.
+    const command = makeStdinHookCommand('stop', {
+      platform: 'win32',
+      windowsLauncher: 'powershell',
+    });
+
+    expect(command).toMatch(
+      /^powershell\.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand [A-Za-z0-9+/]+=*$/
+    );
+    expect(command).not.toContain('&');
+    expect(command).not.toContain('"');
+    const script = Buffer.from(command.split(' ').at(-1) ?? '', 'base64').toString('utf16le');
+    expect(script.startsWith(`<# ${EMDASH_HOOK_VERSION_MARKER} #> `)).toBe(true);
+    expect(script).toContain("'X-Emdash-Event-Type' = 'stop'");
+    expect(script).toContain('[Console]::In.ReadToEnd()');
+  });
+
+  it('finds the markers inside a directly launched PowerShell command', () => {
+    const command = makeNotificationHookCommand('idle_prompt', {
+      platform: 'win32',
+      windowsLauncher: 'powershell',
+    });
+    const userScript = Buffer.from('Write-Output "mine"', 'utf16le').toString('base64');
+    const userCommand = `powershell.exe -NoProfile -EncodedCommand ${userScript}`;
+
+    expect(command).not.toContain(EMDASH_MARKER);
+    expect(isEmdashHookText(command)).toBe(true);
+    expect(isEmdashHookText(userCommand)).toBe(false);
+    expect(filterUserHooks([{ command }, { command: userCommand }])).toEqual([
+      { command: userCommand },
+    ]);
   });
 
   it.runIf(process.platform === 'win32')(

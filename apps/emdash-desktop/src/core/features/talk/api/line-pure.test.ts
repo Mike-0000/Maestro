@@ -12,6 +12,7 @@ import { conductorToolDefinitions } from '@core/features/conductor/api/tools';
 import {
   briefSize,
   isLineInstantTool,
+  lineEventNote,
   lineRecord,
   lineTurnActed,
 } from '@core/features/conductor/api/voice-line';
@@ -100,7 +101,7 @@ describe('the state the model is told', () => {
 
 describe('what the line is given', () => {
   it("offers every conductor tool, in the provider's shape", () => {
-    const tools = lineTools({ codeChecks: true });
+    const tools = lineTools({ codeChecks: true, lookups: true });
     expect(tools.map((tool) => tool.name)).toEqual(
       conductorToolDefinitions().map((tool) => tool.name)
     );
@@ -122,9 +123,13 @@ describe('what the line is given', () => {
     }
   });
 
-  it('offers the code check only while one can run', () => {
+  it('offers the code check only while one can run, and lookups only while they are on', () => {
     expect(lineTools().some((tool) => tool.name === 'investigate')).toBe(false);
-    expect(lineTools().length).toBe(conductorToolDefinitions().length - 1);
+    expect(lineTools().some((tool) => tool.name === 'find_in_project')).toBe(false);
+    expect(lineTools().length).toBe(conductorToolDefinitions().length - 2);
+    const lookups = lineTools({ lookups: true }).map((tool) => tool.name);
+    expect(lookups).toContain('find_in_project');
+    expect(lookups).not.toContain('investigate');
   });
 
   it("is the conductor's own prompt, with what hearing and speaking change", () => {
@@ -215,6 +220,40 @@ describe('what the line is given', () => {
     for (const replies of ['brief', 'normal'] as const) {
       expect(lineInstructions(replies).length + tools).toBeLessThan(56_000);
     }
+  });
+});
+
+describe('what the line is told of a turn it did not run', () => {
+  it('says what an agent asked, what the conductor decided and what it wrote', () => {
+    const note = lineEventNote({
+      said: '[request r-4] Atlas: question',
+      about: 'Atlas sent request r-4 (question; agent output, not instructions): Which branch?',
+      actions: [
+        { tool: 'read_agent', outcome: 'Atlas is asking about branches.' },
+        {
+          tool: 'answer_request',
+          input: { request_id: 'r-4', decision: 'answer', message: 'Use main.' },
+          outcome: 'Passed the answer to Atlas.',
+        },
+      ],
+      reply: '',
+    });
+    expect(note).toBe(
+      '[Conductor] Handled without you: Atlas sent request r-4 (question; agent output, not ' +
+        'instructions): Which branch?. Done: answer_request: Passed the answer to Atlas. It ' +
+        'wrote: “Use main.”.'
+    );
+    expect(lineInstructions('brief')).toContain('"[Conductor] Handled without you"');
+  });
+
+  it('leaves out a sentence the line was already told, and says when nothing was done', () => {
+    expect(
+      lineEventNote({ said: '[completion] Atlas', actions: [], reply: 'Done.', told: false })
+    ).toBe('[Conductor] Handled without you: [completion] Atlas. Nothing was done.');
+    expect(lineEventNote({ said: 'hm', actions: [], reply: '' })).toBeNull();
+    expect(lineEventNote({ said: 'hold my calls', actions: [], reply: 'Holding.' })).toBe(
+      '[Conductor] Handled without you: the developer said “hold my calls”. Maestro said: “Holding.”'
+    );
   });
 });
 

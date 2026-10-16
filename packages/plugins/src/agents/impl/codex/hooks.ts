@@ -5,6 +5,7 @@ import type {
 } from '@emdash/core/services/agent-plugins/api/plugins';
 import {
   EMDASH_MARKER,
+  type HookCommandOptions,
   buildNestedEntry,
   configRoots,
   defaultHookEventParser,
@@ -13,6 +14,7 @@ import {
   hookMapFromConfig,
   makeHookPostCommand,
   makeNotificationHookCommand,
+  makeStdinHookCommand,
   readJsonConfig,
   readTomlConfig,
   writeJsonConfig,
@@ -135,16 +137,23 @@ async function migrateLegacyHooks(
   };
 }
 
+/**
+ * Codex runs hook commands on Windows through Windows PowerShell 5.1, where the `cmd.exe … &&`
+ * launcher is a parse error: every hook failed, so Maestro never saw a Codex turn end and never
+ * passed its reply on. Its hooks start PowerShell directly instead.
+ */
+const CODEX_HOOK_COMMAND: HookCommandOptions = { windowsLauncher: 'powershell' };
+
 function makeCodexSessionStartCommand(): string {
-  const post = makeHookPostCommand('session-start', 'stdin', {});
+  const post = makeHookPostCommand('session-start', 'stdin', CODEX_HOOK_COMMAND);
   if (process.platform === 'win32') return post;
   return `INPUT="\${1:-$(cat)}"; printf '%s' "$INPUT" | { ${post}; }`;
 }
 
 /**
- * Codex sends `{ type: 'agent-turn-complete' }` as its stop signal instead
- * of a plain 'stop' event type, and uses fixed `notification_type` values
- * in its hook payloads rather than piping JSON.
+ * The Stop hook posts Codex's own payload, whose `last_assistant_message` is the turn's final
+ * reply. Older installs posted a fixed `idle_prompt` notification instead, and the legacy
+ * `notify` program sent `{ type: 'agent-turn-complete' }`; both still read as a stop.
  */
 function parseCodexHookEvent(eventType: string, body: Record<string, unknown>): CanonicalHookEvent {
   if (eventType === 'session-start') {
@@ -171,8 +180,8 @@ function parseCodexHookEvent(eventType: string, body: Record<string, unknown>): 
 }
 
 export function buildCodexHookConfig() {
-  const stopCmd = makeNotificationHookCommand('idle_prompt');
-  const permCmd = makeNotificationHookCommand('permission_prompt');
+  const stopCmd = makeStdinHookCommand('stop', CODEX_HOOK_COMMAND);
+  const permCmd = makeNotificationHookCommand('permission_prompt', CODEX_HOOK_COMMAND);
   const sessionCmd = makeCodexSessionStartCommand();
   const specs: [string, string][] = [
     ['Stop', stopCmd],

@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   runTurn: vi.fn(),
   sendToAgent: vi.fn(async (_entry: unknown, _text: string, _submit: boolean) => {}),
   runInvestigation: vi.fn(),
+  runProjectLookup: vi.fn(),
   status: null as unknown,
 }));
 
@@ -32,7 +33,10 @@ vi.mock('../api/browser/client', () => ({
     getStatus: vi.fn(async () => mocks.status),
   }),
 }));
-vi.mock('./investigation-client', () => ({ runInvestigation: mocks.runInvestigation }));
+vi.mock('./investigation-client', () => ({
+  runInvestigation: mocks.runInvestigation,
+  runProjectLookup: mocks.runProjectLookup,
+}));
 vi.mock('@core/features/canvas/contributions/browser/app-stores', () => ({
   getCanvasBrowserHost: () => ({}),
 }));
@@ -296,10 +300,18 @@ describe('the investigate tool', () => {
     );
 
     const calls = mocks.runInvestigation.mock.calls.length;
-    // Two local projects and nothing says which: no guess, and never the remote one.
-    expect(await run({})).toContain('Which project? Local projects: demo, website.');
-    expect(await run({ project: 'remote-thing' })).toContain('No local project matches');
+    // Three projects and nothing says which: no guess.
+    expect(await run({})).toContain('Which project? Projects: demo, website, remote-thing.');
+    expect(await run({ project: 'nowhere' })).toContain('No project matches');
     expect(mocks.runInvestigation.mock.calls.length).toBe(calls);
+
+    // A project on another machine goes to the main process, which reads a WSL project's
+    // Windows copy or says why it cannot.
+    await run({ project: 'remote-thing' });
+    expect(mocks.runInvestigation).toHaveBeenLastCalledWith(
+      expect.objectContaining({ target: { projectId: 'far' } }),
+      expect.anything()
+    );
     store.dispose();
   });
 
@@ -548,6 +560,72 @@ describe('a question asked while the check runs', () => {
     await done;
     await settle();
     expect(JSON.stringify(sentMessages(1).at(-1))).not.toContain('developer said');
+    store.dispose();
+  });
+});
+
+describe('the find_in_project tool', () => {
+  const found = {
+    success: true,
+    data: {
+      folderName: 'demo',
+      terms: [
+        {
+          term: 'desk',
+          paths: ['src/canvas/desks.ts'],
+          files: [{ path: 'src/canvas/desks.ts', lines: 12 }],
+          filesTotal: 1,
+          complete: true,
+        },
+      ],
+    },
+  };
+
+  it('looks up names in the project on screen and leaves the turn untainted', async () => {
+    const store = setup();
+    mocks.runProjectLookup.mockResolvedValue(found);
+    mocks.runTurn
+      .mockResolvedValueOnce(toolUse('find_in_project', { terms: ['desk'] }))
+      .mockResolvedValueOnce(text('Desks live in the canvas code.'));
+
+    await store.handleUtterance('what is the desk thing', 'typed');
+
+    expect(mocks.runProjectLookup).toHaveBeenCalledWith(
+      { target: { projectId: 'proj' }, terms: ['desk'] },
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+    const result = JSON.stringify(sentMessages(1).at(-1));
+    expect(result).toContain('<project-lookup term=');
+    expect(result).toContain('src/canvas/desks.ts (12)');
+    expect(store.reply).toBe('Desks live in the canvas code.');
+    store.dispose();
+  });
+
+  it('allows four lookups in a turn and refuses a fifth', async () => {
+    const store = setup();
+    mocks.runProjectLookup.mockResolvedValue(found);
+    for (const id of ['a', 'b', 'c', 'd', 'e']) {
+      mocks.runTurn.mockResolvedValueOnce(toolUse('find_in_project', { terms: ['desk'] }, id));
+    }
+    mocks.runTurn.mockResolvedValueOnce(text('done'));
+    await store.handleUtterance('find all the desk stuff', 'typed');
+    expect(mocks.runProjectLookup).toHaveBeenCalledTimes(4);
+    expect(JSON.stringify(sentMessages(5).at(-1))).toContain('Four lookups is the limit');
+    store.dispose();
+  });
+
+  it('refuses while lookups are turned off', async () => {
+    const store = setup();
+    store.status = {
+      ...(mocks.status as ConductorStatus),
+      settings: { ...DEFAULT_CONDUCTOR_SETTINGS, investigations: false },
+    } as ConductorStatus;
+    mocks.runTurn
+      .mockResolvedValueOnce(toolUse('find_in_project', { terms: ['desk'] }))
+      .mockResolvedValueOnce(text('ok'));
+    await store.handleUtterance('what is the desk thing', 'typed');
+    expect(mocks.runProjectLookup).not.toHaveBeenCalled();
+    expect(JSON.stringify(sentMessages(1).at(-1))).toContain('Project lookups are turned off');
     store.dispose();
   });
 });
