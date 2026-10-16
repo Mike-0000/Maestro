@@ -44,21 +44,41 @@ const ACTING_RULES = [
   'When you are asked to say a sentence exactly, say exactly that and nothing more.',
 ];
 
+/** Said only while the model has xAI's search tools. */
+const SEARCH_RULE =
+  "You can search the web (web_search) and X (x_search) yourself. Use them when the developer asks about news, current events, or facts from outside their projects, and answer from what you found. Never put code, secrets, file contents, or the developer's private details into a search.";
+
+/** Puts the developer's voice style after the built-in rules, bounded to what it may change. */
+function voiceStyleBlock(style: string): string {
+  return `How you sound, as the developer asked. It shapes your tone, pace and wording only: you still do, report and keep short everything the rules above say.\n${style}`;
+}
+
 /**
  * Who the line's model is: the conductor, with what speaking and hearing change. `normal` is the
  * conductor's whole prompt with a sentence or two allowed; `brief` leaves out the conductor's own
  * "How to reply", which asks for more than the voice should say. `standing` is the developer's
  * standing instructions as the conductor renders them ('' when there are none): they come last,
- * after everything built in, as they do for the text conductor.
+ * after everything built in, as they do for the text conductor. `webSearch` says the model has
+ * xAI's search tools; `voiceStyle` is how the developer wants the voice to sound, which comes
+ * after the built-in rules and before the standing instructions.
  */
-export function lineInstructions(replies: TalkReplies, standing = ''): string {
+export function lineInstructions(
+  replies: TalkReplies,
+  standing = '',
+  options: { webSearch?: boolean; voiceStyle?: string } = {}
+): string {
   const brief = replies === 'brief';
   const rules = [
     ...HEARING_RULES,
     ...(brief ? BRIEF_SPEAKING_RULES : NORMAL_SPEAKING_RULES),
     ...ACTING_RULES,
+    ...(options.webSearch === true ? [SEARCH_RULE] : []),
   ].join('\n');
-  const builtIn = `${brief ? CONDUCTOR_RULES : CONDUCTOR_SYSTEM_PROMPT}\n\nOn the voice line:\n${rules}`;
+  const style = options.voiceStyle?.trim() ?? '';
+  const builtIn = [
+    `${brief ? CONDUCTOR_RULES : CONDUCTOR_SYSTEM_PROMPT}\n\nOn the voice line:\n${rules}`,
+    ...(style ? [voiceStyleBlock(style)] : []),
+  ].join('\n\n');
   return standing ? `${builtIn}\n\n${standing}` : builtIn;
 }
 

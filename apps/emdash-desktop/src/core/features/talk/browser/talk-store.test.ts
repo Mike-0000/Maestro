@@ -771,6 +771,30 @@ describe('a turn of the model', () => {
     store.dispose();
   });
 
+  it('traces why a response ended without completing', async () => {
+    const { store, open, line, conductor } = harness();
+    const session = await open();
+    const turn = line().turn({ context: 'c', spoken: true });
+    session.emit({
+      type: 'response.done',
+      response: {
+        status: 'failed',
+        status_details: {
+          type: 'failed',
+          error: { code: 'invalid_request_error', message: 'Item not found: state_2' },
+        },
+      },
+    });
+    await expect(turn).resolves.toMatchObject({ completed: false });
+    expect(conductor.traceLine).toHaveBeenCalledWith('incomplete', {
+      status: 'failed',
+      type: 'failed',
+      code: 'invalid_request_error',
+      message: 'Item not found: state_2',
+    });
+    store.dispose();
+  });
+
   it('takes one turn at a time', async () => {
     const { store, open, line } = harness();
     await open();
@@ -1160,6 +1184,21 @@ describe('the daily limit', () => {
     const normal = client.openSession.mock.calls[1]![0].instructions;
     expect(normal).toContain('one or two short sentences');
     expect(normal).not.toContain('say nothing before or while you call them');
+    store.dispose();
+  });
+
+  it('gives the open session a new voice style without a new connection', async () => {
+    const { store, open, sessions, client } = harness();
+    const session = await open();
+    const opened = client.openSession.mock.calls[0]![0].instructions;
+
+    await store.updateSettings({ voiceStyle: 'Speak with a laid-back skater vibe.' });
+    await settle();
+    expect(sessions).toHaveLength(1);
+    const update = session.sent.find((event) => event.type === 'session.update');
+    const instructions = (update?.session as { instructions?: string } | undefined)?.instructions;
+    expect(instructions).not.toBe(opened);
+    expect(instructions).toContain('Speak with a laid-back skater vibe.');
     store.dispose();
   });
 

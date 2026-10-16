@@ -1,10 +1,15 @@
 import { PageLayout, SettingsRow, SettingsSection } from '@emdash/ui/react/patterns';
-import { Button, Input, Select, Switch } from '@emdash/ui/react/primitives';
+import { Button, Input, Select, Switch, Textarea } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
 import { useEffect, useState } from 'react';
 import { getCanvasStore } from '@core/features/canvas/contributions/browser/app-stores';
 import { getMachinesClient } from '@core/features/machines/api/browser/client';
-import { isTalkAgentId, TALK_VOICES } from '@core/features/talk/api/contract';
+import {
+  DEFAULT_TALK_SETTINGS,
+  isTalkAgentId,
+  TALK_VOICE_STYLE_MAX_CHARS,
+  TALK_VOICES,
+} from '@core/features/talk/api/contract';
 import { TALK_MODELS } from '@core/features/talk/api/usage';
 import { getTalkStore } from '@core/features/talk/contributions/browser/app-stores';
 import {
@@ -1181,6 +1186,8 @@ const TalkLineSettings = observer(function TalkLineSettings() {
   const settings = status?.settings ?? null;
   const usage = status?.usageToday;
   const agentId = settings?.agentId.trim() ?? '';
+  const voice = settings?.voice ?? '';
+  const customVoice = voice && !(TALK_VOICES as readonly string[]).includes(voice) ? voice : '';
   const state = `${LINE_STATE_LABELS[talk.line]}${talk.error ? `: ${talk.error}` : ''}`;
   return (
     <SettingsSection title="Realtime voice conductor (experimental)">
@@ -1246,11 +1253,11 @@ const TalkLineSettings = observer(function TalkLineSettings() {
         description={
           agentId
             ? 'Not used while a custom voice agent is set: the agent speaks in its own voice.'
-            : "Grok's built-in voices. Changing it reopens the line."
+            : "Grok's built-in voices, and the custom voice below when one is set. Changing it reopens the line."
         }
         control={
           <Select.Root
-            value={settings?.voice ?? ''}
+            value={voice}
             disabled={!settings || agentId !== ''}
             onValueChange={(voice) => {
               if (voice) void talk.updateSettings({ voice });
@@ -1260,16 +1267,68 @@ const TalkLineSettings = observer(function TalkLineSettings() {
               <Select.Value>{settings?.voice ?? ''}</Select.Value>
             </Select.Trigger>
             <Select.Content align="end">
-              {/* A cloned voice set in the settings file is offered as it is. */}
-              {[...new Set([...TALK_VOICES, ...(settings ? [settings.voice] : [])])].map(
-                (voice) => (
-                  <Select.Item key={voice} value={voice}>
-                    {voice}
-                  </Select.Item>
-                )
-              )}
+              {[...TALK_VOICES, ...(customVoice ? [customVoice] : [])].map((option) => (
+                <Select.Item key={option} value={option}>
+                  {option}
+                </Select.Item>
+              ))}
             </Select.Content>
           </Select.Root>
+        }
+      />
+      <SettingsRow
+        label="Custom voice"
+        description={
+          agentId
+            ? 'Not used while a custom voice agent is set: the agent speaks in its own voice.'
+            : "A voice id from xAI's Custom Voices API, such as a clone of your own voice. The line speaks in it instead of a built-in voice. Empty goes back to the default voice. Changing it reopens the line."
+        }
+        control={
+          <CommitInput
+            value={customVoice}
+            ariaLabel="Custom voice id"
+            placeholder="Voice id"
+            className="w-56 font-mono text-xs"
+            allowEmpty
+            onCommit={(value) =>
+              void talk.updateSettings({
+                voice: value.slice(0, 40) || DEFAULT_TALK_SETTINGS.voice,
+              })
+            }
+          />
+        }
+      />
+      <SettingsRow
+        label="Voice style"
+        description="How the voice should sound, in your own words: tone, pace, manner. It changes how Maestro speaks, never what it does or tells you, and works with a custom voice agent too. The open line follows it from its next answer."
+        control={
+          <Textarea
+            key={settings?.voiceStyle ?? ''}
+            defaultValue={settings?.voiceStyle ?? ''}
+            aria-label="Voice style"
+            placeholder="Speak with a laid-back, easygoing vibe…"
+            rows={4}
+            maxLength={TALK_VOICE_STYLE_MAX_CHARS}
+            disabled={!settings}
+            className="w-72 text-xs"
+            onBlur={(event) => {
+              const next = event.currentTarget.value.trim();
+              if (settings && next !== settings.voiceStyle) {
+                void talk.updateSettings({ voiceStyle: next });
+              }
+            }}
+          />
+        }
+      />
+      <SettingsRow
+        label="Web and X search"
+        description="Lets the voice search the web and X itself when you ask about news or facts from outside your projects. xAI bills each search on top of the line's minutes. Changing it reopens the line."
+        control={
+          <Switch
+            checked={settings?.webSearch ?? false}
+            disabled={!settings}
+            onCheckedChange={(webSearch) => void talk.updateSettings({ webSearch })}
+          />
         }
       />
       <SettingsRow

@@ -1,4 +1,4 @@
-import { makeAutoObservable, reaction, runInAction } from 'mobx';
+import { comparer, makeAutoObservable, reaction, runInAction } from 'mobx';
 import { looksLikeSttArtifact } from '@core/features/conductor/api/jev-router/trace';
 import {
   wordCount,
@@ -408,11 +408,12 @@ export class TalkStore {
           if (onLine) this.openWindowSoon();
         }
       ),
-      // The developer changed how the conductor should act: the session that is open follows it
-      // from its next answer, with no new connection.
+      // The developer changed how the conductor should act or how the voice should sound: the
+      // session that is open follows it from its next answer, with no new connection.
       reaction(
-        () => conductor.standingInstructions,
-        () => this.reinstruct()
+        () => [conductor.standingInstructions, this.settings?.voiceStyle ?? ''],
+        () => this.reinstruct(),
+        { equals: comparer.structural }
       ),
       reaction(
         () => voice.muted,
@@ -457,6 +458,7 @@ export class TalkStore {
         before.effort !== after.effort ||
         before.talkOver !== after.talkOver ||
         before.replies !== after.replies ||
+        before.webSearch !== after.webSearch ||
         before.transcriptionModel !== after.transcriptionModel);
     if (reshaped && this.line !== 'off') this.shut('off');
     this.retries = 0;
@@ -567,7 +569,8 @@ export class TalkStore {
   private instructions(): string {
     return lineInstructions(
       this.settings?.replies ?? 'brief',
-      this.deps.conductor.standingInstructions
+      this.deps.conductor.standingInstructions,
+      { webSearch: this.settings?.webSearch === true, voiceStyle: this.settings?.voiceStyle ?? '' }
     );
   }
 
@@ -1303,6 +1306,7 @@ export class TalkStore {
     const done = (response ?? {}) as {
       id?: unknown;
       status?: unknown;
+      status_details?: unknown;
       usage?: unknown;
       metadata?: { purpose?: unknown } | null;
       output?: unknown;
@@ -1311,6 +1315,7 @@ export class TalkStore {
     const purpose = this.sayResponses.delete(id) ? 'say' : done.metadata?.purpose;
     const tokens = tokensFromUsage(done.usage);
     void this.recordUsage(tokens);
+    if (done.status !== 'completed') this.noteIncomplete(done.status, done.status_details);
     if (purpose === 'say') {
       if (done.status !== 'completed') this.finishSaying(false);
       return;
@@ -1348,6 +1353,24 @@ export class TalkStore {
     this.endTurn(turn, {
       reply: turn.said.join(' '),
       completed: done.status === 'completed' && !callsTools(done.output),
+    });
+  }
+
+  /**
+   * Says why a response ended without completing, as the provider put it: in the log in full,
+   * and in the trace as its status and reason, so a turn cut off at once can be told apart from
+   * one the developer stopped.
+   */
+  private noteIncomplete(status: unknown, details: unknown): void {
+    const detail = (details ?? {}) as { type?: unknown; reason?: unknown; error?: unknown };
+    const error = (detail.error ?? {}) as { code?: unknown; message?: unknown };
+    log.warn('talk: a response did not complete', { status, details });
+    this.deps.conductor.traceLine('incomplete', {
+      status: str(status) || 'unknown',
+      ...(str(detail.type) ? { type: str(detail.type) } : {}),
+      ...(str(detail.reason) ? { reason: str(detail.reason) } : {}),
+      ...(str(error.code) ? { code: str(error.code) } : {}),
+      ...(str(error.message) ? { message: str(error.message).slice(0, 200) } : {}),
     });
   }
 
