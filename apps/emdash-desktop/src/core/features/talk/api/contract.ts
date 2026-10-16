@@ -49,6 +49,14 @@ export const talkSettingsSchema = z.object({
   /** The model that writes the transcript of what the developer said. */
   transcriptionModel: z.string().min(1).max(80),
   replies: talkRepliesSchema,
+  /**
+   * A custom voice agent made in xAI's Voice Agent Builder (`agent_…`), or '' for none. With one,
+   * the line connects to that agent instead of `model`, and the agent's own model and voice are
+   * used. Maestro still sends its instructions, tools, turn-taking and audio format, which the
+   * line needs to be the conductor. Any string is accepted here, because a value this schema
+   * refused would reset every talk setting; `openSession` refuses one that is not an agent id.
+   */
+  agentId: z.string().max(100),
 });
 export type TalkSettings = z.infer<typeof talkSettingsSchema>;
 
@@ -64,7 +72,24 @@ export const DEFAULT_TALK_SETTINGS: TalkSettings = {
   dailyUsd: 5,
   transcriptionModel: 'grok-transcribe',
   replies: 'brief',
+  agentId: '',
 };
+
+/** What an xAI voice agent id looks like: `agent_` and letters, digits, `_` or `-`. */
+const TALK_AGENT_ID = /^agent_[A-Za-z0-9_-]{4,80}$/;
+
+export function isTalkAgentId(value: string): boolean {
+  return TALK_AGENT_ID.test(value);
+}
+
+/**
+ * What the line runs on, as usage and traces name it: the custom agent when one is set, else the
+ * model. Grok Voice costs the same per minute either way.
+ */
+export function talkLineModel(settings: Pick<TalkSettings, 'agentId' | 'model'>): string {
+  const agent = settings.agentId.trim();
+  return agent ? agent : settings.model;
+}
 
 /** The built-in Grok voices; a cloned voice's id works too. */
 export const TALK_VOICES = ['eve', 'ara', 'rex', 'sal', 'leo'] as const;
@@ -126,6 +151,7 @@ export const talkErrorSchema = z.object({
   type: z.enum([
     'disabled',
     'not-configured',
+    'invalid-agent',
     'over-budget',
     'rejected-key',
     'rate-limited',

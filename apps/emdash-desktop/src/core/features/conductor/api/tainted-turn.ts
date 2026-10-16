@@ -41,6 +41,7 @@ const VIEW_TOOLS: ReadonlySet<string> = new Set([
   'show_all',
   'canvas_view',
   'investigate',
+  'find_in_project',
   'propose_plan',
   'review_instructions',
 ]);

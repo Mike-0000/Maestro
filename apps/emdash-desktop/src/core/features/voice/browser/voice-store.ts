@@ -627,7 +627,9 @@ export class VoiceStore {
       origin,
       intent,
       latencyMs,
-      engine: this.settings?.engine ?? 'unknown',
+      engine: this.settings?.localTranscriber
+        ? 'parakeet-local'
+        : (this.settings?.engine ?? 'unknown'),
       ...(confidence !== undefined ? { confidence } : {}),
       ...(followUp ? { followUp: true } : {}),
     });
@@ -672,7 +674,11 @@ export class VoiceStore {
   private openStream(): void {
     this.streamId = null;
     this.streamPending = [];
-    if (this.settings?.engine !== 'deepgram' || this.settings.streaming === false) {
+    if (
+      this.settings?.localTranscriber ||
+      this.settings?.engine !== 'deepgram' ||
+      this.settings.streaming === false
+    ) {
       this.streamOpening = null;
       return;
     }

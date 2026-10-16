@@ -10,7 +10,7 @@ import {
 } from '@core/features/conductor/api/voice-line';
 import { log } from '@core/primitives/logging/browser/logger';
 import type { TalkClient } from '../api/browser/client';
-import type { TalkSettings, TalkStatus } from '../api/contract';
+import { talkLineModel, type TalkSettings, type TalkStatus } from '../api/contract';
 import { isEcho, neverEcho, recentSpoken, type Spoken } from '../api/echo-guard';
 import { inputSize, NO_TOKENS, tokensFromUsage, type TalkTokens } from '../api/usage';
 import { lineInstructions, lineTools, ROLLOVER_INSTRUCTIONS } from '../api/voice-prompt';
@@ -45,6 +45,8 @@ export interface TalkConductorPort {
   readonly callOnLine: boolean;
   /** True when a code check can run, so the model may be offered that tool. */
   readonly codeChecksReady: boolean;
+  /** True while project lookups are turned on, so the model may be offered find_in_project. */
+  readonly projectLookupsOn: boolean;
   /**
    * The developer's standing instructions as the model reads them, '' when there are none.
    * Observable: the open session is given them again when they change.
@@ -450,6 +452,7 @@ export class TalkStore {
     const reshaped =
       before !== null &&
       (before.model !== after.model ||
+        before.agentId !== after.agentId ||
         before.voice !== after.voice ||
         before.effort !== after.effort ||
         before.talkOver !== after.talkOver ||
@@ -528,7 +531,9 @@ export class TalkStore {
       runInAction(() => (this.line = 'open'));
       this.deps.conductor.setTalkLine(this.port);
       this.deps.voice.setLiveCapture(this.capture);
-      this.deps.conductor.traceLine('opened', { model: this.settings?.model ?? '' });
+      this.deps.conductor.traceLine('opened', {
+        model: this.settings ? talkLineModel(this.settings) : '',
+      });
       // The instructions may have changed while the session was being set up.
       this.reinstruct();
       this.reopen();
@@ -548,7 +553,10 @@ export class TalkStore {
     this.instructed = instructions;
     const result = await client.openSession({
       instructions,
-      tools: lineTools({ codeChecks: this.deps.conductor.codeChecksReady }),
+      tools: lineTools({
+        codeChecks: this.deps.conductor.codeChecksReady,
+        lookups: this.deps.conductor.projectLookupsOn,
+      }),
     });
     if (!result.success) throw new TalkOpenError(result.error.type, result.error.message);
     const { url, clientSecret, session } = result.data;
@@ -1345,7 +1353,7 @@ export class TalkStore {
 
   /** Reports what the line used since it last did: tokens, and the time and text it is billed. */
   private async recordUsage(tokens: TalkTokens): Promise<void> {
-    const model = this.settings?.model;
+    const model = this.settings ? talkLineModel(this.settings) : '';
     if (!model) return;
     const now = this.now();
     const seconds = this.billedSince > 0 ? Math.max(0, (now - this.billedSince) / 1000) : 0;

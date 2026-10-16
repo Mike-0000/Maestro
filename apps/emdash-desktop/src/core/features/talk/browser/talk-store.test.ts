@@ -110,6 +110,7 @@ function harness(settings: Partial<TalkSettings> = {}) {
       return callOnLine.get();
     },
     codeChecksReady: false,
+    projectLookupsOn: false,
     get standingInstructions() {
       return standing.get();
     },
@@ -1135,6 +1136,14 @@ describe('the daily limit', () => {
     await store.updateSettings({ model: 'grok-voice-latest' });
     await settle();
     expect(sessions).toHaveLength(2);
+
+    // A custom agent is another session too, and so is going back to the model.
+    await store.updateSettings({ agentId: 'agent_9LN3SXMEJ4NuPEDm' });
+    await settle();
+    expect(sessions).toHaveLength(3);
+    await store.updateSettings({ agentId: '' });
+    await settle();
+    expect(sessions).toHaveLength(4);
     store.dispose();
   });
 

@@ -26,6 +26,7 @@ const LINE_INSTANT_TOOLS: ReadonlySet<string> = new Set([
   'check_conflicts',
   'look_at_app',
   'investigate',
+  'find_in_project',
   'review_instructions',
 ]);
 
@@ -87,6 +88,57 @@ export function lineRecord(turn: {
     ...(did.length > 0 ? [`Done: ${did.join('; ')}.`] : []),
     ...(reply ? [`You answered: “${reply}”`] : []),
   ].join(' ');
+}
+
+/** How much of what the conductor wrote to an agent on its own a note keeps. */
+const NOTE_MESSAGE_CHARS = 300;
+
+/** True for what Maestro started by itself: an agent's request, a finished agent's report. */
+function isEvent(said: string): boolean {
+  return /^\[(?:request|completion)\b/.test(said);
+}
+
+/**
+ * A turn the line's model did not run (a fast command, an agent's request the text model
+ * decided, a finished agent's report), as that model is told it: what started it, what was done,
+ * and what the developer was told. The developer may ask the line about any of it. `told` is
+ * false when the reply already reached the line some other way. Null when there is nothing to
+ * tell.
+ */
+export function lineEventNote(turn: {
+  readonly said: string;
+  /** What started the turn, when it was not the developer, in place of `said`. */
+  readonly about?: string;
+  readonly actions: readonly (LineAction & { readonly input?: unknown })[];
+  readonly reply: string;
+  readonly told?: boolean;
+}): string | null {
+  const event = Boolean(turn.about) || isEvent(turn.said);
+  const did = turn.actions
+    .filter((action) => !LINE_READ_TOOLS.has(action.tool))
+    .map((action) => {
+      const outcome = clip(action.outcome, RECORD_OUTCOME_CHARS);
+      // The conductor's own answer to an agent is what "what did you tell it?" asks for.
+      const message =
+        action.tool === 'answer_request' ? stringInput(action.input, 'message') : undefined;
+      const wrote = message ? ` It wrote: “${clip(message, NOTE_MESSAGE_CHARS)}”` : '';
+      return `${action.tool}${action.status ? ` (${action.status})` : ''}: ${outcome}${wrote}`;
+    });
+  const reply = turn.told === false ? '' : clip(turn.reply, RECORD_REPLY_CHARS);
+  if (did.length === 0 && !reply && !event) return null;
+  const said = clip(turn.about ?? turn.said, RECORD_ASKED_CHARS);
+  return [
+    '[Conductor] Handled without you:',
+    event ? `${said}.` : `the developer said “${said}”.`,
+    ...(did.length > 0 ? [`Done: ${did.join('; ')}.`] : []),
+    ...(reply ? [`Maestro said: “${reply}”`] : []),
+    ...(event && did.length === 0 && !reply ? ['Nothing was done.'] : []),
+  ].join(' ');
+}
+
+function stringInput(input: unknown, key: string): string | undefined {
+  const value = (input as Record<string, unknown> | null | undefined)?.[key];
+  return typeof value === 'string' && value.trim() ? value : undefined;
 }
 
 export function wordCount(text: string): number {

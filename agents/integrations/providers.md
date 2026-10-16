@@ -63,6 +63,15 @@ under the lock, and writes only when missing or stale. Existing JSON or TOML tha
 is left untouched and reported through logging. Global hooks are harmless in sessions outside
 Emdash: their commands exit successfully when the Emdash hook server environment is absent.
 
+On Windows, hook commands start PowerShell with an encoded script. The default launcher chains a
+marker `set` through `cmd.exe /d /c … &&`; Codex runs hook commands in Windows PowerShell 5.1,
+which has no `&&`, so its hooks use the `powershell` launcher (`windowsLauncher` in
+`HookCommandOptions`) and carry the markers inside the encoded script, where
+`isEmdashHookText` finds them. Codex's Stop hook posts Codex's own payload, so the turn's final
+reply arrives as `last_assistant_message`. Codex trusts each hook by a hash of its definition, so a
+changed Emdash hook reads as modified until it is reviewed in Codex (`/hooks`), except in sessions
+launched with auto-approve, which pass `--dangerously-bypass-hook-trust`.
+
 The global roots used by the built-in integrations are:
 
 | Providers | Root behavior |

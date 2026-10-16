@@ -196,8 +196,10 @@ export class ActivityLedger {
               .join('; ')
           : `replied “${clip(turn.reply, CONTEXT_TEXT_CHARS)}”`;
       // What was sent already quotes the developer when the text went through unchanged.
-      const said =
-        sends.length > 0 && turn.route !== 'llm' && turn.route !== 'line'
+      // An agent's request or a finished agent's report started the turn, not the developer.
+      const said = /^\[(?:request|completion)\b/.test(turn.said)
+        ? `${clip(turn.said, CONTEXT_SAID_CHARS)} → `
+        : sends.length > 0 && turn.route !== 'llm' && turn.route !== 'line'
           ? ''
           : `you said “${clip(turn.said, CONTEXT_SAID_CHARS)}” → `;
       lines.push(`- ${formatAgo(turn.at, now)}: ${said}${did}`);

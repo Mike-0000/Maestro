@@ -12,6 +12,7 @@ import {
   InvestigationService,
   type InvestigationPorts,
 } from './investigation/investigation-service';
+import { findInProject, type LookupSearchPort } from './investigation/project-lookup';
 import { readProjectContext } from './project-context';
 import { enableGitLongPaths, readSystemChecks } from './system-checks';
 
@@ -21,6 +22,8 @@ export function createConductorWireController(options: {
   scope: Scope;
   /** What code checks need from other slices; see `InvestigationPorts`. */
   investigator: InvestigationPorts;
+  /** The project search that project lookups run on; see `LookupSearchPort`. */
+  lookup: LookupSearchPort;
 }): Controller {
   const service = new ConductorService(options.host, options.logger);
   service.start();
@@ -83,5 +86,19 @@ export function createConductorWireController(options: {
       await investigations.recheck();
       return service.status();
     },
+    findInProject: {
+      run: (input, context) =>
+        findInProject(input, context, {
+          readSettings: () => service.readSettings(),
+          identity: options.investigator.identity,
+          search: options.lookup,
+          logger: options.logger,
+        }),
+      toError: (error) => {
+        options.logger.warn('conductor: project lookup failed', { error });
+        return { type: 'failed', message: 'The project could not be searched.' };
+      },
+    },
+    checkInvestigationFolder: ({ path }) => investigations.checkFolder(path),
   });
 }

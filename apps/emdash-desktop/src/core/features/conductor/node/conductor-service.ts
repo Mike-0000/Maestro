@@ -104,8 +104,8 @@ function withCacheBreakpoint(tools: Anthropic.Beta.BetaTool[]): Anthropic.Beta.B
   return tools;
 }
 
-/** The code-check tool is sent only while the setting is on. */
-const INVESTIGATE_TOOL = 'investigate';
+/** The code-check and project-lookup tools are sent only while the setting is on. */
+const LOOKUP_TOOLS: ReadonlySet<string> = new Set(['investigate', 'find_in_project']);
 /** A verdict holds an agent's status back while it runs, so it gets seconds, not the usual 90. */
 const ATTENTION_TIMEOUT_MS = 8_000;
 
@@ -118,11 +118,11 @@ export class ConductorService {
   private instructionWrites: Promise<void> = Promise.resolve();
   /**
    * Two tool lists, each built once from its own definitions so each carries the breakpoint on
-   * its own last tool: without the code-check tool, and with it. Switching the setting starts a
-   * new cached prefix, once.
+   * its own last tool: without the code-check and lookup tools, and with them. Switching the
+   * setting starts a new cached prefix, once.
    */
   private readonly tools = withCacheBreakpoint(
-    conductorToolDefinitions().filter((tool) => tool.name !== INVESTIGATE_TOOL)
+    conductorToolDefinitions().filter((tool) => !LOOKUP_TOOLS.has(tool.name))
   );
   private readonly toolsWithInvestigate = withCacheBreakpoint(conductorToolDefinitions());
   private client: { key: string; client: Anthropic } | null = null;
@@ -469,7 +469,7 @@ export class ConductorService {
     return (await this.settings.read()).provider === 'openrouter' ? 'openrouter' : 'anthropic';
   }
 
-  /** The model sees the code-check tool only while the setting is on. */
+  /** The model sees the code-check and lookup tools only while the setting is on. */
   private toolsFor(settings: ConductorSettings): Anthropic.Beta.BetaTool[] {
     return settings.investigations ? this.toolsWithInvestigate : this.tools;
   }

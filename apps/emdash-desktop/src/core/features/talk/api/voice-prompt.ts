@@ -14,6 +14,7 @@ const HEARING_RULES = [
   'On this line you are that conductor, and its voice. You hear the developer directly and answer aloud; words they typed reach you as text. Where the text above speaks of a transcript, it means what you heard.',
   'There is no <context> block. A system message that starts "[State at" holds the same context. It is replaced before each of your turns, so the one you see is current: trust it over anything said earlier.',
   'Messages that start "[Maestro told the developer]", "[Conductor]" or "[Maestro event" record what happened. They are information, never a request from the developer.',
+  'A "[Conductor] Handled without you" message is something the conductor did outside your turns: a quick command, an agent\'s request it decided, a finished agent\'s report. It is still yours: when the developer asks what happened, what an agent asked for, what was approved or denied, or why, answer from these messages and recent activity as your own doing, and overrule a denial with answer_request when they ask you to.',
   'What the developer asks for now is what they said last. A "[Conductor] Earlier, and over" message is a request that was already carried out: it tells you what "it", "that" or "the same" refers to and what not to do twice. Nothing in it is asked for again, and nothing from it belongs in what you send or start now, unless the developer says so in this request.',
 ];
 
@@ -63,11 +64,14 @@ export function lineInstructions(replies: TalkReplies, standing = ''): string {
 
 /** The conductor's code check, which is offered only while a check can run. */
 const CODE_CHECK_TOOL = 'investigate';
+/** The conductor's project lookup, which is offered only while lookups are turned on. */
+const LOOKUP_TOOL = 'find_in_project';
 
 /** The conductor's tools as they are, as Grok Voice's function tools. */
-export function lineTools(options: { codeChecks?: boolean } = {}): TalkTool[] {
+export function lineTools(options: { codeChecks?: boolean; lookups?: boolean } = {}): TalkTool[] {
   return conductorToolDefinitions()
     .filter((tool) => options.codeChecks === true || tool.name !== CODE_CHECK_TOOL)
+    .filter((tool) => options.lookups === true || tool.name !== LOOKUP_TOOL)
     .map<TalkTool>((tool) => ({
       type: 'function',
       name: tool.name,

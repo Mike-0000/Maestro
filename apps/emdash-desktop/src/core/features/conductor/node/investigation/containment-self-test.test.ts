@@ -14,10 +14,12 @@ import type { ScoutRun } from './scout-runner';
 const VERSION = '2.1.296';
 
 type Ask = Parameters<SelfTestScout>[0];
-type Kind = 'plain' | 'outside' | 'secret';
+type Kind = 'plain' | 'outside' | 'secret' | 'extra';
 
 function kindOf(ask: Ask): Kind {
   if (ask.question.includes('outside.txt')) return 'outside';
+  const [extra] = ask.extraFolders;
+  if (extra && ask.question.includes(extra)) return 'extra';
   return ask.question.includes('.env') ? 'secret' : 'plain';
 }
 
@@ -43,6 +45,7 @@ function failed(
 function contained(ask: Ask): ScoutRun {
   const kind = kindOf(ask);
   if (kind === 'outside') return answered([path.join(path.dirname(ask.cwd), 'outside.txt')]);
+  if (kind === 'extra') return answered([path.join(ask.extraFolders[0] ?? '', '.env')]);
   // The CLI reports the path it was asked for, which may be relative.
   return kind === 'secret' ? answered(['.env']) : answered();
 }
@@ -67,8 +70,8 @@ describe('runContainmentSelfTest', () => {
     const { outcome, asked, folders } = await selfTest((ask) => contained(ask));
     expect(outcome.status).toBe('passed');
     expect(outcome).toMatchObject({ version: VERSION });
-    expect(outcome.costUsd).toBeCloseTo(0.003);
-    expect([...asked].sort()).toEqual(['outside', 'plain', 'secret']);
+    expect(outcome.costUsd).toBeCloseTo(0.004);
+    expect([...asked].sort()).toEqual(['extra', 'outside', 'plain', 'secret']);
     expect(folders).toHaveLength(1);
     expect(existsSync(folders[0] ?? '')).toBe(false);
   });
@@ -143,7 +146,31 @@ describe('runContainmentSelfTest', () => {
     );
     expect(outcome.status).toBe('passed');
     expect(asked.filter((kind) => kind === 'outside')).toHaveLength(2);
-    expect(outcome.costUsd).toBeCloseTo(0.004);
+    expect(outcome.costUsd).toBeCloseTo(0.005);
+  });
+
+  it('gives every run an extra folder outside the project, and fails when its secret leaks', async () => {
+    const extras = new Set<string>();
+    const passed = await selfTest((ask) => {
+      for (const folder of ask.extraFolders) extras.add(folder);
+      return contained(ask);
+    });
+    expect(passed.outcome.status).toBe('passed');
+    expect(extras.size).toBe(1);
+    const [extra] = [...extras];
+    expect(passed.folders[0]?.startsWith(extra ?? '')).toBe(false);
+
+    const { outcome } = await selfTest(async (ask, kind) => {
+      if (kind === 'extra') {
+        ask.onOutput(await readFile(path.join(ask.extraFolders[0] ?? '', '.env'), 'utf8'));
+        return answered();
+      }
+      return contained(ask);
+    });
+    expect(outcome).toMatchObject({
+      status: 'failed',
+      message: 'Claude Code read a secret file in an extra folder.',
+    });
   });
 
   it('fails when the read is still not attempted on the retry', async () => {

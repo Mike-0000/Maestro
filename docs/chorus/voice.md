@@ -392,18 +392,39 @@ reply is passed back to the one that asked. Turn all of this off with **Let agen
 conductor** in Settings → Voice & Conductor. See [agent requests](agent-requests.md) for the
 request format and the kinds.
 
-### Checking the code (built, not switched on)
+### Looking things up before it writes a prompt
 
-The conductor can ask a read-only Claude Code process questions about a project's files ("do we
-already have a retry helper?") before it plans or answers, and show each answer with the files it
-rests on. A check runs in a contained process: it cannot write, cannot read outside the project
-or its secret files, and runs no project hooks. While a check runs, a card shows what is being
-read, and Esc or "stop" cancels it. After a check, everything the conductor does in that turn
-asks for an explicit yes, because the files it read are not your words.
+Off by default. Turn it on with **Let the conductor read project files** in Settings → Voice &
+Conductor → Code checks. Once it is on, the conductor can look things up in a project before it
+writes a prompt, a plan, or an answer, so a name you use for part of the project ("the desk
+switcher", "the mirror") is placed before an agent is briefed. It decides for itself when a
+request needs it, and you can ask outright: "check the code first", "look it up before you write
+the prompt". Those words always reach the conductor's model, never the fast router, so it can
+look before anything is started.
 
-The setting for this is hidden until the checks in
-[the code-check plan](../conductor-subagent-plan.md) have been run; see
-[the design](../design/talk-mode.md#implementation-status).
+It has two ways to look:
+
+| Lookup | What it does | Wait | Works on |
+| --- | --- | --- | --- |
+| **Find in project** | Where a name appears: the files whose path contains it, and the files that mention it most. Names and counts only, never file contents | Under a second | Every project: this computer, WSL, SSH |
+| **Code check** | A read-only Claude Code process answers up to three questions ("what does the desk switcher do, and where?") with the files and lines it rests on | 10 to 20 seconds | Projects on this computer, and WSL projects made with **Run in WSL**, through their Windows copy |
+
+A code check runs in a contained process: it cannot write or run commands, cannot read outside
+the project (and the extra folders you add) or any secret file, and runs no project hooks. While
+a check runs, a card shows what is being read, and Esc or "stop" cancels it. After a check,
+everything the conductor does in that turn asks for an explicit yes, because the files it read
+are not your words. A lookup by name reads no file contents, so it asks nothing extra.
+
+**Extra folders.** By default a code check reads only the project (or the named agent's folder).
+**Add folder…** under Code checks lets it also read other folders you choose, read-only: another
+repository, a notes folder. A whole drive, your home folder, a folder that holds it, and hidden
+or settings folders are refused, and secret files stay unreadable in extra folders too. The
+self-test proves this on your computer when you turn checks on and after Claude Code updates.
+
+For anything wider, such as searching the whole computer or running commands, start a normal
+agent and watch it: "start a Claude agent to find where my old deploy scripts are". It works
+under the permissions you set for that agent, in a window you can see and stop. See
+[the design](../design/voice-prompt-grounding.md).
 
 ### Calls from agents
 
@@ -558,7 +579,8 @@ session, or over its daily limit. Those need an Anthropic or OpenRouter key, as 
 
 | Setting | What it does |
 | --- | --- |
-| Voice model | `gpt-realtime-2.1` (default), `gpt-realtime-2.1-mini` (about a quarter of the cost), or `gpt-realtime-1.5` |
+| Custom voice agent | An agent made in xAI's Voice Agent Builder, by its id (`agent_…`). The line connects to it (`?agent_id=`) instead of the voice model, and uses the agent's own model, voice and effort. Maestro still sends the conductor's instructions, its tools, hand-taken turns and its audio format, so the line acts as it does without one. Empty (the default) uses the voice model |
+| Voice model | `grok-voice-3.0` (default, pinned) or `grok-voice-latest`. Not used while a custom voice agent is set |
 | Listen without the talk key | Keeps the microphone open all the time. Off, Maestro hears you while you hold the key and for a moment after it speaks |
 | Seconds the microphone stays open | The follow-up window after Maestro speaks; 0 means the microphone opens only with the talk key |
 | Speak over the voice to stop it | Keeps the microphone open while the voice speaks. Use it with headphones, or if echo cancellation holds on your speakers. Off, the talk key stops the voice |
@@ -638,6 +660,16 @@ The cloud option is separate from speech-to-text and from the conductor provider
 API keys are encrypted with Windows DPAPI (Electron `safeStorage`) and only ever used in the main
 process; the UI never sees them. Environment variables `OPENAI_API_KEY`, `DEEPGRAM_API_KEY`, and
 `ANTHROPIC_API_KEY` are used as fallbacks.
+
+### Transcribe on this computer (NVIDIA Parakeet)
+
+**Settings → Voice & Conductor → Voice → Transcribe on this computer** is off by default. When it
+is on, every voice command is transcribed by the same on-device Parakeet model that dictation uses,
+whatever engine is chosen above, and the text goes straight to the conductor: no audio is sent to
+a speech-to-text API, and the live Deepgram transcript is not used. The model is a one-time
+download from the same row. If it is missing or fails, the command shows an error naming the cause;
+voice never silently switches back to a cloud engine. Parakeet is English only and takes no
+vocabulary hints.
 
 ### Local whisper.cpp setup
 

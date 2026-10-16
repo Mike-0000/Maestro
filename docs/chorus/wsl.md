@@ -146,7 +146,10 @@ The distro is a machine like an SSH host, reached without SSH:
 The same things that are off for SSH machines are off here:
 
 - Maestro's per-session MCP tools (browser tools, conductor requests, `show_markdown`).
-- The managed git credential helper, conductor code checks, and the Markdown viewer.
+- The managed git credential helper and the Markdown viewer.
+- Conductor code checks, except on a project made with **Run in WSL**: a check reads its Windows
+  copy, which the live mirror keeps the same apart from files git ignores. The conductor's
+  lookup by name (`find_in_project`) works on every WSL project.
 - "Show in folder" and "Open with the default app". **Open in VS Code / Cursor** works, through
   their WSL remote.
 

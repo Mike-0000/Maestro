@@ -137,6 +137,16 @@ describe('ActivityLedger', () => {
     );
   });
 
+  it('does not put an agent request in the developer mouth', () => {
+    const ledger = new ActivityLedger(() => NOW);
+    ledger.noteRecord(
+      record({ route: 'llm', utterance: '[request r-2] Atlas: question', reply: 'Told it main.' })
+    );
+    expect(ledger.contextLines()[1]).toBe(
+      '- 1 min ago: [request r-2] Atlas: question → replied “Told it main.”'
+    );
+  });
+
   it('gives full texts, filtered by agent, to the recent_activity tool', () => {
     const ledger = new ActivityLedger(() => NOW);
     const long = 'detail '.repeat(300).trim();

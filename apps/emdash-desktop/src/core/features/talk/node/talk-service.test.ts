@@ -150,6 +150,44 @@ describe('TalkService.openSession', () => {
     expect(await down.openSession(asked)).toMatchObject({ error: { type: 'unreachable' } });
   });
 
+  it('connects to a custom voice agent by its id, with its own model and voice', async () => {
+    await secrets.setSecret('chorus.credential.xai', secret('xai-test', 'xai'));
+    const request = minted();
+    const talk = service(request as unknown as typeof fetch);
+    await talk.updateSettings({ enabled: true, agentId: ' agent_9LN3SXMEJ4NuPEDm ' });
+
+    const result = await talk.openSession(asked);
+
+    expect(result).toMatchObject({
+      success: true,
+      data: {
+        url: 'wss://api.x.ai/v1/realtime?agent_id=agent_9LN3SXMEJ4NuPEDm',
+        model: 'agent_9LN3SXMEJ4NuPEDm',
+        voice: '',
+        session: { instructions: 'Be brief.', turn_detection: { type: null } },
+      },
+    });
+    if (!result.success) throw new Error('expected a session');
+    expect(result.data.url).not.toContain('model=');
+    expect(result.data.session).not.toHaveProperty('model');
+    expect(result.data.session).not.toHaveProperty('voice');
+    expect(result.data.session).not.toHaveProperty('reasoning');
+  });
+
+  it('refuses an agent id xAI would not give out, before minting anything', async () => {
+    await secrets.setSecret('chorus.credential.xai', secret('xai-test', 'xai'));
+    const request = minted();
+    const talk = service(request as unknown as typeof fetch);
+    for (const agentId of ['agent_', 'grok-voice-3.0', 'agent_x&model=other', 'agent_ab cd']) {
+      await talk.updateSettings({ enabled: true, agentId });
+      expect(await talk.openSession(asked)).toMatchObject({
+        success: false,
+        error: { type: 'invalid-agent' },
+      });
+    }
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it('refuses a new session once the daily limit is spent', async () => {
     await secrets.setSecret('chorus.credential.xai', secret('xai-test', 'xai'));
     const request = minted();
