@@ -2161,7 +2161,7 @@ export class ConductorStore {
   }
 
   traceLine(status: string, detail: Record<string, string | number | boolean> = {}): void {
-    this.trace('line', undefined, { status, ...detail }, this.lineTraceId);
+    this.trace('line', undefined, { ...detail, status }, this.lineTraceId);
   }
 
   /**

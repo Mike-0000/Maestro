@@ -131,7 +131,7 @@ async function flush(): Promise<void> {
 }
 
 /** Speech long enough to be found, then a pause long enough to end it. */
-function speak(audio: ReturnType<typeof fakeAudio>, pauseMs = 700): void {
+function speak(audio: ReturnType<typeof fakeAudio>, pauseMs = 1_200): void {
   for (let i = 0; i < 6; i++) audio.capture(loud());
   for (let at = 0; at < pauseMs; at += 50) audio.capture(quiet());
 }
@@ -268,7 +268,7 @@ describe('the microphone', () => {
     // The moments before speech was found go first, so its first syllable is not lost.
     const appended = socket.sent.filter((event) => event.type === 'input_audio_buffer.append');
     expect(appended.length).toBeGreaterThan(2);
-    for (let at = 0; at < 700; at += 50) audio.capture(quiet());
+    for (let at = 0; at < 1_200; at += 50) audio.capture(quiet());
     expect(eventTypes()).toEqual([
       'input_audio_buffer.speech_started',
       'input_audio_buffer.speech_stopped',
@@ -400,6 +400,22 @@ describe('the voice', () => {
     speak(audio, 0);
     expect(socket.sent).toContainEqual({ type: 'response.cancel', response_id: 'r1' });
     expect(events).toContainEqual({ type: 'output_audio_buffer.cleared', response_id: 'r1' });
+  });
+
+  it('plays nothing of a response the line cancelled, from the moment it asked', async () => {
+    const { session, socket, audio, opened, events } = harness();
+    await opened();
+    socket.receive(delta('r1'));
+    expect(session.send({ type: 'response.cancel', response_id: 'r1' })).toBe(true);
+    expect(socket.sent.at(-1)).toEqual({ type: 'response.cancel', response_id: 'r1' });
+    expect(audio.clear).toHaveBeenCalled();
+    expect(events.at(-1)).toEqual({ type: 'output_audio_buffer.cleared', response_id: 'r1' });
+    socket.receive(delta('r1'));
+    expect(audio.played).toHaveLength(1);
+    // One cancelled before it spoke is never heard at all.
+    session.send({ type: 'response.cancel', response_id: 'r2' });
+    socket.receive(delta('r2'));
+    expect(audio.played).toHaveLength(1);
   });
 
   it('lets the developer speak over it, without stopping it, with talk-over off', async () => {

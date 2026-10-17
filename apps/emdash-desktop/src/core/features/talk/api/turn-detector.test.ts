@@ -19,7 +19,10 @@ describe('TurnDetector', () => {
     // A breath is not the end of a sentence.
     expect(feed(detector, 0.001, 400)).toEqual([]);
     expect(feed(detector, 0.2, 500)).toEqual([]);
-    expect(feed(detector, 0.001, 700)).toEqual(['stop']);
+    // Nor is a moment to think.
+    expect(feed(detector, 0.001, 700)).toEqual([]);
+    expect(feed(detector, 0.2, 500)).toEqual([]);
+    expect(feed(detector, 0.001, 1_200)).toEqual(['stop']);
     expect(detector.speaking).toBe(false);
   });
 
