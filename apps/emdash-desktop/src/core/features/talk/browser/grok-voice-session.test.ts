@@ -221,6 +221,42 @@ describe('the microphone', () => {
     expect(socket.sent).toEqual([]);
   });
 
+  it('keeps what is said while it opens, and sends it once released', async () => {
+    const { session, socket, audio, opened, eventTypes } = harness();
+    session.holdAudio();
+    const opening = opened();
+    await flush();
+    // Spoken before the session is open: kept, not sent.
+    speak(audio);
+    await opening;
+    expect(socket.sent).toEqual([]);
+    // Still kept after it opens, until the line is ready for it.
+    audio.capture(quiet());
+    expect(socket.sent).toEqual([]);
+    session.releaseAudio(true);
+    expect(eventTypes()).toEqual([
+      'input_audio_buffer.speech_started',
+      'input_audio_buffer.speech_stopped',
+    ]);
+    expect(socket.sent.some((event) => event.type === 'input_audio_buffer.append')).toBe(true);
+    expect(socket.sent.at(-1)).toMatchObject({ type: 'input_audio_buffer.commit' });
+  });
+
+  it('drops what it kept when told to', async () => {
+    const { session, socket, audio, opened, eventTypes } = harness();
+    session.holdAudio();
+    const opening = opened();
+    await flush();
+    speak(audio);
+    await opening;
+    session.releaseAudio(false);
+    expect(socket.sent).toEqual([]);
+    expect(eventTypes()).toEqual([]);
+    // What is heard after is sent as usual.
+    speak(audio);
+    expect(eventTypes()).toContain('input_audio_buffer.speech_started');
+  });
+
   it('reports where speech starts and stops, with what came just before, and commits it', async () => {
     const { socket, audio, opened, eventTypes } = harness();
     await opened();

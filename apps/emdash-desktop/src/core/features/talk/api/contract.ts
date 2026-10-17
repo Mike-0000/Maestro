@@ -71,6 +71,12 @@ export const talkSettingsSchema = z.object({
    * change from its next answer.
    */
   voiceStyle: z.string().max(TALK_VOICE_STYLE_MAX_CHARS),
+  /**
+   * With `key` listening: seconds of quiet (nothing said, played or worked on) after which the
+   * line closes, since an open line is billed by the minute. The next press opens it again. 0
+   * keeps it open until xAI closes it, after 15 minutes of quiet.
+   */
+  idleSec: z.number().int().min(0).max(900),
 });
 export type TalkSettings = z.infer<typeof talkSettingsSchema>;
 
@@ -89,6 +95,7 @@ export const DEFAULT_TALK_SETTINGS: TalkSettings = {
   agentId: '',
   webSearch: true,
   voiceStyle: '',
+  idleSec: 20,
 };
 
 /** What an xAI voice agent id looks like: `agent_` and letters, digits, `_` or `-`. */

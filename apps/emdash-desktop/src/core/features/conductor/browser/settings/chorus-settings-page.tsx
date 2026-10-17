@@ -1401,6 +1401,21 @@ const TalkLineSettings = observer(function TalkLineSettings() {
         }
       />
       <SettingsRow
+        label="Seconds of quiet before the line closes"
+        description="The line is billed for every minute it is open, so it closes after this long with nothing said, played or worked on. The next press of the talk key opens it again and is heard by it: start speaking at once, and what you say while it connects is sent when it is open. 0 keeps it open until xAI closes it, after 15 minutes. Not used when Maestro listens without the key."
+        control={
+          <CommitInput
+            value={String(settings?.idleSec ?? 20)}
+            ariaLabel="Seconds of quiet before the line closes"
+            className="w-20"
+            onCommit={(value) => {
+              const idleSec = Number.parseInt(value, 10);
+              if (idleSec >= 0 && idleSec <= 900) void talk.updateSettings({ idleSec });
+            }}
+          />
+        }
+      />
+      <SettingsRow
         label="Speak over the voice to stop it"
         description="Keeps the microphone open while the voice is speaking. Turn it on with headphones, or if this computer's echo cancellation keeps the voice out of the microphone; otherwise the voice may stop itself. Off: the talk key stops it."
         control={

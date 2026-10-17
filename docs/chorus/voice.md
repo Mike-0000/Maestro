@@ -534,7 +534,13 @@ conductor's place. The voice model hears you directly, answers aloud, and acts o
 with the conductor's own tools: it messages, starts, stops and reads agents, makes plans, and
 arranges the canvas. It is not a voice in front of the text conductor; it is the conductor. A
 small dot next to the microphone button shows it: green when open, with a ring while it hears
-you, amber while connecting, red when it is wanted but not connected.
+you, amber while connecting, red when it is wanted but not connected. The line is billed for every
+minute it is open, so after a quiet spell (20 seconds by default, see below) it closes and
+sleeps, shown as a hollow green ring. The next press of the talk key opens it again, and that
+press goes to the line too: speak at once, and what you say while it connects (a second or two)
+is kept and sent when it is open. The new session is told what the last few turns came to (what
+you asked, what was done, what you were told), so "do that again" and follow-ups still work;
+what it does not have is the conversation word for word.
 
 What changes while it is on:
 
@@ -587,8 +593,9 @@ session, or over its daily limit. Those need an Anthropic or OpenRouter key, as 
 | Web and X search | On by default. Gives the line xAI's built-in `web_search` and `x_search` tools, for news and facts from outside your projects. Each search is billed by xAI on top of the minutes |
 | Listen without the talk key | Keeps the microphone open all the time. Off, Maestro hears you while you hold the key and for a moment after it speaks |
 | Seconds the microphone stays open | The follow-up window after Maestro speaks; 0 means the microphone opens only with the talk key |
+| Seconds of quiet before the line closes | 20 by default. Nothing said, played, held or worked on for this long closes the line, until the next press of the talk key. 0 keeps it open until xAI closes it after 15 minutes of quiet. Not used when Maestro listens without the key |
 | Speak over the voice to stop it | Keeps the microphone open while the voice speaks. Use it with headphones, or if echo cancellation holds on your speakers. Off, the talk key stops the voice |
-| Daily limit | In US dollars ($5 by default). At the limit the line closes and the text conductor takes over; it opens again by itself within half an hour of the next day starting |
+| Daily limit | In US dollars ($5 by default). The line is billed for every minute it is open, used or not. At the limit the line closes, the dot turns into a hollow red ring, and the text conductor takes over; it opens again by itself within half an hour of the next day (UTC) starting, or at once when the limit is raised |
 
 Privacy and cost: while the line is open, what you say with the key held or the microphone open,
 the state of your agents, and what the model reads (redacted like diagnostics) go to OpenAI. No

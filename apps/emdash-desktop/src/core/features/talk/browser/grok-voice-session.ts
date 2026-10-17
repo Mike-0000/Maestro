@@ -95,6 +95,8 @@ export type SessionDeps = LineSessionDeps & {
 const OPEN_TIMEOUT_MS = 15_000;
 /** Sound kept from before speech is found, so its first syllable is not lost. */
 const PRE_ROLL_MS = 300;
+/** Most of what is said while the session opens that is kept, to be sent once it is open. */
+const EARLY_MAX_MS = 20_000;
 /** A commit with nothing to commit waits this long at most for the commits before it. */
 const COMMIT_WAIT_MS = 1_500;
 const SOCKET_OPEN = 1;
@@ -138,6 +140,11 @@ export class GrokVoiceSession {
   private audible: Audible | null = null;
   /** Settles the wait for `session.updated` while opening. */
   private configured: { resolve(): void; reject(error: Error): void } | null = null;
+  /**
+   * What the microphone heard while it was held for the line before the line was ready, or
+   * null when nothing is being held. See `holdAudio`.
+   */
+  private early: { samples: Float32Array; rate: number; ms: number }[] | null = null;
 
   constructor(private readonly deps: SessionDeps) {}
 
@@ -148,8 +155,14 @@ export class GrokVoiceSession {
     // The sound is set up while the main process asks for the secret.
     const audioReady = this.deps.createAudio(this.deps.track);
     // Opening can fail before anyone waits for this (the secret, the socket): its own failure
-    // must then not surface later as a rejection nobody handled.
-    audioReady.catch(() => undefined);
+    // must then not surface later as a rejection nobody handled. The microphone is heard from
+    // as soon as it is ready, so what is said while the session opens can be held.
+    audioReady.then(
+      (audio) => {
+        if (!this.ended()) audio.onCapture = (samples, rate) => this.capture(samples, rate);
+      },
+      () => undefined
+    );
     try {
       const grant = await this.deps.connect();
       if (this.ended()) throw new Error('The voice session was closed.');
@@ -217,9 +230,33 @@ export class GrokVoiceSession {
     this.end('closed');
   }
 
+  /**
+   * Keeps what the microphone hears, from now until `releaseAudio`, instead of sending it. The
+   * developer may start speaking before the session is open; their words are sent once it is,
+   * after the line is ready to take them.
+   */
+  holdAudio(): void {
+    this.early ??= [];
+  }
+
+  /** Sends what was held, as if it were heard now, or drops it. Nothing is held after this. */
+  releaseAudio(keep: boolean): void {
+    const early = this.early;
+    this.early = null;
+    if (!keep || !early || this.state !== 'open') return;
+    for (const chunk of early) this.capture(chunk.samples, chunk.rate);
+  }
+
   // ── The microphone ──────────────────────────────────────────────────────────
 
   private capture(samples: Float32Array, rate: number): void {
+    if (this.early) {
+      if (!this.deps.track.enabled) return;
+      const ms = (samples.length / rate) * 1000;
+      const kept = this.early.reduce((total, chunk) => total + chunk.ms, 0);
+      if (kept + ms <= EARLY_MAX_MS) this.early.push({ samples: samples.slice(), rate, ms });
+      return;
+    }
     if (this.state !== 'open') return;
     // The key is up and the window is shut: nothing is sent, and speech in progress has ended.
     if (!this.deps.track.enabled) {
@@ -570,6 +607,7 @@ export class GrokVoiceSession {
     this.audio = null;
     this.audible = null;
     this.utterance = false;
+    this.early = null;
     this.responses.clear();
     for (const timer of this.emptyCommits.splice(0)) clearTimeout(timer);
     this.configured?.reject(new Error('The voice session closed while opening.'));

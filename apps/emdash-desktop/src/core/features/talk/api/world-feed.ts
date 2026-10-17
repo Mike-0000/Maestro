@@ -24,6 +24,25 @@ export function needsRollover(inputTokens: number, ageMs: number): boolean {
   return inputTokens >= ROLLOVER_INPUT_TOKENS || ageMs >= ROLLOVER_AGE_MS;
 }
 
+/** The most turn records a session that reopens after a quiet spell is told about. */
+export const CARRIED_RECORDS = 8;
+
+/**
+ * What a session that opens after the last one closed for quiet is told about it: the record of
+ * each recent turn (what was asked, done and said), oldest first.
+ */
+export function carriedRecords(records: readonly string[]): string | null {
+  const lines = records.map((record) => record.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  if (lines.length === 0) return null;
+  let text = lines.join('\n');
+  // The newest records matter most: older ones go first when there is too much.
+  while (text.length > 2_000 && lines.length > 1) {
+    lines.shift();
+    text = lines.join('\n');
+  }
+  return `[Earlier in this conversation: the line closed after a quiet spell and opened again. What each recent turn came to, oldest first]\n${text.slice(-2_000)}`;
+}
+
 /** What a new session is told about the one it replaces. */
 export function carriedOver(summary: string): string | null {
   const text = summary.replace(/\s+/g, ' ').trim();
