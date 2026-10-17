@@ -45,6 +45,8 @@ function status(settings: Partial<TalkSettings> = {}, overrides: Partial<TalkSta
 
 type FakeSession = SessionLike & {
   sent: RealtimeEvent[];
+  /** Whether it was asked to keep what the microphone hears, and what became of it. */
+  held: 'no' | 'holding' | 'sent' | 'dropped';
   deps: LineSessionDeps;
   emit(event: RealtimeEvent): void;
   drop(): void;
@@ -131,6 +133,13 @@ function harness(settings: Partial<TalkSettings> = {}) {
       const session: FakeSession = {
         state: 'idle' as SessionState,
         sent: [],
+        held: 'no',
+        holdAudio: () => {
+          if (session.held === 'no') session.held = 'holding';
+        },
+        releaseAudio: (keep) => {
+          if (session.held === 'holding') session.held = keep ? 'sent' : 'dropped';
+        },
         deps: sessionDeps,
         open: async () => {
           await sessionDeps.connect();
@@ -284,6 +293,126 @@ describe('opening the line', () => {
     expect(conductor.setTalkLine).toHaveBeenLastCalledWith(null);
     expect(voice.setLiveCapture).toHaveBeenLastCalledWith(null);
     store.dispose();
+  });
+
+  it('sleeps after the provider times an idle session out, and wakes on the next press', async () => {
+    const { store, open, sessions, room, conductor } = harness();
+    const session = await open();
+    session.emit({
+      type: 'error',
+      error: { code: 'timeout', message: 'Conversation timed out after 900.0 seconds' },
+    });
+    session.drop();
+    expect(store.line).toBe('off');
+    expect(store.asleep).toBe(true);
+    // An idle line is billed by the minute: nothing opens it again by itself.
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(sessions).toHaveLength(1);
+
+    runInAction(() => (room.capturing = true));
+    await settle();
+    expect(store.asleep).toBe(false);
+    expect(sessions).toHaveLength(2);
+    expect(store.line).toBe('open');
+    expect(conductor.traceLine).toHaveBeenCalledWith('asleep');
+    expect(conductor.traceLine).toHaveBeenCalledWith('waking');
+    store.dispose();
+  });
+
+  it('hears a press that wakes it, words said while it opened included', async () => {
+    const { store, open, sessions, capture, conductor, track } = harness({ idleSec: 30 });
+    await open();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(store.asleep).toBe(true);
+
+    // The press is the line's, not the recorder's, while the line is asleep.
+    const press = capture();
+    expect(press.begin('i-1')).toBe(true);
+    expect(store.holding).toBe(true);
+    // The developer lets go before the line is open: their release waits for it.
+    const ended = press.end('i-1');
+    await settle();
+    const woken = sessions[1]!;
+    expect(store.line).toBe('open');
+    // What the microphone kept while the session opened was sent once it was.
+    expect(woken.held).toBe('sent');
+    expect(conductor.traceLine).toHaveBeenCalledWith('woke-for-press');
+    woken.emit({ type: 'input_audio_buffer.speech_started' });
+    committed(woken, 'item-1');
+    await expect(ended).resolves.toBe(true);
+    expect(conductor.speechTurn.mock.calls[0]![0].interactionId).toBe('i-1');
+    expect(track.enabled).toBe(false);
+    store.dispose();
+  });
+
+  it('drops what was kept when a waking press is cancelled', async () => {
+    const { store, open, sessions, capture, conductor } = harness({ idleSec: 30 });
+    await open();
+    await vi.advanceTimersByTimeAsync(30_000);
+    const press = capture();
+    expect(press.begin('i-1')).toBe(true);
+    press.cancel();
+    await settle();
+    expect(store.line).toBe('open');
+    expect(store.holding).toBe(false);
+    expect(sessions[1]!.held).not.toBe('sent');
+    expect(conductor.speechTurn).not.toHaveBeenCalled();
+    store.dispose();
+  });
+
+  it('tells the session it reopens what the recent turns came to', async () => {
+    const { store, open, sessions, line, capture } = harness({ idleSec: 30 });
+    const session = await open();
+    const result = line().turn({ text: 'how is Atlas', context: 'c', spoken: false });
+    responseDone(session);
+    await result;
+    line().record('[Conductor] You asked how Atlas is; it is running the tests.', false);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(store.asleep).toBe(true);
+
+    capture().begin('i-1');
+    await settle();
+    const carried = JSON.stringify(sessions[1]!.sent);
+    expect(carried).toContain('the line closed after a quiet spell');
+    expect(carried).toContain('it is running the tests.');
+    store.dispose();
+  });
+
+  it('closes itself after a quiet spell, but not while something is going on', async () => {
+    const { store, open, sessions, conductor, capture } = harness({ idleSec: 30 });
+    const session = await open();
+    // Holding the key is not quiet, however long it lasts.
+    expect(capture().begin('i-1')).toBe(true);
+    await vi.advanceTimersByTimeAsync(45_000);
+    expect(store.line).toBe('open');
+    capture().cancel();
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(store.line).toBe('open');
+    // The voice spoke: the quiet spell starts over when it stops.
+    session.emit({ type: 'output_audio_buffer.started' });
+    session.emit({ type: 'output_audio_buffer.stopped' });
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(store.line).toBe('open');
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(store.line).toBe('off');
+    expect(store.asleep).toBe(true);
+    expect(conductor.traceLine).toHaveBeenCalledWith('idle', { seconds: 30 });
+    expect(sessions).toHaveLength(1);
+    store.dispose();
+  });
+
+  it('stays open with no quiet limit, and when it listens without the key', async () => {
+    const never = harness({ idleSec: 0 });
+    await never.open();
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(never.store.line).toBe('open');
+    never.store.dispose();
+
+    const always = harness({ listening: 'open', idleSec: 30 });
+    await always.open();
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(always.store.line).toBe('open');
+    always.store.dispose();
   });
 
   it('does not open when the provider refuses, and says why', async () => {
@@ -1188,7 +1317,7 @@ describe('a long session', () => {
   });
 
   it('takes turns again when the summary never comes', async () => {
-    const { store, open, line } = harness();
+    const { store, open, line } = harness({ idleSec: 0 });
     const session = await open();
     const result = line().turn({ text: 'hi', context: 'c', spoken: false });
     responseDone(session, { inputTokens: ROLLOVER_INPUT_TOKENS });
@@ -1325,7 +1454,7 @@ describe('on Grok Voice', () => {
   });
 
   it('reports each minute it is open, and the text it sent, for the daily limit', async () => {
-    const { store, open, line, client } = harness();
+    const { store, open, line, client } = harness({ idleSec: 0 });
     await open();
     line().note('[Conductor] Atlas finished.');
     await vi.advanceTimersByTimeAsync(60_000);
@@ -1346,7 +1475,7 @@ describe('on Grok Voice', () => {
   });
 
   it('closes for the day when the time it was open spends the limit', async () => {
-    const { store, open, client } = harness();
+    const { store, open, client } = harness({ idleSec: 0 });
     await open();
     client.recordUsage.mockResolvedValueOnce(status({}, { overBudget: true }));
     await vi.advanceTimersByTimeAsync(60_000);

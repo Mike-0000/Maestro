@@ -270,11 +270,28 @@ const DictationButton = observer(function DictationButton() {
 
 /**
  * The voice line, when one is wanted: whether it is open (it is the conductor then), and
- * whether it hears the developer right now. Shown only while the line is turned on.
+ * whether it hears the developer right now. Shown only while the line is turned on; a hollow
+ * dot is a line that is asleep (green) or shut for the day's limit (red).
  */
 const LineIndicator = observer(function LineIndicator() {
   const talk = getTalkStore();
-  if (talk.line === 'off') return null;
+  if (talk.line === 'off') {
+    if (!talk.asleep && !talk.overBudget) return null;
+    const label = talk.overBudget
+      ? "Voice conductor: today's limit is spent, so the text conductor answers. Raise the daily limit in Settings, or it opens again tomorrow"
+      : 'Voice conductor: closed after a quiet spell, to save cost; pressing the talk key opens it again';
+    return (
+      <span
+        role="status"
+        aria-label={label}
+        title={label}
+        className={cn(
+          'size-2.5 shrink-0 rounded-full border',
+          talk.overBudget ? 'border-red-500/70' : 'border-emerald-500/70'
+        )}
+      />
+    );
+  }
   const hears = talk.holding || talk.micOpen;
   const label =
     talk.line === 'open'

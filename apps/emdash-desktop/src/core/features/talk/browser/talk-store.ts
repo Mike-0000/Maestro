@@ -20,7 +20,13 @@ import {
 import { isEcho, neverEcho, recentSpoken, type Spoken } from '../api/echo-guard';
 import { inputSize, NO_TOKENS, tokensFromUsage, type TalkTokens } from '../api/usage';
 import { lineInstructions, lineTools, ROLLOVER_INSTRUCTIONS } from '../api/voice-prompt';
-import { carriedOver, feedSnapshot, needsRollover } from '../api/world-feed';
+import {
+  CARRIED_RECORDS,
+  carriedOver,
+  carriedRecords,
+  feedSnapshot,
+  needsRollover,
+} from '../api/world-feed';
 import type {
   LineSessionDeps,
   RealtimeEvent,
@@ -85,7 +91,22 @@ export interface SessionLike {
   open(): Promise<void>;
   send(event: RealtimeEvent): boolean;
   close(): void;
+  /** Keeps what the microphone hears instead of sending it, until `releaseAudio`. */
+  holdAudio(): void;
+  /** Sends what was kept as if it were heard now (once open), or drops it. */
+  releaseAudio(keep: boolean): void;
 }
+
+/**
+ * A press of the talk key taken while the line was asleep: it is the line's capture, heard once
+ * the line is open. What is said meanwhile is kept by the session and sent then.
+ */
+type EarlyHold = {
+  interactionId: string;
+  released: boolean;
+  /** Settles the developer's release once the line has the words, or false if it never will. */
+  settle: ((handed: boolean) => void) | null;
+};
 
 export type TalkDeps = {
   client(): Promise<TalkClient>;
@@ -124,6 +145,8 @@ const TRANSCRIPT_WAIT_MS = 4_000;
 const RESPONSE_MAX_MS = 60_000;
 /** An open line reports the time it has been open this often: it is billed by the minute. */
 const CLOCK_MS = 60_000;
+/** A line that is busy when its quiet spell would be up is looked at again this much later. */
+const IDLE_RECHECK_MS = 10_000;
 /** A turn may go back to the model with tool results this many times. */
 const MAX_ROUNDS = 12;
 const RETRY_MS = 30_000;
@@ -210,6 +233,11 @@ export class TalkStore {
   speaking = false;
   status: TalkStatus | null = null;
   error: string | null = null;
+  /**
+   * The provider closed the session after a quiet spell. The line stays closed, since an open
+   * one is billed by the minute, until the developer next takes the talk key.
+   */
+  asleep = false;
   /** A custom voice xAI would not speak in on this line, until the voice setting changes. */
   private voiceRefused: string | null = null;
 
@@ -224,6 +252,12 @@ export class TalkStore {
   private voiceTimer: ReturnType<typeof setTimeout> | null = null;
   private rollTimer: ReturnType<typeof setTimeout> | null = null;
   private budgetTimer: ReturnType<typeof setTimeout> | null = null;
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** When something last happened on the line: a word, a press, a turn, the voice. */
+  private activeAt = 0;
+  private early: EarlyHold | null = null;
+  /** What the most recent turns came to, carried into a session that opens after a quiet spell. */
+  private recent: string[] = [];
   /** When the window opened, or last heard words meant for Maestro. */
   private windowSince = 0;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -288,6 +322,17 @@ export class TalkStore {
     cancel: () => this.cancelHold(),
   };
 
+  /**
+   * The capture the voice slice sees while the line is asleep. A press wakes the line and is
+   * heard by it, so it never goes to the text conductor while realtime is on.
+   */
+  private readonly waking: LineCapture = {
+    begin: (interactionId) => this.beginEarly(interactionId),
+    end: (interactionId) => this.endEarly(interactionId),
+    // Once the line is open, the press is an ordinary hold.
+    cancel: () => (this.early ? this.cancelEarly() : this.cancelHold()),
+  };
+
   constructor(private readonly deps: TalkDeps) {
     this.now = deps.now ?? Date.now;
     makeAutoObservable<
@@ -303,6 +348,11 @@ export class TalkStore {
       | 'voiceTimer'
       | 'rollTimer'
       | 'budgetTimer'
+      | 'idleTimer'
+      | 'activeAt'
+      | 'early'
+      | 'recent'
+      | 'waking'
       | 'windowSince'
       | 'retryTimer'
       | 'retries'
@@ -348,6 +398,11 @@ export class TalkStore {
       voiceTimer: false,
       rollTimer: false,
       budgetTimer: false,
+      idleTimer: false,
+      activeAt: false,
+      early: false,
+      recent: false,
+      waking: false,
       windowSince: false,
       retryTimer: false,
       retries: false,
@@ -393,6 +448,11 @@ export class TalkStore {
     return this.line === 'open' && !this.rolling && this.status?.overBudget !== true;
   }
 
+  /** The line is turned on, but today's limit is spent: the text conductor answers. */
+  get overBudget(): boolean {
+    return this.status?.settings.enabled === true && this.status.overBudget;
+  }
+
   activate(): void {
     void this.refreshStatus().then(() => this.reconcile());
     const { voice, conductor } = this.deps;
@@ -402,6 +462,8 @@ export class TalkStore {
       reaction(
         () => voice.capturing || voice.speaking,
         (busy) => {
+          // A press after a quiet spell opens the line again for the next one.
+          if (voice.capturing && this.asleep) this.wake();
           if (busy) {
             if (voice.capturing) this.hush();
             this.closeWindow();
@@ -471,6 +533,7 @@ export class TalkStore {
         before.webSearch !== after.webSearch ||
         before.transcriptionModel !== after.transcriptionModel);
     if (before?.voice !== after.voice) this.voiceRefused = null;
+    runInAction(() => (this.asleep = false));
     if (reshaped && this.line !== 'off') this.shut('off');
     this.retries = 0;
     this.reconcile();
@@ -478,19 +541,139 @@ export class TalkStore {
     if (!reshaped && this.line === 'open') {
       this.closeWindow();
       this.reopen();
+      // So is how long it may stay quiet, timed from now.
+      if (this.idleTimer) clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+      this.touch();
     }
   }
 
   /** Opens or closes the line to match what the settings ask for. */
   private reconcile(): void {
     const status = this.status;
-    const wanted = status?.settings.enabled === true && status.hasKey && !status.overBudget;
+    const wanted =
+      status?.settings.enabled === true && status.hasKey && !status.overBudget && !this.asleep;
     if (wanted && (this.line === 'off' || this.line === 'down')) void this.start();
     else if (!wanted && this.line !== 'off') this.shut('off');
     // Wanted, and only the day's limit is in the way: the line opens again by itself.
     if (status?.settings.enabled === true && status.hasKey && status.overBudget) {
       this.recheckBudgetLater();
     }
+  }
+
+  /**
+   * The provider ended the session because nothing was said for a while. Opening it again
+   * straight away would bill an idle line all day, so it waits for the next press.
+   */
+  private sleep(): void {
+    this.deps.conductor.traceLine('asleep');
+    runInAction(() => (this.asleep = true));
+    this.shut('off');
+    // The next session hears what the recent turns came to, and the next press goes to it.
+    this.carry = carriedRecords(this.recent);
+    this.deps.voice.setLiveCapture(this.waking);
+  }
+
+  private wake(): void {
+    if (!this.asleep) return;
+    runInAction(() => (this.asleep = false));
+    this.deps.conductor.traceLine('waking');
+    this.reconcile();
+  }
+
+  /** A press while the line is asleep or still opening: the line will hear it. */
+  private beginEarly(interactionId: string): boolean {
+    const status = this.status;
+    if (!status?.settings.enabled || !status.hasKey || status.overBudget) return false;
+    if (this.line !== 'connecting' && !(this.line === 'off' && this.asleep)) return false;
+    this.cancelEarly();
+    this.early = { interactionId, released: false, settle: null };
+    this.hush();
+    // A session already opening keeps what is said from now; one not opening yet is started,
+    // and keeps it from the moment the microphone is ready.
+    this.session?.holdAudio();
+    if (this.track) this.track.enabled = true;
+    runInAction(() => (this.holding = true));
+    this.wake();
+    return true;
+  }
+
+  private endEarly(interactionId: string): Promise<boolean> {
+    const early = this.early;
+    if (!early || early.interactionId !== interactionId) return this.endHold(interactionId);
+    runInAction(() => (this.holding = false));
+    early.released = true;
+    return new Promise((resolve) => (early.settle = resolve));
+  }
+
+  private cancelEarly(): void {
+    const early = this.early;
+    if (!early) return;
+    this.early = null;
+    this.session?.releaseAudio(false);
+    if (this.track && this.line !== 'open') this.track.enabled = false;
+    runInAction(() => (this.holding = false));
+    early.settle?.(false);
+  }
+
+  /** The line is open: the press that woke it becomes its capture, with what was said so far. */
+  private takeEarly(): void {
+    const early = this.early;
+    const session = this.session;
+    if (!early || !session) {
+      session?.releaseAudio(false);
+      return;
+    }
+    this.early = null;
+    if (!this.beginHold(early.interactionId)) {
+      session.releaseAudio(false);
+      early.settle?.(false);
+      return;
+    }
+    session.releaseAudio(true);
+    this.deps.conductor.traceLine('woke-for-press');
+    if (early.released)
+      void this.endHold(early.interactionId).then((handed) => early.settle?.(handed));
+  }
+
+  /** Something happened on the line: its quiet spell starts over from now. */
+  private touch(): void {
+    this.activeAt = this.now();
+    if (!this.idleTimer) this.armIdle(this.idleMs());
+  }
+
+  /** How long the line may stay quiet before it closes, or 0 when it stays open. */
+  private idleMs(): number {
+    const settings = this.settings;
+    // Listening without the key wants the microphone open all the time.
+    if (!settings || settings.listening === 'open') return 0;
+    return settings.idleSec * 1000;
+  }
+
+  private armIdle(ms: number): void {
+    if (ms <= 0 || this.line !== 'open') return;
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null;
+      this.checkIdle();
+    }, ms);
+  }
+
+  private checkIdle(): void {
+    const limit = this.idleMs();
+    if (limit <= 0 || this.line !== 'open') return;
+    const busy =
+      this.turn !== null ||
+      this.hold !== null ||
+      this.holding ||
+      this.micOpen ||
+      this.speaking ||
+      this.saying !== null ||
+      this.rolling;
+    if (busy) return this.armIdle(IDLE_RECHECK_MS);
+    const left = this.activeAt + limit - this.now();
+    if (left > 0) return this.armIdle(left);
+    this.deps.conductor.traceLine('idle', { seconds: limit / 1000 });
+    this.sleep();
   }
 
   private recheckBudgetLater(): void {
@@ -512,8 +695,9 @@ export class TalkStore {
     let track: MediaStreamTrack | null = null;
     try {
       track = await this.deps.microphone();
-      // Nothing is heard until the developer takes the key or the microphone is opened.
-      track.enabled = false;
+      // Nothing is heard until the developer takes the key or the microphone is opened; a press
+      // that woke the line is heard from now.
+      track.enabled = this.early !== null;
       this.hushed = this.deps.voice.capturing || this.deps.voice.muted;
       const session = this.deps.createSession({
         track,
@@ -528,6 +712,7 @@ export class TalkStore {
       });
       this.session = session;
       this.track = track;
+      if (this.early) session.holdAudio();
       await session.open();
       if (this.session !== session) return;
       const context = await this.deps.conductor.lineContext();
@@ -550,6 +735,8 @@ export class TalkStore {
       // The instructions may have changed while the session was being set up.
       this.reinstruct();
       this.reopen();
+      this.touch();
+      this.takeEarly();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'The talk line could not open.';
       log.warn('talk: the line could not open', { error });
@@ -635,6 +822,10 @@ export class TalkStore {
     // The time it was open is billed whatever ends it.
     if (this.clockTimer) clearInterval(this.clockTimer);
     this.clockTimer = null;
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+    // A press waiting for the line is let go: what was said is lost with the session.
+    this.cancelEarly();
     if (this.billedSince > 0) void this.recordUsage(NO_TOKENS);
     this.billedSince = 0;
     const session = this.session;
@@ -683,6 +874,7 @@ export class TalkStore {
   /** The developer took the microphone with a key or a click: the line hears them itself. */
   private beginHold(interactionId: string): boolean {
     if (!this.ready || !this.track) return false;
+    this.touch();
     this.hush();
     // A capture still waiting for its last words to be confirmed is complete as it is.
     if (this.hold) this.seal(this.hold);
@@ -708,6 +900,7 @@ export class TalkStore {
    * it could be a yes or a stop to something, it is read first.
    */
   private async endHold(interactionId: string): Promise<boolean> {
+    this.touch();
     const hold = this.hold;
     if (!hold || hold.interactionId !== interactionId || hold.released) return false;
     hold.released = true;
@@ -771,6 +964,7 @@ export class TalkStore {
   }
 
   private cancelHold(): void {
+    this.touch();
     const hold = this.hold;
     if (!hold) return;
     this.hold = null;
@@ -918,6 +1112,7 @@ export class TalkStore {
   private endTurn(turn: Turn, result: { reply: string; completed: boolean }): void {
     if (this.turn !== turn) return;
     this.turn = null;
+    this.touch();
     if (turn.watchdog) clearTimeout(turn.watchdog);
     // It stays in the conversation as it happened until the conductor says its exchange is over.
     if (this.session) {
@@ -938,6 +1133,7 @@ export class TalkStore {
     const turn = this.past.at(-1);
     if (!turn || turn.record !== null) return;
     turn.record = text;
+    this.recent = [...this.recent, text].slice(-CARRIED_RECORDS);
     if (over) this.closed = this.past.length;
     this.replacePast(false);
   }
@@ -1066,6 +1262,7 @@ export class TalkStore {
   private onEvent(event: RealtimeEvent): void {
     switch (event.type) {
       case 'input_audio_buffer.speech_started':
+        this.touch();
         this.hearing = true;
         this.speechAt = this.now();
         if (this.hold) this.hold.spoke = true;
@@ -1120,6 +1317,10 @@ export class TalkStore {
       return;
     }
     log.warn('talk: the provider reported an error', { error });
+    if (str((error as { code?: unknown } | null)?.code) === 'timeout') {
+      this.sleep();
+      return;
+    }
     // Whatever was asked for may never come: a sentence that has not started is not said, and
     // a summary that was refused must not keep the line shut.
     if (this.saying && !this.saying.started) this.finishSaying(false);
@@ -1309,6 +1510,7 @@ export class TalkStore {
   private onVoiceStopped(responseId: string): void {
     if (this.voiceTimer) clearTimeout(this.voiceTimer);
     this.voiceTimer = null;
+    this.touch();
     runInAction(() => (this.speaking = false));
     this.replacePast(false);
     // Another response stopping says nothing about the sentence that was asked for.
