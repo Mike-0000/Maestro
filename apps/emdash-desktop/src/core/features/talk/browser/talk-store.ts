@@ -123,6 +123,13 @@ const SAY_START_MS = 4_000;
 const VOICE_MAX_MS = 60_000;
 /** The room is given this long to go quiet after a voice stops, before the microphone opens. */
 const ECHO_TAIL_MS = 300;
+/**
+ * xAI may write the next stretch of open-microphone speech as everything said so far: words
+ * already heard this recently are not a request of their own. Only long ones, since a short
+ * "yes" said twice can mean it.
+ */
+const REPEAT_MS = 10_000;
+const REPEAT_MIN_WORDS = 4;
 /** A window after Maestro speaks stays open this long at most without words meant for it. */
 const MAX_WINDOW_MS = 60_000;
 /** A line shut for the day's limit looks again this often: the limit starts over with the day. */
@@ -260,6 +267,8 @@ export class TalkStore {
   private committedAt = 0;
   /** What the most recent turns came to, carried into a session that opens after a quiet spell. */
   private recent: string[] = [];
+  /** What was heard lately with no key held, as said, so a repeat of it is not heard again. */
+  private looseHeard: Spoken[] = [];
   /** When the window opened, or last heard words meant for Maestro. */
   private windowSince = 0;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -354,6 +363,7 @@ export class TalkStore {
       | 'activeAt'
       | 'early'
       | 'recent'
+      | 'looseHeard'
       | 'awaitingCommit'
       | 'committedAt'
       | 'waking'
@@ -406,6 +416,7 @@ export class TalkStore {
       activeAt: false,
       early: false,
       recent: false,
+      looseHeard: false,
       awaitingCommit: false,
       committedAt: false,
       waking: false,
@@ -858,6 +869,7 @@ export class TalkStore {
     this.awaitingCommit.clear();
     this.reading.clear();
     this.loose.clear();
+    this.looseHeard = [];
     this.transcripts.clear();
     this.handledCalls.clear();
     this.sayResponses.clear();
@@ -1320,6 +1332,7 @@ export class TalkStore {
         this.onWritten(str(event.text));
         break;
       case 'response.function_call_arguments.done':
+        this.claimResponse(str(event.response_id));
         void this.onToolCall(str(event.call_id), str(event.name), str(event.arguments));
         break;
       case 'response.created':
@@ -1347,6 +1360,11 @@ export class TalkStore {
     // Letting go right after a pause leaves nothing to commit: the capture is complete as it is.
     if (str((error as { code?: unknown } | null)?.code) === 'input_audio_buffer_commit_empty') {
       if (this.hold?.committing) this.seal(this.hold);
+      return;
+    }
+    // A delete of an item xAI no longer has: nothing was asked for, so nothing is given up on.
+    if (str((error as { message?: unknown } | null)?.message).startsWith('Item not found')) {
+      log.debug('talk: an item to delete was already gone', { error });
       return;
     }
     log.warn('talk: the provider reported an error', { error });
@@ -1407,16 +1425,26 @@ export class TalkStore {
       this.forget(itemId);
       return;
     }
-    if (isSleepPhrase(heard)) {
+    const fresh = this.freshWords(heard);
+    if (!fresh) {
+      this.forget(itemId);
+      conductor.traceLine('ignored', { reason: 'repeat' });
+      return;
+    }
+    if (isSleepPhrase(fresh)) {
       this.goToSleep();
       return;
     }
+    // Words that repeat what was heard first go on as text: the model would hear the repeat in
+    // the audio.
+    const trimmed = fresh !== heard;
+    if (trimmed) conductor.traceLine('trimmed-repeat', { dropped: heard.length - fresh.length });
     this.windowSince = this.now();
     const interactionId = crypto.randomUUID();
     conductor.traceLine('heard', { guarded: conductor.lineGuarded });
-    if (conductor.lineGuarded) {
+    if (conductor.lineGuarded || trimmed) {
       this.forget(itemId);
-      conductor.hearOnLine(heard, { interactionId, saidAt, key: false });
+      conductor.hearOnLine(fresh, { interactionId, saidAt, key: false });
       return;
     }
     const items = () => [itemId];
@@ -1430,6 +1458,30 @@ export class TalkStore {
         this.forget(itemId);
       },
     });
+  }
+
+  /**
+   * What open-microphone words add to those heard just before: all of them, none when they were
+   * all heard already, or only the words after what was heard when they repeat it first.
+   */
+  private freshWords(heard: string): string {
+    const now = this.now();
+    const recent = this.looseHeard.filter((entry) => now - entry.at <= REPEAT_MS);
+    let fresh = heard;
+    const said = comparable(heard);
+    for (const entry of recent) {
+      const before = comparable(entry.text);
+      if (before.split(' ').length < REPEAT_MIN_WORDS) continue;
+      if (before.includes(said)) {
+        fresh = '';
+        break;
+      }
+      if (said.startsWith(`${before} `)) fresh = wordsAfter(heard, before);
+    }
+    // The longest version stands for everything heard so far.
+    const kept = recent.filter((entry) => !said.startsWith(comparable(entry.text)));
+    this.looseHeard = fresh ? [...kept, { text: heard, at: now }] : recent;
+    return fresh;
   }
 
   /** Removes an item the model must not see, or see twice. */
@@ -1459,6 +1511,23 @@ export class TalkStore {
 
   private noteSpoken(said: string): void {
     this.spoken = [...recentSpoken(this.spoken, this.now()), { text: said, at: this.now() }];
+  }
+
+  /**
+   * A tool call while a turn waits on a response: its response is the turn's, whatever id the
+   * turn took from `response.created`. Otherwise its done is ignored, the result is never
+   * answered, and the turn waits out the watchdog.
+   */
+  private claimResponse(responseId: string): void {
+    const turn = this.turn;
+    if (!turn?.responding || !responseId || turn.responseId === responseId) return;
+    if (turn.responseId) {
+      this.deps.conductor.traceLine('response-reclaimed', {
+        from: turn.responseId,
+        to: responseId,
+      });
+    }
+    turn.responseId = responseId;
   }
 
   private async onToolCall(callId: string, name: string, rawArguments: string): Promise<void> {
@@ -1590,7 +1659,14 @@ export class TalkStore {
     const turn = this.turn;
     if (!turn) return;
     // A response an earlier turn gave up on says nothing about this one.
-    if (turn.responseId && id && id !== turn.responseId) return;
+    if (turn.responseId && id && id !== turn.responseId) {
+      this.deps.conductor.traceLine('stray-response', {
+        response: id,
+        expected: turn.responseId,
+        status: str(done.status),
+      });
+      return;
+    }
     // xAI cancelled the response the moment it was asked for, before the model said or did
     // anything: it is asked once more, a moment later. Asking again has answered every time.
     if (!turn.retried && !turn.stopped && cancelledAtOnce(done)) {
@@ -1854,6 +1930,17 @@ const SLEEP_PHRASE =
 /** True when what was said is the developer telling the line to go to sleep. */
 export function isSleepPhrase(text: string): boolean {
   return SLEEP_PHRASE.test(comparable(text));
+}
+
+/** The words of `text` after those that, compared, make up `prefix`. */
+function wordsAfter(text: string, prefix: string): string {
+  const words = text.trim().split(/\s+/);
+  for (let count = 1; count <= words.length; count++) {
+    if (comparable(words.slice(0, count).join(' ')) === prefix) {
+      return words.slice(count).join(' ');
+    }
+  }
+  return text;
 }
 
 /** A transcript as compared: case, punctuation and spacing aside. */

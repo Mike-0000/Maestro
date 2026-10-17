@@ -692,6 +692,46 @@ describe('what is heard with no key', () => {
     store.dispose();
   });
 
+  it('does not hear again what xAI writes twice, and hears only what a longer copy adds', async () => {
+    const { store, session, conductor } = await listening();
+    const request = 'Start a Claude agent in Maestro to fix the voice line.';
+    committed(session, 'item-1');
+    transcribed(session, request, 'item-1');
+    committed(session, 'item-2');
+    transcribed(session, request, 'item-2');
+    committed(session, 'item-3');
+    transcribed(session, `${request} And do it yourself.`, 'item-3');
+    expect(conductor.speechTurn).toHaveBeenCalledTimes(1);
+    expect(conductor.traceLine).toHaveBeenCalledWith('ignored', { reason: 'repeat' });
+    expect(conductor.hearOnLine).toHaveBeenCalledTimes(1);
+    expect(conductor.hearOnLine).toHaveBeenCalledWith(
+      'And do it yourself.',
+      expect.objectContaining({ key: false })
+    );
+    // Neither copy stays in the conversation for the model to hear.
+    expect(session.sent).toEqual([
+      { type: 'conversation.item.delete', item_id: 'item-2' },
+      { type: 'conversation.item.delete', item_id: 'item-3' },
+    ]);
+
+    // The same words a while later are a request again.
+    await vi.advanceTimersByTimeAsync(11_000);
+    committed(session, 'item-4');
+    transcribed(session, request, 'item-4');
+    expect(conductor.speechTurn).toHaveBeenCalledTimes(2);
+    store.dispose();
+  });
+
+  it('hears a short word said twice both times', async () => {
+    const { store, session, conductor } = await listening();
+    committed(session, 'item-1');
+    transcribed(session, 'Yeah.', 'item-1');
+    committed(session, 'item-2');
+    transcribed(session, 'Yeah.', 'item-2');
+    expect(conductor.speechTurn).toHaveBeenCalledTimes(2);
+    store.dispose();
+  });
+
   it('goes to sleep when told to, and stays closed until the next press', async () => {
     const { store, session, sessions, conductor, room } = await listening();
     committed(session, 'item-1');
@@ -943,6 +983,50 @@ describe('a turn of the model', () => {
     expect(ended).toBe(false);
     session.emit({ type: 'response.done', response: { id: 'r2', status: 'completed' } });
     await expect(second).resolves.toMatchObject({ completed: true });
+    store.dispose();
+  });
+
+  it('keeps a sentence waiting to be said when a deleted item was already gone', async () => {
+    const { store, open, line } = harness();
+    const session = await open();
+    let said: boolean | null = null;
+    void line()
+      .say('Atlas finished.')
+      .then((done) => (said = done));
+    session.emit({
+      type: 'error',
+      error: { type: 'invalid_request_error', message: 'Item not found: state_7' },
+    });
+    await settle();
+    expect(said).toBeNull();
+    store.dispose();
+  });
+
+  it("takes the response that calls a tool as the turn's, whatever id it took first", async () => {
+    const { store, open, line, conductor } = harness();
+    const session = await open();
+    const turn = line().turn({ context: 'c', spoken: true });
+    session.emit({ type: 'response.created', response: { id: 'r-other' } });
+    session.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'r-1',
+      call_id: 'call-1',
+      name: 'list_agents',
+      arguments: '{}',
+    });
+    session.emit({
+      type: 'response.done',
+      response: { id: 'r-1', status: 'completed', output: [{ type: 'function_call' }] },
+    });
+    await settle();
+    // The tool's result is answered, not left to the watchdog.
+    expect(sentTypes(session).filter((type) => type === 'response.create')).toHaveLength(2);
+    expect(conductor.traceLine).toHaveBeenCalledWith('response-reclaimed', {
+      from: 'r-other',
+      to: 'r-1',
+    });
+    session.emit({ type: 'response.done', response: { id: 'r-2', status: 'completed' } });
+    await expect(turn).resolves.toMatchObject({ completed: true });
     store.dispose();
   });
 
