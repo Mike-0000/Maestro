@@ -10,7 +10,13 @@ import { DEFAULT_TALK_SETTINGS, type TalkSettings, type TalkStatus } from '../ap
 import { NO_TOKENS } from '../api/usage';
 import { ROLLOVER_INPUT_TOKENS } from '../api/world-feed';
 import type { LineSessionDeps, RealtimeEvent, SessionState } from './grok-voice-session';
-import { TalkStore, type LineCapture, type SessionLike, type TalkDeps } from './talk-store';
+import {
+  joinTranscripts,
+  TalkStore,
+  type LineCapture,
+  type SessionLike,
+  type TalkDeps,
+} from './talk-store';
 
 // The line end to end against a stand-in for the provider: its model is the conductor, every
 // tool it calls goes through the conductor's gate, and words that could answer something in
@@ -771,6 +777,57 @@ describe('a turn of the model', () => {
     store.dispose();
   });
 
+  it('asks again in a built-in voice when xAI will not speak in the custom one', async () => {
+    const { store, open, line, conductor, sessions, client } = harness({ voice: 'amgtiwcbk60e' });
+    const session = await open();
+    const turn = line().turn({ context: 'c', spoken: true });
+    session.emit({
+      type: 'response.done',
+      response: { status: 'cancelled', status_details: 'unimplemented' },
+    });
+    await settle();
+    expect(session.sent).toContainEqual({ type: 'session.update', session: { voice: 'eve' } });
+    expect(sentTypes(session).filter((type) => type === 'response.create')).toHaveLength(2);
+    expect(conductor.traceLine).toHaveBeenCalledWith('voice-fallback', {
+      voice: 'amgtiwcbk60e',
+      to: 'eve',
+    });
+    expect(store.error).toContain('amgtiwcbk60e');
+    responseDone(session);
+    await expect(turn).resolves.toMatchObject({ completed: true });
+
+    // The next session opens in the built-in voice, until the voice is changed.
+    client.openSession.mockResolvedValue({
+      success: true as const,
+      data: {
+        url: 'wss://example.test/realtime',
+        clientSecret: 'secret',
+        expiresAt: 0,
+        session: { voice: 'amgtiwcbk60e' },
+        model: 'm',
+        voice: 'amgtiwcbk60e',
+      },
+    });
+    await store.updateSettings({ model: 'grok-voice-latest' });
+    await settle();
+    expect(sessions).toHaveLength(2);
+    expect((await sessions[1]!.deps.connect()).session).toEqual({ voice: 'eve' });
+    store.dispose();
+  });
+
+  it('never second-guesses a built-in voice that was cut off', async () => {
+    const { store, open, line, conductor } = harness();
+    const session = await open();
+    const turn = line().turn({ context: 'c', spoken: true });
+    session.emit({
+      type: 'response.done',
+      response: { status: 'cancelled', status_details: 'unimplemented' },
+    });
+    await expect(turn).resolves.toMatchObject({ completed: false });
+    expect(conductor.traceLine).not.toHaveBeenCalledWith('voice-fallback', expect.anything());
+    store.dispose();
+  });
+
   it('traces why a response ended without completing', async () => {
     const { store, open, line, conductor } = harness();
     const session = await open();
@@ -787,7 +844,7 @@ describe('a turn of the model', () => {
     });
     await expect(turn).resolves.toMatchObject({ completed: false });
     expect(conductor.traceLine).toHaveBeenCalledWith('incomplete', {
-      status: 'failed',
+      response: 'failed',
       type: 'failed',
       code: 'invalid_request_error',
       message: 'Item not found: state_2',
@@ -1075,6 +1132,16 @@ describe('the voice', () => {
     store.dispose();
   });
 
+  it('opens the microphone as the voice starts when talking over it is on, with the key', async () => {
+    const { store, open, track } = harness({ talkOver: true, windowSec: 6 });
+    const session = await open();
+    expect(store.micOpen).toBe(false);
+    session.emit({ type: 'output_audio_buffer.started' });
+    expect(store.micOpen).toBe(true);
+    expect(track.enabled).toBe(true);
+    store.dispose();
+  });
+
   it('keeps the microphone shut while it speaks, unless talking over it is on', async () => {
     const quiet = harness({ listening: 'open' });
     const first = await quiet.open();
@@ -1305,5 +1372,24 @@ describe('on Grok Voice', () => {
     const carried = sessions[1]!.sent[1] as { item?: { content?: { text: string }[] } };
     expect(carried.item?.content?.[0]?.text).toContain('They were rebasing Atlas.');
     store.dispose();
+  });
+});
+
+describe('joinTranscripts', () => {
+  it('keeps the last of transcripts that each repeat everything said so far', () => {
+    expect(
+      joinTranscripts([
+        'Message Vesper',
+        'Message Vesper, the open agent.',
+        'Message Vesper, the open agent. There is an issue',
+        'message vesper the open agent there is an issue with the voice.',
+      ])
+    ).toBe('message vesper the open agent there is an issue with the voice.');
+  });
+
+  it('joins transcripts of separate stretches, and drops one already said', () => {
+    expect(joinTranscripts(['Stop Atlas.', '', 'Then start Cedar.', 'start cedar'])).toBe(
+      'Stop Atlas. Then start Cedar.'
+    );
   });
 });
