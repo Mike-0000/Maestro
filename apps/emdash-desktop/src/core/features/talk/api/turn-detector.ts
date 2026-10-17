@@ -22,7 +22,9 @@ export type TurnDetectorOptions = {
 
 export const DEFAULT_TURN_DETECTOR: TurnDetectorOptions = {
   startMs: 100,
-  stopMs: 700,
+  // A pause to think mid-sentence is not the end of a turn: with the microphone open, each
+  // stretch that ends here is answered.
+  stopMs: 1_200,
   maxMs: 60_000,
   minLevel: 0.02,
   floorRatio: 3,

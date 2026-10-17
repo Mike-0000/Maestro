@@ -1030,6 +1030,43 @@ describe('a turn of the model', () => {
     store.dispose();
   });
 
+  it('cancels a response xAI starts on its own, and hears nothing of it', async () => {
+    const { store, open, line, conductor } = harness();
+    const session = await open();
+    // xAI answers committed words by itself, before the line has asked anything.
+    session.emit({ type: 'response.created', response: { id: 'r-own' } });
+    expect(session.sent).toContainEqual({ type: 'response.cancel', response_id: 'r-own' });
+    expect(conductor.traceLine).toHaveBeenCalledWith('unasked-response', {
+      response: 'r-own',
+      turn: 'none',
+    });
+    const turn = line().turn({ context: 'c', spoken: true });
+    session.emit({ type: 'response.created', response: { id: 'r-1' } });
+    session.emit({
+      type: 'response.output_audio_transcript.done',
+      response_id: 'r-own',
+      transcript: 'Anytime.',
+    });
+    session.emit({
+      type: 'response.function_call_arguments.done',
+      response_id: 'r-own',
+      call_id: 'call-own',
+      name: 'list_agents',
+      arguments: '{}',
+    });
+    session.emit({ type: 'response.done', response: { id: 'r-own', status: 'cancelled' } });
+    await settle();
+    expect(conductor.lineTool).not.toHaveBeenCalled();
+    session.emit({
+      type: 'response.output_audio_transcript.done',
+      response_id: 'r-1',
+      transcript: 'Anytime, dude.',
+    });
+    session.emit({ type: 'response.done', response: { id: 'r-1', status: 'completed' } });
+    await expect(turn).resolves.toMatchObject({ reply: 'Anytime, dude.', completed: true });
+    store.dispose();
+  });
+
   it('asks once more, in the same voice, when xAI cancels a response the moment it is asked', async () => {
     const { store, open, line, conductor } = harness({ voice: 'amgtiwcbk60e' });
     const session = await open();
@@ -1050,7 +1087,7 @@ describe('a turn of the model', () => {
     store.dispose();
   });
 
-  it('asks again only once', async () => {
+  it('asks again at most three times', async () => {
     const { store, open, line } = harness();
     const session = await open();
     const turn = line().turn({ context: 'c', spoken: true });
@@ -1059,11 +1096,13 @@ describe('a turn of the model', () => {
         type: 'response.done',
         response: { status: 'cancelled', status_details: 'unimplemented' },
       });
-    cancel();
-    await vi.advanceTimersByTimeAsync(500);
+    for (let i = 0; i < 3; i++) {
+      cancel();
+      await vi.advanceTimersByTimeAsync(500);
+    }
     cancel();
     await expect(turn).resolves.toMatchObject({ completed: false });
-    expect(sentTypes(session).filter((type) => type === 'response.create')).toHaveLength(2);
+    expect(sentTypes(session).filter((type) => type === 'response.create')).toHaveLength(4);
     store.dispose();
   });
 
@@ -1402,6 +1441,19 @@ describe('the voice', () => {
     store.dispose();
   });
 
+  it('keeps the microphone open for talking over however long the voice speaks', async () => {
+    const { store, open } = harness({ talkOver: true, windowSec: 6 });
+    const session = await open();
+    session.emit({ type: 'output_audio_buffer.started' });
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(store.micOpen).toBe(true);
+    // Once it has stopped, the window runs out as usual.
+    session.emit({ type: 'output_audio_buffer.stopped' });
+    await vi.advanceTimersByTimeAsync(ECHO_TAIL + 6_000);
+    expect(store.micOpen).toBe(false);
+    store.dispose();
+  });
+
   it('keeps the microphone shut while it speaks, unless talking over it is on', async () => {
     const quiet = harness({ listening: 'open' });
     const first = await quiet.open();
@@ -1661,6 +1713,8 @@ describe('isSleepPhrase', () => {
       'Go to sleep.',
       'Okay, go to sleep now.',
       'Maestro, go to sleep!',
+      'No, all good. Go to sleep.',
+      "Thanks, that's all, you can go to sleep.",
     ]) {
       expect(isSleepPhrase(said)).toBe(true);
     }

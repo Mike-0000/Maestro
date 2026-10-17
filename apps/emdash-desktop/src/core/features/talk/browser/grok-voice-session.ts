@@ -221,6 +221,9 @@ export class GrokVoiceSession {
       case 'input_audio_buffer.clear':
         this.dropSpeech();
         return this.sendRaw(event);
+      case 'response.cancel':
+        this.cancelled(str(event.response_id));
+        return this.sendRaw(event);
       default:
         return this.sendRaw(event);
     }
@@ -420,6 +423,16 @@ export class GrokVoiceSession {
       });
     }
     this.emit({ type: 'output_audio_buffer.cleared', response_id: audible.responseId });
+  }
+
+  /** A response named in a cancel is not heard: nothing more of it plays, nor what is queued. */
+  private cancelled(responseId: string): void {
+    if (!responseId) return;
+    this.response(responseId).cleared = true;
+    if (this.audible?.responseId !== responseId || !this.audio) return;
+    this.audible = null;
+    this.audio.clear();
+    this.emit({ type: 'output_audio_buffer.cleared', response_id: responseId });
   }
 
   // ── What the provider sends ─────────────────────────────────────────────────

@@ -155,6 +155,8 @@ const MAX_RETRIES = 3;
 
 /** A response xAI cancelled the moment it was asked for is asked again this much later. */
 const RETRY_CANCELLED_MS = 500;
+/** And this many times in one turn: one after the words, and one after each tool's result. */
+const MAX_CANCELLED_RETRIES = 3;
 
 const DROPPED_REPLY = 'The voice line dropped before that was finished.';
 const NO_ANSWER_REPLY = 'The voice line did not answer.';
@@ -215,8 +217,8 @@ type Turn = {
   record: string | null;
   /** Its items were taken out of the conversation, and its record stands for it. */
   replaced: boolean;
-  /** Asked again once already, after xAI cancelled a response the moment it was asked for. */
-  retried: boolean;
+  /** Times asked again, after xAI cancelled a response the moment it was asked for. */
+  retries: number;
 };
 
 /**
@@ -302,6 +304,8 @@ export class TalkStore {
   private saying: Saying | null = null;
   /** The responses that said a sentence as written, until they are done. */
   private readonly sayResponses = new Set<string>();
+  /** Responses xAI started that nothing on the line asked for, cancelled as they start. */
+  private readonly unasked = new Set<string>();
   /** What a summary for a fresh session wrote, should its response not list it. */
   private rollText = '';
   private readonly handledCalls = new Set<string>();
@@ -873,6 +877,7 @@ export class TalkStore {
     this.transcripts.clear();
     this.handledCalls.clear();
     this.sayResponses.clear();
+    this.unasked.clear();
     this.past = [];
     this.closed = 0;
     this.heard = null;
@@ -1098,7 +1103,7 @@ export class TalkStore {
         items,
         record: null,
         replaced: false,
-        retried: false,
+        retries: 0,
       };
       this.respond(this.turn);
     });
@@ -1305,6 +1310,10 @@ export class TalkStore {
   private onEvent(event: RealtimeEvent): void {
     switch (event.type) {
       case 'input_audio_buffer.speech_started':
+        // The session stops the voice for it; the trace shows that talking over was heard.
+        if (this.speaking && this.settings?.talkOver && !this.holding) {
+          this.deps.conductor.traceLine('talked-over');
+        }
         this.touch();
         this.hearing = true;
         this.speechAt = this.now();
@@ -1326,15 +1335,17 @@ export class TalkStore {
         this.onTranscript(str(event.item_id), null);
         break;
       case 'response.output_audio_transcript.done':
-        this.onSaid(str(event.transcript));
+        if (!this.unasked.has(str(event.response_id))) this.onSaid(str(event.transcript));
         break;
       case 'response.output_text.done':
-        this.onWritten(str(event.text));
+        if (!this.unasked.has(str(event.response_id))) this.onWritten(str(event.text));
         break;
-      case 'response.function_call_arguments.done':
-        this.claimResponse(str(event.response_id));
-        void this.onToolCall(str(event.call_id), str(event.name), str(event.arguments));
+      case 'response.function_call_arguments.done': {
+        const unasked = this.unasked.has(str(event.response_id));
+        if (!unasked) this.claimResponse(str(event.response_id));
+        void this.onToolCall(str(event.call_id), str(event.name), str(event.arguments), unasked);
         break;
+      }
       case 'response.created':
         this.onResponseCreated(event.response);
         break;
@@ -1530,17 +1541,25 @@ export class TalkStore {
     turn.responseId = responseId;
   }
 
-  private async onToolCall(callId: string, name: string, rawArguments: string): Promise<void> {
+  private async onToolCall(
+    callId: string,
+    name: string,
+    rawArguments: string,
+    unasked = false
+  ): Promise<void> {
     if (!callId || this.handledCalls.has(callId)) return;
     this.handledCalls.add(callId);
     const session = this.session;
-    const turn = this.turn;
+    const turn = unasked ? null : this.turn;
     let result: LineToolResult;
     if (!turn) {
       // A call that belongs to no request of the developer's: answered, so the conversation
       // stays whole, and never run.
       result = { output: NO_TURN_RESULT };
-      this.deps.conductor.traceLine('refused-call', { tool: name, reason: 'no-turn' });
+      this.deps.conductor.traceLine('refused-call', {
+        tool: name,
+        reason: unasked ? 'unasked' : 'no-turn',
+      });
     } else if (turn.stopped) {
       result = { output: STOPPED_RESULT };
     } else {
@@ -1583,6 +1602,16 @@ export class TalkStore {
       this.sayResponses.add(created.id);
     } else if (this.turn?.responding && !this.turn.responseId) {
       this.turn.responseId = created.id;
+    } else if (!this.rolling) {
+      // xAI starts a response of its own as words are committed, and after a tool's result.
+      // Nothing asked for it: left alone it speaks over the answer the turn asks for (a second
+      // voice), makes the turn's own request fail at once, and calls tools for nobody.
+      this.unasked.add(created.id);
+      this.send({ type: 'response.cancel', response_id: created.id });
+      this.deps.conductor.traceLine('unasked-response', {
+        response: created.id,
+        turn: this.turn ? (this.turn.responding ? 'responding' : 'waiting') : 'none',
+      });
     }
   }
 
@@ -1640,6 +1669,8 @@ export class TalkStore {
     const purpose = this.sayResponses.delete(id) ? 'say' : done.metadata?.purpose;
     const tokens = tokensFromUsage(done.usage);
     void this.recordUsage(tokens);
+    // A response nothing asked for says nothing about the turn, however it ended.
+    if (this.unasked.delete(id)) return;
     if (done.status !== 'completed') this.noteIncomplete(done.status, done.status_details);
     if (purpose === 'say') {
       if (done.status !== 'completed') this.finishSaying(false);
@@ -1663,14 +1694,14 @@ export class TalkStore {
       this.deps.conductor.traceLine('stray-response', {
         response: id,
         expected: turn.responseId,
-        status: str(done.status),
+        outcome: str(done.status),
       });
       return;
     }
     // xAI cancelled the response the moment it was asked for, before the model said or did
     // anything: it is asked once more, a moment later. Asking again has answered every time.
-    if (!turn.retried && !turn.stopped && cancelledAtOnce(done)) {
-      turn.retried = true;
+    if (turn.retries < MAX_CANCELLED_RETRIES && !turn.stopped && cancelledAtOnce(done)) {
+      turn.retries++;
       if (turn.watchdog) clearTimeout(turn.watchdog);
       turn.watchdog = null;
       turn.responding = false;
@@ -1800,6 +1831,9 @@ export class TalkStore {
   private armWindow(ms: number): void {
     this.windowTimer = setTimeout(() => {
       this.windowTimer = null;
+      // With talk-over, the voice can be spoken over until it is done, however long it talks;
+      // the window runs out only once it has stopped.
+      if (this.speaking && this.settings?.talkOver) return this.armWindow(ms);
       // Mid-sentence: the window waits for the developer to finish. Sound that never turns
       // into words for Maestro (a meeting, a radio) does not hold it open for ever.
       const stale = this.now() - this.windowSince >= MAX_WINDOW_MS;
@@ -1923,9 +1957,12 @@ export function joinTranscripts(parts: readonly string[]): string {
   return text;
 }
 
-/** "Go to sleep", alone or with a word around it ("okay, go to sleep now"), and nothing else. */
+/**
+ * "Go to sleep", alone or with a word around it ("okay, go to sleep now", "no, all good, go to
+ * sleep"), and nothing else.
+ */
 const SLEEP_PHRASE =
-  /^(?:(?:ok|okay|alright|all right|hey|maestro|chorus|please|now)\s+)*go to sleep(?:\s+(?:now|please|maestro|chorus))*$/;
+  /^(?:(?:ok|okay|alright|all right|hey|maestro|chorus|please|now|no|nope|nah|yeah|yes|thanks|thank you|cool|great|all good|i m good|we re good|that s all|that s it|you can|just)\s+)*go to sleep(?:\s+(?:now|please|maestro|chorus|thanks|thank you))*$/;
 
 /** True when what was said is the developer telling the line to go to sleep. */
 export function isSleepPhrase(text: string): boolean {
