@@ -10,7 +10,13 @@ import {
 } from '@core/features/conductor/api/voice-line';
 import { log } from '@core/primitives/logging/browser/logger';
 import type { TalkClient } from '../api/browser/client';
-import { talkLineModel, type TalkSettings, type TalkStatus } from '../api/contract';
+import {
+  DEFAULT_TALK_SETTINGS,
+  talkLineModel,
+  TALK_VOICES,
+  type TalkSettings,
+  type TalkStatus,
+} from '../api/contract';
 import { isEcho, neverEcho, recentSpoken, type Spoken } from '../api/echo-guard';
 import { inputSize, NO_TOKENS, tokensFromUsage, type TalkTokens } from '../api/usage';
 import { lineInstructions, lineTools, ROLLOVER_INSTRUCTIONS } from '../api/voice-prompt';
@@ -182,6 +188,8 @@ type Turn = {
   record: string | null;
   /** Its items were taken out of the conversation, and its record stands for it. */
   replaced: boolean;
+  /** It was asked again in a built-in voice, after xAI would not speak in the custom one. */
+  voiceRetried: boolean;
 };
 
 /**
@@ -202,6 +210,8 @@ export class TalkStore {
   speaking = false;
   status: TalkStatus | null = null;
   error: string | null = null;
+  /** A custom voice xAI would not speak in on this line, until the voice setting changes. */
+  private voiceRefused: string | null = null;
 
   private session: SessionLike | null = null;
   private track: MediaStreamTrack | null = null;
@@ -460,6 +470,7 @@ export class TalkStore {
         before.replies !== after.replies ||
         before.webSearch !== after.webSearch ||
         before.transcriptionModel !== after.transcriptionModel);
+    if (before?.voice !== after.voice) this.voiceRefused = null;
     if (reshaped && this.line !== 'off') this.shut('off');
     this.retries = 0;
     this.reconcile();
@@ -562,7 +573,13 @@ export class TalkStore {
     });
     if (!result.success) throw new TalkOpenError(result.error.type, result.error.message);
     const { url, clientSecret, session } = result.data;
-    return { url, clientSecret, session };
+    // A custom voice xAI would not speak earlier is not tried again until it is changed.
+    const refused = this.voiceRefused !== null && session.voice === this.voiceRefused;
+    return {
+      url,
+      clientSecret,
+      session: refused ? { ...session, voice: DEFAULT_TALK_SETTINGS.voice } : session,
+    };
   }
 
   /** Who the line's model is right now: the conductor, with the developer's standing instructions. */
@@ -781,11 +798,7 @@ export class TalkStore {
     const written = () => hold.sealed && hold.items.every((item) => this.transcripts.has(item));
     await this.waitFor(() => written() || this.session === null, TRANSCRIPT_WAIT_MS);
     if (!written() || hold.items.some((item) => this.transcripts.get(item) === null)) return '';
-    return hold.items
-      .map((item) => this.transcripts.get(item) ?? '')
-      .join(' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+    return joinTranscripts(hold.items.map((item) => this.transcripts.get(item) ?? ''));
   }
 
   /** Resolves once `done` holds, looked at whenever something arrives, or after `ms`. */
@@ -853,6 +866,7 @@ export class TalkStore {
         items,
         record: null,
         replaced: false,
+        voiceRetried: false,
       };
       this.respond(this.turn);
     });
@@ -1287,7 +1301,9 @@ export class TalkStore {
     }
     this.unhush();
     // Without talk-over the microphone is shut while the voice speaks, so it never hears itself.
+    // With it, the microphone opens as the voice starts, so speaking over it can stop it.
     if (!this.settings?.talkOver) this.closeWindow();
+    else this.openWindow();
   }
 
   private onVoiceStopped(responseId: string): void {
@@ -1317,6 +1333,7 @@ export class TalkStore {
     void this.recordUsage(tokens);
     if (done.status !== 'completed') this.noteIncomplete(done.status, done.status_details);
     if (purpose === 'say') {
+      if (this.refusesVoice(done)) this.fallBackFromVoice();
       if (done.status !== 'completed') this.finishSaying(false);
       return;
     }
@@ -1335,6 +1352,16 @@ export class TalkStore {
     if (!turn) return;
     // A response an earlier turn gave up on says nothing about this one.
     if (turn.responseId && id && id !== turn.responseId) return;
+    // xAI would not speak in the custom voice: the turn is asked again in a built-in one.
+    if (turn.spoken && !turn.voiceRetried && this.refusesVoice(done)) {
+      turn.voiceRetried = true;
+      if (turn.watchdog) clearTimeout(turn.watchdog);
+      turn.watchdog = null;
+      turn.responding = false;
+      this.fallBackFromVoice();
+      this.respond(turn);
+      return;
+    }
     turn.items.push(...itemIds(done.output));
     if (callsTools(done.output)) {
       turn.leadWords += wordCount(turn.said.slice(turn.saidBefore).join(' '));
@@ -1357,6 +1384,33 @@ export class TalkStore {
   }
 
   /**
+   * True when a response was refused the way xAI refuses a voice its realtime line cannot speak
+   * in: cancelled at once as `unimplemented`, while a custom voice is set and has not already
+   * been given up on. Built-in voices and a custom agent's own voice are never second-guessed.
+   */
+  private refusesVoice(done: { status?: unknown; status_details?: unknown }): boolean {
+    const settings = this.settings;
+    if (!settings || settings.agentId.trim()) return false;
+    if (done.status !== 'cancelled' || str(done.status_details) !== 'unimplemented') return false;
+    const voice = settings.voice;
+    return !(TALK_VOICES as readonly string[]).includes(voice) && this.voiceRefused !== voice;
+  }
+
+  /** Moves the open session to the default voice, says so, and keeps to it until the voice changes. */
+  private fallBackFromVoice(): void {
+    const voice = this.settings?.voice ?? '';
+    const fallback = DEFAULT_TALK_SETTINGS.voice;
+    this.voiceRefused = voice;
+    this.send({ type: 'session.update', session: { voice: fallback } });
+    runInAction(
+      () =>
+        (this.error = `xAI would not speak in the custom voice ${voice}, so the line uses ${fallback}.`)
+    );
+    log.warn('talk: xAI would not speak in the custom voice', { voice });
+    this.deps.conductor.traceLine('voice-fallback', { voice, to: fallback });
+  }
+
+  /**
    * Says why a response ended without completing, as the provider put it: in the log in full,
    * and in the trace as its status and reason, so a turn cut off at once can be told apart from
    * one the developer stopped.
@@ -1366,7 +1420,8 @@ export class TalkStore {
     const error = (detail.error ?? {}) as { code?: unknown; message?: unknown };
     log.warn('talk: a response did not complete', { status, details });
     this.deps.conductor.traceLine('incomplete', {
-      status: str(status) || 'unknown',
+      response: str(status) || 'unknown',
+      ...(typeof details === 'string' && details ? { reason: details } : {}),
       ...(str(detail.type) ? { type: str(detail.type) } : {}),
       ...(str(detail.reason) ? { reason: str(detail.reason) } : {}),
       ...(str(error.code) ? { code: str(error.code) } : {}),
@@ -1553,6 +1608,32 @@ class TalkOpenError extends Error {
     super(message);
     this.name = 'TalkOpenError';
   }
+}
+
+/**
+ * The transcripts of one capture's items as one text. xAI may write each stretch's transcript
+ * as everything said so far, so a transcript that starts with what came before replaces it,
+ * and one already contained in it adds nothing.
+ */
+export function joinTranscripts(parts: readonly string[]): string {
+  let text = '';
+  for (const part of parts) {
+    const next = part.replace(/\s+/g, ' ').trim();
+    if (!next) continue;
+    const said = comparable(text);
+    const adds = comparable(next);
+    if (said && adds.startsWith(said)) text = next;
+    else if (!said.includes(adds)) text = text ? `${text} ${next}` : next;
+  }
+  return text;
+}
+
+/** A transcript as compared: case, punctuation and spacing aside. */
+function comparable(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
 }
 
 function str(value: unknown): string {
