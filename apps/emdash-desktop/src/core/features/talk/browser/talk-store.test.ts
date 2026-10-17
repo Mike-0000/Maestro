@@ -11,6 +11,7 @@ import { NO_TOKENS } from '../api/usage';
 import { ROLLOVER_INPUT_TOKENS } from '../api/world-feed';
 import type { LineSessionDeps, RealtimeEvent, SessionState } from './grok-voice-session';
 import {
+  isSleepPhrase,
   joinTranscripts,
   TalkStore,
   type LineCapture,
@@ -484,6 +485,26 @@ describe('holding the talk key', () => {
     store.dispose();
   });
 
+  it('goes to sleep when told to with the key, ending the answer it began', async () => {
+    const { store, open, capture, conductor, line } = harness();
+    const session = await open();
+    capture().begin('i-1');
+    session.emit({ type: 'input_audio_buffer.speech_started' });
+    committed(session, 'item-1');
+    await expect(capture().end('i-1')).resolves.toBe(true);
+    const speech = conductor.speechTurn.mock.calls[0]![0];
+    const turn = line().turn({ context: 'Agents: now', spoken: true });
+
+    committed(session, 'item-2');
+    transcribed(session, 'go to', 'item-1');
+    transcribed(session, 'sleep', 'item-2');
+    await expect(speech.heard).resolves.toBe('go to sleep');
+    await expect(turn).resolves.toMatchObject({ reply: '', completed: false });
+    expect(store.line).toBe('off');
+    expect(store.asleep).toBe(true);
+    store.dispose();
+  });
+
   it('drops a press nobody spoke into', async () => {
     const { store, open, capture, conductor } = harness();
     const session = await open();
@@ -668,6 +689,25 @@ describe('what is heard with no key', () => {
       expect.objectContaining({ key: false })
     );
     expect(session.sent).toEqual([{ type: 'conversation.item.delete', item_id: 'item-1' }]);
+    store.dispose();
+  });
+
+  it('goes to sleep when told to, and stays closed until the next press', async () => {
+    const { store, session, sessions, conductor, room } = await listening();
+    committed(session, 'item-1');
+    transcribed(session, 'Okay, go to sleep.');
+    expect(conductor.speechTurn).not.toHaveBeenCalled();
+    expect(conductor.hearOnLine).not.toHaveBeenCalled();
+    expect(conductor.traceLine).toHaveBeenCalledWith('told-to-sleep');
+    expect(store.line).toBe('off');
+    expect(store.asleep).toBe(true);
+    expect(store.micOpen).toBe(false);
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(sessions).toHaveLength(1);
+
+    runInAction(() => (room.capturing = true));
+    await settle();
+    expect(store.line).toBe('open');
     store.dispose();
   });
 
@@ -1527,5 +1567,24 @@ describe('joinTranscripts', () => {
     expect(joinTranscripts(['Stop Atlas.', '', 'Then start Cedar.', 'start cedar'])).toBe(
       'Stop Atlas. Then start Cedar.'
     );
+  });
+});
+
+describe('isSleepPhrase', () => {
+  it('hears "go to sleep" alone or with a word around it', () => {
+    for (const said of [
+      'go to sleep',
+      'Go to sleep.',
+      'Okay, go to sleep now.',
+      'Maestro, go to sleep!',
+    ]) {
+      expect(isSleepPhrase(said)).toBe(true);
+    }
+  });
+
+  it('does not hear it inside a request', () => {
+    for (const said of ['tell Atlas to go to sleep', 'go to sleep mode in the app', 'sleep', '']) {
+      expect(isSleepPhrase(said)).toBe(false);
+    }
   });
 });

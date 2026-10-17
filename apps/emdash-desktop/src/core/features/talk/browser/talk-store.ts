@@ -579,6 +579,20 @@ export class TalkStore {
     this.deps.voice.setLiveCapture(this.waking);
   }
 
+  /**
+   * The developer said "go to sleep": whatever is being said or done stops, and the line closes
+   * as after a quiet spell, until the next press of the talk key.
+   */
+  private goToSleep(): void {
+    this.deps.conductor.traceLine('told-to-sleep');
+    const turn = this.turn;
+    if (turn) {
+      if (turn.responding) this.send({ type: 'response.cancel' });
+      this.endTurn(turn, { reply: '', completed: false });
+    }
+    this.sleep();
+  }
+
   private wake(): void {
     if (!this.asleep) return;
     runInAction(() => (this.asleep = false));
@@ -932,7 +946,11 @@ export class TalkStore {
     this.committedAt = this.now();
     this.send({ type: 'input_audio_buffer.commit' });
     setTimeout(() => this.seal(hold), SEAL_MS);
-    const heard = this.heardOf(hold);
+    // Answered before the transcript exists; once it does, "go to sleep" closes the line.
+    const heard = this.heardOf(hold).then((text) => {
+      if (isSleepPhrase(text) && this.session) this.goToSleep();
+      return text;
+    });
     const discard = () => {
       for (const item of hold.items) this.forget(item);
     };
@@ -956,6 +974,10 @@ export class TalkStore {
     if (!text || looksLikeSttArtifact(text)) {
       conductor.traceLine('ignored', { reason: text ? 'noise' : 'unread' });
       return false;
+    }
+    if (isSleepPhrase(text)) {
+      this.goToSleep();
+      return true;
     }
     conductor.hearOnLine(text, {
       interactionId: hold.interactionId,
@@ -1383,6 +1405,10 @@ export class TalkStore {
     // The developer took the key meanwhile: what they say with it is what counts now.
     if (voice.capturing) {
       this.forget(itemId);
+      return;
+    }
+    if (isSleepPhrase(heard)) {
+      this.goToSleep();
       return;
     }
     this.windowSince = this.now();
@@ -1819,6 +1845,15 @@ export function joinTranscripts(parts: readonly string[]): string {
     else if (!said.includes(adds)) text = text ? `${text} ${next}` : next;
   }
   return text;
+}
+
+/** "Go to sleep", alone or with a word around it ("okay, go to sleep now"), and nothing else. */
+const SLEEP_PHRASE =
+  /^(?:(?:ok|okay|alright|all right|hey|maestro|chorus|please|now)\s+)*go to sleep(?:\s+(?:now|please|maestro|chorus))*$/;
+
+/** True when what was said is the developer telling the line to go to sleep. */
+export function isSleepPhrase(text: string): boolean {
+  return SLEEP_PHRASE.test(comparable(text));
 }
 
 /** A transcript as compared: case, punctuation and spacing aside. */

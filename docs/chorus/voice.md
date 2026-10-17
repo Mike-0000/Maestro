@@ -540,7 +540,9 @@ sleeps, shown as a hollow green ring. The next press of the talk key opens it ag
 press goes to the line too: speak at once, and what you say while it connects (a second or two)
 is kept and sent when it is open. The new session is told what the last few turns came to (what
 you asked, what was done, what you were told), so "do that again" and follow-ups still work;
-what it does not have is the conversation word for word.
+what it does not have is the conversation word for word. Say "go to sleep" (on its own, or with
+a word around it, as in "okay, go to sleep now") to put it to sleep yourself: whatever it is
+saying or doing stops, and it stays closed, even with the microphone open, until the next press.
 
 What changes while it is on:
 
