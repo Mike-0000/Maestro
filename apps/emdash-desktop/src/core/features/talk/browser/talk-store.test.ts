@@ -906,8 +906,8 @@ describe('a turn of the model', () => {
     store.dispose();
   });
 
-  it('asks again in a built-in voice when xAI will not speak in the custom one', async () => {
-    const { store, open, line, conductor, sessions, client } = harness({ voice: 'amgtiwcbk60e' });
+  it('asks once more, in the same voice, when xAI cancels a response the moment it is asked', async () => {
+    const { store, open, line, conductor } = harness({ voice: 'amgtiwcbk60e' });
     const session = await open();
     const turn = line().turn({ context: 'c', spoken: true });
     session.emit({
@@ -915,45 +915,51 @@ describe('a turn of the model', () => {
       response: { status: 'cancelled', status_details: 'unimplemented' },
     });
     await settle();
-    expect(session.sent).toContainEqual({ type: 'session.update', session: { voice: 'eve' } });
+    expect(sentTypes(session).filter((type) => type === 'response.create')).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(500);
     expect(sentTypes(session).filter((type) => type === 'response.create')).toHaveLength(2);
-    expect(conductor.traceLine).toHaveBeenCalledWith('voice-fallback', {
-      voice: 'amgtiwcbk60e',
-      to: 'eve',
-    });
-    expect(store.error).toContain('amgtiwcbk60e');
+    // The voice is never changed for it.
+    expect(sentTypes(session)).not.toContain('session.update');
+    expect(conductor.traceLine).toHaveBeenCalledWith('retried', { afterMs: 500 });
     responseDone(session);
     await expect(turn).resolves.toMatchObject({ completed: true });
-
-    // The next session opens in the built-in voice, until the voice is changed.
-    client.openSession.mockResolvedValue({
-      success: true as const,
-      data: {
-        url: 'wss://example.test/realtime',
-        clientSecret: 'secret',
-        expiresAt: 0,
-        session: { voice: 'amgtiwcbk60e' },
-        model: 'm',
-        voice: 'amgtiwcbk60e',
-      },
-    });
-    await store.updateSettings({ model: 'grok-voice-latest' });
-    await settle();
-    expect(sessions).toHaveLength(2);
-    expect((await sessions[1]!.deps.connect()).session).toEqual({ voice: 'eve' });
     store.dispose();
   });
 
-  it('never second-guesses a built-in voice that was cut off', async () => {
-    const { store, open, line, conductor } = harness();
+  it('asks again only once', async () => {
+    const { store, open, line } = harness();
     const session = await open();
     const turn = line().turn({ context: 'c', spoken: true });
-    session.emit({
-      type: 'response.done',
-      response: { status: 'cancelled', status_details: 'unimplemented' },
-    });
+    const cancel = () =>
+      session.emit({
+        type: 'response.done',
+        response: { status: 'cancelled', status_details: 'unimplemented' },
+      });
+    cancel();
+    await vi.advanceTimersByTimeAsync(500);
+    cancel();
     await expect(turn).resolves.toMatchObject({ completed: false });
-    expect(conductor.traceLine).not.toHaveBeenCalledWith('voice-fallback', expect.anything());
+    expect(sentTypes(session).filter((type) => type === 'response.create')).toHaveLength(2);
+    store.dispose();
+  });
+
+  it('asks for the answer only once xAI has taken in the last words', async () => {
+    const { store, open, capture, conductor, line } = harness();
+    const session = await open();
+    conductor.speechTurn.mockImplementation(async () => {
+      await line().turn({ context: 'c', spoken: true });
+    });
+    expect(capture().begin('i-1')).toBe(true);
+    session.emit({ type: 'input_audio_buffer.speech_started' });
+    const ended = capture().end('i-1');
+    await expect(ended).resolves.toBe(true);
+    await settle();
+    // The commit went out; the answer waits for it to be confirmed.
+    expect(sentTypes(session)).toContain('input_audio_buffer.commit');
+    expect(sentTypes(session)).not.toContain('response.create');
+    committed(session, 'item-1');
+    await settle();
+    expect(sentTypes(session)).toContain('response.create');
     store.dispose();
   });
 
@@ -974,6 +980,7 @@ describe('a turn of the model', () => {
     await expect(turn).resolves.toMatchObject({ completed: false });
     expect(conductor.traceLine).toHaveBeenCalledWith('incomplete', {
       response: 'failed',
+      awaitingCommit: false,
       type: 'failed',
       code: 'invalid_request_error',
       message: 'Item not found: state_2',

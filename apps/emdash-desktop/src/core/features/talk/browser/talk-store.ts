@@ -10,13 +10,7 @@ import {
 } from '@core/features/conductor/api/voice-line';
 import { log } from '@core/primitives/logging/browser/logger';
 import type { TalkClient } from '../api/browser/client';
-import {
-  DEFAULT_TALK_SETTINGS,
-  talkLineModel,
-  TALK_VOICES,
-  type TalkSettings,
-  type TalkStatus,
-} from '../api/contract';
+import { talkLineModel, type TalkSettings, type TalkStatus } from '../api/contract';
 import { isEcho, neverEcho, recentSpoken, type Spoken } from '../api/echo-guard';
 import { inputSize, NO_TOKENS, tokensFromUsage, type TalkTokens } from '../api/usage';
 import { lineInstructions, lineTools, ROLLOVER_INSTRUCTIONS } from '../api/voice-prompt';
@@ -152,6 +146,9 @@ const MAX_ROUNDS = 12;
 const RETRY_MS = 30_000;
 const MAX_RETRIES = 3;
 
+/** A response xAI cancelled the moment it was asked for is asked again this much later. */
+const RETRY_CANCELLED_MS = 500;
+
 const DROPPED_REPLY = 'The voice line dropped before that was finished.';
 const NO_ANSWER_REPLY = 'The voice line did not answer.';
 const TOO_MANY_STEPS_REPLY = 'I stopped after several steps. Check the canvas.';
@@ -211,8 +208,8 @@ type Turn = {
   record: string | null;
   /** Its items were taken out of the conversation, and its record stands for it. */
   replaced: boolean;
-  /** It was asked again in a built-in voice, after xAI would not speak in the custom one. */
-  voiceRetried: boolean;
+  /** Asked again once already, after xAI cancelled a response the moment it was asked for. */
+  retried: boolean;
 };
 
 /**
@@ -238,8 +235,6 @@ export class TalkStore {
    * one is billed by the minute, until the developer next takes the talk key.
    */
   asleep = false;
-  /** A custom voice xAI would not speak in on this line, until the voice setting changes. */
-  private voiceRefused: string | null = null;
 
   private session: SessionLike | null = null;
   private track: MediaStreamTrack | null = null;
@@ -256,6 +251,13 @@ export class TalkStore {
   /** When something last happened on the line: a word, a press, a turn, the voice. */
   private activeAt = 0;
   private early: EarlyHold | null = null;
+  /**
+   * Captures whose last words were committed and not yet confirmed. xAI cancels a response
+   * asked for while a commit is still being taken in, so none is asked for until it is.
+   */
+  private awaitingCommit = new Set<Hold>();
+  /** When speech was last committed, for the trace of a response that did not complete. */
+  private committedAt = 0;
   /** What the most recent turns came to, carried into a session that opens after a quiet spell. */
   private recent: string[] = [];
   /** When the window opened, or last heard words meant for Maestro. */
@@ -352,6 +354,8 @@ export class TalkStore {
       | 'activeAt'
       | 'early'
       | 'recent'
+      | 'awaitingCommit'
+      | 'committedAt'
       | 'waking'
       | 'windowSince'
       | 'retryTimer'
@@ -402,6 +406,8 @@ export class TalkStore {
       activeAt: false,
       early: false,
       recent: false,
+      awaitingCommit: false,
+      committedAt: false,
       waking: false,
       windowSince: false,
       retryTimer: false,
@@ -532,7 +538,6 @@ export class TalkStore {
         before.replies !== after.replies ||
         before.webSearch !== after.webSearch ||
         before.transcriptionModel !== after.transcriptionModel);
-    if (before?.voice !== after.voice) this.voiceRefused = null;
     runInAction(() => (this.asleep = false));
     if (reshaped && this.line !== 'off') this.shut('off');
     this.retries = 0;
@@ -760,13 +765,7 @@ export class TalkStore {
     });
     if (!result.success) throw new TalkOpenError(result.error.type, result.error.message);
     const { url, clientSecret, session } = result.data;
-    // A custom voice xAI would not speak earlier is not tried again until it is changed.
-    const refused = this.voiceRefused !== null && session.voice === this.voiceRefused;
-    return {
-      url,
-      clientSecret,
-      session: refused ? { ...session, voice: DEFAULT_TALK_SETTINGS.voice } : session,
-    };
+    return { url, clientSecret, session };
   }
 
   /** Who the line's model is right now: the conductor, with the developer's standing instructions. */
@@ -842,6 +841,7 @@ export class TalkStore {
     this.voiceTimer = null;
     this.hearing = false;
     this.hold = null;
+    this.awaitingCommit.clear();
     this.reading.clear();
     this.loose.clear();
     this.transcripts.clear();
@@ -928,6 +928,8 @@ export class TalkStore {
     }
     // The provider commits at each pause by itself; this takes what was said since the last.
     hold.committing = true;
+    this.awaitingCommit.add(hold);
+    this.committedAt = this.now();
     this.send({ type: 'input_audio_buffer.commit' });
     setTimeout(() => this.seal(hold), SEAL_MS);
     const heard = this.heardOf(hold);
@@ -982,6 +984,8 @@ export class TalkStore {
     hold.sealed = true;
     if (this.hold === hold) this.hold = null;
     this.poke();
+    // A response held back for this commit is asked for now.
+    if (this.awaitingCommit.delete(hold)) this.advance();
   }
 
   /**
@@ -1060,7 +1064,7 @@ export class TalkStore {
         items,
         record: null,
         replaced: false,
-        voiceRetried: false,
+        retried: false,
       };
       this.respond(this.turn);
     });
@@ -1071,7 +1075,12 @@ export class TalkStore {
     // One voice at a time: a sentence being said as written is finished first. And words the
     // developer is saying over the turn are read as words (a stop, a yes, a new request of its
     // own): the model is not asked again while they sit in the conversation.
-    if (this.saying || this.reading.size > 0 || this.loose.size > 0) {
+    if (
+      this.saying ||
+      this.reading.size > 0 ||
+      this.loose.size > 0 ||
+      this.awaitingCommit.size > 0
+    ) {
       turn.owed = true;
       return;
     }
@@ -1270,6 +1279,8 @@ export class TalkStore {
         break;
       case 'input_audio_buffer.speech_stopped':
         this.hearing = false;
+        // The session commits each stretch of speech as it stops.
+        this.committedAt = this.now();
         break;
       case 'input_audio_buffer.committed':
         this.onCommitted(str(event.item_id));
@@ -1434,6 +1445,7 @@ export class TalkStore {
       // A call that belongs to no request of the developer's: answered, so the conversation
       // stays whole, and never run.
       result = { output: NO_TURN_RESULT };
+      this.deps.conductor.traceLine('refused-call', { tool: name, reason: 'no-turn' });
     } else if (turn.stopped) {
       result = { output: STOPPED_RESULT };
     } else {
@@ -1535,7 +1547,6 @@ export class TalkStore {
     void this.recordUsage(tokens);
     if (done.status !== 'completed') this.noteIncomplete(done.status, done.status_details);
     if (purpose === 'say') {
-      if (this.refusesVoice(done)) this.fallBackFromVoice();
       if (done.status !== 'completed') this.finishSaying(false);
       return;
     }
@@ -1554,14 +1565,18 @@ export class TalkStore {
     if (!turn) return;
     // A response an earlier turn gave up on says nothing about this one.
     if (turn.responseId && id && id !== turn.responseId) return;
-    // xAI would not speak in the custom voice: the turn is asked again in a built-in one.
-    if (turn.spoken && !turn.voiceRetried && this.refusesVoice(done)) {
-      turn.voiceRetried = true;
+    // xAI cancelled the response the moment it was asked for, before the model said or did
+    // anything: it is asked once more, a moment later. Asking again has answered every time.
+    if (!turn.retried && !turn.stopped && cancelledAtOnce(done)) {
+      turn.retried = true;
       if (turn.watchdog) clearTimeout(turn.watchdog);
       turn.watchdog = null;
       turn.responding = false;
-      this.fallBackFromVoice();
-      this.respond(turn);
+      this.deps.conductor.traceLine('retried', { afterMs: RETRY_CANCELLED_MS });
+      setTimeout(() => {
+        if (this.turn !== turn || turn.stopped || turn.responding) return;
+        this.respond(turn);
+      }, RETRY_CANCELLED_MS);
       return;
     }
     turn.items.push(...itemIds(done.output));
@@ -1586,33 +1601,6 @@ export class TalkStore {
   }
 
   /**
-   * True when a response was refused the way xAI refuses a voice its realtime line cannot speak
-   * in: cancelled at once as `unimplemented`, while a custom voice is set and has not already
-   * been given up on. Built-in voices and a custom agent's own voice are never second-guessed.
-   */
-  private refusesVoice(done: { status?: unknown; status_details?: unknown }): boolean {
-    const settings = this.settings;
-    if (!settings || settings.agentId.trim()) return false;
-    if (done.status !== 'cancelled' || str(done.status_details) !== 'unimplemented') return false;
-    const voice = settings.voice;
-    return !(TALK_VOICES as readonly string[]).includes(voice) && this.voiceRefused !== voice;
-  }
-
-  /** Moves the open session to the default voice, says so, and keeps to it until the voice changes. */
-  private fallBackFromVoice(): void {
-    const voice = this.settings?.voice ?? '';
-    const fallback = DEFAULT_TALK_SETTINGS.voice;
-    this.voiceRefused = voice;
-    this.send({ type: 'session.update', session: { voice: fallback } });
-    runInAction(
-      () =>
-        (this.error = `xAI would not speak in the custom voice ${voice}, so the line uses ${fallback}.`)
-    );
-    log.warn('talk: xAI would not speak in the custom voice', { voice });
-    this.deps.conductor.traceLine('voice-fallback', { voice, to: fallback });
-  }
-
-  /**
    * Says why a response ended without completing, as the provider put it: in the log in full,
    * and in the trace as its status and reason, so a turn cut off at once can be told apart from
    * one the developer stopped.
@@ -1623,6 +1611,9 @@ export class TalkStore {
     log.warn('talk: a response did not complete', { status, details });
     this.deps.conductor.traceLine('incomplete', {
       response: str(status) || 'unknown',
+      // How long after the last commit it was asked for, and whether one was still unconfirmed.
+      ...(this.committedAt > 0 ? { sinceCommitMs: this.now() - this.committedAt } : {}),
+      awaitingCommit: this.awaitingCommit.size > 0,
       ...(typeof details === 'string' && details ? { reason: details } : {}),
       ...(str(detail.type) ? { type: str(detail.type) } : {}),
       ...(str(detail.reason) ? { reason: str(detail.reason) } : {}),
@@ -1895,4 +1886,12 @@ function responseText(output: unknown): string {
     }
   }
   return parts.join(' ');
+}
+
+/** xAI ended a response as soon as it was asked for, as `unimplemented`, before any output. */
+function cancelledAtOnce(done: { status?: unknown; status_details?: unknown }): boolean {
+  if (done.status !== 'cancelled') return false;
+  const details = done.status_details as { reason?: unknown } | string | null | undefined;
+  const reason = typeof details === 'string' ? details : str(details?.reason);
+  return reason === 'unimplemented';
 }
