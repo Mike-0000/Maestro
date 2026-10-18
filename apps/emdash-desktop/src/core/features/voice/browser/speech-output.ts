@@ -43,6 +43,10 @@ export class SpeechOutput {
       case 'openrouter-gemini-flash':
       case 'openrouter-gemini-flash-lite':
         return this.credentials.openrouter === true;
+      case 'vertex-gemini-flash':
+      case 'vertex-gemini-flash-lite':
+        // The main process reads the gcloud sign-in and reports an error when there is none.
+        return true;
     }
   }
 
@@ -51,6 +55,8 @@ export class SpeechOutput {
     if (this.engine === 'kitten') return 12_000;
     // OpenRouter may buffer the provider's audio before the first byte arrives.
     if (this.engine.startsWith('openrouter-')) return 8000;
+    // The first Vertex reply also exchanges the gcloud sign-in for an access token.
+    if (this.engine.startsWith('vertex-')) return 8000;
     return 3500;
   }
 

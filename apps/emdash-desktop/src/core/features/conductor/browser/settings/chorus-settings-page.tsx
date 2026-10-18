@@ -106,6 +106,8 @@ const TTS_ENGINE_LABELS = {
   'gemini-flash-lite': 'Gemini 3.8 Flash-Lite (fast)',
   'openrouter-gemini-flash': 'Gemini 3.8 Flash via OpenRouter',
   'openrouter-gemini-flash-lite': 'Gemini 3.8 Flash-Lite via OpenRouter',
+  'vertex-gemini-flash': 'Gemini 3.8 Flash via Google Cloud',
+  'vertex-gemini-flash-lite': 'Gemini 3.8 Flash-Lite via Google Cloud',
 } as const;
 type TtsEngine = keyof typeof TTS_ENGINE_LABELS;
 
@@ -511,7 +513,9 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
           description={
             voiceSettings?.ttsEngine.startsWith('openrouter-') && !credentials?.openrouter
               ? 'Add an OpenRouter API key above; until then, replies use the Windows voice.'
-              : 'Kitten Mini runs offline on your CPU; Gemini (direct or via OpenRouter) sends reply text to Google. Windows speech is the fallback.'
+              : voiceSettings?.ttsEngine.startsWith('vertex-')
+                ? 'Signs in with your gcloud application default credentials (gcloud auth application-default login) and bills your Google Cloud project. Windows speech is the fallback.'
+                : 'Kitten Mini runs offline on your CPU; Gemini (direct, via OpenRouter, or via Google Cloud) sends reply text to Google. Windows speech is the fallback.'
           }
           control={
             <Select.Root
@@ -610,7 +614,7 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
         {usesGeminiVoice(voiceSettings?.ttsEngine) && (
           <SettingsRow
             label="Custom Gemini voice"
-            description="A voice id you made in Google AI Studio or with voice design (voice_… or voicekey_…). When set, it replaces the prebuilt voice for all Gemini speech, direct or via OpenRouter. Empty uses the prebuilt voice."
+            description="A voice id you made with voice design (voice_… or voicekey_…). It replaces the prebuilt voice for every Gemini engine. A voice made in a Google Cloud project only works with the Google Cloud engines; OpenRouter and API keys cannot reach it. Empty uses the prebuilt voice."
             control={
               <CommitInput
                 value={voiceSettings?.geminiCustomVoice ?? ''}
@@ -620,6 +624,24 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
                 allowEmpty
                 onCommit={(value) =>
                   void voice.updateSettings({ geminiCustomVoice: value.trim().slice(0, 200) })
+                }
+              />
+            }
+          />
+        )}
+        {voiceSettings?.ttsEngine.startsWith('vertex-') && (
+          <SettingsRow
+            label="Google Cloud project"
+            description="The project that owns your custom voices. Empty uses your gcloud sign-in's quota project."
+            control={
+              <CommitInput
+                value={voiceSettings.vertexProject}
+                ariaLabel="Google Cloud project id"
+                placeholder="Project id"
+                className="w-56 font-mono text-xs"
+                allowEmpty
+                onCommit={(value) =>
+                  void voice.updateSettings({ vertexProject: value.trim().slice(0, 100) })
                 }
               />
             }

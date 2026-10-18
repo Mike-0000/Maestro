@@ -12,6 +12,18 @@ const { localSpeak } = vi.hoisted(() => ({ localSpeak: vi.fn() }));
 const { openRouterSpeak } = vi.hoisted(() => ({ openRouterSpeak: vi.fn() }));
 const { geminiSpeak } = vi.hoisted(() => ({ geminiSpeak: vi.fn() }));
 vi.mock('./gemini-tts', () => ({ streamGeminiTts: geminiSpeak }));
+const { vertexSpeak, vertexAdc } = vi.hoisted(() => ({
+  vertexSpeak: vi.fn(),
+  vertexAdc: vi.fn(),
+}));
+vi.mock('./vertex-tts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./vertex-tts')>()),
+  streamVertexTts: vertexSpeak,
+  VertexAuth: class {
+    credentials = vertexAdc;
+    accessToken = async () => 'access-token';
+  },
+}));
 vi.mock('./openrouter-tts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./openrouter-tts')>()),
   streamOpenRouterTts: openRouterSpeak,
@@ -28,6 +40,8 @@ afterEach(async () => {
   localSpeak.mockReset();
   openRouterSpeak.mockReset();
   geminiSpeak.mockReset();
+  vertexSpeak.mockReset();
+  vertexAdc.mockReset();
 });
 
 describe('VoiceService offline speech', () => {
@@ -159,6 +173,82 @@ describe('VoiceService custom Gemini voice', () => {
       expect.objectContaining({ voice: 'Puck' }),
       expect.any(Function)
     );
+    service.dispose();
+  });
+});
+
+describe('VoiceService Google Cloud speech', () => {
+  async function serviceWith(settings: Record<string, unknown>) {
+    const dir = await mkdtemp(join(tmpdir(), 'chorus-tts-'));
+    dirs.push(dir);
+    await writeFile(
+      join(dir, 'voice-settings.json'),
+      JSON.stringify({
+        ...DEFAULT_VOICE_SETTINGS,
+        ttsEngine: 'vertex-gemini-flash-lite',
+        ...settings,
+      })
+    );
+    const getSecret = vi.fn();
+    const warn = vi.fn();
+    const host = { dataDir: dir, secrets: { getSecret } } as unknown as ChorusHostServices;
+    const logger = { warn } as unknown as Logger;
+    return { service: new VoiceService(host, () => {}, logger), getSecret, warn };
+  }
+  const adc = {
+    client_id: 'id',
+    client_secret: 's',
+    refresh_token: 'r',
+    quota_project_id: 'adc-proj',
+  };
+
+  it('speaks the custom voice in the gcloud quota project without reading any API key', async () => {
+    const { service, getSecret } = await serviceWith({ geminiCustomVoice: 'voice_abc123' });
+    vertexAdc.mockResolvedValue(adc);
+    vertexSpeak.mockImplementation(async (_options, emit) => emit({ type: 'done' }));
+    const emit = vi.fn();
+    await service.startTts('reply-id', 'Ready.', emit);
+    await vi.waitFor(() => expect(emit).toHaveBeenCalledWith({ type: 'done' }));
+    expect(vertexSpeak).toHaveBeenCalledWith(
+      expect.objectContaining({
+        token: 'access-token',
+        project: 'adc-proj',
+        model: 'gemini-3.8-flash-lite-tts',
+        voice: 'voice_abc123',
+        text: 'Ready.',
+      }),
+      expect.any(Function)
+    );
+    expect(getSecret).not.toHaveBeenCalled();
+    service.dispose();
+  });
+
+  it('prefers the configured project', async () => {
+    const { service } = await serviceWith({ vertexProject: ' chosen ' });
+    vertexAdc.mockResolvedValue(adc);
+    vertexSpeak.mockImplementation(async (_options, emit) => emit({ type: 'done' }));
+    const emit = vi.fn();
+    await service.startTts('reply-id', 'Ready.', emit);
+    await vi.waitFor(() => expect(emit).toHaveBeenCalledWith({ type: 'done' }));
+    expect(vertexSpeak).toHaveBeenCalledWith(
+      expect.objectContaining({ project: 'chosen' }),
+      expect.any(Function)
+    );
+    service.dispose();
+  });
+
+  it('logs why it fell back when there is no gcloud sign-in', async () => {
+    const { service, warn } = await serviceWith({});
+    vertexAdc.mockResolvedValue(null);
+    const emit = vi.fn();
+    await service.startTts('reply-id', 'Ready.', emit);
+    await vi.waitFor(() => expect(emit).toHaveBeenCalledWith({ type: 'error' }));
+    expect(vertexSpeak).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      'voice: speech synthesis failed',
+      expect.objectContaining({ engine: 'vertex-gemini-flash-lite' })
+    );
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('Ready.');
     service.dispose();
   });
 });
