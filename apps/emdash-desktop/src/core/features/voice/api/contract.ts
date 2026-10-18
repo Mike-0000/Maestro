@@ -46,6 +46,11 @@ export const voiceSettingsSchema = z.object({
   /** Kitten TTS Mini 0.8 English voice (runs entirely on the CPU). */
   localVoice: z.enum(['Bella', 'Jasper', 'Luna', 'Bruno', 'Rosie', 'Hugo', 'Kiki', 'Leo']),
   geminiVoice: z.enum(['Kore', 'Puck', 'Aoede', 'Zephyr']),
+  /**
+   * A custom Gemini voice id (`voice_…` or `voicekey_…`, from voice design or replication). When
+   * set, it replaces `geminiVoice` for both direct and OpenRouter Gemini speech.
+   */
+  geminiCustomVoice: z.string(),
   /** Stream audio while speaking for live partial transcripts (Deepgram only). */
   streaming: z.boolean(),
   /** Listen continuously and start on speech; only acts after the wake phrase. */
@@ -71,6 +76,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   ttsEngine: 'platform',
   localVoice: 'Bella',
   geminiVoice: 'Kore',
+  geminiCustomVoice: '',
   streaming: true,
   handsFree: false,
   wakePhrase: 'maestro',
