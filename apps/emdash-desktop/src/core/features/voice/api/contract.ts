@@ -42,15 +42,23 @@ export const voiceSettingsSchema = z.object({
     'gemini-flash-lite',
     'openrouter-gemini-flash',
     'openrouter-gemini-flash-lite',
+    'vertex-gemini-flash',
+    'vertex-gemini-flash-lite',
   ]),
   /** Kitten TTS Mini 0.8 English voice (runs entirely on the CPU). */
   localVoice: z.enum(['Bella', 'Jasper', 'Luna', 'Bruno', 'Rosie', 'Hugo', 'Kiki', 'Leo']),
   geminiVoice: z.enum(['Kore', 'Puck', 'Aoede', 'Zephyr']),
   /**
    * A custom Gemini voice id (`voice_…` or `voicekey_…`, from voice design or replication). When
-   * set, it replaces `geminiVoice` for both direct and OpenRouter Gemini speech.
+   * set, it replaces `geminiVoice` for every Gemini engine. Voices made in a Google Cloud project
+   * only work through the Vertex engines, which sign in to that project.
    */
   geminiCustomVoice: z.string(),
+  /**
+   * Google Cloud project for the Vertex engines; empty uses the gcloud sign-in's quota project,
+   * then `GOOGLE_CLOUD_PROJECT`.
+   */
+  vertexProject: z.string(),
   /** Stream audio while speaking for live partial transcripts (Deepgram only). */
   streaming: z.boolean(),
   /** Listen continuously and start on speech; only acts after the wake phrase. */
@@ -77,6 +85,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   localVoice: 'Bella',
   geminiVoice: 'Kore',
   geminiCustomVoice: '',
+  vertexProject: '',
   streaming: true,
   handsFree: false,
   wakePhrase: 'maestro',

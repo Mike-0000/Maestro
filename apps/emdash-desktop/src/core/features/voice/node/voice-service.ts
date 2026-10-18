@@ -34,6 +34,7 @@ import { streamGeminiTts } from './gemini-tts';
 import { DICTATION_MODEL_NAME, DictationModel, LocalDictation } from './local-dictation';
 import { LocalTts } from './local-tts';
 import { OPENROUTER_TTS_MODELS, streamOpenRouterTts } from './openrouter-tts';
+import { streamVertexTts, VERTEX_TTS_MODELS, VertexAuth } from './vertex-tts';
 
 /** RIFF header (44 bytes) plus at least ~0.2 s of 16 kHz 16-bit audio. */
 const MIN_WAV_BYTES = 44 + 6400;
@@ -55,6 +56,7 @@ export class VoiceService {
   private readonly hold: HoldToTalkMachine;
   private readonly ttsRequests = new Map<string, AbortController>();
   private localTts: LocalTts | null = null;
+  private readonly vertexAuth = new VertexAuth();
   private readonly streams = new Map<
     string,
     { stream: DeepgramStream; startedAt: number; timer: ReturnType<typeof setTimeout> }
@@ -193,6 +195,28 @@ export class VoiceService {
           },
           forward
         );
+      } else if (
+        settings.ttsEngine === 'vertex-gemini-flash' ||
+        settings.ttsEngine === 'vertex-gemini-flash-lite'
+      ) {
+        const model = VERTEX_TTS_MODELS[settings.ttsEngine];
+        synthesis = (async () => {
+          const adc = await this.vertexAuth.credentials();
+          if (!adc) {
+            throw new Error('No gcloud sign-in; run gcloud auth application-default login.');
+          }
+          const project =
+            settings.vertexProject.trim() ||
+            adc.quota_project_id ||
+            process.env.GOOGLE_CLOUD_PROJECT ||
+            '';
+          if (!project) throw new Error('No Google Cloud project for Vertex speech.');
+          const token = await this.vertexAuth.accessToken(adc, controller.signal);
+          await streamVertexTts(
+            { token, project, model, voice: geminiVoice, text, signal: controller.signal },
+            forward
+          );
+        })();
       } else {
         const key = await this.credentials.get('gemini');
         if (controller.signal.aborted) return;
@@ -211,8 +235,15 @@ export class VoiceService {
         );
       }
       void synthesis
-        .catch(() => {
-          if (!controller.signal.aborted) emit({ type: 'error' });
+        .catch((error: unknown) => {
+          if (controller.signal.aborted) return;
+          // Error messages carry status codes, never the reply text or a key.
+          this.logger.warn('voice: speech synthesis failed', {
+            engine: settings.ttsEngine,
+            customVoice: geminiVoice !== settings.geminiVoice,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          emit({ type: 'error' });
         })
         .finally(() => {
           if (this.ttsRequests.get(requestId) === controller) this.ttsRequests.delete(requestId);

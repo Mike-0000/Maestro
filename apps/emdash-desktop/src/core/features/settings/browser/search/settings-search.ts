@@ -59,12 +59,15 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     label: 'Spoken output',
     tab: 'chorus',
     description:
-      'Speak replies with Windows, offline Kitten Mini, or Gemini Flash / Flash-Lite (direct or via OpenRouter).',
+      'Speak replies with Windows, offline Kitten Mini, or Gemini Flash / Flash-Lite (direct, via OpenRouter, or via Google Cloud).',
     keywords: [
       'tts',
       'text to speech',
       'gemini',
       'openrouter',
+      'vertex',
+      'google cloud',
+      'custom voice',
       'kitten',
       'model',
       'spoken replies',
