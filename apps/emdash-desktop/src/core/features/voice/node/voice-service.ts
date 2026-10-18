@@ -163,6 +163,7 @@ export class VoiceService {
       ) => {
         if (!controller.signal.aborted) emit(event);
       };
+      const geminiVoice = settings.geminiCustomVoice.trim() || settings.geminiVoice;
       let synthesis: Promise<void>;
       if (settings.ttsEngine === 'kitten') {
         synthesis = (this.localTts ??= new LocalTts()).speak(
@@ -186,7 +187,7 @@ export class VoiceService {
           {
             key,
             model: OPENROUTER_TTS_MODELS[settings.ttsEngine],
-            voice: settings.geminiVoice,
+            voice: geminiVoice,
             text,
             signal: controller.signal,
           },
@@ -205,7 +206,7 @@ export class VoiceService {
             ? 'gemini-3.8-flash-tts'
             : 'gemini-3.8-flash-lite-tts';
         synthesis = streamGeminiTts(
-          { key, model, voice: settings.geminiVoice, text, signal: controller.signal },
+          { key, model, voice: geminiVoice, text, signal: controller.signal },
           forward
         );
       }

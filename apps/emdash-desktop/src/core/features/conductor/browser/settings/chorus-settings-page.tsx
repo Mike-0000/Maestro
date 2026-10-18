@@ -113,7 +113,7 @@ function isTtsEngine(value: unknown): value is TtsEngine {
   return typeof value === 'string' && value in TTS_ENGINE_LABELS;
 }
 
-/** Cloud engines speak with Gemini's prebuilt voices, whichever key they use. */
+/** Cloud engines speak with Gemini voices (prebuilt or custom), whichever key they use. */
 function usesGeminiVoice(engine: TtsEngine | undefined): boolean {
   return engine !== undefined && engine !== 'platform' && engine !== 'kitten';
 }
@@ -577,7 +577,7 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
         {usesGeminiVoice(voiceSettings?.ttsEngine) && (
           <SettingsRow
             label="Gemini voice"
-            description="A prebuilt English voice for spoken replies and notifications."
+            description="A prebuilt English voice for spoken replies and notifications. Not used while a custom Gemini voice is set."
             control={
               <Select.Root
                 value={voiceSettings?.geminiVoice ?? 'Kore'}
@@ -604,6 +604,24 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
                   ))}
                 </Select.Content>
               </Select.Root>
+            }
+          />
+        )}
+        {usesGeminiVoice(voiceSettings?.ttsEngine) && (
+          <SettingsRow
+            label="Custom Gemini voice"
+            description="A voice id you made in Google AI Studio or with voice design (voice_… or voicekey_…). When set, it replaces the prebuilt voice for all Gemini speech, direct or via OpenRouter. Empty uses the prebuilt voice."
+            control={
+              <CommitInput
+                value={voiceSettings?.geminiCustomVoice ?? ''}
+                ariaLabel="Custom Gemini voice id"
+                placeholder="voice_…"
+                className="w-56 font-mono text-xs"
+                allowEmpty
+                onCommit={(value) =>
+                  void voice.updateSettings({ geminiCustomVoice: value.trim().slice(0, 200) })
+                }
+              />
             }
           />
         )}

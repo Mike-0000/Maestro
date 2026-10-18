@@ -10,6 +10,8 @@ import { VoiceService } from './voice-service';
 
 const { localSpeak } = vi.hoisted(() => ({ localSpeak: vi.fn() }));
 const { openRouterSpeak } = vi.hoisted(() => ({ openRouterSpeak: vi.fn() }));
+const { geminiSpeak } = vi.hoisted(() => ({ geminiSpeak: vi.fn() }));
+vi.mock('./gemini-tts', () => ({ streamGeminiTts: geminiSpeak }));
 vi.mock('./openrouter-tts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./openrouter-tts')>()),
   streamOpenRouterTts: openRouterSpeak,
@@ -25,6 +27,7 @@ afterEach(async () => {
   for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true });
   localSpeak.mockReset();
   openRouterSpeak.mockReset();
+  geminiSpeak.mockReset();
 });
 
 describe('VoiceService offline speech', () => {
@@ -106,6 +109,56 @@ describe('VoiceService OpenRouter speech', () => {
     }
     expect(emit).toHaveBeenCalledWith({ type: 'error' });
     expect(openRouterSpeak).not.toHaveBeenCalled();
+    service.dispose();
+  });
+});
+
+describe('VoiceService custom Gemini voice', () => {
+  async function serviceWith(ttsEngine: string, geminiCustomVoice: string) {
+    const dir = await mkdtemp(join(tmpdir(), 'chorus-tts-'));
+    dirs.push(dir);
+    await writeFile(
+      join(dir, 'voice-settings.json'),
+      JSON.stringify({
+        ...DEFAULT_VOICE_SETTINGS,
+        ttsEngine,
+        geminiVoice: 'Puck',
+        geminiCustomVoice,
+      })
+    );
+    const getSecret = vi.fn(async (name: string) => secret('key', name));
+    const host = { dataDir: dir, secrets: { getSecret } } as unknown as ChorusHostServices;
+    return new VoiceService(host, () => {}, {} as Logger);
+  }
+  const speakOnce = async (_options: unknown, emit: (event: { type: 'done' }) => void) =>
+    emit({ type: 'done' });
+
+  it.each([
+    ['gemini-flash', geminiSpeak],
+    ['openrouter-gemini-flash-lite', openRouterSpeak],
+  ])('speaks %s in the custom voice instead of the prebuilt one', async (engine, speak) => {
+    const service = await serviceWith(engine, '  voice_abc123  ');
+    speak.mockImplementation(speakOnce);
+    const emit = vi.fn();
+    await service.startTts('reply-id', 'Ready.', emit);
+    await vi.waitFor(() => expect(emit).toHaveBeenCalledWith({ type: 'done' }));
+    expect(speak).toHaveBeenCalledWith(
+      expect.objectContaining({ voice: 'voice_abc123' }),
+      expect.any(Function)
+    );
+    service.dispose();
+  });
+
+  it('uses the prebuilt voice when the custom voice is blank', async () => {
+    const service = await serviceWith('gemini-flash', '   ');
+    geminiSpeak.mockImplementation(speakOnce);
+    const emit = vi.fn();
+    await service.startTts('reply-id', 'Ready.', emit);
+    await vi.waitFor(() => expect(emit).toHaveBeenCalledWith({ type: 'done' }));
+    expect(geminiSpeak).toHaveBeenCalledWith(
+      expect.objectContaining({ voice: 'Puck' }),
+      expect.any(Function)
+    );
     service.dispose();
   });
 });
