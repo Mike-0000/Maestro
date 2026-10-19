@@ -136,12 +136,15 @@ export async function streamVertexTts(
     model: VertexTtsModel;
     voice: string;
     text: string;
+    /** Delivery for the sentence ("calm and friendly"); blank sends none. */
+    style?: string;
     signal: AbortSignal;
   },
   emit: (event: VertexTtsEvent) => void,
   request: typeof fetch = fetch
 ): Promise<void> {
   const project = encodeURIComponent(options.project);
+  const style = options.style?.trim();
   const url =
     `https://aiplatform.googleapis.com/v1beta1/projects/${project}/locations/global` +
     `/publishers/google/models/${options.model}:streamGenerateContent?alt=sse`;
@@ -153,7 +156,12 @@ export async function streamVertexTts(
       'x-goog-user-project': options.project,
     },
     body: JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: options.text }] }],
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: options.text, ...(style ? { speechMetadata: { style } } : {}) }],
+        },
+      ],
       generationConfig: {
         responseModalities: ['AUDIO'],
         speechConfig: { voiceConfig: { voice: options.voice } },

@@ -29,6 +29,19 @@ const audioEvent = (data: string, mimeType = 'audio/l16; rate=24000; channels=1'
   `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ inlineData: { mimeType, data } }] } }] })}\r\n\r\n`;
 
 describe('Vertex TTS streaming', () => {
+  it('sends the voice style with the text, and none when it is blank', async () => {
+    const pcm = Buffer.from([0, 0]).toString('base64');
+    const request = vi.fn<typeof fetch>().mockImplementation(async () => response(audioEvent(pcm)));
+    await streamVertexTts({ ...options(), style: ' laid-back ' }, () => {}, request);
+    await streamVertexTts({ ...options(), style: '  ' }, () => {}, request);
+
+    const bodies = request.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
+    expect(bodies[0].contents[0].parts).toEqual([
+      { text: 'Sent to Atlas.', speechMetadata: { style: 'laid-back' } },
+    ]);
+    expect(bodies[1].contents[0].parts).toEqual([{ text: 'Sent to Atlas.' }]);
+  });
+
   it('sends the custom voice to the project endpoint and emits PCM chunks', async () => {
     const pcm = Buffer.from([0, 0, 255, 127]).toString('base64');
     const data = audioEvent(pcm);

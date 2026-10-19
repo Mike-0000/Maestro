@@ -223,6 +223,20 @@ describe('VoiceService Google Cloud speech', () => {
     service.dispose();
   });
 
+  it('sends the voice style with every sentence', async () => {
+    const { service } = await serviceWith({ geminiVoiceStyle: 'Laid-back skater' });
+    vertexAdc.mockResolvedValue(adc);
+    vertexSpeak.mockImplementation(async (_options, emit) => emit({ type: 'done' }));
+    const emit = vi.fn();
+    await service.startTts('reply-id', 'Ready.', emit);
+    await vi.waitFor(() => expect(emit).toHaveBeenCalledWith({ type: 'done' }));
+    expect(vertexSpeak).toHaveBeenCalledWith(
+      expect.objectContaining({ style: 'Laid-back skater' }),
+      expect.any(Function)
+    );
+    service.dispose();
+  });
+
   it('prefers the configured project', async () => {
     const { service } = await serviceWith({ vertexProject: ' chosen ' });
     vertexAdc.mockResolvedValue(adc);
