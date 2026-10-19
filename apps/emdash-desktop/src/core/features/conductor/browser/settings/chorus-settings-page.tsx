@@ -12,6 +12,7 @@ import {
 } from '@core/features/talk/api/contract';
 import { TALK_MODELS } from '@core/features/talk/api/usage';
 import { getTalkStore } from '@core/features/talk/contributions/browser/app-stores';
+import { GEMINI_VOICE_STYLE_MAX_CHARS } from '@core/features/voice/api/contract';
 import {
   acceleratorFromCodes,
   acceleratorLabel,
@@ -625,6 +626,29 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
                 onCommit={(value) =>
                   void voice.updateSettings({ geminiCustomVoice: value.trim().slice(0, 200) })
                 }
+              />
+            }
+          />
+        )}
+        {voiceSettings?.ttsEngine.startsWith('vertex-') && (
+          <SettingsRow
+            label="Google Cloud voice style"
+            description="How the voice delivers every sentence, in your own words: tone, pace, manner. It is sent with each reply and each agent announcement, so they sound alike. Empty lets the model choose per sentence."
+            control={
+              <Textarea
+                key={voiceSettings.geminiVoiceStyle}
+                defaultValue={voiceSettings.geminiVoiceStyle}
+                aria-label="Google Cloud voice style"
+                placeholder="Laid-back and unhurried, like chatting with a friend…"
+                rows={4}
+                maxLength={GEMINI_VOICE_STYLE_MAX_CHARS}
+                className="w-72 text-xs"
+                onBlur={(event) => {
+                  const next = event.currentTarget.value.trim();
+                  if (next !== voiceSettings.geminiVoiceStyle) {
+                    void voice.updateSettings({ geminiVoiceStyle: next });
+                  }
+                }}
               />
             }
           />

@@ -213,7 +213,15 @@ export class VoiceService {
           if (!project) throw new Error('No Google Cloud project for Vertex speech.');
           const token = await this.vertexAuth.accessToken(adc, controller.signal);
           await streamVertexTts(
-            { token, project, model, voice: geminiVoice, text, signal: controller.signal },
+            {
+              token,
+              project,
+              model,
+              voice: geminiVoice,
+              text,
+              style: settings.geminiVoiceStyle,
+              signal: controller.signal,
+            },
             forward
           );
         })();

@@ -12,6 +12,9 @@ export type SttEngineId = z.infer<typeof sttEngineIdSchema>;
 export const transcriptionEngineSchema = z.enum([...sttEngineIds, 'parakeet-local']);
 export type TranscriptionEngine = z.infer<typeof transcriptionEngineSchema>;
 
+/** The longest Google Cloud voice style the settings page accepts. */
+export const GEMINI_VOICE_STYLE_MAX_CHARS = 1_000;
+
 export const voiceSettingsSchema = z.object({
   engine: sttEngineIdSchema,
   /** whisper.cpp `whisper-server` base URL for the local engine. */
@@ -55,6 +58,11 @@ export const voiceSettingsSchema = z.object({
    */
   geminiCustomVoice: z.string(),
   /**
+   * How the Google Cloud voice delivers every sentence ("laid-back and unhurried"), sent with each
+   * request so replies and agent news sound alike. Empty lets the model choose per sentence.
+   */
+  geminiVoiceStyle: z.string(),
+  /**
    * Google Cloud project for the Vertex engines; empty uses the gcloud sign-in's quota project,
    * then `GOOGLE_CLOUD_PROJECT`.
    */
@@ -85,6 +93,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   localVoice: 'Bella',
   geminiVoice: 'Kore',
   geminiCustomVoice: '',
+  geminiVoiceStyle: '',
   vertexProject: '',
   streaming: true,
   handsFree: false,
