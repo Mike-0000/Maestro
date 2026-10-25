@@ -8,7 +8,22 @@ export function shouldApplyAgentStateTransition(
   if (!previous) return true;
   if (previous.status !== next.status) return true;
   if (previous.notificationType !== next.notificationType) return true;
+  // 7 → 6 → 5 subagents left: the agent stays working, but what it is doing changed.
+  if (previous.backgroundAgents !== next.backgroundAgents) return true;
   return false;
+}
+
+/** True when only the subagent count moved: the same turn, not a new one. */
+export function isBackgroundAgentsOnlyChange(
+  previous: TuiAgentState | undefined,
+  next: TuiAgentState
+): boolean {
+  return (
+    previous !== undefined &&
+    previous.status === next.status &&
+    previous.notificationType === next.notificationType &&
+    previous.backgroundAgents !== next.backgroundAgents
+  );
 }
 
 export function eventFromTuiAgentState(state: TuiAgentState): AgentStatusSignal | null {
@@ -22,6 +37,7 @@ export function eventFromTuiAgentState(state: TuiAgentState): AgentStatusSignal 
       title: state.title,
       message: state.message,
       lastAssistantMessage: state.lastAssistantMessage,
+      backgroundAgents: state.backgroundAgents,
     },
   } satisfies Omit<AgentStatusSignal, 'type'>;
 

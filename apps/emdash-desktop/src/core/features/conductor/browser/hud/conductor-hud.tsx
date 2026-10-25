@@ -35,6 +35,7 @@ import { getConductorStore } from '../../contributions/browser/app-stores';
 import { CallCard } from './call-card';
 import { ConductorLogPanel } from './conductor-log-panel';
 import { DictationPanel } from './dictation-panel';
+import { useHudLayoutReserve } from './hud-reserve';
 import { InvestigationCard } from './investigation-card';
 import { LocalUpdateCard } from './local-update-card';
 import { PendingActionCard } from './pending-action-card';
@@ -60,6 +61,8 @@ export const ConductorHud = observer(function ConductorHud() {
   const [showLocalUpdate, setShowLocalUpdate] = useLocalStorage('chorus:show-local-update', true);
   const needsSetup = voice.settings !== null && !voice.settings.onboarded;
   const replyVisible = useRecentlyChanged(conductor.replyAt, REPLY_VISIBLE_MS);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const rowRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const pending = conductor.pending;
@@ -100,9 +103,13 @@ export const ConductorHud = observer(function ConductorHud() {
     dictation.active ||
     dictation.sentTo !== null ||
     showLog;
+  useHudLayoutReserve(rootRef, rowRef, expanded);
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex flex-col items-center gap-2 px-4">
+    <div
+      ref={rootRef}
+      className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex flex-col items-center gap-2 px-4"
+    >
       <PlanPanel />
       {showLocalUpdate && <LocalUpdateCard onHide={() => setShowLocalUpdate(false)} />}
       {setupOpen && <VoiceSetupPanel onClose={() => setSetupOpen(false)} />}
@@ -112,7 +119,8 @@ export const ConductorHud = observer(function ConductorHud() {
           expanded ? 'p-3' : 'p-1.5'
         )}
       >
-        <div className="flex items-center gap-2">
+        {/* The resting bar: its height (with the collapsed padding) is the layout's reserve. */}
+        <div ref={rowRef} className="flex items-center gap-2">
           <CommandBox />
           <MicButton />
           <DictationButton />

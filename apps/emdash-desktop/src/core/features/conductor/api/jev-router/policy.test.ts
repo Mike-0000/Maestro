@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { JevAnswer, JevAnswers } from '../jev';
 import type { RosterAgent } from '../resolver';
-import { catalogKey, NOT_MENTIONED, SENTINEL, type RouterInput } from './catalog';
+import { catalogKey, FOCUSED_PROJECT, NOT_MENTIONED, SENTINEL, type RouterInput } from './catalog';
 import { ConversationContext } from './context';
 import { decideRoute, planMode, routerHints, thresholdsFrom, type RouterOptions } from './policy';
 import { ADDRESSEE, buildRouterRequest } from './questions';
@@ -211,7 +211,25 @@ describe('decideRoute', () => {
     });
   });
 
-  it("starts a blank agent in the focused agent's project when none is named", () => {
+  it('starts a blank agent in the project on screen when the developer says "here"', () => {
+    const request = buildRouterRequest(input('open a new codex agent here'));
+    const decision = decideRoute(
+      answers({
+        intent: choice('spawn_blank', 0.95),
+        provider: choice('Codex', 0.95),
+        project: choice(FOCUSED_PROJECT, 0.95),
+        action: choice(catalogKey.spawn(CODEX, CHORUS), 0.9),
+      }),
+      request.plan,
+      options
+    );
+    expect(decision).toMatchObject({
+      kind: 'act',
+      action: { verb: 'spawn', project: CHORUS, prompt: '', taskName: 'Codex agent' },
+    });
+  });
+
+  it('hands a spawn with no project named to the model, which asks, when several are open', () => {
     const request = buildRouterRequest(input('open a new codex agent'));
     const decision = decideRoute(
       answers({
@@ -222,10 +240,64 @@ describe('decideRoute', () => {
       request.plan,
       options
     );
+    expect(decision).toMatchObject({ kind: 'llm', reason: 'project-not-named', project: null });
+    expect(decision.kind === 'llm' && decision.hints).toContain('ask which project');
+  });
+
+  it('starts in the only open project when none is named', () => {
+    const request = buildRouterRequest({ ...input('open a new codex agent'), projects: [CHORUS] });
+    const decision = decideRoute(
+      answers({
+        intent: choice('spawn_blank', 0.95),
+        provider: choice('Codex', 0.95),
+        action: choice(catalogKey.spawn(CODEX, CHORUS), 0.9),
+      }),
+      request.plan,
+      options
+    );
+    expect(decision).toMatchObject({ kind: 'act', action: { verb: 'spawn', project: CHORUS } });
+  });
+
+  it('settles the project Jev is sure of when the model takes the turn', () => {
+    const request = buildRouterRequest(input('send this to a claude agent for the website'));
+    const decision = decideRoute(
+      answers({
+        intent: choice('spawn_with_brief', 0.82, { send_verbatim: 0.13 }),
+        provider: choice('Claude Code', 0.99),
+        project: choice('Website', 0.89, { [FOCUSED_PROJECT]: 0.09 }),
+        action: choice(catalogKey.spawn(CLAUDE, SITE), 0.47, { 'send_verbatim · Tango': 0.43 }),
+      }),
+      request.plan,
+      options
+    );
     expect(decision).toMatchObject({
-      kind: 'act',
-      action: { verb: 'spawn', project: CHORUS, prompt: '', taskName: 'Codex agent' },
+      kind: 'llm',
+      reason: 'low-intent-confidence',
+      project: { project: SITE },
     });
+    const hints = decision.kind === 'llm' ? decision.hints : '';
+    expect(hints).toContain('Project: Website (89%). Settled');
+    expect(hints).toContain(
+      'Torn between: spawn · Claude Code in Website (47%) or send_verbatim · Tango (43%)'
+    );
+    expect(hints).toContain('not sure enough what the developer wants');
+  });
+
+  it('does not settle a project below the confidence setting', () => {
+    const request = buildRouterRequest(input('start a claude agent on the website maybe'));
+    const decision = decideRoute(
+      answers({
+        intent: choice('spawn_with_brief', 0.6),
+        provider: choice('Claude Code', 0.99),
+        project: choice('Website', 0.6, { Chorus: 0.3 }),
+      }),
+      request.plan,
+      options
+    );
+    expect(decision).toMatchObject({ kind: 'llm', project: null });
+    expect(decision.kind === 'llm' && decision.hints).toContain(
+      'Project: unsure (Website 60%, Chorus 30%)'
+    );
   });
 
   it('re-sends the last message to a corrected target', () => {
@@ -424,7 +496,7 @@ describe('planMode and hints', () => {
       }),
       request.plan
     );
-    expect(hints).toContain('intent status (.90)');
+    expect(hints).toContain('(90%)');
     expect(hints).toContain('"Maple" and "Maple 2"');
   });
 });

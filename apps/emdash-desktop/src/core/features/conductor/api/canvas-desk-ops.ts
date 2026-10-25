@@ -306,6 +306,36 @@ export function deskPhrase(
   return result.kind === 'none' ? null : result;
 }
 
+/**
+ * Where a new agent was asked to go (spawn_agent's `desk`): a desk, or else a region, the canvas
+ * has by that name; else a new one called that, made when the agent arrives. "This desk" is the
+ * desk in view, so asking for it is how the developer keeps an agent where they are.
+ */
+export function spawnDestination(
+  reference: string,
+  context: CanvasRefContext
+): { readonly regionId: string } | { readonly name: string } | { readonly error: string } {
+  const desk = context.desks ? resolveDesk(reference, context) : NO_DESK;
+  if (desk.kind === 'match') return { regionId: desk.id };
+  if (desk.kind === 'clarify') return { error: desk.question };
+  const region = resolveRegionRef(reference, context);
+  if (region.kind === 'clarify') return { error: region.question };
+  const [id] = region.kind === 'match' ? region.ids : [];
+  if (id) return { regionId: id };
+  const name = reference
+    .trim()
+    .replace(/[.!?]+$/, '')
+    .replace(/^(?:the|my|our|a new|an|a|new)\s+/i, '')
+    .replace(new RegExp(`\\s+(?:${DESK_WORD}|region|sub-canvas)$`, 'i'), '')
+    .trim();
+  const spoken = tidy(name);
+  // A bare "desk", or "here" with nowhere in view, names nothing: it must not become a desk.
+  if (!spoken || ONLY_DESK.test(spoken) || HERE.test(spoken)) {
+    return { error: 'Say which desk to put the agent on.' };
+  }
+  return { name };
+}
+
 // ── Commands ─────────────────────────────────────────────────────────────────
 
 type Ids = { ids: string[] } | { error: string };

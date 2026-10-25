@@ -33,6 +33,7 @@ import {
   type CompletionReport,
 } from '@core/primitives/agents/api/completion-report';
 import { log } from '@core/primitives/logging/browser/logger';
+import { playNotificationSound } from '@core/primitives/notifications/browser/notification-sound';
 import { ActivityLedger, formatAgo } from '../api/activity-ledger';
 import {
   describeAdjustableSettings,
@@ -63,6 +64,7 @@ import {
   deskPhrase,
   DESKS_NEED_PRO,
   GATHER_PHRASES,
+  spawnDestination,
   type DeskCommand,
 } from '../api/canvas-desk-ops';
 import { resolveCanvasRef } from '../api/canvas-refs';
@@ -121,6 +123,7 @@ import {
   lookupBypass,
   looksLikeSttArtifact,
 } from '../api/jev-router/trace';
+import { chooseNewWorkProject, type ProjectRef } from '../api/new-work-project';
 import { deliveryNote, describePrompt, withVerbatimRequest } from '../api/prompt-fidelity';
 import { matchInstalledProvider } from '../api/provider-match';
 import {
@@ -202,6 +205,7 @@ import {
   buildCanvasRefContext,
   buildContext,
   buildRoster,
+  currentProject,
   entryForConversation,
   focusedConversationId,
   installedProviders,
@@ -211,9 +215,11 @@ import {
   screenFocus,
   setCallFocus,
   vocabulary,
+  workingStatus,
 } from './roster';
 import {
   agentMetadata,
+  openProjects,
   resolveProjectId,
   resolveProviderId,
   resolveSpokenProject,
@@ -481,6 +487,8 @@ export class ConductorStore {
    * words do not name the action, so each action asks for an explicit yes.
    */
   private turnTainted = false;
+  /** Jev's settled project for this turn's new work (the source of truth over the model's). */
+  private turnProject: ProjectRef | null = null;
   /** A tainted tool call the developer just confirmed: the tool does not ask again. */
   private preconfirmed = false;
   /**
@@ -639,6 +647,7 @@ export class ConductorStore {
       | 'modelTurn'
       | 'turnCancelled'
       | 'turnTainted'
+      | 'turnProject'
       | 'preconfirmed'
       | 'turnReadAgentText'
       | 'speakingReplies'
@@ -702,6 +711,7 @@ export class ConductorStore {
       modelTurn: false,
       turnCancelled: false,
       turnTainted: false,
+      turnProject: false,
       preconfirmed: false,
       turnReadAgentText: false,
       speakingReplies: false,
@@ -877,6 +887,20 @@ export class ConductorStore {
 
   get settings(): ConductorSettings | null {
     return this.status?.settings ?? null;
+  }
+
+  /**
+   * The developer asked to hear only about agents that need them: a finished agent with nothing
+   * for them stays on the HUD, unspoken and without a sound. Attention verdicts must run, since
+   * they are what turns a finished agent that needs the developer into a waiting one.
+   */
+  private get quietCompletions(): boolean {
+    const settings = this.settings ?? DEFAULT_CONDUCTOR_SETTINGS;
+    return (
+      this.configured &&
+      settings.announceCompletions === 'attention_only' &&
+      settings.attentionVerdicts
+    );
   }
 
   /** Words for the speech engine's vocabulary hint. */
@@ -1417,6 +1441,7 @@ export class ConductorStore {
     this.modelTurn = false;
     this.turnCancelled = false;
     this.turnTainted = false;
+    this.turnProject = null;
     this.turnReadAgentText = false;
     this.turnSaidAt = Number.POSITIVE_INFINITY;
     this.turnInvestigations = 0;
@@ -3123,14 +3148,22 @@ export class ConductorStore {
       return { reply: 'Back on the classic canvas. Your desks are regions on it.', speak: false };
     }
     const desks = `${result.desks} desk${result.desks === 1 ? '' : 's'}`;
+    const windows = (count: number) => `${count} loose window${count === 1 ? '' : 's'}`;
+    const sorted =
+      result.sorted > 0 ? `; ${windows(result.sorted)} went to their project's desk` : '';
     const gathered =
       result.gathered > 0
-        ? `; ${result.gathered} loose window${result.gathered === 1 ? '' : 's'} went to ${MAIN_DESK_NAME}`
+        ? sorted
+          ? `, ${result.gathered} to ${MAIN_DESK_NAME}`
+          : `; ${windows(result.gathered)} went to ${MAIN_DESK_NAME}`
         : '';
     const here = canvas.activeDeskId;
     const on = here ? ` You are on ${canvas.windowName(here)}.` : '';
     // Where the loose windows went is not something the eyes can tell.
-    return { reply: `Canvas Pro, ${desks}${gathered}.${on}`, speak: result.gathered > 0 };
+    return {
+      reply: `Canvas Pro, ${desks}${sorted}${gathered}.${on}`,
+      speak: result.gathered + result.sorted > 0,
+    };
   }
 
   private stageAction(
@@ -3452,10 +3485,14 @@ export class ConductorStore {
         this.dropArtifact(source, startedAt);
         return { handled: true };
       case 'llm':
+        this.turnProject = decision.project
+          ? { id: decision.project.project.id, name: decision.project.project.name }
+          : null;
         this.trace('route', undefined, {
           route: 'jev-fallback',
           mode: decision.mode,
           reason: decision.reason,
+          project: decision.project?.project.name ?? null,
         });
         return { handled: false, mode: decision.mode, hints: decision.hints || undefined };
       case 'clarify': {
@@ -3942,6 +3979,60 @@ export class ConductorStore {
     return { reply, completed, tokens };
   }
 
+  /**
+   * The desk or region a new agent was told to go to, by its name on the canvas (made on arrival
+   * when there is none). A gathering desk holds no windows of its own, so it is refused.
+   */
+  private spawnRegionName(reference: string): { name: string } | { error: string } {
+    const destination = spawnDestination(reference, buildCanvasRefContext(this.canvas));
+    if (!('regionId' in destination)) return destination;
+    const region = this.canvas.state.regions[destination.regionId];
+    if (!region) return { error: 'That desk no longer exists.' };
+    if (region.gather) {
+      return { error: `${region.name} only gathers windows from other desks; pick another desk.` };
+    }
+    return { name: region.name };
+  }
+
+  /**
+   * Where this turn's new work goes: Jev's settled project, else the one the model named, else the
+   * only open one. With several open and none named, the outcome asks the model to check with the
+   * developer, conversationally, before anything starts.
+   */
+  private newWorkProject(
+    named: string | undefined,
+    tool: 'spawn_agent' | 'propose_plan'
+  ): { ok: true; id: string; name: string } | { ok: false; outcome: ToolOutcome } {
+    const open = openProjects(currentProject(this.canvas)?.name);
+    const choice = chooseNewWorkProject({ named, settled: this.turnProject, open, tool });
+    switch (choice.kind) {
+      case 'settled':
+        if (choice.overrode !== null) {
+          this.trace('route', undefined, {
+            route: 'project',
+            from: 'jev',
+            used: choice.project.name,
+            modelSaid: choice.overrode,
+          });
+        }
+        return { ok: true, id: choice.project.id, name: choice.project.name };
+      case 'only':
+        return { ok: true, id: choice.project.id, name: choice.project.name };
+      case 'named': {
+        const resolved = resolveSpokenProject(choice.reference, this.focusedEntry()?.projectId);
+        if (!resolved.ok)
+          return { ok: false, outcome: { content: resolved.reason, isError: true } };
+        const name = open.find((project) => project.id === resolved.id)?.name ?? choice.reference;
+        return { ok: true, id: resolved.id, name };
+      }
+      case 'none':
+        return { ok: false, outcome: { content: 'No project is open.', isError: true } };
+      case 'ask':
+        this.trace('route', undefined, { route: 'project', from: 'asked', tool });
+        return { ok: false, outcome: { content: choice.text } };
+    }
+  }
+
   private async executeTool(
     name: string,
     rawInput: unknown,
@@ -4152,16 +4243,22 @@ export class ConductorStore {
         const providerId = provider?.id ?? (await resolveProviderId(spawn.provider));
         let projectId = options.projectId;
         if (!projectId) {
-          const resolved = resolveSpokenProject(spawn.project, this.focusedEntry()?.projectId);
-          if (!resolved.ok) return { content: resolved.reason, isError: true };
-          projectId = resolved.id;
+          const where = this.newWorkProject(spawn.project, 'spawn_agent');
+          if (!where.ok) return where.outcome;
+          projectId = where.id;
         }
         const prompt = options.verbatim
           ? spawn.prompt
           : withVerbatimRequest(spawn.prompt, this.lastUtterance);
         const worktree = spawn.worktree === true;
         const projectName = getProjectManagerStore().projects.get(projectId)?.name ?? null;
-        const where = `${projectName ? ` in ${projectName}` : ''}${worktree ? ' in a new worktree' : ''}`;
+        // Where the developer said to put it; without that it goes to its project's desk.
+        const destination = spawn.desk ? this.spawnRegionName(spawn.desk) : null;
+        if (destination && 'error' in destination) {
+          return { content: destination.error, isError: true };
+        }
+        const regionName = destination?.name ?? null;
+        const where = `${projectName ? ` in ${projectName}` : ''}${worktree ? ' in a new worktree' : ''}${regionName ? ` on ${regionName}` : ''}`;
         const label = `Start ${spokenProviderLabel(providerId)}${where} on “${truncate(spawn.task_name, 60)}” · ${describePrompt(prompt)}`;
         if (!(await this.requestPending(label, confirmKind, { detail: prompt }))) {
           return { content: 'The user cancelled the new agent.', cancelled: true };
@@ -4169,6 +4266,8 @@ export class ConductorStore {
         runInAction(() => (this.activity = worktree ? 'Creating a worktree…' : 'Creating a task…'));
         const conversationId = crypto.randomUUID();
         const name = this.canvas.claimSpokenName(conversationId);
+        // Before the spawn: the window can appear before the task call returns.
+        if (regionName) this.canvas.joinRegionOnArrival(conversationId, regionName);
         const result = await spawnAgentTask({
           projectId,
           providerId: providerId,
@@ -4238,7 +4337,7 @@ export class ConductorStore {
             )
           );
         return {
-          content: `Created task "${spawn.task_name}"${projectName ? ` in project "${projectName}"` : ''} ${worktree ? 'in a new worktree' : 'in the project directory'} with ${prompt.trim() ? `a prompt of ${deliveryNote(spawn.prompt, prompt)}` : 'no prompt, so it waits for its first instruction'}; the agent is starting. It will appear on the canvas as ${name}.`,
+          content: `Created task "${spawn.task_name}"${projectName ? ` in project "${projectName}"` : ''} ${worktree ? 'in a new worktree' : 'in the project directory'} with ${prompt.trim() ? `a prompt of ${deliveryNote(spawn.prompt, prompt)}` : 'no prompt, so it waits for its first instruction'}; the agent is starting. It will appear on the canvas as ${name}${regionName ? ` on ${regionName}` : ''}.`,
           subject: { conversationId: result.conversationId },
         };
       }
@@ -4274,12 +4373,17 @@ export class ConductorStore {
             sizes = interpretSubtaskSizes(outcome.decision.answers, plan.subtasks.length);
           }
         }
+        const where = this.newWorkProject(plan.project, 'propose_plan');
+        if (!where.ok) return where.outcome;
         const providers = await installedProviders();
-        const proposal = this.plans.propose(plan, {
-          providers,
-          maxAgents: settings?.maxAgentsPerPlan ?? 4,
-          preferredProjectId: this.focusedEntry()?.projectId,
-        });
+        const proposal = this.plans.propose(
+          { ...plan, project: where.name },
+          {
+            providers,
+            maxAgents: settings?.maxAgentsPerPlan ?? 4,
+            preferredProjectId: this.focusedEntry()?.projectId,
+          }
+        );
         if (!proposal.ok) return { content: proposal.reason, isError: true };
         this.plans.setSizes(sizes);
         // A plan made in a tainted turn waits for the developer, whatever the setting says.
@@ -4766,6 +4870,11 @@ export class ConductorStore {
       };
     }
     await this.updateSettings(change.patch);
+    if (change.patch.announceCompletions === 'attention_only' && !this.quietCompletions) {
+      return {
+        content: `${change.label}: done. It takes effect only while attention_verdicts is on and your model has a key, since those tell a finished agent from one that needs the developer; until then every finished agent is still announced.`,
+      };
+    }
     return { content: `${change.label}: done.` };
   }
 
@@ -5168,10 +5277,16 @@ export class ConductorStore {
       : reported;
     const followUp = this.canFollowUp() ? narrate : [];
     const handled = new Set([...(gated?.handled ?? []), ...followUp]);
+    const unhandled = fresh.filter((entry) => !handled.has(entry));
+    // A finished agent nobody read further was judged done by its attention verdict: when
+    // completions are quiet it goes to the HUD, while waiting agents are still announced.
+    const quiet = this.quietCompletions ? unhandled.filter(isDone) : [];
     const text = this.fixedAnnouncement(
-      fresh.filter((entry) => !handled.has(entry)),
+      unhandled.filter((entry) => !quiet.includes(entry)),
       reports
     );
+    const quietText = this.fixedAnnouncement(quiet, reports);
+    if (quietText) this.showQuietly(quietText, gated?.interactionId);
     const announcement = [...spoken, text].filter(Boolean).join(' ');
     if (announcement) this.notify(announcement, gated?.interactionId);
     if (followUp.length > 0) await this.followUpCompletions(followUp, reports);
@@ -5205,6 +5320,10 @@ export class ConductorStore {
       }
       const text = this.fixedAnnouncement([entry], reports);
       if (!text) continue;
+      if (this.quietCompletions && isDone(entry)) {
+        this.showQuietly(text);
+        continue;
+      }
       if (entry.notificationType === 'permission_prompt') {
         const fingerprint = await this.promptOf(entry);
         this.offerCall(entry, 'permission', text, fingerprint ? { fingerprint } : {});
@@ -5221,7 +5340,9 @@ export class ConductorStore {
         continue;
       }
       const text = this.fixedAnnouncement([entry], reports);
-      if (text) this.offerCall(entry, isDone(entry) ? 'completion' : 'attention', text);
+      if (!text) continue;
+      if (this.quietCompletions && isDone(entry)) this.showQuietly(text);
+      else this.offerCall(entry, isDone(entry) ? 'completion' : 'attention', text);
     }
   }
 
@@ -5307,17 +5428,20 @@ export class ConductorStore {
         return;
       }
       handled.push(entry);
-      if (verdict.kind === 'speak') {
-        spoken.push(verdict.text);
-        said.set(entry.conversationId, verdict.text);
-        this.narratedAt.set(entry.conversationId, Date.now());
-      } else {
-        this.trace('reply', verdict.hud, { surface: 'hud', source: 'silent' }, interactionId);
-        runInAction(() => {
-          this.reply = verdict.hud;
-          this.replyAt = Date.now();
-        });
+      if (verdict.kind === 'silent') {
+        this.showQuietly(verdict.hud, interactionId);
+        return;
       }
+      // A plain result is news the developer asked not to be called for: the HUD shows it.
+      if (this.quietCompletions && verdict.reason === 'done_with_result') {
+        this.showQuietly(verdict.text, interactionId);
+        return;
+      }
+      spoken.push(verdict.text);
+      said.set(entry.conversationId, verdict.text);
+      this.narratedAt.set(entry.conversationId, Date.now());
+      // Routing dropped this agent's sound: what Jev found it needs calls the developer here.
+      if (this.quietCompletions) this.callDeveloper();
     });
     return { spoken, said, handled, llm, interactionId };
   }
@@ -5414,6 +5538,9 @@ export class ConductorStore {
     });
     const names = agents.map((agent) => agent.name);
     const fallback = this.fixedAnnouncement(entries, reports) ?? '';
+    // Every agent here finished and its verdict found nothing it needs: speak only what the
+    // model finds the developer must hear.
+    const attentionOnly = this.quietCompletions && entries.every(isDone);
     const startedAt = performance.now();
     this.interactionId = crypto.randomUUID();
     this.followUpActive = true;
@@ -5437,7 +5564,10 @@ export class ConductorStore {
       );
       const messages: Anthropic.Beta.BetaMessageParam[] = [
         ...this.history,
-        { role: 'user', content: conductorUserMessage(context, completionTurnText(agents)) },
+        {
+          role: 'user',
+          content: conductorUserMessage(context, completionTurnText(agents, { attentionOnly })),
+        },
       ];
       const result = await this.modelLoop('command', messages, actions, FOLLOW_UP_MAX_ITERATIONS);
       tokens = result.tokens;
@@ -5465,20 +5595,25 @@ export class ConductorStore {
       // A first report the developer never heard still gets the fixed sentence (it finished,
       // and where its app is); a restated one does not get a bare "finished" again.
       const neverHeard = entries.some((entry) => !this.narratedAt.has(entry.conversationId));
-      const quiet = noNews && (heardLately || (ownWords.length === 0 && !neverHeard));
-      const spoken = quiet
-        ? `${names.join(' and ')}: finished a turn with nothing new.`
-        : noNews
+      // Asked to hear only what needs them, the developer hears nothing unless the model said
+      // so; when its turn failed, the verdict that these agents are done stands.
+      const quiet = attentionOnly
+        ? noNews || !reply
+        : noNews && (heardLately || (ownWords.length === 0 && !neverHeard));
+      const spoken = attentionOnly
+        ? quiet
           ? ownWords.join(' ') || fallback
-          : reply || ownWords.join(' ') || fallback;
+          : reply
+        : quiet
+          ? `${names.join(' and ')}: finished a turn with nothing new.`
+          : noNews
+            ? ownWords.join(' ') || fallback
+            : reply || ownWords.join(' ') || fallback;
       if (quiet) {
-        this.trace('reply', spoken, { surface: 'hud', source: 'silent' });
-        runInAction(() => {
-          this.reply = spoken;
-          this.replyAt = now;
-        });
+        if (spoken) this.showQuietly(spoken);
       } else if (spoken) {
         for (const entry of entries) this.narratedAt.set(entry.conversationId, now);
+        if (attentionOnly) this.callDeveloper();
         deliver(spoken, this.interactionId);
       }
       this.log({
@@ -5582,6 +5717,24 @@ export class ConductorStore {
       if (Date.now() >= deadline) throw new Error('it stayed at a prompt that needs you.');
       await new Promise((resolve) => setTimeout(resolve, REQUEST_REPLY_POLL_MS));
     }
+  }
+
+  /** Puts news on the HUD only: nothing is spoken and nothing sounds. */
+  private showQuietly(text: string, interactionId?: string | null): void {
+    this.trace('reply', text, { surface: 'hud', source: 'silent' }, interactionId ?? undefined);
+    runInAction(() => {
+      this.reply = text;
+      this.replyAt = Date.now();
+    });
+  }
+
+  /**
+   * The attention sound for a finished agent the conductor judged to need the developer. While
+   * completions are quiet, routing drops every finished agent's own sound, so this is its call.
+   */
+  private callDeveloper(): void {
+    // One key for every agent, so a batch that needs the developer sounds once.
+    playNotificationSound('needs_attention', 'conductor-attention');
   }
 
   private notify(text: string, interactionId?: string | null): void {
@@ -6176,7 +6329,7 @@ function spokenStatus(entry: AgentTileEntry): string {
         ? 'waiting on a permission prompt'
         : 'waiting for you';
     case 'working':
-      return 'working';
+      return workingStatus(entry);
     case 'completed':
       return 'done';
     case 'error':

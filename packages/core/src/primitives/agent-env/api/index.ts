@@ -125,15 +125,32 @@ export const AGENT_ENV_VARS = [
   'ZAI_API_KEY',
 ] as const;
 
+/**
+ * Windows system locations. Without `SystemDrive` and `ProgramData`, the shell resolves the
+ * ProgramData known folder to the unexpanded, relative `%SystemDrive%\ProgramData`, and any
+ * agent or tool that touches it creates a literal `%SystemDrive%` folder in the project.
+ */
 const WINDOWS_AGENT_ENV_VARS = [
   'TEMP',
   'TMP',
   'SystemRoot',
+  'SystemDrive',
   'windir',
   'ComSpec',
   'PATHEXT',
   'LOCALAPPDATA',
   'USERPROFILE',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'ProgramData',
+  'ALLUSERSPROFILE',
+  'PUBLIC',
+  'ProgramFiles',
+  'ProgramFiles(x86)',
+  'ProgramW6432',
+  'CommonProgramFiles',
+  'CommonProgramFiles(x86)',
+  'CommonProgramW6432',
 ] as const;
 
 const DISPLAY_ENV_VARS = [

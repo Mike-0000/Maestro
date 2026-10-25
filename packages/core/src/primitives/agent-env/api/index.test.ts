@@ -42,6 +42,36 @@ describe('buildAllowlistedAgentEnv', () => {
     expect(env).not.toHaveProperty('unsafe_env');
   });
 
+  it('keeps the Windows system locations the shell expands known folders from', () => {
+    const env = buildAllowlistedAgentEnv(
+      {
+        SYSTEMDRIVE: 'C:',
+        PROGRAMDATA: 'C:\\ProgramData',
+        allusersprofile: 'C:\\ProgramData',
+        PUBLIC: 'C:\\Users\\Public',
+        'PROGRAMFILES(X86)': 'C:\\Program Files (x86)',
+        ProgramFiles: 'C:\\Program Files',
+        HOMEDRIVE: 'C:',
+        HOMEPATH: '\\Users\\ada',
+      },
+      { platform: 'windows' }
+    );
+
+    expect(env).toMatchObject({
+      SystemDrive: 'C:',
+      ProgramData: 'C:\\ProgramData',
+      ALLUSERSPROFILE: 'C:\\ProgramData',
+      PUBLIC: 'C:\\Users\\Public',
+      'ProgramFiles(x86)': 'C:\\Program Files (x86)',
+      ProgramFiles: 'C:\\Program Files',
+      HOMEDRIVE: 'C:',
+      HOMEPATH: '\\Users\\ada',
+    });
+    expect(
+      buildAllowlistedAgentEnv({ SystemDrive: 'C:' }, { platform: 'posix' })
+    ).not.toHaveProperty('SystemDrive');
+  });
+
   it('prefers an exact canonical spelling over duplicate casing variants', () => {
     const env = buildAllowlistedAgentEnv(
       {

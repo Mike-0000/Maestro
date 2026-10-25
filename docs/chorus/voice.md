@@ -344,6 +344,27 @@ your request, or the model call fails, you get the fixed sentence instead, which
 reported app URL. Turn it off with **Report what finished agents said** in Settings → Voice &
 Conductor.
 
+#### Only what needs you
+
+Say "don't notify me when things don't need my attention" (or "only tell me when an agent needs
+me") and the conductor sets `announce_completions` to `attention_only`; "tell me about everything
+again" sets it back to `all`. It is a setting, not a standing instruction, because whether a
+finished agent is spoken and sounds is decided in Maestro, not in the conductor's reply. The switch
+is also **Only tell me when an agent needs me** in Settings → Voice & Conductor.
+
+With it on, a finished agent that the attention verdict found to need nothing from you shows on
+the HUD only. It is not read out, and its notification sound, desktop notification and phone push
+are dropped (it still appears in the notification feed). Agents waiting for you, at a permission
+prompt, or ending on a question they cannot go on without arrive as attention notifications and are
+announced and sound as before. The conductor can still call you for a finished agent: when Jev
+finds its report asks a question or says it is stuck, or the follow-up turn finds something you
+must decide or do, that report is spoken with the attention sound (under your notification sound
+settings). A plain result, a progress note, or a follow-up turn that fails stays on the HUD.
+
+It takes effect only while **Let the conductor decide who needs you** is on and the conductor has a
+key, since those verdicts are what tell a finished agent from one that needs you. Until then every
+finished agent is announced as before.
+
 Codex's notify hook sends no reply text, and neither does any hook without
 `last_assistant_message`. For these terminal agents Chorus reads the last 2,000 characters of the
 agent's terminal instead, about one screen, where the TUI prints its closing message. Box-drawing
@@ -646,6 +667,25 @@ OpenRouter account. Chorus calls OpenRouter's OpenAI-compatible `POST /api/v1/au
 OpenRouter and Google. Because OpenRouter may buffer audio before the first byte, Chorus waits up
 to 8 seconds before falling back to the Windows voice.
 
+All four Gemini engines speak in a prebuilt voice (Kore, Puck, Aoede, Zephyr) unless you paste a
+**Custom Gemini voice** id, such as a `voice_…` id from Google AI Studio's voice design or a
+`voicekey_…` replicated voice. When set, the id replaces the prebuilt voice for every Gemini
+engine. Clear the field to go back to the prebuilt voice.
+
+A voice made with voice design belongs to the Google Cloud project it was made in, so OpenRouter
+and Gemini API keys cannot speak with it. For those voices choose **Gemini 3.8 Flash via Google
+Cloud** or **Flash-Lite via Google Cloud**. They call Vertex AI
+(`aiplatform.googleapis.com/v1beta1/projects/<project>/locations/global/.../:streamGenerateContent`)
+with your gcloud application default credentials: run
+`gcloud auth application-default login` once. Chorus reads only `authorized_user` credentials
+(from `GOOGLE_APPLICATION_CREDENTIALS`, `CLOUDSDK_CONFIG`, or gcloud's default folder), exchanges
+the refresh token for an access token in the main process, and caches it until shortly before it
+expires. **Google Cloud project** picks the project that owns the voices; empty uses the sign-in's
+quota project, then `GOOGLE_CLOUD_PROJECT`. Usage is billed to that project.
+
+When cloud speech fails, the main log records `voice: speech synthesis failed` with the engine
+and the error's status (never the reply text or a key) before Chorus uses the Windows voice.
+
 For developers, `pnpm --dir apps/emdash-desktop run voice:model` downloads the model for local
 development. `electron-builder` does this automatically when packaging and verifies the pinned
 SHA-256 before including the model in every installer; end users never need to run that command.
@@ -766,6 +806,13 @@ destructive action.
 
 **Fast verbatim routing** (settings, on by default) is the switch for direct sends and starts.
 Turn it off to send those through Claude.
+
+New work always lands in a project you named or meant. When Jev reads the project at **Jev
+confidence to act** or above, that project is settled: a new agent or plan goes there even when
+Claude takes the turn and leaves the project out or names another. "Here" and "this project" mean
+the project on screen. When you named none and several projects are open, nothing starts and
+nothing is guessed from focus: the conductor asks "Which project, Chorus or Website?" and starts
+the agent as soon as you answer. With one project open, it just uses that one.
 
 ### Completion reports
 

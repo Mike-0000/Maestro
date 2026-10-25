@@ -1,4 +1,6 @@
 import type {
+  BackgroundWork,
+  BackgroundWorkKind,
   CanonicalHookEvent,
   NotificationType,
 } from '@emdash/core/services/agent-plugins/api/plugins';
@@ -53,31 +55,54 @@ function parseClaudeStatusEvent(
   return event;
 }
 
+/**
+ * How Claude's `background_tasks[].type` labels bear on completion. Claude reports a friendly
+ * label (2.1.310: local_agent → 'subagent', local_workflow → 'workflow', local_bash → 'shell',
+ * monitor_mcp and monitor_ws → 'monitor', mcp_task → 'MCP task', in_process_teammate →
+ * 'teammate', remote_agent → 'cloud session') and the raw discriminant for types it has no
+ * label for.
+ *
+ * Teammates and cloud sessions are not 'agent' work although they are agents: an idle teammate
+ * stays `running` between assignments, and a cloud session can be long-running (PR autofix), so
+ * holding on them would pin the lead at working for good. Unlisted types count as 'process' for
+ * the same reason: a wrong 'process' can only end a wait early, a wrong 'agent' never ends it.
+ */
+const CLAUDE_TASK_KINDS = new Map<string, BackgroundWorkKind>([
+  ['subagent', 'agent'],
+  ['workflow', 'agent'],
+  ['shell', 'process'],
+  ['monitor', 'process'],
+  ['MCP task', 'process'],
+  ['teammate', 'process'],
+  ['cloud session', 'process'],
+]);
+
 /** Claude's own bookkeeping tasks; they never hand a result back to the conversation. */
 const CLAUDE_HOUSEKEEPING_TASK_TYPES = new Set(['dream', 'auto-mode scan', 'memory import']);
 
 const CLAUDE_IN_FLIGHT_TASK_STATUSES = new Set(['running', 'pending']);
 
 /**
- * Ids of the work that will wake this session: `background_tasks` (shells, subagents,
- * workflows, monitors) and one-shot `session_crons` (ScheduleWakeup, `/loop`). Recurring crons
- * are excluded: a standing schedule does not mean the current request is unfinished.
+ * The work that will wake this session: `background_tasks` (shells, subagents, workflows,
+ * monitors) and one-shot `session_crons` (ScheduleWakeup, `/loop`). Recurring crons are
+ * excluded: a standing schedule does not mean the current request is unfinished.
  */
-function claudeBackgroundWork(body: Record<string, unknown>): string[] {
-  const ids: string[] = [];
+function claudeBackgroundWork(body: Record<string, unknown>): BackgroundWork[] {
+  const work: BackgroundWork[] = [];
   for (const task of recordList(body.background_tasks)) {
     if (typeof task.id !== 'string') continue;
     if (typeof task.type === 'string' && CLAUDE_HOUSEKEEPING_TASK_TYPES.has(task.type)) continue;
     if (typeof task.status === 'string' && !CLAUDE_IN_FLIGHT_TASK_STATUSES.has(task.status)) {
       continue;
     }
-    ids.push(`task:${task.id}`);
+    const kind = typeof task.type === 'string' ? CLAUDE_TASK_KINDS.get(task.type) : undefined;
+    work.push({ id: `task:${task.id}`, kind: kind ?? 'process' });
   }
   for (const cron of recordList(body.session_crons)) {
     if (typeof cron.id !== 'string' || cron.recurring !== false) continue;
-    ids.push(`cron:${cron.id}`);
+    work.push({ id: `cron:${cron.id}`, kind: 'wakeup' });
   }
-  return ids;
+  return work;
 }
 
 function recordList(value: unknown): Record<string, unknown>[] {

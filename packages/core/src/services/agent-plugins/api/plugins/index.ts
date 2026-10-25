@@ -83,6 +83,8 @@ export type {
   CommandContext,
 } from '#services/agent-plugins/api/plugins/capabilities/prompt';
 export type {
+  BackgroundWork,
+  BackgroundWorkKind,
   CanonicalHookEvent,
   HookEvent,
   HookRegistration,

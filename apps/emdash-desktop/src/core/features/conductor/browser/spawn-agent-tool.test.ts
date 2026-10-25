@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
     conversationId: 'conv-1',
     promptDeferred: false,
   })),
+  openProjects: vi.fn(() => [{ id: 'proj', name: 'Chorus' }]),
 }));
 
 vi.mock('../api/browser/client', () => ({
@@ -42,6 +43,7 @@ vi.mock('@core/primitives/logging/browser/logger', () => ({
 }));
 vi.mock('./spawn', () => ({
   agentMetadata: vi.fn(async () => []),
+  openProjects: mocks.openProjects,
   resolveProjectId: vi.fn(() => 'proj'),
   resolveProviderId: vi.fn(async (reference: string) =>
     /^claude( code)?$/i.test(reference.trim()) ? 'claude' : reference
@@ -54,6 +56,7 @@ vi.mock('./focus-spawned-agent', () => ({ focusSpawnedAgent: vi.fn(() => () => {
 vi.mock('./roster', async (importOriginal) => ({
   ...(await importOriginal<typeof Roster>()),
   installedProviders: vi.fn(async () => []),
+  currentProject: vi.fn(() => null),
 }));
 
 function setup() {
@@ -174,5 +177,34 @@ describe('spawn_agent routing', () => {
     expect(mocks.spawnAgentTask).toHaveBeenCalledWith(expect.objectContaining({ prompt: '' }));
     expect(outcome.content).toContain('with no prompt, so it waits for its first instruction');
     expect(requestPending.mock.calls[0]![0]).toContain('no prompt');
+  });
+
+  it('asks which project, without starting anything, when several are open and none is named', async () => {
+    mocks.openProjects.mockReturnValueOnce([
+      { id: 'proj', name: 'Chorus' },
+      { id: 'zoo', name: 'Planet Zoo 2 Mods' },
+    ]);
+    const { store, requestPending } = setup();
+    const outcome = await store['executeTool']('spawn_agent', spawnInput);
+
+    expect(outcome.isError).toBeUndefined();
+    expect(outcome.content).toContain('"Which project, Chorus or Planet Zoo 2 Mods?"');
+    expect(mocks.spawnAgentTask).not.toHaveBeenCalled();
+    expect(requestPending).not.toHaveBeenCalled();
+  });
+
+  it("starts in Jev's settled project even when the model named another", async () => {
+    mocks.openProjects.mockReturnValueOnce([
+      { id: 'proj', name: 'Chorus' },
+      { id: 'zoo', name: 'Planet Zoo 2 Mods' },
+    ]);
+    const { store } = setup();
+    store['turnProject'] = { id: 'zoo', name: 'Planet Zoo 2 Mods' };
+    await store['executeTool']('spawn_agent', { ...spawnInput, project: 'Chorus' });
+
+    expect(mocks.spawnAgentTask).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: 'zoo' })
+    );
+    expect(resolveSpokenProject).not.toHaveBeenCalled();
   });
 });

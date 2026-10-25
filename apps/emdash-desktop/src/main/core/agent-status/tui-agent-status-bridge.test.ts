@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   cacheSignal: vi.fn(async () => {}),
   loadActiveIds: vi.fn(async (_host: HostRef) => [] as string[]),
   resetToIdle: vi.fn(async () => {}),
+  updateBackgroundAgents: vi.fn(async () => {}),
 }));
 
 vi.mock('./agent-status-service', () => ({
@@ -33,6 +34,7 @@ vi.mock('./agent-status-service', () => ({
     applySignal: mocks.applySignal,
     cacheSignal: mocks.cacheSignal,
     resetToIdle: mocks.resetToIdle,
+    updateBackgroundAgents: mocks.updateBackgroundAgents,
   },
 }));
 vi.mock('@main/lib/logger', () => ({ log: { warn: vi.fn() } }));
@@ -105,6 +107,30 @@ describe('TuiAgentStatusBridge', () => {
       expect(fixture.client.mock.calls.length).toBeGreaterThan(callsBeforeRecovery)
     );
     expect(fixture.client).toHaveBeenLastCalledWith(LOCAL_HOST_REF);
+    await fixture.dispose();
+  });
+
+  it('sends a change in the awaited subagent count as an update, not a new turn', async () => {
+    const runtime = createRuntime({ local: state('local', 'working') });
+    const fixture = createBridge(new Map([[formatHostRef(LOCAL_HOST_REF), runtime]]));
+    mocks.loadActiveIds.mockResolvedValue([]);
+    await fixture.bridge.attachHost(LOCAL_HOST_REF);
+
+    runtime.agentStates.model.states.list.set({
+      local: { ...state('local', 'working'), awaitingBackgroundWork: true, backgroundAgents: 6 },
+    });
+    await vi.waitFor(() =>
+      expect(mocks.updateBackgroundAgents).toHaveBeenCalledWith(
+        expect.objectContaining({ conversationId: 'local', payload: { backgroundAgents: 6 } })
+      )
+    );
+    expect(mocks.applySignal).not.toHaveBeenCalled();
+
+    runtime.agentStates.model.states.list.set({ local: state('local', 'completed') });
+    await vi.waitFor(() =>
+      expect(mocks.applySignal).toHaveBeenCalledWith(expect.objectContaining({ type: 'stop' }))
+    );
+    expect(mocks.updateBackgroundAgents).toHaveBeenCalledTimes(1);
     await fixture.dispose();
   });
 });

@@ -160,7 +160,8 @@ export class TuiAgentsRuntime {
       },
       (conversationId) => {
         this.lifecycle.saveIntent(conversationId);
-      }
+      },
+      deps.logger
     );
     this.hookInstaller = new AgentHookInstaller({ agentHost: deps.agentHost, logger: deps.logger });
     this.workspaceTrust = new TuiWorkspaceTrust({

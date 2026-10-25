@@ -79,6 +79,16 @@ function availableProjects() {
   );
 }
 
+/** Open projects by id and name, `first` (by name) leading when it is open. */
+export function openProjects(first?: string): { id: string; name: string }[] {
+  const open = availableProjects().map((project) => ({
+    id: project.id,
+    name: project.name ?? project.id,
+  }));
+  const lead = open.filter((project) => project.name === first);
+  return [...lead, ...open.filter((project) => project.name !== first)];
+}
+
 /**
  * The project a spoken reference names, or why it names none. With no reference: the preferred
  * project when it is open, else the first. A reference that matches no open project, or several,

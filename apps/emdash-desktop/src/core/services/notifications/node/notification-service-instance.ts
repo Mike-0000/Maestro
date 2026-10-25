@@ -1,5 +1,6 @@
 import type { AgentEvent } from '@core/primitives/agents/api';
 import type { NotificationSettings } from '@core/primitives/app-settings/api';
+import { quietCompletions } from '@core/primitives/notifications/api/quiet-completions';
 import type { AppDb } from '@core/services/app-db/node/db';
 import type { EmitNotificationDelivery, NotificationSink } from '../api/ports';
 import { NotificationService, type NotificationServiceDeps } from './notification-service';
@@ -29,6 +30,7 @@ export function createNotificationService(
       return {
         appFocused: deps.isAppFocused(),
         settings: await deps.settings.get('notifications'),
+        quietCompletions: await quietCompletions(),
       };
     },
   });

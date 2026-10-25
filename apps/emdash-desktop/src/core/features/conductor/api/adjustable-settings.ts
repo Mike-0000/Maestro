@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { completionAnnouncementModes } from './announcements';
 import { callModes } from './calls';
 // Type only: the contract reaches the tool list, which names these settings.
 import type { ConductorSettings } from './contract';
@@ -36,6 +37,12 @@ export const ADJUSTABLE_SETTINGS = {
     key: 'attentionVerdicts',
     schema: onOff,
     about: 'Judge from a finished reply whether the agent needs the developer.',
+  },
+  announce_completions: {
+    key: 'announceCompletions',
+    schema: z.enum(completionAnnouncementModes),
+    about:
+      'Which finished agents are announced: all, or attention_only (only those that need the developer are spoken and sound; the rest show on screen). attention_only needs attention_verdicts on.',
   },
   agent_requests: {
     key: 'agentRequests',

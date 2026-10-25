@@ -69,8 +69,12 @@ interface WorkspaceContentLayoutProps {
 }
 
 export function WorkspaceContentLayout({ titlebarSlot, mainPanel }: WorkspaceContentLayoutProps) {
+  // The bottom padding keeps views (terminals, task views, the canvas) clear of the floating
+  // conductor HUD's resting bar; `useHudLayoutReserve` in the conductor HUD sets the property
+  // (HUD_RESERVE_PROPERTY) and leaves it unset when no HUD is mounted. The sidebar is not padded:
+  // the bar is centered on the window and meets the sidebar only at narrow widths.
   return (
-    <div className="flex h-full flex-col bg-background text-foreground">
+    <div className="flex h-full flex-col bg-background pb-[var(--conductor-hud-reserve,0px)] text-foreground">
       {titlebarSlot}
       <div className="flex-1 overflow-hidden">
         <div className="flex h-full flex-col overflow-hidden">{mainPanel}</div>

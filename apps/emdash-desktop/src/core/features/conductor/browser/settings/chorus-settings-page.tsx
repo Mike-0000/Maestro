@@ -876,6 +876,21 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
           }
         />
         <SettingsRow
+          label="Only tell me when an agent needs me"
+          description="A finished agent the conductor judges to need nothing from you shows on screen only: it is not read out, and it makes no notification sound, desktop notification or phone alert. Agents waiting for you, stuck, or asking a question are still announced with the attention sound. Needs the setting above. You can also say it to the conductor: “don’t notify me unless it needs me”."
+          control={
+            <Switch
+              checked={conductorSettings?.announceCompletions === 'attention_only'}
+              disabled={!conductorSettings || conductorSettings.attentionVerdicts === false}
+              onCheckedChange={(quiet) =>
+                void conductor.updateSettings({
+                  announceCompletions: quiet ? 'attention_only' : 'all',
+                })
+              }
+            />
+          }
+        />
+        <SettingsRow
           label="Let agents ask the conductor"
           description="Claude Code and Codex agents on this computer can ask the conductor to start another agent, pass a message to one, ask you a question, or tell you something by voice. The conductor decides requests to start or message an agent, or asks you when it is unsure; you can cancel each one as it starts. Off: every request is refused."
           control={
@@ -1860,6 +1875,18 @@ const CanvasSettings = observer(function CanvasSettings() {
         }
       />
       <SettingsRow
+        label="Canvas Pro: one desk per project"
+        description="New agents and app browsers go to their project's desk, not the desk you are looking at. If the project has no desk yet, one is made and named after it; switching to Canvas Pro sorts loose windows the same way. Say where an agent should go to put it elsewhere. Turn off to open them on the desk in view."
+        control={
+          <Switch
+            checked={canvas.layoutSettings.placeNewWindowsOnProjectDesk}
+            onCheckedChange={(next) =>
+              canvas.setLayoutSettings({ placeNewWindowsOnProjectDesk: next })
+            }
+          />
+        }
+      />
+      <SettingsRow
         label="Group plan agents"
         description="Put the agents a plan starts into one region named after the plan."
         control={
@@ -1871,7 +1898,7 @@ const CanvasSettings = observer(function CanvasSettings() {
       />
       <SettingsRow
         label="New windows join the region in view"
-        description="When you are zoomed into a region or have it on the stage, new agents and app browsers go there instead of the project's main sub-canvas."
+        description="When you are zoomed into a region or have it on the stage, new agents and app browsers go there instead of the project's main sub-canvas. On Canvas Pro, one desk per project takes precedence while it is on."
         control={
           <Switch
             checked={canvas.layoutSettings.placeNewAgentsInCurrentRegion}

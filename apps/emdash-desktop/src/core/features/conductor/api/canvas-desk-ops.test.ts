@@ -9,6 +9,7 @@ import {
   moveToDesk,
   previousDesk,
   resolveDesk,
+  spawnDestination,
 } from './canvas-desk-ops';
 import type { CanvasDeskContext, CanvasEntity, CanvasRefContext } from './canvas-refs';
 import { stepsToOps } from './canvas-tool-ops';
@@ -163,6 +164,29 @@ describe('desk references', () => {
     // Says desk, names none: left to the usual resolver (it may be a window called that).
     expect(deskPhrase('the billing desk', context())).toBeNull();
     expect(deskPhrase('the desktop app', context())).toBeNull();
+  });
+});
+
+describe('spawn destinations', () => {
+  it('names a desk, the one in view, or a region by its name', () => {
+    expect(spawnDestination('the Main desk', context())).toEqual({ regionId: 'region:main' });
+    expect(spawnDestination('this desk', context())).toEqual({ regionId: 'region:review' });
+    expect(spawnDestination('Pair', context())).toEqual({ regionId: 'region:pair' });
+    expect(spawnDestination('Pair', classic)).toEqual({ regionId: 'region:pair' });
+  });
+
+  it('names a new desk after what was said, without the desk word', () => {
+    expect(spawnDestination('the Frontend desk', context())).toEqual({ name: 'Frontend' });
+    expect(spawnDestination('a new space', context())).toEqual({
+      error: 'Say which desk to put the agent on.',
+    });
+    expect(spawnDestination('a new Docs desk', context())).toEqual({ name: 'Docs' });
+  });
+
+  it('never makes a desk called "here" when nothing is in view', () => {
+    expect(spawnDestination('here', { ...classic, currentRegion: null })).toEqual({
+      error: 'Say which desk to put the agent on.',
+    });
   });
 });
 

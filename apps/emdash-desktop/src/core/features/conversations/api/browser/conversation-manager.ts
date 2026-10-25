@@ -281,6 +281,8 @@ export class ConversationManagerStore implements Disposable {
       const turnEnded = payload.status === 'completed' || payload.status === 'awaiting-input';
       conversationStore.completionSummary = turnEnded ? (payload.completionSummary ?? null) : null;
       conversationStore.completionReport = turnEnded ? (payload.completionReport ?? null) : null;
+      conversationStore.backgroundAgents =
+        payload.status === 'working' ? (payload.backgroundAgents ?? null) : null;
     });
   }
 
@@ -637,6 +639,8 @@ export class ConversationStore {
   completionSummary: string | null = null;
   /** That turn's final reply, redacted and bounded; null once the agent moves on. */
   completionReport: CompletionReport | null = null;
+  /** Subagents the agent is waiting on while working; null for none or once it stops working. */
+  backgroundAgents: number | null = null;
 
   constructor(conversation: Conversation) {
     this.data = conversation;
@@ -649,6 +653,7 @@ export class ConversationStore {
       lastNotificationType: observable,
       completionSummary: observable,
       completionReport: observable.ref,
+      backgroundAgents: observable,
       setStatus: action,
       setAwaitingInput: action,
       setWorking: action,
@@ -682,6 +687,7 @@ export class ConversationStore {
       this.completionSummary = null;
       this.completionReport = null;
     }
+    if (status !== 'working') this.backgroundAgents = null;
   }
 
   setAwaitingInput(notificationType: NotificationType) {
