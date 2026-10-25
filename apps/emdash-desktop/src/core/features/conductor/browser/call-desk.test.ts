@@ -1,10 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  announcementDeadlineMs,
+  ANNOUNCEMENT_TTL_MS,
   callUrgency,
   LATER_MS,
+  MAX_WAITING_ANNOUNCEMENTS,
   nextCall,
   promptFingerprint,
+  queueAnnouncement,
   SPOKEN_CALLS_PER_MINUTE,
+  type Announcement,
   type Call,
   type CallMode,
 } from '../api/calls';
@@ -23,10 +28,27 @@ function call(overrides: Partial<Call> = {}): Call {
   };
 }
 
+function news(overrides: Partial<Announcement> = {}): Announcement {
+  return {
+    id: overrides.id ?? `a-${Math.random().toString(36).slice(2, 8)}`,
+    text: 'Atlas needs you.',
+    source: 'attention',
+    spoken: true,
+    at: Date.now(),
+    interactionId: 'trace-1',
+    agents: ['conv-atlas'],
+    ...overrides,
+  };
+}
+
 function harness(options: { mode?: CallMode; windowMs?: number } = {}) {
   const state = {
     mode: options.mode ?? ('spoken' as CallMode),
     free: true,
+    freeToAnnounce: true,
+    firstAudioMs: 0,
+    told: [] as string[],
+    finishNews: [] as (() => void)[],
     highlighted: [] as (string | null)[],
     shown: [] as string[],
     spoken: [] as string[],
@@ -46,6 +68,16 @@ function harness(options: { mode?: CallMode; windowMs?: number } = {}) {
     highlight: (id) => state.highlighted.push(id),
     tone: () => state.tones++,
     trace: (traced, status) => state.traces.push(`${traced.agentName}:${status}`),
+    freeToAnnounce: () => state.freeToAnnounce,
+    firstAudioWaitMs: () => state.firstAudioMs,
+    announce: (_announcement, text) => {
+      state.told.push(text);
+      return new Promise<void>((resolve) => state.finishNews.push(resolve));
+    },
+    traceAnnouncement: (announcement, status, detail) =>
+      state.traces.push(
+        `${announcement.text}:${status}${detail?.reason ? `:${String(detail.reason)}` : ''}`
+      ),
   };
   const desk = new CallDesk(host);
   const endSpeech = async () => {
@@ -53,7 +85,12 @@ function harness(options: { mode?: CallMode; windowMs?: number } = {}) {
     await Promise.resolve();
     await Promise.resolve();
   };
-  return { desk, state, endSpeech };
+  const endNews = async () => {
+    state.finishNews.shift()?.();
+    await Promise.resolve();
+    await Promise.resolve();
+  };
+  return { desk, state, endSpeech, endNews };
 }
 
 beforeEach(() => vi.useFakeTimers());
@@ -345,5 +382,170 @@ describe('CallDesk', () => {
     desk.forget('conv-atlas');
     expect(desk.current).toBeNull();
     expect(desk.waiting).toEqual([]);
+  });
+});
+
+describe('announcements', () => {
+  it('keeps only the latest word on an agent, and caps what waits', () => {
+    const now = Date.now();
+    const atlas = news({ id: 'atlas', at: now });
+    const both = news({ id: 'both', agents: ['conv-atlas', 'conv-bravo'], at: now });
+    const newer = news({ id: 'newer', text: 'Atlas finished.', at: now });
+    const queued = queueAnnouncement([atlas, both], newer, now);
+    // The batch also names Bravo, so the newer word on Atlas alone does not cover it.
+    expect(queued.waiting.map((item) => item.id)).toEqual(['both', 'newer']);
+    expect(queued.dropped).toEqual([{ announcement: atlas, reason: 'replaced' }]);
+
+    let waiting: Announcement[] = [];
+    for (let index = 0; index < MAX_WAITING_ANNOUNCEMENTS + 2; index++) {
+      waiting = queueAnnouncement(
+        waiting,
+        news({ id: `n${index}`, agents: [`c${index}`] }),
+        now
+      ).waiting;
+    }
+    expect(waiting.map((item) => item.id)).toEqual(['n2', 'n3', 'n4']);
+  });
+
+  it('keeps a question to the developer until news about the same request replaces it', () => {
+    const now = Date.now();
+    const question = news({ id: 'q', asks: 'r-1', at: now });
+    const done = news({ id: 'done', text: 'Atlas finished.', at: now });
+    expect(queueAnnouncement([question], done, now).waiting.map((item) => item.id)).toEqual([
+      'q',
+      'done',
+    ]);
+    const again = news({ id: 'again', asks: 'r-1', at: now });
+    expect(queueAnnouncement([question], again, now).waiting.map((item) => item.id)).toEqual([
+      'again',
+    ]);
+    // Over the cap, what asks nothing goes first.
+    const full = [question, news({ id: 'x', agents: ['c1'] }), news({ id: 'y', agents: ['c2'] })];
+    const capped = queueAnnouncement(full, news({ id: 'z', agents: ['c3'] }), now);
+    expect(capped.waiting.map((item) => item.id)).toEqual(['q', 'y', 'z']);
+  });
+
+  it('waits while the developer is not free, then tells one at a time', async () => {
+    const { desk, state, endNews } = harness({ mode: 'off' });
+    state.freeToAnnounce = false;
+    desk.announce(news({ text: 'Atlas needs you.' }));
+    desk.announce(news({ text: 'Bravo finished.', agents: ['conv-bravo'] }));
+    expect(state.told).toEqual([]);
+
+    state.freeToAnnounce = true;
+    desk.pump();
+    expect(state.told).toEqual(['Atlas needs you.']);
+    // The next one waits for the first to end, whatever else pumps the desk.
+    desk.pump();
+    expect(state.told).toEqual(['Atlas needs you.']);
+    await endNews();
+    expect(state.told).toEqual(['Atlas needs you.', 'Bravo finished.']);
+    await endNews();
+    expect(desk.announcements).toEqual([]);
+  });
+
+  it('drops what is old news, or no longer true, when it is about to be told', () => {
+    const { desk, state } = harness({ mode: 'off' });
+    state.freeToAnnounce = false;
+    const now = Date.now();
+    desk.announce(news({ text: 'Old.', agents: ['c1'], at: now - ANNOUNCEMENT_TTL_MS - 1 }));
+    desk.announce(news({ text: 'Settled.', agents: ['c2'], current: () => null }));
+    desk.announce(news({ text: 'Atlas needs permission.', current: () => 'Atlas needs you.' }));
+    state.freeToAnnounce = true;
+    desk.pump();
+    expect(state.told).toEqual(['Atlas needs you.']);
+    expect(state.traces).toContain('Old.:dropped:expired');
+    expect(state.traces).toContain('Settled.:dropped:stale');
+  });
+
+  it('moves on when the end of what is being said never comes', async () => {
+    const { desk, state } = harness({ mode: 'off' });
+    // A cloud voice may wait this long for its first audio before it says anything.
+    state.firstAudioMs = 8_000;
+    desk.announce(news({ text: 'Atlas needs you.' }));
+    desk.announce(news({ text: 'Bravo finished.', agents: ['conv-bravo'] }));
+    expect(state.told).toEqual(['Atlas needs you.']);
+    // Without that wait in the deadline, the next one would cut off a sentence about to start.
+    await vi.advanceTimersByTimeAsync(announcementDeadlineMs('Atlas needs you.'));
+    expect(state.told).toEqual(['Atlas needs you.']);
+    // The speech's end is never reported.
+    const deadline = announcementDeadlineMs('Atlas needs you.', 8_000);
+    await vi.advanceTimersByTimeAsync(deadline - announcementDeadlineMs('Atlas needs you.') - 1);
+    expect(state.told).toEqual(['Atlas needs you.']);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(state.told).toEqual(['Atlas needs you.', 'Bravo finished.']);
+    expect(state.traces).toContain('Atlas needs you.:timeout');
+  });
+
+  it('never lets news replace a failure, or news only shown replace news to be said', () => {
+    const now = Date.now();
+    const failed = news({ id: 'f', text: 'Atlas didn’t start.', source: 'failure', at: now });
+    const later = news({ id: 'n', text: 'Atlas needs you.', at: now });
+    expect(queueAnnouncement([failed], later, now).waiting.map((item) => item.id)).toEqual([
+      'f',
+      'n',
+    ]);
+    const spoken = news({ id: 's', at: now });
+    const shown = news({ id: 'h', spoken: false, at: now });
+    expect(queueAnnouncement([spoken], shown, now).waiting.map((item) => item.id)).toEqual([
+      's',
+      'h',
+    ]);
+    // Over the cap a failure stays, and routine news goes first.
+    const full = [failed, news({ id: 'x', agents: ['c1'] }), news({ id: 'y', agents: ['c2'] })];
+    const capped = queueAnnouncement(full, news({ id: 'z', agents: ['c3'] }), now);
+    expect(capped.waiting.map((item) => item.id)).toEqual(['f', 'y', 'z']);
+  });
+
+  it('says that “next” delivered something when it told news first', async () => {
+    const { desk, state, endSpeech } = harness();
+    desk.offer(call({ id: 'a' }));
+    await endSpeech();
+    state.free = false;
+    state.freeToAnnounce = false;
+    desk.announce(news({ text: 'Bravo didn’t start.', source: 'failure', agents: ['conv-b'] }));
+    desk.offer(call({ id: 'b', conversationId: 'conv-cedar', agentName: 'Cedar' }));
+    state.freeToAnnounce = true;
+    expect(desk.next()).toBe(true);
+    expect(state.told).toEqual(['Bravo didn’t start.']);
+  });
+
+  it('holds news with the calls, except that something failed', async () => {
+    const { desk, state, endNews } = harness();
+    desk.hold(true);
+    desk.announce(news({ text: 'Atlas finished.' }));
+    desk.announce(news({ text: 'Bravo didn’t start.', source: 'failure', agents: ['conv-bravo'] }));
+    expect(state.told).toEqual(['Bravo didn’t start.']);
+    await endNews();
+    expect(state.told).toEqual(['Bravo didn’t start.']);
+    desk.hold(false);
+    expect(state.told).toEqual(['Bravo didn’t start.', 'Atlas finished.']);
+  });
+
+  it('clears what waits when the developer says stop', () => {
+    const { desk, state } = harness({ mode: 'off' });
+    state.freeToAnnounce = false;
+    desk.announce(news());
+    desk.clearAnnouncements();
+    state.freeToAnnounce = true;
+    desk.pump();
+    expect(state.told).toEqual([]);
+    expect(state.traces).toContain('Atlas needs you.:dropped:stopped');
+  });
+
+  it('waits behind a call on the line, and holds the next call back while it is told', async () => {
+    const { desk, state, endSpeech, endNews } = harness();
+    desk.offer(call({ id: 'a' }));
+    await endSpeech();
+    expect(desk.current?.state).toBe('on-line');
+    desk.announce(news({ text: 'Bravo failed to start.', agents: ['conv-bravo'] }));
+    expect(state.told).toEqual([]);
+
+    desk.skip();
+    expect(state.told).toEqual(['Bravo failed to start.']);
+    desk.offer(call({ id: 'b', conversationId: 'conv-cedar', agentName: 'Cedar' }));
+    expect(desk.current).toBeNull();
+    await endNews();
+    expect(desk.current?.call.id).toBe('b');
   });
 });

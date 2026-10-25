@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { isSingleAgentWithSubagents } from '../grammar';
 import type { JevAnswer, JevAnswers } from '../jev';
 import type { RosterAgent } from '../resolver';
 import { catalogKey, FOCUSED_PROJECT, NOT_MENTIONED, SENTINEL, type RouterInput } from './catalog';
@@ -485,6 +486,35 @@ describe('planMode and hints', () => {
     });
     expect(planMode(weak, false)).toBe('command');
     expect(planMode(weak, true)).toBe('plan');
+  });
+
+  it('stays in command mode for one agent that should use subagents', () => {
+    const multi = answers({
+      intent: choice('plan_multi', 0.96),
+      agent_count: {
+        type: 'score',
+        score: 2,
+        confidence: 0.9,
+        probabilities: { '2': 0.9, '1': 0.1 },
+      },
+    });
+    for (const said of [
+      'Start a Claude agent and have it spin up subagents to review the auth module.',
+      'Spin up a new agent for the billing bug, maybe spin up some sub-agent review agents.',
+    ]) {
+      expect(isSingleAgentWithSubagents(said)).toBe(true);
+      expect(planMode(multi, true, said)).toBe('command');
+    }
+    for (const said of [
+      'Split this across agents, one per package.',
+      'Start three agents to fix the lint errors in parallel.',
+      'Make a plan for the migration and start a Claude agent for each part.',
+      'Start a Claude agent and two more agents for the docs, with subagents for review.',
+      'Start a Claude agent to fix the bug.',
+    ]) {
+      expect(isSingleAgentWithSubagents(said)).toBe(false);
+      expect(planMode(multi, true, said)).toBe('plan');
+    }
   });
 
   it('summarizes confident slots and warns about confusable names', () => {

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { realpath as realpathJs, realpathSync } from 'node:fs';
+import { mkdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createBoundExec, ExecError, type BoundExec } from '@emdash/core/services/exec/api';
 import { redactReply } from '@core/primitives/agents/api/completion-report';
@@ -8,6 +9,7 @@ import {
   checkPreflight,
   oneLine,
   resultFailure,
+  sameScoutFolder,
   scoutAnswer,
   scoutArgs,
   scoutPrompt,
@@ -90,10 +92,15 @@ export type ScoutRun =
 export type ScoutRunnerDeps = {
   exec?: ScoutExecFactory;
   now?: () => number;
+  platform?: NodeJS.Platform;
 };
 
 const CANCELLED: ScoutFailure = { reason: 'cancelled', message: 'The check was cancelled.' };
 const TIMED_OUT: ScoutFailure = { reason: 'timeout', message: 'The check ran out of time.' };
+const ELSEWHERE: ScoutFailure = {
+  reason: 'preflight',
+  message: 'Claude Code started outside the project folder, so the check was stopped.',
+};
 
 export async function runScout(
   input: ScoutRunInput,
@@ -130,6 +137,13 @@ export async function runScout(
     });
   }
 
+  const platform = deps.platform ?? process.platform;
+  const folders = await folderForms(input.cwd);
+  /** The CLI reports the folder it really runs in; it must be the project, or nothing is read. */
+  const inProject = (reported: string | null): boolean =>
+    sameScoutFolder(reported, folders, platform) ||
+    (reported !== null && sameScoutFolder(realFolder(reported), folders, platform));
+
   const parser = new ScoutStreamParser();
   let lastStepAt = Number.NEGATIVE_INFINITY;
 
@@ -142,6 +156,10 @@ export async function runScout(
         seen.version = event.init.version;
         if (!preflight.success) {
           seen.refused = preflight.error;
+          return false;
+        }
+        if (!inProject(event.init.cwd)) {
+          seen.refused = ELSEWHERE;
           return false;
         }
         seen.started = true;
@@ -280,6 +298,28 @@ async function spawnFailure(cwd: string): Promise<ScoutFailure> {
 function isSpawnError(error: unknown): boolean {
   if (typeof error !== 'object' || error === null || !('syscall' in error)) return false;
   return typeof error.syscall === 'string' && error.syscall.startsWith('spawn');
+}
+
+/**
+ * The project folder in each form the CLI could report it: as given, its real path from the
+ * system, and the one Node's own lookup gives (which keeps short 8.3 names and drive letters
+ * made with `subst`).
+ */
+async function folderForms(cwd: string): Promise<string[]> {
+  const real = await realpath(cwd).catch(() => null);
+  const js = await new Promise<string | null>((resolve) => {
+    realpathJs(cwd, (error, resolved) => resolve(error ? null : resolved));
+  });
+  return [cwd, real, js].filter((form): form is string => form !== null);
+}
+
+/** What the system says a reported folder is; null when it cannot say. Only after a mismatch. */
+function realFolder(folder: string): string | null {
+  try {
+    return realpathSync.native(folder);
+  } catch {
+    return null;
+  }
 }
 
 let settingsWrites: Promise<unknown> = Promise.resolve();

@@ -229,9 +229,14 @@ export type FakeScoutCall = {
   options: ExecOptions;
 };
 
+/** The start event's folder as it appears in `scoutStream` output. */
+const CAPTURED_CWD = `"cwd":${JSON.stringify(INIT_EVENT.cwd)}`;
+
 /**
  * A stand-in for the process. `behave` plays the child: it writes to `emit` (false means the
- * runner asked for the process to be killed) and settles the way the exec helper would.
+ * runner asked for the process to be killed) and settles the way the exec helper would. Like a
+ * real CLI, it reports the folder it was started in: the captured start event's folder becomes
+ * the call's. A start event with any other folder is passed through as written.
  */
 export function fakeScoutExec(
   behave: (call: FakeScoutCall, emit: (chunk: string) => boolean) => Promise<void>
@@ -243,7 +248,11 @@ export function fakeScoutExec(
       execStreaming: (args, onStdout, options = {}) => {
         const call = { file, cwd, env, args, options };
         calls.push(call);
-        return behave(call, (chunk) => onStdout(chunk) !== false);
+        const cwdField = `"cwd":${JSON.stringify(cwd)}`;
+        return behave(
+          call,
+          (chunk) => onStdout(chunk.replaceAll(CAPTURED_CWD, cwdField)) !== false
+        );
       },
     }),
   };

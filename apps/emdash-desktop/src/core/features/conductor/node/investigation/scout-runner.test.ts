@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { ExecError } from '@emdash/core/services/exec/api';
@@ -168,7 +168,7 @@ describe('runScout', () => {
     const steps: string[] = [];
     const output: string[] = [];
     let clock = 1_000;
-    const stream = scoutStream(ANSWERED_EVENTS);
+    const stream = scoutStream([{ ...INIT_EVENT, cwd }, ...ANSWERED_EVENTS.slice(1)]);
     const fake = fakeScoutExec(async (_call, emit) => {
       emit(stream.slice(0, 700));
       emit(stream.slice(700));
@@ -251,6 +251,57 @@ describe('runScout', () => {
     });
     // With the check off, as the self-test runs it, the same stream answers.
     expect((await runScout(input({ verifiedVersions: null }), fake)).status).toBe('answered');
+  });
+
+  it('stops a run whose CLI reports a folder other than the project', async () => {
+    // cmd.exe runs a `.cmd` shim in C:\Windows when it cannot use a network folder.
+    for (const reported of ['C:\\Windows', path.dirname(cwd), path.join(cwd, 'src'), '']) {
+      const continued: boolean[] = [];
+      const fake = fakeScoutExec(async (_call, emit) => {
+        continued.push(emit(scoutStream([{ ...INIT_EVENT, cwd: reported }])));
+        continued.push(emit(scoutStream(ANSWERED_EVENTS.slice(1))));
+      });
+      expect(await runScout(input(), fake), reported).toMatchObject({
+        status: 'failed',
+        reason: 'preflight',
+        message: 'Claude Code started outside the project folder, so the check was stopped.',
+      });
+      expect(continued).toEqual([false, false]);
+    }
+  });
+
+  it('stops a run whose CLI does not report its folder', async () => {
+    const { cwd: _dropped, ...withoutCwd } = INIT_EVENT;
+    const fake = fakeScoutExec(async (_call, emit) => {
+      emit(scoutStream([withoutCwd, ...ANSWERED_EVENTS.slice(1)]));
+    });
+    expect(await runScout(input(), fake)).toMatchObject({ status: 'failed', reason: 'preflight' });
+  });
+
+  it('accepts the project folder in another form: real path, case, trailing separator', async () => {
+    const link = path.join(dir, 'project-link');
+    await symlink(cwd, link, 'dir');
+    const real = await realpath(cwd);
+    const answers = async (folder: string, reported: string, platform?: NodeJS.Platform) => {
+      const fake = fakeScoutExec(async (_call, emit) => {
+        emit(scoutStream([{ ...INIT_EVENT, cwd: reported }, ...ANSWERED_EVENTS.slice(1)]));
+      });
+      return (await runScout(input({ cwd: folder }), { ...fake, platform })).status;
+    };
+    expect(await answers(link, real)).toBe('answered');
+    expect(await answers(cwd, `${cwd}/`)).toBe('answered');
+    expect(await answers('C:\\work\\Project', 'c:/work/project\\', 'win32')).toBe('answered');
+    // A project path in extended form, and a CLI that reports either form.
+    expect(await answers('\\\\?\\C:\\work\\project', 'C:\\work\\project', 'win32')).toBe(
+      'answered'
+    );
+    expect(await answers('C:\\work\\project', '\\\\?\\C:\\work\\project', 'win32')).toBe(
+      'answered'
+    );
+    // A share is never the same folder as a drive path.
+    expect(await answers('\\\\?\\UNC\\srv\\c\\work', 'C:\\work', 'win32')).toBe('failed');
+    // Case counts where file names are case-sensitive.
+    expect(await answers('/work/Project', '/work/project', 'linux')).toBe('failed');
   });
 
   it('checks a second start event too', async () => {

@@ -615,7 +615,12 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
         {usesGeminiVoice(voiceSettings?.ttsEngine) && (
           <SettingsRow
             label="Custom Gemini voice"
-            description="A voice id you made with voice design (voice_… or voicekey_…). It replaces the prebuilt voice for every Gemini engine. A voice made in a Google Cloud project only works with the Google Cloud engines; OpenRouter and API keys cannot reach it. Empty uses the prebuilt voice."
+            description={`A voice id you made with voice design (voice_… or voicekey_…). It replaces the prebuilt voice on the Google Cloud engines. A voice made in a Google Cloud project only works there; OpenRouter and API keys cannot reach it. Empty uses the prebuilt voice.${
+              voiceSettings?.geminiCustomVoice.trim() &&
+              !voiceSettings.ttsEngine.startsWith('vertex-')
+                ? ' Warning: the selected engine cannot use it, so the prebuilt voice is spoken. Switch to a Google Cloud engine.'
+                : ''
+            }`}
             control={
               <CommitInput
                 value={voiceSettings?.geminiCustomVoice ?? ''}

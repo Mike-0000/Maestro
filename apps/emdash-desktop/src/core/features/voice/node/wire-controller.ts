@@ -93,6 +93,7 @@ export function createVoiceWireController(options: {
         return err({ type: 'engine-failed' as const, message: 'Dictation could not start.' });
       }
     },
+    warmDictation: () => service.warmDictation().catch(() => {}),
     closeDictation: async ({ streamId }) => {
       try {
         return ok(await service.closeDictation(streamId));

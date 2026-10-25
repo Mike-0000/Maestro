@@ -1,9 +1,11 @@
+import path from 'node:path';
 import { err, ok, type Result } from '@emdash/shared';
 import {
   INVESTIGATION_LIMITS,
   type InvestigationFailureReason,
   type InvestigationFound,
 } from '../../api/contract';
+import { withoutExtendedPrefix } from './scout-folders';
 
 /**
  * Everything about Claude Code's print mode that a code scout depends on: the fixed argument
@@ -132,6 +134,8 @@ export type ScoutInit = {
   permissionMode: string | null;
   version: string | null;
   model: string | null;
+  /** The folder the CLI is running in. */
+  cwd: string | null;
 };
 
 /** A read the CLI refused. */
@@ -198,6 +202,39 @@ export function checkPreflight(
     });
   }
   return ok({ version: init.version });
+}
+
+/**
+ * Whether the folder the CLI reports it runs in is the one it was started for. `--restricted`
+ * confines the tools to the CLI's own folder, so a CLI that ended up elsewhere (cmd.exe puts a
+ * `.cmd` shim in C:\Windows when it cannot use the folder it was given) reads the wrong files.
+ * `folders` holds the requested folder in every form the CLI could report it: as given, and its
+ * real paths. Case is ignored where file names ignore it.
+ */
+export function sameScoutFolder(
+  reported: string | null,
+  folders: readonly string[],
+  platform: NodeJS.Platform
+): boolean {
+  if (!reported) return false;
+  const key = folderKey(platform);
+  const wanted = key(reported);
+  return folders.some((folder) => key(folder) === wanted);
+}
+
+/** A folder as a key to compare: normalized, without a trailing separator. */
+function folderKey(platform: NodeJS.Platform): (folder: string) => string {
+  if (platform === 'win32') {
+    return (folder) =>
+      path.win32
+        .normalize(withoutExtendedPrefix(folder, platform))
+        .replace(/\\+$/, '')
+        .toLowerCase();
+  }
+  return (folder) => {
+    const normal = path.posix.normalize(folder).replace(/\/+$/, '');
+    return platform === 'darwin' ? normal.toLowerCase() : normal;
+  };
 }
 
 /** A value the CLI reported, made safe to show inside a message. */
@@ -272,6 +309,7 @@ function parseInit(event: Record<string, unknown>): ScoutInit {
     permissionMode: stringOrNull(event.permissionMode),
     version: stringOrNull(event.claude_code_version),
     model: stringOrNull(event.model),
+    cwd: stringOrNull(event.cwd),
   };
 }
 

@@ -73,6 +73,11 @@ export class BufferedDictationStream {
     return this.text;
   }
 
+  /** Resolves once the pass in flight, and any it triggers, has finished. */
+  async idle(): Promise<void> {
+    while (this.running) await this.running;
+  }
+
   abort(): void {
     this.closed = true;
     this.length = 0;

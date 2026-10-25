@@ -18,6 +18,7 @@ import {
   type InvestigationFolder,
   type ScoutMirror,
 } from './investigation-service';
+import type { FolderCheckOptions } from './scout-folders';
 import type { ScoutRun, ScoutRunInput } from './scout-runner';
 
 const VERSION = '2.1.296';
@@ -86,7 +87,10 @@ async function verified(): Promise<void> {
   );
 }
 
-function harness(settingsOverrides: Partial<ConductorSettings> = {}) {
+function harness(
+  settingsOverrides: Partial<ConductorSettings> = {},
+  folderOptions?: FolderCheckOptions
+) {
   const state = {
     settings: { ...DEFAULT_CONDUCTOR_SETTINGS, investigations: true, ...settingsOverrides },
     usage: { count: 0, costUsd: 0 },
@@ -148,6 +152,7 @@ function harness(settingsOverrides: Partial<ConductorSettings> = {}) {
     now: () => state.clock,
     runScout,
     runSelfTest,
+    folderOptions,
   });
   const progress: InvestigationProgress[] = [];
   const run = (
@@ -217,6 +222,47 @@ describe('InvestigationService.run', () => {
     const result = await h.run({ target: { projectId: 'wsl' } });
     expect(result).toMatchObject({ success: true, data: { source: 'windows-copy' } });
     expect(h.runScout).toHaveBeenCalledWith(expect.objectContaining({ cwd: project }));
+  });
+
+  it('refuses a project on a network share on Windows, before touching the folder', async () => {
+    await verified();
+    const h = harness({}, { platform: 'win32' });
+    for (const share of [
+      '\\\\10.0.0.5\\c\\Program Files (x86)\\Steam\\steamapps\\common\\ACE COMBAT 8',
+      '//10.0.0.5/c/Games',
+      '\\\\?\\UNC\\10.0.0.5\\c\\Games',
+    ]) {
+      h.state.folders.project = { workspaceId: 'w-project', host: LOCAL_HOST_REF, path: share };
+      expect(await h.run(), share).toEqual({
+        success: false,
+        error: {
+          type: 'not-local',
+          message: "Code checks can't read network shares; find_in_project still works.",
+        },
+      });
+    }
+    expect(h.runScout).not.toHaveBeenCalled();
+
+    // A folder on this computer still runs, under the same Windows rules.
+    h.state.folders.project = { workspaceId: 'w-project', host: LOCAL_HOST_REF, path: project };
+    expect((await h.run()).success).toBe(true);
+    expect(h.runScout).toHaveBeenCalledWith(expect.objectContaining({ cwd: project }));
+  });
+
+  it('does not take a local drive path in extended form for a network share', async () => {
+    await verified();
+    const h = harness({}, { platform: 'win32' });
+    h.state.folders.project = {
+      workspaceId: 'w-project',
+      host: LOCAL_HOST_REF,
+      path: '\\\\?\\C:\\Games\\ACE COMBAT 8',
+    };
+    // The folder is not on this test machine; what matters is that it was not refused as a share.
+    expect(await h.run()).toEqual({
+      success: false,
+      error: { type: 'not-found', message: 'The project folder no longer exists.' },
+    });
+    expect(h.runScout).not.toHaveBeenCalled();
   });
 
   it('refuses a WSL project whose mirror has not finished its first copy', async () => {

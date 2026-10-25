@@ -3,6 +3,7 @@ import type { JevAnswer, JevAnswers } from '../jev';
 import {
   completionGateRequest,
   interpretCompletionGate,
+  isInputOrChrome,
   reportSentences,
   spokenLine,
   type CompletionCandidate,
@@ -139,5 +140,108 @@ describe('interpretCompletionGate', () => {
       [agent]
     )[0];
     expect(noQuestion).toMatchObject({ fallback: 'Maple: All 42 tests pass now.' });
+  });
+});
+
+describe('terminal input and chrome', () => {
+  const LINES = [
+    "❯ keep going until it's fully done",
+    '✔ Update installed · Restart to update',
+    '✻ Baked for 6m 42s',
+    '● Stop Task',
+    '⏵⏵ bypass permissions on',
+    '✻ Churned for 3m 2s',
+    '※ recap',
+    '⎿ Tip:',
+    '› run the tests again please',
+  ];
+
+  it('is recognized, and real sentences are not', () => {
+    for (const line of LINES) expect(isInputOrChrome(line)).toBe(true);
+    expect(isInputOrChrome('I updated the redirect handler in auth.ts.')).toBe(false);
+  });
+
+  it('stays out of the best and question candidates but in the text Jev reads', () => {
+    const text = `${REPORT}\n${LINES.join('\n')}`;
+    const gate = completionGateRequest([candidate(text)], []);
+    const options = Object.keys(
+      (gate.questions.a0_best as { criteria: Record<string, unknown> }).criteria
+    ).join('\n');
+    expect(options).toContain('I updated the redirect');
+    for (const marker of ['keep going', 'Baked for', 'Stop Task', 'bypass', 'Churned']) {
+      expect(options).not.toContain(marker);
+    }
+    const state = JSON.stringify(gate.state);
+    expect(state).toContain('keep going until');
+    expect(state).toContain('Baked for');
+  });
+});
+
+describe('quiet and thin verdicts', () => {
+  it('keeps a confident progress_no_news quiet whatever novel says', () => {
+    const agent = candidate("I'll report the result when it finishes running.", {
+      previous: 'Working on it, more soon.',
+    });
+    const { gate, option } = gateFor(agent);
+    const verdict = interpretCompletionGate(
+      {
+        a0_kind: choice('progress_no_news', 0.9),
+        a0_novel: noul(0.8),
+        a0_best: choice(option(0)),
+        a0_followup: noul(0.1),
+      },
+      gate,
+      [agent]
+    )[0];
+    expect(verdict).toMatchObject({ kind: 'silent', reason: 'no-news' });
+  });
+
+  it('sends content-free one-liners to the model instead of speaking them', () => {
+    for (const line of [
+      'I found and fixed it.',
+      'The push worked.',
+      'All four recommendations are built.',
+    ]) {
+      const agent = candidate(line);
+      const { gate, option } = gateFor(agent);
+      const verdict = interpretCompletionGate(
+        { a0_kind: choice('done_with_result'), a0_best: choice(option(0)), a0_followup: noul(0.1) },
+        gate,
+        [agent]
+      )[0];
+      expect(verdict).toMatchObject({ kind: 'llm', reason: 'thin-sentence' });
+    }
+  });
+
+  it('speaks a full sentence only at best-sentence confidence 0.7', () => {
+    const agent = candidate(REPORT);
+    const { gate, option } = gateFor(agent);
+    const run = (confidence: number) =>
+      interpretCompletionGate(
+        {
+          a0_kind: choice('done_with_result'),
+          a0_best: choice(option(0), confidence),
+          a0_followup: noul(0.1),
+        },
+        gate,
+        [agent]
+      )[0];
+    expect(run(0.8)).toMatchObject({ kind: 'speak' });
+    expect(run(0.6)).toMatchObject({ kind: 'llm', reason: 'thin-sentence' });
+  });
+});
+
+describe('Claude Code reply markers', () => {
+  it("keeps the agent's own sentences and drops tool-call and status lines", () => {
+    const sentences = reportSentences(
+      '⏺ I updated the redirect handler and the tests pass.\n● Bash(npm test --silent)\n⏺ Read(src/auth.ts)\n● Stop Task'
+    );
+    expect(sentences).toContain('I updated the redirect handler and the tests pass.');
+    expect(sentences.filter((sentence) => !isInputOrChrome(sentence))).toEqual([
+      'I updated the redirect handler and the tests pass.',
+    ]);
+    expect(isInputOrChrome('● Stop Task')).toBe(true);
+    expect(isInputOrChrome('⏺ Update(src/auth.ts)')).toBe(true);
+    expect(isInputOrChrome('● I fixed the redirect handler.')).toBe(false);
   });
 });

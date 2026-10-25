@@ -23,6 +23,8 @@ const mocks = vi.hoisted(() => ({
     taskId: 'task-new',
     conversationId: 'conv-new',
     promptDeferred: false,
+    taskName: 'Check it',
+    notes: [] as string[],
   })),
   startAgentSession: vi.fn(async () => false),
   focusSpawnedAgent: vi.fn(() => () => {}),
@@ -46,6 +48,8 @@ vi.mock('@core/features/tasks/api/browser/task-state/task-selectors', () => ({
   getTaskStore: vi.fn(),
 }));
 vi.mock('@core/features/projects/api/browser/stores/project-selectors', () => ({
+  getProjectStore: vi.fn(),
+  projectData: vi.fn(() => null),
   getProjectManagerStore: vi.fn(() => ({ projects: new Map([['proj', { name: 'demo' }]]) })),
 }));
 vi.mock('@core/primitives/logging/browser/logger', () => ({
@@ -60,6 +64,8 @@ vi.mock('./spawn', () => ({
 }));
 vi.mock('./focus-spawned-agent', () => ({ focusSpawnedAgent: mocks.focusSpawnedAgent }));
 vi.mock('./agent-io', () => ({
+  CodexNotStartedError: class extends Error {},
+  DeliveryLeftUnsentError: class extends Error {},
   answerPermission: vi.fn(),
   interruptAgent: vi.fn(),
   lastMeaningfulLine: vi.fn(),
@@ -237,6 +243,7 @@ function toolResults(call: number): Anthropic.Beta.BetaToolResultBlockParam[] {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.runTurn.mockReset();
   sequence = 0;
 });
 
@@ -284,12 +291,12 @@ describe('agent requests in the conductor', () => {
 
   it('lets the model approve a spawn request and starts the agent exactly as asked', async () => {
     const { store, speech, receive, acks } = setup();
+    mocks.startAgentSession.mockResolvedValueOnce(true);
     const asked = spawnRequest();
-    mocks.runTurn
-      .mockResolvedValueOnce(
-        toolUses({ name: 'answer_request', input: { request_id: asked.id, decision: 'approve' } })
-      )
-      .mockResolvedValueOnce(text('Starting a Codex agent to check the order for Zulu.'));
+    // Settling the request ends the turn: no second model call writes a closing line.
+    mocks.runTurn.mockResolvedValueOnce(
+      toolUses({ name: 'answer_request', input: { request_id: asked.id, decision: 'approve' } })
+    );
 
     await receive(asked);
     await vi.waitFor(() => expect(speech.announce).toHaveBeenCalled());
@@ -330,9 +337,10 @@ describe('agent requests in the conductor', () => {
     expect(reply).toContain('It will appear on the canvas as Echo.');
     expect(reply).toContain("That agent's final reply will be passed back to you");
 
+    expect(mocks.runTurn).toHaveBeenCalledTimes(1);
     expect(speech.announce).toHaveBeenCalledTimes(1);
     expect(speech.announce).toHaveBeenCalledWith(
-      'Starting a Codex agent to check the order for Zulu.'
+      'Zulu asks to start a codex agent on “Check the PCB order”. I approved it.'
     );
     expect(store.requests.watching('conv-new')).toBe(true);
     expect(store.busy).toBe(false);

@@ -239,6 +239,8 @@ export const conductorTurnRecordSchema = z.object({
   modelFailed: z.boolean().optional(),
   latencyMs: z.number(),
   tokens: z.number().optional(),
+  /** What an agent's request asked, as the agent wrote it: redacted and bounded. */
+  request: z.string().optional(),
 });
 export type ConductorTurnRecord = z.infer<typeof conductorTurnRecordSchema>;
 

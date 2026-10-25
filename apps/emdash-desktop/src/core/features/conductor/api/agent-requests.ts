@@ -90,6 +90,8 @@ type KindSpec<Payload> = {
   readonly usage: string;
   /** What the conductor says aloud about the request when no model narrates it. */
   readonly spoken: (sender: string, payload: Payload, target?: string) => string;
+  /** What it shows, when that is more than it says (a long report, whole). */
+  readonly shown?: (sender: string, payload: Payload) => string;
   /** What is asked, as the conductor's model reads it. */
   readonly body: (payload: Payload, target?: string) => string;
   /** A provider id that must be installed for the request to be accepted. */
@@ -152,6 +154,22 @@ const labelField = (max: number) =>
 function clip(value: string, max: number): string {
   const flat = value.replace(/\s+/g, ' ').trim();
   return flat.length <= max ? flat : `${flat.slice(0, max - 1)}…`;
+}
+
+/**
+ * At most `max` characters of `value` on one line, to be said: cut after the last whole sentence
+ * that fits when that keeps a fair share of it, otherwise between two words, never inside one.
+ */
+export function spokenClip(value: string, max: number): string {
+  const flat = value.replace(/\s+/g, ' ').trim();
+  if (flat.length <= max) return flat;
+  // One character more, so a sentence that ends exactly at the limit still counts as whole.
+  const head = flat.slice(0, max + 1);
+  const end = Math.max(...['. ', '! ', '? '].map((mark) => head.lastIndexOf(mark)));
+  if (end + 1 >= max * 0.4) return flat.slice(0, end + 1);
+  const space = flat.lastIndexOf(' ', max - 1);
+  const words = space > 0 ? flat.slice(0, space) : flat.slice(0, max - 1);
+  return `${words.replace(/[\s,;:–—-]+$/, '')}…`;
 }
 
 /** Ends a spoken clause with a full stop unless it already ends a sentence. */
@@ -287,18 +305,18 @@ export const agentRequestKinds = {
     decidedBy: 'nobody',
     usage:
       '{ status: "progress" | "done" | "blocked", message }. The conductor tells the developer in one spoken sentence. No reply follows. Send "blocked" whenever you cannot continue and have no question to ask. Use "progress" and "done" sparingly, for news the developer needs now.',
-    spoken: (sender, payload) => {
-      const lead =
-        payload.status === 'blocked'
-          ? `${sender} is blocked:`
-          : payload.status === 'done'
-            ? `${sender} is done:`
-            : `${sender} reports:`;
-      return `${lead} ${sentence(clip(payload.message, SPOKEN_CHARS))}`;
-    },
+    spoken: (sender, payload) =>
+      `${reportLead(sender, payload.status)} ${sentence(spokenClip(payload.message, SPOKEN_CHARS))}`,
+    shown: (sender, payload) =>
+      `${reportLead(sender, payload.status)} ${sentence(payload.message.replace(/\s+/g, ' ').trim())}`,
     body: (payload) => `${payload.status}: ${payload.message}`,
   }),
 } as const satisfies Record<string, AgentRequestKindSpec>;
+
+function reportLead(sender: string, status: 'progress' | 'done' | 'blocked'): string {
+  if (status === 'blocked') return `${sender} is blocked:`;
+  return status === 'done' ? `${sender} is done:` : `${sender} reports:`;
+}
 
 export type AgentRequestKind = keyof typeof agentRequestKinds;
 export const agentRequestKindNames = Object.keys(agentRequestKinds) as AgentRequestKind[];
@@ -426,6 +444,11 @@ export type OpenRequestView = {
   readonly at: number;
   /** True once the developer was asked and the request waits for them. */
   readonly awaitingDeveloper: boolean;
+  /**
+   * False while the question waits to be told: the developer has not heard it, so nothing they
+   * say yet is their answer to it.
+   */
+  readonly told?: boolean;
   readonly spoken: string;
   readonly body: string;
   readonly reason?: string;
@@ -495,9 +518,11 @@ export function requestContextLines(open: readonly OpenRequestView[], now: numbe
     ...open.map((request) => {
       const waiting = !request.awaitingDeveloper
         ? 'waiting for your own decision'
-        : isQuestionKind(request.kind)
-          ? "waiting for the developer's answer"
-          : "waiting for the developer's yes or no";
+        : request.told === false
+          ? 'not yet told to the developer, so nothing they said answers it'
+          : isQuestionKind(request.kind)
+            ? "waiting for the developer's answer"
+            : "waiting for the developer's yes or no";
       const reason = request.reason ? ` Reason: ${inert(request.reason, 160)}` : '';
       return `- ${request.id} from ${request.sender.name}, ${ago(request.at, now)}, ${waiting}: ${inert(request.spoken, 400)}${reason}`;
     }),

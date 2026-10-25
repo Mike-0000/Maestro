@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
     taskId: 'task-1',
     conversationId: 'conv-1',
     promptDeferred: false,
+    taskName: 'Check it',
+    notes: [] as string[],
   })),
   openProjects: vi.fn(() => [{ id: 'proj', name: 'Chorus' }]),
 }));
@@ -36,6 +38,8 @@ vi.mock('@core/features/tasks/api/browser/task-state/task-selectors', () => ({
   getTaskStore: vi.fn(),
 }));
 vi.mock('@core/features/projects/api/browser/stores/project-selectors', () => ({
+  getProjectStore: vi.fn(),
+  projectData: vi.fn(() => null),
   getProjectManagerStore: vi.fn(() => ({ projects: new Map([['proj', { name: 'Chorus' }]]) })),
 }));
 vi.mock('@core/primitives/logging/browser/logger', () => ({

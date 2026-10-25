@@ -180,6 +180,11 @@ export class LocalDictation {
     return new BufferedDictationStream((samples) => this.transcribe(samples), onPartial);
   }
 
+  /** Loads the model now, if it is not loaded, so the next recording does not wait for it. */
+  warm(): void {
+    void this.load().catch(() => {});
+  }
+
   dispose(): void {
     if (this.unloadTimer) clearTimeout(this.unloadTimer);
     this.unloadTimer = null;

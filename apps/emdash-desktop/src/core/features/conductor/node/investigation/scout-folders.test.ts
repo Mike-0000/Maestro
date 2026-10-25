@@ -2,7 +2,13 @@ import { mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { checkScoutFolder, MAX_SCOUT_FOLDERS, usableScoutFolders } from './scout-folders';
+import {
+  checkScoutFolder,
+  isNetworkFolder,
+  MAX_SCOUT_FOLDERS,
+  usableScoutFolders,
+  withoutExtendedPrefix,
+} from './scout-folders';
 
 let root: string;
 let home: string;
@@ -74,6 +80,45 @@ describe('checkScoutFolder', () => {
       ok: false,
       reason: 'Network folders are not supported.',
     });
+  });
+});
+
+describe('isNetworkFolder', () => {
+  const SHARES = [
+    '\\\\10.0.0.5\\c\\Program Files (x86)\\Steam',
+    '//10.0.0.5/c/Program Files (x86)/Steam',
+    '\\\\?\\UNC\\10.0.0.5\\c\\Games',
+    '\\\\?\\unc\\10.0.0.5\\c\\Games',
+    '\\\\.\\C:\\Games',
+    '\\\\.\\PhysicalDrive0',
+    '\\\\?\\Volume{0a1b2c3d-0000-0000-0000-100000000000}\\Games',
+    '//?/C:/Games',
+    '  \\\\server\\share',
+  ];
+
+  it('catches every network form on Windows', () => {
+    for (const folder of SHARES) expect(isNetworkFolder(folder, 'win32'), folder).toBe(true);
+  });
+
+  it('lets local folders through, and leaves other systems alone', () => {
+    for (const folder of [
+      'C:\\Github\\chorus',
+      'D:/games',
+      '\\Users\\dev',
+      '\\\\?\\C:\\Github\\chorus',
+      '\\\\?\\d:\\games',
+    ]) {
+      expect(isNetworkFolder(folder, 'win32'), folder).toBe(false);
+    }
+    expect(isNetworkFolder('//srv/app', 'linux')).toBe(false);
+  });
+
+  it('reads a local drive path in extended form as the plain path', () => {
+    expect(withoutExtendedPrefix('\\\\?\\C:\\Github\\chorus', 'win32')).toBe('C:\\Github\\chorus');
+    for (const folder of ['\\\\?\\UNC\\server\\share', '\\\\.\\C:\\Games', 'C:\\Games']) {
+      expect(withoutExtendedPrefix(folder, 'win32'), folder).toBe(folder);
+    }
+    expect(withoutExtendedPrefix('\\\\?\\C:\\Games', 'linux')).toBe('\\\\?\\C:\\Games');
   });
 });
 

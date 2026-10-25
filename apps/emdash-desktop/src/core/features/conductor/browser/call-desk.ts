@@ -1,5 +1,15 @@
 import { makeAutoObservable } from 'mobx';
-import { LATER_MS, nextCall, overSpokenLimit, type Call, type CallMode } from '../api/calls';
+import {
+  announcementDeadlineMs,
+  announcementExpired,
+  LATER_MS,
+  nextCall,
+  overSpokenLimit,
+  queueAnnouncement,
+  type Announcement,
+  type Call,
+  type CallMode,
+} from '../api/calls';
 
 /** What the call desk needs from the conductor (kept structural so it tests without one). */
 export interface CallHost {
@@ -17,6 +27,21 @@ export interface CallHost {
   /** A short sound for a call that is shown and not spoken. */
   tone(): void;
   trace(call: Call, status: string, detail?: Record<string, string | number | boolean>): void;
+  /**
+   * True when news may be told now: nobody is speaking or about to be answered, and nothing
+   * waits for the developer's answer. Unlike `free`, the conductor may be busy with a turn
+   * nobody is waiting for.
+   */
+  freeToAnnounce(): boolean;
+  /** Shows and says an announcement (`text` is what to say now); resolves when it is over. */
+  announce(announcement: Announcement, text: string): Promise<unknown>;
+  /** How long the voice may wait for its first audio, which the announcement's deadline adds. */
+  firstAudioWaitMs(): number;
+  traceAnnouncement(
+    announcement: Announcement,
+    status: string,
+    detail?: Record<string, string | number | boolean>
+  ): void;
 }
 
 export type CallState =
@@ -48,6 +73,10 @@ export class CallDesk {
   held = false;
   /** The agent whose calls go first ("stay with Atlas"). */
   stayWith: string | null = null;
+  /** News waiting for the developer to be free, oldest first. Calls off or on, it waits here. */
+  announcements: Announcement[] = [];
+  /** The announcement being shown and said. */
+  private announcing: Announcement | null = null;
 
   private timer: ReturnType<typeof setTimeout> | null = null;
   /** Wakes the desk when a call that was set aside is due. */
@@ -57,19 +86,20 @@ export class CallDesk {
 
   constructor(
     private readonly host: CallHost,
-    private readonly now: () => number = Date.now
+    private readonly now: () => number = () => Date.now()
   ) {
-    makeAutoObservable<CallDesk, 'host' | 'now' | 'timer' | 'wake' | 'spokenAt' | 'disposed'>(
-      this,
-      {
-        host: false,
-        now: false,
-        timer: false,
-        wake: false,
-        spokenAt: false,
-        disposed: false,
-      }
-    );
+    makeAutoObservable<
+      CallDesk,
+      'host' | 'now' | 'timer' | 'wake' | 'spokenAt' | 'disposed' | 'announcing'
+    >(this, {
+      host: false,
+      now: false,
+      timer: false,
+      wake: false,
+      spokenAt: false,
+      disposed: false,
+      announcing: false,
+    });
   }
 
   /** True while a call can be picked up. */
@@ -100,9 +130,46 @@ export class CallDesk {
     this.pump();
   }
 
+  /**
+   * Queues news to be told once the developer is free (see `queueAnnouncement` for what it
+   * replaces), and tells it at once when they are.
+   */
+  announce(announcement: Announcement): void {
+    if (this.disposed) return;
+    const { waiting, dropped } = queueAnnouncement(this.announcements, announcement, this.now());
+    for (const { announcement: old, reason } of dropped) {
+      this.host.traceAnnouncement(old, 'dropped', { reason });
+    }
+    this.announcements = waiting;
+    if (waiting.includes(announcement)) {
+      this.host.traceAnnouncement(announcement, 'queued', { waiting: waiting.length });
+    }
+    this.pump();
+  }
+
+  /** The developer said stop: nothing that is waiting is told. */
+  clearAnnouncements(): void {
+    for (const announcement of this.announcements) {
+      this.host.traceAnnouncement(announcement, 'dropped', { reason: 'stopped' });
+    }
+    this.announcements = [];
+  }
+
+  /** Tells the waiting news, and only that, when the developer is free for it. */
+  pumpAnnouncements(): void {
+    if (this.disposed || this.current || this.announcing) return;
+    if (this.tellable() && this.host.freeToAnnounce()) void this.tellNext();
+  }
+
   /** Delivers the next call when the developer is free. Safe to call at any time. */
   pump(): void {
-    if (this.disposed || this.current || this.held || this.waiting.length === 0) return;
+    if (this.disposed || this.current || this.announcing) return;
+    // News waits behind a call on the line, and goes before the next one.
+    if (this.tellable() && this.host.freeToAnnounce()) {
+      void this.tellNext();
+      return;
+    }
+    if (this.held || this.waiting.length === 0) return;
     if (this.host.mode() === 'off' || !this.host.free()) return;
     const call = nextCall(this.waiting, this.stayWith, this.now());
     if (!call) {
@@ -112,6 +179,64 @@ export class CallDesk {
     }
     this.waiting = this.waiting.filter((other) => other.id !== call.id);
     void this.deliver(call);
+  }
+
+  /**
+   * Whether an announcement may be told now. "Hold my calls" holds news as well, except that
+   * something failed: the developer would otherwise believe it worked.
+   */
+  private mayTell(announcement: Announcement): boolean {
+    return !this.held || announcement.source === 'failure';
+  }
+
+  private tellable(): boolean {
+    return this.announcements.some((announcement) => this.mayTell(announcement));
+  }
+
+  /** Tells the oldest announcement that still holds, then whatever is next. */
+  private async tellNext(): Promise<void> {
+    let next: { announcement: Announcement; text: string } | null = null;
+    while (!next) {
+      const announcement = this.announcements.find((waiting) => this.mayTell(waiting));
+      if (!announcement) break;
+      this.announcements = this.announcements.filter((waiting) => waiting !== announcement);
+      if (announcementExpired(announcement, this.now())) {
+        this.host.traceAnnouncement(announcement, 'dropped', { reason: 'expired' });
+        continue;
+      }
+      const text = announcement.current ? announcement.current() : announcement.text;
+      if (!text) {
+        this.host.traceAnnouncement(announcement, 'dropped', { reason: 'stale' });
+        continue;
+      }
+      next = { announcement, text };
+    }
+    if (!next) return;
+    const { announcement, text } = next;
+    this.announcing = announcement;
+    this.host.traceAnnouncement(announcement, 'told', {
+      waitedMs: Math.max(0, this.now() - announcement.at),
+      ...(text !== announcement.text ? { changed: true } : {}),
+    });
+    // Speech whose end never comes must not hold every announcement after it.
+    let watchdog: ReturnType<typeof setTimeout> | null = null;
+    const deadline = new Promise<'timeout'>((resolve) => {
+      watchdog = setTimeout(
+        () => resolve('timeout'),
+        announcementDeadlineMs(text, this.host.firstAudioWaitMs())
+      );
+    });
+    try {
+      const ended = await Promise.race([this.host.announce(announcement, text), deadline]);
+      if (ended === 'timeout') this.host.traceAnnouncement(announcement, 'timeout');
+    } catch {
+      // However it ended, it was told; what is next must not wait on it.
+    } finally {
+      if (watchdog) clearTimeout(watchdog);
+    }
+    if (this.announcing !== announcement) return;
+    this.announcing = null;
+    this.pump();
   }
 
   private async deliver(call: Call): Promise<void> {
@@ -219,13 +344,16 @@ export class CallDesk {
     this.pump();
   }
 
-  /** "Next call": delivers what is waiting now, including a call that was set aside. */
+  /**
+   * "Next call": delivers what is waiting now, including a call that was set aside. True when
+   * something is being delivered: a call, or news that goes before it.
+   */
   next(): boolean {
     if (this.current) this.skip();
     this.recall();
     const before = this.waiting.length;
     this.pump();
-    return this.current !== null || this.waiting.length < before;
+    return this.current !== null || this.announcing !== null || this.waiting.length < before;
   }
 
   stay(conversationId: string | null): void {
@@ -247,6 +375,8 @@ export class CallDesk {
     this.wake = null;
     this.current = null;
     this.waiting = [];
+    this.announcements = [];
+    this.announcing = null;
   }
 
   /** Ends the current call and delivers the next. */

@@ -131,6 +131,16 @@ export class ConductorService {
   private usageWrites: Promise<void> = Promise.resolve();
   private investigator: ((settings: ConductorSettings) => InvestigatorStatus) | null = null;
   private pruneTimer: ReturnType<typeof setInterval> | null = null;
+  /**
+   * OpenRouter's sticky routing session for the conductor's turns. Without one, OpenRouter keys
+   * stickiness on the first system and first conversation message; the oldest stored turn moves
+   * whenever history is cut, so every cut looked like a new conversation and models that cache
+   * implicitly (Mercury) landed on a provider without the prefix. One id for the app run, not one
+   * per history epoch: after a cut the tools and system prompt are still cached on the provider
+   * the session sticks to, and a new id could route to one that holds nothing. Random, never
+   * derived from what anyone said.
+   */
+  private readonly openRouterSession = `conductor-${randomUUID()}`;
 
   constructor(
     private readonly host: ChorusHostServices,
@@ -388,6 +398,8 @@ export class ConductorService {
     const startedAt = performance.now();
     let verdict: AttentionVerdict | null = null;
     let status = 'answered';
+    /** What the call cost and which model answered, for the trace. */
+    let spent: { inputTokens: number; outputTokens: number; model: string } | null = null;
     try {
       let content: Anthropic.Beta.BetaContentBlock[];
       if (settings.provider === 'openrouter') {
@@ -404,9 +416,14 @@ export class ConductorService {
         );
         const choice = response.choices?.[0];
         content = choice ? fromOpenAiChoice(choice).content : [];
-        await this.recordUsage({
+        spent = {
           inputTokens: response.usage?.prompt_tokens ?? 0,
           outputTokens: response.usage?.completion_tokens ?? 0,
+          model: response.model ?? settings.openrouterModel,
+        };
+        await this.recordUsage({
+          inputTokens: spent.inputTokens,
+          outputTokens: spent.outputTokens,
           cacheReadTokens: response.usage?.prompt_tokens_details?.cached_tokens ?? 0,
         });
       } else {
@@ -420,10 +437,15 @@ export class ConductorService {
           { timeout: ATTENTION_TIMEOUT_MS, maxRetries: 0 }
         );
         content = response.content;
-        await this.recordUsage({
+        spent = {
           inputTokens:
             response.usage.input_tokens + (response.usage.cache_creation_input_tokens ?? 0),
           outputTokens: response.usage.output_tokens,
+          model: response.model,
+        };
+        await this.recordUsage({
+          inputTokens: spent.inputTokens,
+          outputTokens: spent.outputTokens,
           cacheReadTokens: response.usage.cache_read_input_tokens ?? 0,
         });
       }
@@ -445,6 +467,7 @@ export class ConductorService {
         ms: Math.round(performance.now() - startedAt),
         conversationId: input.conversationId,
         needsDeveloper: verdict?.needsDeveloper ?? null,
+        ...(spent ?? {}),
       },
     }).catch(() => {});
     return verdict;
@@ -504,6 +527,8 @@ export class ConductorService {
         reasoning: {
           effort: openRouterEffort(mode === 'plan' ? settings.planEffort : settings.commandEffort),
         },
+        // Never with provider.order, which turns stickiness off.
+        session_id: this.openRouterSession,
       });
       const choice = response.choices?.[0];
       if (!choice) return err({ type: 'api-error', message: 'OpenRouter returned no answer.' });

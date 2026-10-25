@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { spawnAgentTask } from './spawn';
+import { conversationRegistry } from '@core/features/conversations/api/browser/stores/conversation-registry';
+import {
+  developerTyping,
+  noteDeveloperInput,
+} from '@core/features/terminals/api/browser/pty/developer-typing';
+import { spawnAgentTask, startAgentSession } from './spawn';
 
 const mocks = vi.hoisted(() => ({
   createTask: vi.fn(),
@@ -76,5 +81,56 @@ describe('spawnAgentTask', () => {
     const outcome = expect(spawning).rejects.toThrow('timed out');
     await vi.advanceTimersByTimeAsync(16_000);
     await outcome;
+  });
+
+  it('renames a clashing task and notes a busy agent in the same folder', async () => {
+    mocks.createTask.mockResolvedValue(undefined);
+    const peers = [
+      { name: 'Quartz', projectId: 'proj', status: 'working', inProjectDirectory: true },
+    ];
+    const result = await spawnAgentTask({
+      ...request,
+      taskName: 'quartz',
+      providerId: 'claude',
+      peers,
+    });
+    expect(result.taskName).toBe('quartz task');
+    expect(result.notes).toEqual([
+      expect.stringContaining('also the name of agent Quartz'),
+      'Quartz is also working in this folder.',
+    ]);
+    expect(mocks.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskConfig: expect.objectContaining({ name: 'quartz task' }),
+      })
+    );
+  });
+});
+
+describe('startAgentSession', () => {
+  function manager(active: boolean) {
+    return {
+      conversations: new Map([['conv-1', {}]]),
+      isSessionActive: () => active,
+      hydrateConversation: vi.fn(async () => {}),
+    };
+  }
+
+  it("forgets what was typed into the agent's last session when it starts a new one", async () => {
+    mocks.getTaskStore.mockReturnValue({ state: 'provisioned' });
+    vi.mocked(conversationRegistry.get).mockReturnValue(manager(false) as never);
+    noteDeveloperInput('proj:task-1:conv-1', 'half a sentence');
+
+    await expect(startAgentSession('proj', 'task-1', 'conv-1')).resolves.toBe(true);
+    expect(developerTyping('conv-1')).toBeNull();
+  });
+
+  it('keeps it for a session that is already running', async () => {
+    mocks.getTaskStore.mockReturnValue({ state: 'provisioned' });
+    vi.mocked(conversationRegistry.get).mockReturnValue(manager(true) as never);
+    noteDeveloperInput('proj:task-1:conv-1', 'half a sentence');
+
+    await expect(startAgentSession('proj', 'task-1', 'conv-1')).resolves.toBe(true);
+    expect(developerTyping('conv-1')?.unsentText).toBe(true);
   });
 });

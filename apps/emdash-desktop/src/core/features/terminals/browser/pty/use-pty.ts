@@ -1,6 +1,7 @@
 import { type Terminal } from '@xterm/xterm';
 import { reaction } from 'mobx';
 import { useCallback, useEffect, useRef } from 'react';
+import { noteDeveloperInput } from '@core/features/terminals/api/browser/pty/developer-typing';
 import type { FrontendPty, SessionTheme } from '@core/features/terminals/api/browser/pty/pty';
 import { TERMINAL_PADDING_PX } from '@core/features/terminals/api/browser/pty/pty';
 import { measureDimensions } from '@core/features/terminals/api/browser/pty/pty-dimensions';
@@ -234,6 +235,8 @@ export function usePty(
     (data: string, options?: { track?: boolean }) => {
       if (readOnlyRef.current) return;
       const shouldTrack = options?.track ?? true;
+      // Observational only: lets the conductor hold its own messages while the developer types.
+      if (shouldTrack && inputContextRef.current === 'agent') noteDeveloperInput(sessionId, data);
       if (shouldTrack) {
         const submittedMessages = submittedInputBufferRef.current.feed(data);
         for (const message of submittedMessages) {
@@ -244,7 +247,7 @@ export function usePty(
       }
       pty.sendInput(data);
     },
-    [pty]
+    [pty, sessionId]
   );
 
   useEffect(() => {

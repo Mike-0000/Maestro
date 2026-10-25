@@ -30,6 +30,34 @@ export type FolderCheckOptions = {
   platform?: NodeJS.Platform;
 };
 
+/** A local Windows path in extended form, `\\?\C:\…`; the drive and the rest are kept. */
+const EXTENDED_DRIVE_PATH = /^\\\\\?\\([A-Za-z]:\\)/;
+
+/**
+ * A folder with the extended-length prefix taken off a local drive path: `\\?\C:\work` becomes
+ * `C:\work`. Anything else, `\\?\UNC\…` and `\\.\` device paths included, is returned as given.
+ */
+export function withoutExtendedPrefix(
+  folder: string,
+  platform: NodeJS.Platform = process.platform
+): string {
+  return platform === 'win32' ? folder.replace(EXTENDED_DRIVE_PATH, '$1') : folder;
+}
+
+/**
+ * A network folder on Windows: `\\server\share`, `//server/share`, `\\?\UNC\server\share`, a
+ * `\\.\` device path, or any other path that starts with two slashes, except a local drive path
+ * in extended form (`\\?\C:\…`). A scout never runs in or reads one: the CLI is a `.cmd` shim,
+ * and cmd.exe cannot use such a path as its current folder and silently falls back to
+ * C:\Windows. A mapped drive letter is an ordinary path and is not caught here.
+ */
+export function isNetworkFolder(
+  folder: string,
+  platform: NodeJS.Platform = process.platform
+): boolean {
+  return platform === 'win32' && /^[\\/]{2}/.test(withoutExtendedPrefix(folder.trim(), platform));
+}
+
 /** Checks one folder and, when it may be read, returns its real path (links followed). */
 export async function checkScoutFolder(
   input: string,
@@ -37,13 +65,12 @@ export async function checkScoutFolder(
 ): Promise<FolderCheck> {
   const platform = options.platform ?? process.platform;
   const home = options.home ?? homedir();
-  const given = input.trim();
+  // cmd.exe cannot run in an extended-form path either, so a local one is read as the plain path.
+  const given = withoutExtendedPrefix(input.trim(), platform);
   const refuse = (reason: string): FolderCheck => ({ ok: false, reason });
 
   if (!given) return refuse('No folder was given.');
-  if (platform === 'win32' && /^[\\/]{2}/.test(given)) {
-    return refuse('Network folders are not supported.');
-  }
+  if (isNetworkFolder(given, platform)) return refuse('Network folders are not supported.');
   const absolute = platform === 'win32' ? path.win32.isAbsolute : path.posix.isAbsolute;
   if (!absolute(given)) return refuse('Give the full path of the folder.');
   if (RULE_CHARACTERS.test(given)) {

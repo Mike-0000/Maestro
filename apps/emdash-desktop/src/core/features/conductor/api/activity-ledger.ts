@@ -11,6 +11,8 @@ import type { ConductorTurnRecord } from './contract';
 /** Turns kept; the context shows fewer. */
 export const LEDGER_TURNS = 40;
 const CONTEXT_TURNS = 6;
+/** The developer's own newest turns the context keeps, however many events came after them. */
+const CONTEXT_DEVELOPER_TURNS = 2;
 /** The newest sent text is shown whole up to this; older ones are previews. */
 const CONTEXT_LATEST_TEXT_CHARS = 1_200;
 const CONTEXT_TEXT_CHARS = 160;
@@ -48,6 +50,29 @@ function clipMiddle(text: string, max: number): string {
   if (text.length <= max) return text;
   const half = Math.floor((max - 20) / 2);
   return `${text.slice(0, half)}\n[… middle omitted …]\n${text.slice(-half)}`;
+}
+
+/** A turn Maestro started: "[request r-…] Name: kind" or "[completion] Name, Name". */
+const EVENT_SAID = /^\[(?:request|completion)\b/;
+const REQUEST_SAID = /^\[request [^\]]*\] (.+): [^:]*$/;
+const COMPLETION_SAID = /^\[completion\] (.+)$/;
+
+/** True when an agent's request or a finished agent's report started the turn. */
+export function isEventTurn(turn: Pick<LedgerTurn, 'said'>): boolean {
+  return EVENT_SAID.test(turn.said);
+}
+
+/** The agents an event turn names in what started it: the request's sender, the finished ones. */
+export function eventAgents(said: string): string[] {
+  const sender = REQUEST_SAID.exec(said)?.[1];
+  if (sender) return [sender.trim()];
+  const finished = COMPLETION_SAID.exec(said)?.[1];
+  return finished
+    ? finished
+        .split(', ')
+        .map((name) => name.trim())
+        .filter(Boolean)
+    : [];
 }
 
 /** "just now", "4 min ago", "3 h ago", "2 days ago". */
@@ -169,11 +194,18 @@ export class ActivityLedger {
     return this.turns.slice(-limit).reverse();
   }
 
-  /** Lines for the per-turn context: the latest turns, newest first, with what was sent. */
+  /**
+   * Lines for the per-turn context: the latest turns, newest first, with what was sent. A finished
+   * agent's report that led to no action is left out before the newest are taken, and the
+   * developer's own newest turns stay in even after a burst of agents' requests and reports.
+   */
   contextLines(): string[] {
-    const turns = this.recent(CONTEXT_TURNS).filter(
+    const shown = this.recent().filter(
       (turn) => !turn.said.startsWith('[completion]') || turn.actions.length > 0
     );
+    const newest = shown.slice(0, CONTEXT_TURNS);
+    const developer = shown.filter((turn) => !isEventTurn(turn)).slice(0, CONTEXT_DEVELOPER_TURNS);
+    const turns = shown.filter((turn) => newest.includes(turn) || developer.includes(turn));
     if (turns.length === 0) return [];
     const now = this.now();
     const lines = [
@@ -197,7 +229,7 @@ export class ActivityLedger {
           : `replied “${clip(turn.reply, CONTEXT_TEXT_CHARS)}”`;
       // What was sent already quotes the developer when the text went through unchanged.
       // An agent's request or a finished agent's report started the turn, not the developer.
-      const said = /^\[(?:request|completion)\b/.test(turn.said)
+      const said = isEventTurn(turn)
         ? `${clip(turn.said, CONTEXT_SAID_CHARS)} → `
         : sends.length > 0 && turn.route !== 'llm' && turn.route !== 'line'
           ? ''
@@ -209,7 +241,8 @@ export class ActivityLedger {
 
   /**
    * The fuller listing behind the recent_activity tool. `agent` narrows it to turns that involved
-   * that agent: by any part of the name, or by the exact name with `exact`.
+   * that agent: by any part of the name, or by the exact name with `exact`. An agent's request or
+   * report involves the agent it names even when nothing was aimed back at it.
    */
   describe(limit: number, agent?: string, exact = false): string {
     const wanted = agent?.trim().toLowerCase();
@@ -218,7 +251,12 @@ export class ActivityLedger {
       wanted !== undefined &&
       (exact ? name.toLowerCase() === wanted : name.toLowerCase().includes(wanted));
     const turns = this.recent()
-      .filter((turn) => !wanted || turn.actions.some((action) => involves(action.agent)))
+      .filter(
+        (turn) =>
+          !wanted ||
+          turn.actions.some((action) => involves(action.agent)) ||
+          (isEventTurn(turn) && eventAgents(turn.said).some(involves))
+      )
       .slice(0, limit);
     if (turns.length === 0) {
       return wanted ? `Nothing recent involving ${agent}.` : 'Nothing has happened yet.';
@@ -227,7 +265,9 @@ export class ActivityLedger {
     return turns
       .map((turn) => {
         const lines = [
-          `${formatAgo(turn.at, now)} — the developer said: “${clip(turn.said, 600)}”`,
+          isEventTurn(turn)
+            ? `${formatAgo(turn.at, now)} — Maestro event, not the developer: ${clip(turn.said, 600)}`
+            : `${formatAgo(turn.at, now)} — the developer said: “${clip(turn.said, 600)}”`,
         ];
         for (const action of turn.actions) {
           lines.push(

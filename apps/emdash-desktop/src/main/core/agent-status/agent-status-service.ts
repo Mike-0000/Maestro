@@ -37,6 +37,16 @@ type TurnVerdict = {
   current: boolean;
 };
 
+/**
+ * A conversation whose last signal was the end of a turn. The provider's idle reminder follows
+ * about a minute later; with nothing in between, this is the turn it reminds of.
+ */
+type TurnEnd = {
+  /** The turn's final reply, when the stop carried one or the verdict read it. */
+  reply: string | undefined;
+  loadReply: ApplyAgentStatusSignalOptions['loadReply'];
+};
+
 /** A verdict holds the status at 'working' while it runs; past this the stop is just a stop. */
 const VERDICT_TIMEOUT_MS = 10_000;
 
@@ -85,6 +95,7 @@ function deriveAgentStatus(event: AgentStatusSignal): AgentStatus | null {
 export class AgentStatusService implements Hookable<AgentStatusServiceHooks> {
   private readonly queues = new Map<string, Promise<void>>();
   private readonly verdicts = new Map<string, TurnVerdict>();
+  private readonly turnEnds = new Map<string, TurnEnd>();
   /** Counts each conversation's live signals, so a held turn end can tell it was overtaken. */
   private readonly sequence = new Map<string, number>();
   private readonly hooks = new HookCore<AgentStatusServiceHooks>((name, error) =>
@@ -135,6 +146,10 @@ export class AgentStatusService implements Hookable<AgentStatusServiceHooks> {
     const turnEnded = signal.type === 'stop';
     const idleReminder =
       signal.type === 'notification' && signal.payload.notificationType === 'idle_prompt';
+    let preserveSeen = options.preserveSeen ?? false;
+    // A reminder that is kept stands for the turn it follows, and reports that turn's reply.
+    let carriesReply = turnEnded;
+    if (!turnEnded && !idleReminder) this.turnEnds.delete(signal.conversationId);
     if (turnEnded || idleReminder) {
       const judge = getAttentionJudge();
       if (!deliver) {
@@ -153,6 +168,17 @@ export class AgentStatusService implements Hookable<AgentStatusServiceHooks> {
         // The provider's idle reminder follows every finished turn by about a minute. Where the
         // conductor already decided what that turn needs, the reminder adds nothing.
         if (this.verdicts.get(signal.conversationId)?.current) return;
+        const turnEnd = this.turnEnds.get(signal.conversationId);
+        // Some providers (OpenCode, Kilo Code, Mimo) end a turn with this reminder alone.
+        if (turnEnd) {
+          // With no verdict (verdicts off, failed or timed out) it counts only when the turn
+          // ended on a question; then it stands for that turn and leaves the seen flag alone.
+          const reply = await turnEndReply(turnEnd);
+          if (!endsInQuestion(reply)) return;
+          signal = { ...signal, payload: { ...signal.payload, lastAssistantMessage: reply } };
+          preserveSeen = true;
+          carriesReply = true;
+        }
       } else if (judge && (await judge.enabled().catch(() => false))) {
         signal = await this.judgeTurnEnd(signal, judge, options.loadReply);
         // The agent moved on while the verdict was out (the developer answered, a prompt came
@@ -164,6 +190,12 @@ export class AgentStatusService implements Hookable<AgentStatusServiceHooks> {
     } else {
       this.retireVerdict(signal.conversationId);
     }
+    if (turnEnded) {
+      this.turnEnds.set(signal.conversationId, {
+        reply: signal.payload.lastAssistantMessage,
+        loadReply: options.loadReply,
+      });
+    }
     const status = deriveAgentStatus(signal);
     let context: ConversationContext;
 
@@ -174,7 +206,7 @@ export class AgentStatusService implements Hookable<AgentStatusServiceHooks> {
       const [row] = await getAppDb()
         .update(conversations)
         .set(
-          options.preserveSeen
+          preserveSeen
             ? { agentStatus: status }
             : { agentStatus: status, agentStatusSeen: derivedSeen }
         )
@@ -201,7 +233,7 @@ export class AgentStatusService implements Hookable<AgentStatusServiceHooks> {
         // The final reply leaves the main process only redacted and bounded; reasoning and the
         // rest of the transcript never do.
         // A turn that ended needing the developer still reports what the agent said.
-        ...(status === 'completed' || (turnEnded && status === 'awaiting-input')
+        ...(status === 'completed' || (carriesReply && status === 'awaiting-input')
           ? {
               completionSummary: summarizeCompletionMessage(signal.payload.lastAssistantMessage),
               completionReport: buildCompletionReport(signal.payload.lastAssistantMessage),
@@ -307,6 +339,7 @@ export class AgentStatusService implements Hookable<AgentStatusServiceHooks> {
 
   private async resetToIdleQueued(conversationId: string): Promise<void> {
     this.verdicts.delete(conversationId);
+    this.turnEnds.delete(conversationId);
     const [row] = await getAppDb()
       .update(conversations)
       .set({ agentStatus: 'idle', agentStatusSeen: 1 })
@@ -357,6 +390,22 @@ export class AgentStatusService implements Hookable<AgentStatusServiceHooks> {
 function replyKeyOf(message: string | undefined): string | null {
   const report = buildCompletionReport(message);
   return report ? replyKey(report.text) : null;
+}
+
+/** The reply of the turn an idle reminder follows; empty when there is none to read. */
+async function turnEndReply(turnEnd: TurnEnd): Promise<string> {
+  const known = turnEnd.reply?.trim();
+  if (known) return known;
+  if (!turnEnd.loadReply) return '';
+  const loaded = await withTimeout(turnEnd.loadReply(), VERDICT_TIMEOUT_MS).catch(() => null);
+  return loaded?.trim() ?? '';
+}
+
+/** Whether a reply ends by asking something: its last sentence ends in a question mark. */
+export function endsInQuestion(reply: string): boolean {
+  // Closing quotes, brackets and Markdown emphasis may follow the mark.
+  const text = reply.replace(/[\s*_`"'\u201d\u2019)\]]+$/u, '');
+  return text.endsWith('?') || text.endsWith('\uff1f');
 }
 
 /** A finished turn that waits on the developer: an attention notification that keeps the reply. */

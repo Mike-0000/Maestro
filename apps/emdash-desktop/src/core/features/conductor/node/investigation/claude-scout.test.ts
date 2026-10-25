@@ -135,6 +135,7 @@ describe('ScoutStreamParser', () => {
         permissionMode: 'default',
         version: CAPTURED_VERSION,
         model: 'claude-haiku-5-5',
+        cwd: 'C:\\work\\project',
       },
     });
     expect(events.flatMap((event) => (event.kind === 'step' ? [event.text] : []))).toEqual([

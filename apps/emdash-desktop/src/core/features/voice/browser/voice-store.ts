@@ -70,6 +70,14 @@ export type TapDictation = {
 /** How a spoken sentence ended; `suppressed` when it was never started (muted, or listening). */
 export type SpeechResult = 'ended' | 'cancelled' | 'failed' | 'suppressed';
 
+/** Why a capture was cancelled, for the trace. */
+export type CaptureCancelCause =
+  | 'escape'
+  | 'hud-button'
+  | 'hold-key'
+  | 'no-speech-timeout'
+  | 'other';
+
 export type SpeakOptions = {
   /** `system` uses the computer's own voice: no network wait, and it never paraphrases. */
   readonly voice?: 'main' | 'system';
@@ -97,6 +105,15 @@ const LEFT_OPEN_MS = 90_000;
 const FOLLOW_UP_MS = 10_000;
 /** How long after a command a reply that finishes being spoken still opens that window. */
 const FOLLOW_UP_REPLY_MS = 30_000;
+
+/**
+ * How long a sentence may stay in flight with no end reported: the platform voice sometimes
+ * never fires its end, and a cloud voice can miss its last event. The engine's wait for its
+ * first audio, then roughly how long the words take, generously, and never forever.
+ */
+function speechDeadlineMs(text: string, firstAudioMs: number): number {
+  return Math.min(firstAudioMs + 8_000 + 90 * text.length, 2 * 60_000);
+}
 
 export class VoiceStore {
   phase: VoicePhase = 'idle';
@@ -143,6 +160,10 @@ export class VoiceStore {
   private live: { capture: LiveCapture; since: number } | null = null;
   /** How long a tap-started capture has heard nothing, in ms. */
   private quietMs = 0;
+  /** Hears whether the capture in progress ever picked up speech, however it ends. */
+  private heard = new SilenceDetector();
+  /** Sentences requested and not yet over, so news can wait for the conductor's own answers. */
+  private playing = 0;
   private endsOnPause = false;
   private lastTapAt = 0;
   private interactionId: string | null = null;
@@ -158,6 +179,7 @@ export class VoiceStore {
       | 'liveCapture'
       | 'live'
       | 'quietMs'
+      | 'heard'
       | 'endsOnPause'
       | 'lastTapAt'
       | 'recorder'
@@ -184,6 +206,7 @@ export class VoiceStore {
       liveCapture: false,
       live: false,
       quietMs: false,
+      heard: false,
       endsOnPause: false,
       lastTapAt: false,
       recorder: false,
@@ -228,7 +251,7 @@ export class VoiceStore {
             else if (event.type === 'partial' && event.streamId === this.streamId) {
               runInAction(() => (this.partial = event.text));
               this.trace('stt-partial', event.text, {
-                engine: 'deepgram',
+                engine: this.settings?.localTranscriber ? 'parakeet-local' : 'deepgram',
                 ...(event.confidence !== undefined ? { confidence: event.confidence } : {}),
               });
             } else this.speech.handleEvent(event);
@@ -280,6 +303,16 @@ export class VoiceStore {
     return this.phase === 'listening' || this.phase === 'transcribing';
   }
 
+  /** True from the moment a sentence is asked for until it stopped playing, however it stopped. */
+  get speechInFlight(): boolean {
+    return this.playing > 0;
+  }
+
+  /** How long a sentence may wait for its first sound with the voice configured now. */
+  get firstAudioWaitMs(): number {
+    return this.speech.firstAudioWaitMs;
+  }
+
   private captureEnded(reason: Extract<CaptureEvent, { type: 'end' }>['reason']): void {
     const interactionId = this.interactionId;
     if (interactionId) this.captureHandler?.({ type: 'end', interactionId, reason });
@@ -324,7 +357,7 @@ export class VoiceStore {
     if (this.phase === 'listening' || this.phase === 'transcribing') return;
     // One microphone at a time: dictation is finished or cancelled first.
     if (this.dictation?.capturing) return;
-    this.speech.stop(); // barge-in
+    this.speech.stop('developer-capture'); // barge-in
     const interactionId = crypto.randomUUID();
     this.interactionId = interactionId;
     this.trace('capture', undefined, { mode, intent, origin });
@@ -340,6 +373,7 @@ export class VoiceStore {
     // hold key, pressing the toggle shortcut again, or clicking Send.
     this.endsOnPause = origin === 'hands-free' || options.endOnPause === true;
     this.quietMs = 0;
+    this.heard = new SilenceDetector();
     this.silence = this.endsOnPause ? new SilenceDetector() : null;
     this.leftOpen =
       mode === 'toggle' && origin === 'user' && !this.endsOnPause
@@ -360,6 +394,12 @@ export class VoiceStore {
         this.maxTimer = setTimeout(() => void this.stopListening(), MAX_MANUAL_MS);
       }
       return;
+    }
+    // The on-device model can take seconds to load after a while idle: start now, not on release.
+    if (intent === 'command' && this.settings?.localTranscriber) {
+      void getVoiceClient()
+        .then((client) => client.warmDictation())
+        .catch((error: unknown) => log.warn('voice: dictation warm-up failed', { error }));
     }
     this.openStream();
     try {
@@ -536,8 +576,12 @@ export class VoiceStore {
     });
   }
 
-  cancelListening(): void {
-    this.trace('ignored', undefined, { reason: 'cancelled' });
+  cancelListening(cause: CaptureCancelCause = 'other'): void {
+    this.trace('ignored', undefined, {
+      reason: 'cancelled',
+      cause,
+      heardSpeech: this.heard.hasSpeech,
+    });
     this.clearMaxTimer();
     this.abortStream();
     this.partial = '';
@@ -575,6 +619,7 @@ export class VoiceStore {
       // Smooth for the HUD meter.
       this.level = this.level * 0.6 + Math.min(1, level * 6) * 0.4;
     });
+    this.heard.push(level, durationMs);
     if (this.silence?.push(level, durationMs)) {
       void this.stopListening();
       return;
@@ -582,7 +627,7 @@ export class VoiceStore {
     // A tap that nobody spoke after: close the microphone instead of waiting out the full limit.
     if (this.origin === 'user' && this.endsOnPause && this.silence && !this.silence.hasSpeech) {
       this.quietMs += durationMs;
-      if (this.quietMs >= NO_SPEECH_MS) this.cancelListening();
+      if (this.quietMs >= NO_SPEECH_MS) this.cancelListening('no-speech-timeout');
     }
     // A click-to-talk capture nobody ended: send what was said, or drop one with no speech.
     if (this.leftOpen?.push(level, durationMs)) {
@@ -591,7 +636,7 @@ export class VoiceStore {
     }
     if (this.leftOpen && !this.leftOpen.hasSpeech) {
       this.quietMs += durationMs;
-      if (this.quietMs >= LEFT_OPEN_MS) this.cancelListening();
+      if (this.quietMs >= LEFT_OPEN_MS) this.cancelListening('no-speech-timeout');
     }
   }
 
@@ -674,11 +719,10 @@ export class VoiceStore {
   private openStream(): void {
     this.streamId = null;
     this.streamPending = [];
-    if (
-      this.settings?.localTranscriber ||
-      this.settings?.engine !== 'deepgram' ||
-      this.settings.streaming === false
-    ) {
+    // Deepgram streams; so does the on-device model, transcribing while the developer speaks.
+    // Without a model (or with streaming off) the recording is uploaded whole on release.
+    const local = this.settings?.localTranscriber === true;
+    if (this.settings?.streaming === false || (!local && this.settings?.engine !== 'deepgram')) {
       this.streamOpening = null;
       return;
     }
@@ -753,7 +797,7 @@ export class VoiceStore {
     if (action === 'start') void this.startListening('hold', intent);
     else if (action === 'stop') void this.stopListening();
     else if (action === 'tap') this.tap();
-    else this.cancelListening();
+    else this.cancelListening('hold-key');
   }
 
   // ── Hands-free ─────────────────────────────────────────────────────────────
@@ -782,10 +826,11 @@ export class VoiceStore {
   say(text: string, interactionId?: string): void {
     const id = interactionId ?? this.interactionId;
     if (this.muted || this.settings?.speakReplies === false) {
-      this.trace('speech', undefined, { status: 'suppressed' }, id);
+      const reason = this.muted ? 'muted' : 'speak-replies-off';
+      this.trace('speech', undefined, { status: 'suppressed', reason }, id);
       return;
     }
-    void this.play(text, id, false);
+    void this.play(text, id, false, false);
   }
 
   /**
@@ -794,51 +839,108 @@ export class VoiceStore {
    */
   speak(text: string, options: SpeakOptions = {}): Promise<SpeechResult> {
     const id = options.interactionId ?? this.interactionId;
-    const allowed = options.attention
-      ? this.settings?.speakAttention !== false
-      : this.settings?.speakReplies !== false;
-    if (this.muted || !allowed || this.isListening) {
-      this.trace('speech', undefined, { status: 'suppressed' }, id);
+    const attention = options.attention === true;
+    const reason = this.muted
+      ? 'muted'
+      : attention && this.settings?.speakAttention === false
+        ? 'speak-attention-off'
+        : !attention && this.settings?.speakReplies === false
+          ? 'speak-replies-off'
+          : this.isListening
+            ? 'listening'
+            : null;
+    if (reason) {
+      this.trace(
+        'speech',
+        undefined,
+        { status: 'suppressed', reason, ...(attention ? { attention: true } : {}) },
+        id
+      );
       return Promise.resolve('suppressed');
     }
-    return this.play(text, id, options.voice === 'system');
+    return this.play(text, id, options.voice === 'system', attention);
   }
 
-  private play(text: string, id: string | null, system: boolean): Promise<SpeechResult> {
+  private play(
+    text: string,
+    id: string | null,
+    system: boolean,
+    attention: boolean
+  ): Promise<SpeechResult> {
+    const tag: Record<string, boolean> = attention ? { attention: true } : {};
     this.trace(
       'speech',
       undefined,
-      { status: 'requested', ...(system ? { voice: 'system' } : {}) },
+      { status: 'requested', ...(system ? { voice: 'system' } : {}), ...tag },
       id
     );
     const requestedAt = performance.now();
+    // Counted before the sentence it replaces is cancelled, so the count never touches zero.
+    runInAction(() => this.playing++);
     return new Promise<SpeechResult>((resolve) => {
+      let over = false;
+      const finish = (status: SpeechResult) => {
+        if (over) return;
+        over = true;
+        clearTimeout(watchdog);
+        runInAction(() => this.playing--);
+        resolve(status);
+      };
+      // No end came: the sentence no longer counts as being said, so nothing waits on it.
+      const watchdog = setTimeout(
+        () => {
+          if (over) return;
+          this.trace('speech', undefined, { status: 'timeout', ...tag }, id);
+          finish('failed');
+        },
+        speechDeadlineMs(text, this.speech.firstAudioWaitMs)
+      );
       this.speech.speak(
         text,
-        (status) => {
+        (status, detail) => {
+          if (over) return;
           if (status === 'started') {
-            // How long the developer waited for the first sound.
+            // How long the developer waited for the first sound, and which voice they hear.
             const ms = Math.round(performance.now() - requestedAt);
-            this.trace('speech', undefined, { status, ms }, id);
+            this.trace(
+              'speech',
+              undefined,
+              { status, ms, ...(detail?.engine ? { engine: detail.engine } : {}), ...tag },
+              id
+            );
             return;
           }
-          this.trace('speech', undefined, { status }, id);
-          resolve(status);
+          this.trace(
+            'speech',
+            undefined,
+            { status, ...(detail?.reason ? { reason: detail.reason } : {}), ...tag },
+            id
+          );
+          finish(status);
         },
-        { platform: system }
+        {
+          platform: system,
+          onFallback: ({ engine, reason }) =>
+            this.trace('speech', undefined, { status: 'fallback', engine, reason, ...tag }, id),
+        }
       );
     });
   }
 
-  /** Speaks an attention event such as "Codex 1 needs permission". */
-  announce(text: string): void {
-    if (this.muted || this.settings?.speakAttention === false || this.isListening) return;
-    this.speech.speak(text);
+  /**
+   * Speaks an attention event such as "Codex 1 needs permission" (respects mute and the
+   * speak-attention setting) and resolves when it stopped playing. It is traced like a reply.
+   */
+  announce(text: string, interactionId: string = crypto.randomUUID()): Promise<SpeechResult> {
+    return this.speak(text, { attention: true, interactionId });
   }
 
   setMuted(muted: boolean): void {
+    if (this.muted !== muted) {
+      this.trace('speech', undefined, { status: muted ? 'muted' : 'unmuted' }, crypto.randomUUID());
+    }
     this.muted = muted;
-    if (muted) this.speech.stop();
+    if (muted) this.speech.stop('muted');
   }
 
   // ── Settings ───────────────────────────────────────────────────────────────

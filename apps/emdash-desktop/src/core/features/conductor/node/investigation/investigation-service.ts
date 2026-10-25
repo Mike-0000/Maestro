@@ -26,7 +26,13 @@ import {
 } from './containment-self-test';
 import { checkEvidence } from './evidence';
 import { scoutEnv } from './scout-env';
-import { checkScoutFolder, usableScoutFolders, type FolderCheckOptions } from './scout-folders';
+import {
+  checkScoutFolder,
+  isNetworkFolder,
+  usableScoutFolders,
+  withoutExtendedPrefix,
+  type FolderCheckOptions,
+} from './scout-folders';
 import { runScout, type ScoutRun } from './scout-runner';
 
 /**
@@ -230,7 +236,16 @@ export class InvestigationService {
           'Code checks read folders on this computer, and this project is on another machine with no Windows copy. find_in_project still works there.',
       });
     }
-    const { cwd, source } = readable;
+    const { source } = readable;
+    // `\\?\C:\…` is read as `C:\…`: cmd.exe could not run the scout in the extended form.
+    const cwd = withoutExtendedPrefix(readable.cwd, this.folderOptions.platform);
+    // Refused before anything touches the folder: the scout would run in C:\Windows instead.
+    if (isNetworkFolder(cwd, this.folderOptions.platform)) {
+      return err({
+        type: 'not-local',
+        message: "Code checks can't read network shares; find_in_project still works.",
+      });
+    }
     if (!(await stat(cwd).catch(() => null))?.isDirectory()) {
       return err({ type: 'not-found', message: 'The project folder no longer exists.' });
     }

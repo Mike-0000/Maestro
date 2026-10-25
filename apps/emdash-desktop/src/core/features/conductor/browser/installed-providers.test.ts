@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { installedProviders, resetInstalledProviders } from './roster';
+import { installedProviders, forgetInstalledProviders } from './roster';
 
 // Provider detection takes seconds on a real machine. A command spoken more than a minute after
 // the last one must not wait for it: the last good answer is served while a new one is fetched.
@@ -27,7 +27,7 @@ function available(...ids: string[]) {
 
 beforeEach(() => {
   vi.useRealTimers();
-  resetInstalledProviders();
+  forgetInstalledProviders();
   mocks.list.mockReset();
 });
 

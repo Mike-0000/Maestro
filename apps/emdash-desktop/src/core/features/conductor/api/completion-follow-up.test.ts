@@ -67,7 +67,7 @@ describe('completionTurnText', () => {
   });
 
   it('shortens a long reply for the turn and marks it truncated', () => {
-    const long = buildCompletionReport(`Summary.\n${'x '.repeat(1_800)}`)!;
+    const long = { text: `Summary.\n${'x '.repeat(3_000)}`, truncated: false, appUrls: [] };
     const text = completionTurnText([
       { name: 'Zulu', providerLabel: 'Claude', taskName: 't', report: long },
     ]);
@@ -123,6 +123,46 @@ describe('completionTurnText with a terminal tail', () => {
     expect(text).toContain('Approved. [typed by Maestro]');
     expect(text).toContain('Do not test or run the game. [typed by Maestro]');
     expect(text).toContain("❯ commit this [typed by the developer into this agent's terminal]");
+  });
+});
+
+describe('completionTurnText, long reports and corrections', () => {
+  const one = (extra: object = {}, text = 'Done.') =>
+    completionTurnText([
+      {
+        name: 'Echo',
+        providerLabel: 'Claude',
+        taskName: 't',
+        report: { text, truncated: false, appUrls: [] },
+        ...extra,
+      },
+    ]);
+
+  it('keeps the decision at the end of a 4,000 character report', () => {
+    const decision = 'DECISION: should I delete the old cache? Please answer yes or no.';
+    const long = buildCompletionReport(
+      `${'Detail line about the work. '.repeat(160)}\n${decision}`
+    )!;
+    expect(long.text.length).toBeGreaterThan(3_900);
+    expect(one({}, long.text)).toContain(decision);
+  });
+
+  it('keeps the head and tail of a report over the limit', () => {
+    const turn = one({}, `START ${'a '.repeat(4_000)} END-DECISION`);
+    expect(turn).toContain('START');
+    expect(turn).toContain('END-DECISION');
+  });
+
+  it('shows what the developer was last told and the correction rule', () => {
+    const turn = one({ lastToldDeveloper: 'Echo restarted the server and it works.' });
+    expect(turn).toContain('What you last told the developer about Echo: "Echo restarted');
+    expect(turn).toMatch(/contradicts or corrects what you last told/);
+    expect(one()).not.toContain('What you last told the developer');
+  });
+
+  it('tells the model to say "you typed that"', () => {
+    const turn = one({}, '● Done.\n❯ push it please');
+    expect(turn).toContain('say "you typed that"');
   });
 });
 

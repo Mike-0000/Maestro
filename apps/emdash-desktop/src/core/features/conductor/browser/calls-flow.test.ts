@@ -63,6 +63,8 @@ vi.mock('./spawn', () => ({
   startAgentSession: vi.fn(),
 }));
 vi.mock('./agent-io', () => ({
+  CodexNotStartedError: class extends Error {},
+  DeliveryLeftUnsentError: class extends Error {},
   answerPermission: mocks.answerPermission,
   interruptAgent: mocks.interruptAgent,
   lastMeaningfulLine: vi.fn(),
@@ -283,7 +285,9 @@ describe('calls', () => {
     const [atlas, bravo] = [agent('atlas'), agent('bravo')];
     const { store, speech, announce } = setup([atlas, bravo], { calls: 'off' });
     await announce([atlas, bravo]);
-    expect(speech.announce).toHaveBeenCalledTimes(1);
+    // One announcement, said with the attention voice: not a call, nothing on the line.
+    expect(speech.spoken).toHaveLength(1);
+    expect(speech.announce).not.toHaveBeenCalled();
     expect(store.calls.current).toBeNull();
     store.dispose();
   });
@@ -1760,7 +1764,8 @@ describe('a reply to something Maestro only announced', () => {
     ];
     await announce([atlas]);
     await settle();
-    expect(speech.announce).toHaveBeenCalledTimes(1);
+    expect(speech.spoken).toHaveLength(1);
+    await speech.endSpeech();
 
     mocks.runTurn
       .mockResolvedValueOnce(

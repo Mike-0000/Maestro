@@ -21,6 +21,8 @@ import { getLocalUpdatesClient } from '@core/features/local-updates/api/browser/
 import {
   asAvailableProject,
   getProjectManagerStore,
+  getProjectStore,
+  projectData,
 } from '@core/features/projects/api/browser/stores/project-selectors';
 import {
   getTaskManagerStore,
@@ -49,11 +51,20 @@ import {
   type OpenRequestView,
 } from '../api/agent-requests';
 import { type SuggestableProvider } from '../api/agent-suggestions';
-import { announcementText, attentionPhrase } from '../api/announcements';
+import {
+  announcementText,
+  attentionPhrase,
+  batchSource,
+  planNoticeSource,
+  stillAnnounced,
+} from '../api/announcements';
 import { getConductorClient } from '../api/browser/client';
 import {
+  ANNOUNCEMENT_TTL_MS,
   callUrgency,
   promptFingerprint,
+  type AnnounceSource,
+  type Announcement,
   type Call,
   type CallKind,
   type CallMode,
@@ -77,6 +88,7 @@ import {
   isNoNewsReply,
   type CompletedAgentReport,
 } from '../api/completion-follow-up';
+import { spokenConfirmation } from '../api/confirm-speech';
 import {
   DEFAULT_CONDUCTOR_SETTINGS,
   type ConductorError,
@@ -124,8 +136,14 @@ import {
   looksLikeSttArtifact,
 } from '../api/jev-router/trace';
 import { chooseNewWorkProject, type ProjectRef } from '../api/new-work-project';
-import { deliveryNote, describePrompt, withVerbatimRequest } from '../api/prompt-fidelity';
+import {
+  deliveryNote,
+  describePrompt,
+  emptyBriefError,
+  withVerbatimRequest,
+} from '../api/prompt-fidelity';
 import { matchInstalledProvider } from '../api/provider-match';
+import { keptRequestTurn } from '../api/request-turn-history';
 import {
   candidateLabels,
   departedName,
@@ -146,6 +164,15 @@ import {
 } from '../api/standing-instructions';
 import { isPureStop, meansStop } from '../api/stop-words';
 import { conductorUserMessage } from '../api/system-prompt';
+import {
+  codeCheckTexts,
+  jevReading,
+  liveCodeCheckInputs,
+  namedAction,
+  namesAgent,
+  waivesCodeCheckTaint,
+  type WaivableAction,
+} from '../api/taint-waiver';
 import {
   AGENT_TEXT_REACH,
   instructionChangeLabel,
@@ -186,15 +213,29 @@ import {
   readAgentOutput,
   readFinalChatReply,
   readFinishedTerminal,
+  CodexNotStartedError,
+  DeliveryLeftUnsentError,
   sendToAgent,
   sendToLiveSession,
   stopAgentSession,
   submitAgentInput,
 } from './agent-io';
-import { AgentRequestDesk, atBlockingPrompt, newlyCompleted } from './agent-requests';
+import {
+  AgentRequestDesk,
+  atBlockingPrompt,
+  newlyCompleted,
+  type RequestSayContext,
+  type RequestSayOptions,
+} from './agent-requests';
 import { ConductorAppTools, type AppTask } from './app-tools';
 import { CallDesk } from './call-desk';
 import { deliverPromptWhenReady } from './deferred-prompt';
+import {
+  DeliveryHeldError,
+  onAgentDelivery,
+  type DeliveryHold,
+  type HoldReason,
+} from './delivery-lane';
 import { focusSpawnedAgent } from './focus-spawned-agent';
 import { runInvestigation, runProjectLookup, type InvestigationRun } from './investigation-client';
 import { jevDecide, type JevOutcome } from './jev';
@@ -212,8 +253,10 @@ import {
   offBoardEntries,
   endedTurn,
   reportFromEntry,
+  forgetInstalledProviders,
   screenFocus,
   setCallFocus,
+  spawnPeers,
   vocabulary,
   workingStatus,
 } from './roster';
@@ -242,8 +285,13 @@ export interface ConductorVoicePort {
   readonly muted: boolean;
   /** True from the moment the microphone opens until its transcript is handed on. */
   readonly capturing?: boolean;
+  /** True from the moment a sentence is asked for until it stopped playing. */
+  readonly speechInFlight?: boolean;
+  /** How long a sentence may wait for its first sound with the voice configured now. */
+  readonly firstAudioWaitMs?: number;
   say(text: string, interactionId?: string): void;
-  announce(text: string): void;
+  /** Says news (an attention notice); resolves when it stopped playing, where it can tell. */
+  announce(text: string): Promise<unknown> | void;
   /**
    * Speaks one sentence and resolves when it stopped playing. `system` is the computer's own
    * voice, which reads exactly what it is given.
@@ -301,6 +349,9 @@ export type InvestigationView = {
 };
 
 type ActionRecord = ConductorTurnRecord['actions'][number];
+
+/** How a send went: typed, waiting for the agent to start, or held for the developer. */
+type Delivery = 'sent' | 'starting' | DeliveryHold;
 
 /** A layout change's reply and how it ended, for callers that act on the result. */
 type LayoutReply = {
@@ -377,6 +428,10 @@ const QUIET_COMPLETION_MS = 30 * 60_000;
 const UNNAMED_TARGET_REPLY_MS = 2 * 60_000;
 /** How long an open capture holds agent requests back when no transcript arrives. */
 const DEVELOPER_SPEAKING_MS = 2 * 60_000;
+/** A report the developer heard whole stands for the finished turn that follows it this soon. */
+const REPORT_STANDS_MS = 2 * 60_000;
+/** What of an agent's request the turn log keeps, after redaction. */
+const REQUEST_LOG_CHARS = 1_000;
 /** How long a clarifying question ("Maple or Maple 2?") waits for its answer. */
 const CLARIFY_TTL_MS = 60_000;
 /** Previous reports kept per agent, so the completion gate can tell a repeat from news. */
@@ -491,6 +546,14 @@ export class ConductorStore {
   private turnProject: ProjectRef | null = null;
   /** A tainted tool call the developer just confirmed: the tool does not ask again. */
   private preconfirmed = false;
+  /** The running turn is tainted only by an earlier code check's result in the history. */
+  private codeCheckTaintOnly = false;
+  /** What the router read the developer's words in the running turn as, when it was sure. */
+  private turnNamedAction: WaivableAction | null = null;
+  /** The router's reading of which agent the running turn's words are about. */
+  private turnNamedTarget: { choice: string; confidence: number } | null = null;
+  /** The running turn already skipped one confirmation on the developer's own words. */
+  private waiverUsed = false;
   /**
    * The running turn read text the developer did not write (an agent's output, a page, the
    * clipboard). A change to the conductor's own instructions or settings then asks first: it
@@ -551,6 +614,20 @@ export class ConductorStore {
   private readonly handledCompletions = new Map<string, number>();
   /** When each agent's completion was last spoken, by conversation. */
   private readonly narratedAt = new Map<string, number>();
+  /** When the developer heard an agent's whole report of a turn it finished or is stuck in. */
+  private readonly reportHeardAt = new Map<string, number>();
+  /** Completion follow-ups that came while the conductor was busy, oldest first. */
+  private readonly deferredFollowUps: {
+    readonly entries: readonly AgentTileEntry[];
+    readonly reports: ReadonlyMap<string, CompletionReport>;
+    readonly interactionId: string;
+    readonly at: number;
+    readonly deliver: ((text: string, interactionId: string | null) => void) | undefined;
+  }[] = [];
+  /** The last sentence the developer was told about each agent, for a correction of it. */
+  private readonly toldAbout = new Map<string, string>();
+  /** The trace id of the latest send to each agent, for its delivery's holds and submits. */
+  private readonly sendTraceIds = new Map<string, string>();
   /** Chat agents' final replies (TUI agents carry theirs on the tile entry). */
   private readonly capturedReports = new Map<string, CompletionReport>();
   /** The windows the conductor closed last, so a bare "reopen" or "undo" restores the batch. */
@@ -572,7 +649,9 @@ export class ConductorStore {
     private readonly canvas: CanvasStore,
     private readonly voice: ConductorVoicePort
   ) {
-    this.plans = new PlanStore(canvas, { notify: (text) => this.notify(text) });
+    this.plans = new PlanStore(canvas, {
+      notify: (text) => this.notify(text, null, { source: planNoticeSource(text) }),
+    });
     this.requests = new AgentRequestDesk({
       enabled: () => this.settings?.agentRequests ?? DEFAULT_CONDUCTOR_SETTINGS.agentRequests,
       entryFor: (conversationId) => entryForConversation(this.canvas, conversationId),
@@ -600,15 +679,16 @@ export class ConductorStore {
           projectId: context.from.projectId,
           ...(context.targetId ? { agentId: context.targetId } : {}),
         }),
-      say: (text, about) => this.sayForRequest(text, about),
+      say: (text, about, options) => this.sayForRequest(text, about, options),
       send: (conversationId, text) => this.sendWhenSafe(conversationId, text),
-      record: ({ said, tool, outcome, reply }) =>
+      record: ({ said, tool, outcome, reply, request }) =>
         this.log({
           route: 'grammar',
           actions: [{ tool, input: {}, outcome }],
           reply,
           startedAt: performance.now(),
           utterance: said,
+          ...(request ? { request } : {}),
         }),
     });
     this.calls = new CallDesk({
@@ -627,6 +707,22 @@ export class ConductorStore {
           { status, agent: call.agentName, kind: call.kind, ...detail },
           call.interactionId ?? null
         ),
+      freeToAnnounce: () => this.freeToAnnounce(),
+      announce: (announcement, text) => this.tellAnnouncement(announcement, text),
+      firstAudioWaitMs: () => this.voice.firstAudioWaitMs ?? 0,
+      traceAnnouncement: (announcement, status, detail) =>
+        this.trace(
+          'call',
+          status === 'queued' ? announcement.text : undefined,
+          {
+            status,
+            kind: 'announcement',
+            source: announcement.source,
+            ...(announcement.spoken ? {} : { spoken: false }),
+            ...detail,
+          },
+          announcement.interactionId
+        ),
     });
     makeAutoObservable<
       ConductorStore,
@@ -640,6 +736,14 @@ export class ConductorStore {
       | 'captureStarts'
       | 'lastAnswer'
       | 'completionFallbacks'
+      | 'reportHeardAt'
+      | 'sendTraceIds'
+      | 'toldAbout'
+      | 'deferredFollowUps'
+      | 'codeCheckTaintOnly'
+      | 'turnNamedAction'
+      | 'turnNamedTarget'
+      | 'waiverUsed'
       | 'pendingDeadline'
       | 'pendingRemainingMs'
       | 'pendingReadingId'
@@ -713,6 +817,10 @@ export class ConductorStore {
       turnTainted: false,
       turnProject: false,
       preconfirmed: false,
+      codeCheckTaintOnly: false,
+      turnNamedAction: false,
+      turnNamedTarget: false,
+      waiverUsed: false,
       turnReadAgentText: false,
       speakingReplies: false,
       highlighted: false,
@@ -745,6 +853,10 @@ export class ConductorStore {
       requestTurnActive: false,
       handledCompletions: false,
       narratedAt: false,
+      reportHeardAt: false,
+      sendTraceIds: false,
+      toldAbout: false,
+      deferredFollowUps: false,
       capturedReports: false,
       reportOf: false,
       lastClosed: false,
@@ -755,6 +867,25 @@ export class ConductorStore {
       previousReports: false,
       ledger: false,
     });
+    // Every delivery's holds and submits, traced under the send that started it.
+    this.disposers.push(
+      onAgentDelivery((event) => {
+        const { type, conversationId, ...rest } = event;
+        const detail = 'detail' in rest ? { providerId: rest.providerId, ...rest.detail } : rest;
+        const entry = entryForConversation(this.canvas, conversationId);
+        this.trace(
+          'action-result',
+          undefined,
+          {
+            tool: 'delivery',
+            status: type,
+            ...(entry ? { agent: this.nameOf(entry) } : {}),
+            ...detail,
+          },
+          this.sendTraceIds.get(conversationId) ?? crypto.randomUUID()
+        );
+      })
+    );
   }
 
   activate(): void {
@@ -828,6 +959,14 @@ export class ConductorStore {
         () => this.plans.awaitingApproval,
         (waiting) => {
           if (!waiting) this.calls.pump();
+        }
+      ),
+      // News waits for whatever is being said, the conductor's answer to the developer above
+      // all: once that is over, it is told.
+      reaction(
+        () => this.voice.speechInFlight === true,
+        (inFlight) => {
+          if (!inFlight) this.calls.pump();
         }
       )
     );
@@ -973,10 +1112,14 @@ export class ConductorStore {
     const blocked = this.permissionBlock(entry);
     if (blocked) return { ok: false, message: blocked };
     try {
-      await sendToAgent(entry, text);
+      // The developer's own words, which they chose to send now: they do not wait for typing.
+      await sendToAgent(entry, text, true, { waitForTyping: false });
       return { ok: true, agentName: this.nameOf(entry) };
     } catch (error) {
-      return { ok: false, message: errorMessage(error) };
+      return {
+        ok: false,
+        message: undeliveredText(error, this.nameOf(entry), 'your words') ?? errorMessage(error),
+      };
     }
   }
 
@@ -1038,7 +1181,7 @@ export class ConductorStore {
     await this.takeUtterance(text, source, interactionId, call);
     // The developer is back: what agents asked while nobody answered is told once.
     const missed = this.requests.takeMissed();
-    if (missed) this.notify(missed, interactionId);
+    if (missed) this.notify(missed, interactionId, { source: 'request' });
     // Words that were used up while the conductor was busy (they settled what was pending,
     // stopped the turn, or joined it) answered no call.
     if (!call) this.dropPickup(interactionId);
@@ -1183,6 +1326,8 @@ export class ConductorStore {
     // With something pending or a model turn running, "No, stop!" and "stop it" mean stop,
     // whatever else the grammar would make of them.
     const stops = command?.kind === 'reject' || isPureStop(text);
+    // "Stop" also stops the news that was waiting to be told; a bare "no" may answer something.
+    if (isPureStop(text) && meansStop(text)) this.calls.clearAnnouncements();
     if (this.pending && onset < this.pending.armedAt) {
       // Begun before this prompt could be heard or seen, so it is never a yes to it.
       this.trace(
@@ -1323,6 +1468,8 @@ export class ConductorStore {
           ? { handled: false as const, mode: undefined, hints: undefined }
           : await this.routeWithJev(text, source, startedAt);
       if (routed.handled) return;
+      this.turnNamedAction = routed.named ?? null;
+      this.turnNamedTarget = routed.target ?? null;
       await this.runModel(text, source, startedAt, routed.mode, routed.hints);
     } finally {
       this.context.noteUtterance(text);
@@ -1429,6 +1576,30 @@ export class ConductorStore {
       { tool: 'spawn_agent', status: started ? 'session-started' : 'failed-to-start' },
       interactionId
     );
+    if (!started) void this.announceStartFailure(name, providerId, interactionId);
+  }
+
+  /**
+   * A new agent the developer was told is starting never started: they hear it once, with the
+   * reason when it is that its CLI is not installed (detection is run again to tell).
+   */
+  private async announceStartFailure(
+    name: string,
+    providerId: string,
+    interactionId: string | null
+  ): Promise<void> {
+    forgetInstalledProviders();
+    const installed = await installedProviders().catch(() => []);
+    // An empty list means detection failed, not that nothing is installed.
+    const missing =
+      installed.length > 0 && !installed.some((provider) => provider.id === providerId);
+    this.notify(
+      missing
+        ? `${name} didn't start: ${spokenProviderLabel(providerId)} isn't installed.`
+        : `${name} didn't start. Open it to see why.`,
+      interactionId,
+      { source: 'failure' }
+    );
   }
 
   /** Returns to idle and runs the utterance that arrived meanwhile, if any. */
@@ -1442,6 +1613,10 @@ export class ConductorStore {
     this.turnCancelled = false;
     this.turnTainted = false;
     this.turnProject = null;
+    this.codeCheckTaintOnly = false;
+    this.turnNamedAction = null;
+    this.turnNamedTarget = null;
+    this.waiverUsed = false;
     this.turnReadAgentText = false;
     this.turnSaidAt = Number.POSITIVE_INFINITY;
     this.turnInvestigations = 0;
@@ -1451,8 +1626,13 @@ export class ConductorStore {
     const next = this.queued;
     this.queued = null;
     if (next) void this.handleUtterance(next.text, next.source, next.interactionId);
-    // The developer's queued words go first; agent requests take the conductor when it is free.
-    else void this.requests.drain().then(() => this.calls.pump());
+    else {
+      // News that waited for this turn is told now, then a completion follow-up that waited;
+      // agent requests take the conductor when it is free. The developer's words go first.
+      this.calls.pumpAnnouncements();
+      this.resumeFollowUps();
+      void this.requests.drain().then(() => this.calls.pump());
+    }
   }
 
   /** Ends the model turn in progress at its next step; what it already did stays done. */
@@ -1490,12 +1670,35 @@ export class ConductorStore {
     );
   }
 
+  /**
+   * Nothing the developer said, is saying or must answer would be talked over, so news may be
+   * told. A turn nobody is waiting for (an agent's request, a completion) does not hold it.
+   */
+  private freeToAnnounce(): boolean {
+    return (
+      // A turn the developer started: its answer goes first.
+      this.turnSource === null &&
+      !this.queued &&
+      !this.pending &&
+      !this.plans.awaitingApproval &&
+      this.speakingReplies === 0 &&
+      this.voice.speechInFlight !== true &&
+      this.voice.capturing !== true &&
+      !this.developerSpeaking()
+    );
+  }
+
   /** Offers one agent's news to the developer as a call. */
   private offerCall(
     entry: AgentTileEntry,
     kind: CallKind,
     text: string,
-    extra: { requestId?: string; fingerprint?: string; interactionId?: string | null } = {}
+    extra: {
+      requestId?: string;
+      fingerprint?: string;
+      interactionId?: string | null;
+      onShown?: () => void;
+    } = {}
   ): void {
     this.calls.offer({
       id: crypto.randomUUID(),
@@ -1508,6 +1711,7 @@ export class ConductorStore {
       interactionId: extra.interactionId ?? crypto.randomUUID(),
       ...(extra.requestId ? { requestId: extra.requestId } : {}),
       ...(extra.fingerprint ? { fingerprint: extra.fingerprint } : {}),
+      ...(extra.onShown ? { onShown: extra.onShown } : {}),
     });
   }
 
@@ -1519,12 +1723,14 @@ export class ConductorStore {
     });
     this.context.noteReply(call.text);
     this.trace('reply', call.text, { surface: 'announce' }, call.interactionId ?? null);
+    this.toldAbout.set(call.conversationId, call.text);
+    call.onShown?.();
   }
 
   private async speakCall(call: Call): Promise<void> {
     if (!this.voice.speak) {
       this.tellLine(call.text);
-      this.voice.announce(call.text);
+      await this.voice.announce(call.text);
       return;
     }
     const interaction = call.interactionId ? { interactionId: call.interactionId } : {};
@@ -1690,21 +1896,36 @@ export class ConductorStore {
     };
   }
 
-  /** A sentence from the request desk: a call from the agent it is about, when calls are on. */
+  /**
+   * A sentence from the request desk: a call from the agent it is about, when calls are on;
+   * otherwise news, told when the developer is free. A question is told only while it is open.
+   */
   private sayForRequest(
     text: string,
-    about?: { conversationId: string; requestId: string; asks: 'question' | 'request' | 'report' }
+    about?: RequestSayContext,
+    options: RequestSayOptions = {}
   ): void {
     const entry =
       about && this.callMode !== 'off'
         ? entryForConversation(this.canvas, about.conversationId)
         : undefined;
+    const onShown = options.onShown ? { onShown: options.onShown } : {};
     if (!entry || !about) {
-      this.notify(text);
+      const asks = about && about.asks !== 'report' ? about.requestId : undefined;
+      const agent = about?.conversationId ?? options.agent;
+      this.notify(text, null, {
+        source: options.source ?? (about?.asks === 'report' ? 'report' : 'request'),
+        ...(options.shown ? { shown: options.shown } : {}),
+        ...(options.speak === false ? { spoken: false } : {}),
+        agents: agent ? [agent] : [],
+        ...(asks ? { asks, current: () => (this.requests.awaiting(asks) ? text : null) } : {}),
+        ...(options.standsForTurn && agent ? { standsForTurn: agent } : {}),
+        ...onShown,
+      });
       return;
     }
     if (about.asks === 'report') this.offerCall(entry, 'attention', text);
-    else this.offerCall(entry, about.asks, text, { requestId: about.requestId });
+    else this.offerCall(entry, about.asks, text, { requestId: about.requestId, ...onShown });
   }
 
   // ── Code checks ────────────────────────────────────────────────────────────
@@ -1775,6 +1996,7 @@ export class ConductorStore {
     // Text a scout read from the repository is now in the model's context: from here on, what
     // the model does in this turn needs the developer's explicit yes.
     this.turnTainted = true;
+    this.codeCheckTaintOnly = false;
     return { content: formatInvestigationResult(run.data) };
   }
 
@@ -3441,7 +3663,15 @@ export class ConductorStore {
     text: string,
     source: UtteranceSource,
     startedAt: number
-  ): Promise<{ handled: boolean; mode?: ConductorMode; hints?: string }> {
+  ): Promise<{
+    handled: boolean;
+    mode?: ConductorMode;
+    hints?: string;
+    /** The command the router read the developer's own words as, when it was sure. */
+    named?: WaivableAction | null;
+    /** Which agent the router read the words as being about. */
+    target?: { choice: string; confidence: number } | null;
+  }> {
     if (source === 'voice' && looksLikeSttArtifact(text)) {
       this.trace('jev', undefined, { purpose: 'route', status: 'skipped', reason: 'stt-artifact' });
       this.dropArtifact(source, startedAt);
@@ -3494,7 +3724,13 @@ export class ConductorStore {
           reason: decision.reason,
           project: decision.project?.project.name ?? null,
         });
-        return { handled: false, mode: decision.mode, hints: decision.hints || undefined };
+        return {
+          handled: false,
+          mode: decision.mode,
+          hints: decision.hints || undefined,
+          named: namedAction(routed.detail),
+          target: jevReading(routed.detail, 'target'),
+        };
       case 'clarify': {
         this.lastRoute = 'jev';
         this.clarification = { choices: decision.choices, at: Date.now() };
@@ -3763,8 +3999,12 @@ export class ConductorStore {
         `Code checks are unavailable: ${investigator.reason ?? 'unknown reason'}. Do not call investigate.`
       );
     }
-    // A scout's reading of the repository is still in context: what the model does asks first.
-    if (hasCodeCheck(this.history)) this.turnTainted = true;
+    // A scout's reading of the repository is still in context: what the model does asks first,
+    // unless the developer's own words named it (see `codeCheckWaived`).
+    if (hasCodeCheck(this.history)) {
+      this.codeCheckTaintOnly = !this.turnTainted;
+      this.turnTainted = true;
+    }
     if (this.boundCall) {
       // The developer answered this agent's call without naming it.
       extra.push(
@@ -3848,11 +4088,17 @@ export class ConductorStore {
     mode: ConductorMode,
     messages: Anthropic.Beta.BetaMessageParam[],
     actions: ActionRecord[],
-    maxIterations: number
-  ): Promise<{ reply: string; completed: boolean; tokens: number }> {
+    maxIterations: number,
+    /**
+     * A request turn ends once a round's only call settled the request: a second model call
+     * would only write a closing line, which a fixed sentence says as well.
+     */
+    endOnSettle = false
+  ): Promise<{ reply: string; completed: boolean; tokens: number; settled?: boolean }> {
     let tokens = 0;
     let reply = '';
     let completed = false;
+    let settled = false;
 
     try {
       const client = await getConductorClient();
@@ -3888,6 +4134,7 @@ export class ConductorStore {
           iteration,
           ms,
           status: turn.stopReason ?? 'unknown',
+          model: turn.model,
           inputTokens: turn.usage.inputTokens,
           outputTokens: turn.usage.outputTokens,
           cachedTokens: turn.usage.cacheReadTokens,
@@ -3913,6 +4160,7 @@ export class ConductorStore {
         // wants to say, or ask, while the developer waits.
         if (text && toolUses.some((use) => use.name === 'investigate')) this.sayInterim(text);
         const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
+        let settledNow = false;
         for (const use of toolUses) {
           // Said stop between two steps: the rest of what the model asked for does not run.
           if (this.turnCancelled) break;
@@ -3940,6 +4188,12 @@ export class ConductorStore {
             outcome: truncate(recorded, 300),
             ...(LAYOUT_TOOLS.has(use.name) ? {} : actionStatus(outcome)),
           });
+          settledNow =
+            endOnSettle &&
+            toolUses.length === 1 &&
+            use.name === 'answer_request' &&
+            !outcome.isError &&
+            !outcome.cancelled;
           results.push({
             type: 'tool_result',
             tool_use_id: use.id,
@@ -3969,6 +4223,11 @@ export class ConductorStore {
           role: 'user',
           content: added ? [...results, { type: 'text', text: added }] : results,
         });
+        if (settledNow) {
+          settled = true;
+          completed = true;
+          break;
+        }
       }
       if (!completed && !reply) reply = 'I stopped after several steps. Check the canvas.';
     } catch (error) {
@@ -3976,7 +4235,7 @@ export class ConductorStore {
       runInAction(() => (this.error = { kind: 'other', message: errorMessage(error) }));
       reply = 'Something went wrong talking to the conductor.';
     }
-    return { reply, completed, tokens };
+    return { reply, completed, tokens, ...(settled ? { settled } : {}) };
   }
 
   /**
@@ -4176,7 +4435,9 @@ export class ConductorStore {
         if (
           !(await this.requestPending(
             `Send to ${this.targetLabel(entry.entry)}: “${truncate(text, 90)}”`,
-            confirmKind,
+            this.codeCheckWaived('send_to_agent', entry.entry.projectId, message, target)
+              ? null
+              : confirmKind,
             // Everything that will be typed, so a yes is given to all of it.
             { detail: message }
           ))
@@ -4204,7 +4465,9 @@ export class ConductorStore {
           content:
             outcome === 'sent'
               ? `Sent to ${target} (${delivered}).`
-              : `${target} was not running; it is starting and will get the message (${delivered}) when ready. You will be told if it cannot be delivered.`,
+              : outcome === 'starting'
+                ? `${target} was not running; it is starting and will get the message (${delivered}) when ready. You will be told if it cannot be delivered.`
+                : `Held for ${target} ${heldWhile(outcome.reason)} (${delivered}); it is typed once that clears. You will be told if it cannot be delivered.`,
           subject: { conversationId: entry.entry.conversationId },
         };
       }
@@ -4247,6 +4510,9 @@ export class ConductorStore {
           if (!where.ok) return where.outcome;
           projectId = where.id;
         }
+        // A detailed request with no brief would start an agent with nothing to do.
+        const noBrief = options.verbatim ? null : emptyBriefError(spawn.prompt, this.lastUtterance);
+        if (noBrief) return { content: noBrief, isError: true };
         const prompt = options.verbatim
           ? spawn.prompt
           : withVerbatimRequest(spawn.prompt, this.lastUtterance);
@@ -4260,7 +4526,8 @@ export class ConductorStore {
         const regionName = destination?.name ?? null;
         const where = `${projectName ? ` in ${projectName}` : ''}${worktree ? ' in a new worktree' : ''}${regionName ? ` on ${regionName}` : ''}`;
         const label = `Start ${spokenProviderLabel(providerId)}${where} on “${truncate(spawn.task_name, 60)}” · ${describePrompt(prompt)}`;
-        if (!(await this.requestPending(label, confirmKind, { detail: prompt }))) {
+        const kind = this.codeCheckWaived('spawn_agent', projectId, prompt) ? null : confirmKind;
+        if (!(await this.requestPending(label, kind, { detail: prompt }))) {
           return { content: 'The user cancelled the new agent.', cancelled: true };
         }
         runInAction(() => (this.activity = worktree ? 'Creating a worktree…' : 'Creating a task…'));
@@ -4276,6 +4543,10 @@ export class ConductorStore {
           conversationId,
           title: name,
           worktree,
+          peers: spawnPeers(
+            this.canvas,
+            (id) => projectData(getProjectStore(id))?.repositoryWorkspaceId
+          ),
         }).catch((error: unknown) => {
           this.canvas.releaseSpokenName(conversationId);
           throw error;
@@ -4291,14 +4562,16 @@ export class ConductorStore {
             providerLabel: spokenProviderLabel(providerId),
             projectName,
             prompt,
-            taskName: spawn.task_name,
+            taskName: result.taskName,
             worktree,
           });
         }
         const interactionId = this.interactionId;
         this.trace('action-result', undefined, { tool: 'spawn_agent', status: 'scheduled' });
+        let sessionStarted = false;
         void startAgentSession(projectId, result.taskId, result.conversationId)
           .then(async (started) => {
+            sessionStarted = started;
             if (!started) {
               this.trace(
                 'action-result',
@@ -4306,6 +4579,7 @@ export class ConductorStore {
                 { tool: 'spawn_agent', status: 'failed-to-start' },
                 interactionId
               );
+              void this.announceStartFailure(name, providerId, interactionId);
               return;
             }
             this.trace(
@@ -4328,16 +4602,24 @@ export class ConductorStore {
               );
             }
           })
-          .catch(() =>
+          .catch((error: unknown) => {
+            const notTyped = undeliveredText(error, name, 'its brief');
             this.trace(
               'action-result',
               undefined,
-              { tool: 'spawn_agent', status: 'failed-to-start' },
+              { tool: 'spawn_agent', status: notTyped ? 'prompt-failed' : 'failed-to-start' },
               interactionId
-            )
-          );
+            );
+            // The brief was pasted and not sent, or given up on: said as it is, never as "did
+            // not start", which would have it sent again.
+            if (notTyped) this.notify(notTyped, interactionId, { source: 'failure' });
+            else if (!sessionStarted) {
+              void this.announceStartFailure(name, providerId, interactionId);
+            }
+          });
+        const notes = result.notes.length > 0 ? ` ${result.notes.join(' ')}` : '';
         return {
-          content: `Created task "${spawn.task_name}"${projectName ? ` in project "${projectName}"` : ''} ${worktree ? 'in a new worktree' : 'in the project directory'} with ${prompt.trim() ? `a prompt of ${deliveryNote(spawn.prompt, prompt)}` : 'no prompt, so it waits for its first instruction'}; the agent is starting. It will appear on the canvas as ${name}${regionName ? ` on ${regionName}` : ''}.`,
+          content: `Created task "${result.taskName}"${projectName ? ` in project "${projectName}"` : ''} ${worktree ? 'in a new worktree' : 'in the project directory'} with ${prompt.trim() ? `a prompt of ${deliveryNote(spawn.prompt, prompt)}` : 'no prompt, so it waits for its first instruction'}; the agent is starting. It will appear on the canvas as ${name}${regionName ? ` on ${regionName}` : ''}.${notes}`,
           subject: { conversationId: result.conversationId },
         };
       }
@@ -5070,6 +5352,57 @@ export class ConductorStore {
     return `${name} is waiting on a permission prompt, and typing there could answer it. Say "allow ${name}" or "deny ${name}" first.`;
   }
 
+  /**
+   * A start or a send in a turn tainted only by an earlier code check that the developer's own
+   * words named, in the project the check read, with a brief that quotes none of it: it runs
+   * without asking (see `waivesCodeCheckTaint`). Every other tool, and every other taint, asks.
+   */
+  private codeCheckWaived(
+    tool: string,
+    projectId: string | null,
+    brief: string,
+    /** A send's agent, by its name. */
+    targetName?: string
+  ): boolean {
+    // Once a turn: the developer's words named one action, not every one the model makes.
+    if (!this.turnTainted || !this.codeCheckTaintOnly || this.preconfirmed || this.waiverUsed) {
+      return false;
+    }
+    const waived = waivesCodeCheckTaint({
+      tool,
+      named: this.turnNamedAction,
+      projectId,
+      checkedProjects: this.checkedProjectIds(),
+      brief,
+      checks: codeCheckTexts(this.history),
+      ...(targetName
+        ? { targetNamed: namesAgent(targetName, this.lastUtterance, this.turnNamedTarget) }
+        : {}),
+    });
+    if (waived) {
+      this.waiverUsed = true;
+      this.trace('confirmation', undefined, { status: 'waived', tool, reason: 'own-command' });
+    }
+    return waived;
+  }
+
+  /** The projects the code checks still in the history read: a compacted one reads none. */
+  private checkedProjectIds(): Set<string> {
+    const ids = new Set<string>();
+    for (const raw of liveCodeCheckInputs(this.history)) {
+      const parsed = conductorToolSchemas.investigate.safeParse(raw);
+      if (!parsed.success) continue;
+      const target = this.investigationTarget(parsed.data);
+      if ('error' in target) continue;
+      if ('projectId' in target.target) ids.add(target.target.projectId);
+      else if (parsed.data.agent) {
+        const resolved = this.resolveEntry(parsed.data.agent);
+        if ('entry' in resolved) ids.add(resolved.entry.projectId);
+      }
+    }
+    return ids;
+  }
+
   // ── Pending actions ────────────────────────────────────────────────────────
 
   /**
@@ -5112,7 +5445,7 @@ export class ConductorStore {
     this.trace('confirmation', undefined, { status: 'waiting', kind: 'confirm' });
     return new Promise<boolean>((resolve) => {
       this.pendingResolve = resolve;
-      if (readBack) void this.readBackPending(id, label);
+      if (readBack) void this.readBackPending(id, label, options.detail);
       // While the developer is speaking the clock waits for what they are saying.
       else if (!speaking) this.startPendingTimer(durationMs);
     });
@@ -5138,7 +5471,10 @@ export class ConductorStore {
     resolve?.(confirmed);
     // A pending action outside a turn held agent requests back; nothing else would pick them
     // up when it settles.
-    if (!this.busy) void this.requests.drain().then(() => this.calls.pump());
+    if (!this.busy) {
+      this.resumeFollowUps();
+      void this.requests.drain().then(() => this.calls.pump());
+    }
   }
 
   /**
@@ -5151,12 +5487,16 @@ export class ConductorStore {
     return this.turnTainted || this.callMode !== 'off';
   }
 
-  /** Reads a pending action out in the system voice, then arms it and starts its clock. */
-  private async readBackPending(id: number, label: string): Promise<void> {
+  /**
+   * Reads a pending action out in the system voice, short (the HUD shows all of it), then arms
+   * it and starts its clock: a yes counts from the end of what the developer heard.
+   */
+  private async readBackPending(id: number, label: string, detail?: string): Promise<void> {
     this.pendingReadingId = id;
-    this.talkLine?.spoke(spokenLabel(label));
+    const said = spokenConfirmation(label, detail);
+    this.talkLine?.spoke(said);
     try {
-      await this.voice.speak?.(spokenLabel(label), {
+      await this.voice.speak?.(said, {
         voice: 'system',
         ...(this.interactionId ? { interactionId: this.interactionId } : {}),
       });
@@ -5252,6 +5592,22 @@ export class ConductorStore {
           reports.set(entry.conversationId, report);
         }
       }
+      // Done and blocked reports both stand for the turn that ends after them.
+      const covered = endedTurn(entry) ? this.reportStandsForTurn(entry.conversationId) : null;
+      if (covered) {
+        // The developer just heard, or is about to hear, this agent's whole report: its
+        // finished turn is not told again. One that waits keeps its place in the queue.
+        this.narratedAt.set(entry.conversationId, Date.now());
+        const text = covered === 'heard' ? this.fixedAnnouncement([entry], reports) : null;
+        if (text) {
+          this.notify(text, null, {
+            source: 'completion',
+            spoken: false,
+            agents: [entry.conversationId],
+          });
+        }
+        continue;
+      }
       fresh.push(entry);
     }
     for (const entry of fresh) {
@@ -5276,20 +5632,47 @@ export class ConductorStore {
       ? [...gated.llm, ...reported.filter((entry) => !isDone(entry))]
       : reported;
     const followUp = this.canFollowUp() ? narrate : [];
-    const handled = new Set([...(gated?.handled ?? []), ...followUp]);
+    // The conductor is busy: these wait for their follow-up rather than get the bare sentence.
+    const waiting = this.followUpWaits() ? narrate : [];
+    if (waiting.length > 0) this.deferFollowUp(waiting, reports, gated?.interactionId);
+    const handled = new Set([...(gated?.handled ?? []), ...followUp, ...waiting]);
     const unhandled = fresh.filter((entry) => !handled.has(entry));
     // A finished agent nobody read further was judged done by its attention verdict: when
     // completions are quiet it goes to the HUD, while waiting agents are still announced.
     const quiet = this.quietCompletions ? unhandled.filter(isDone) : [];
-    const text = this.fixedAnnouncement(
-      unhandled.filter((entry) => !quiet.includes(entry)),
-      reports
-    );
+    const told = unhandled.filter((entry) => !quiet.includes(entry));
+    const text = this.fixedAnnouncement(told, reports);
     const quietText = this.fixedAnnouncement(quiet, reports);
     if (quietText) this.showQuietly(quietText, gated?.interactionId);
     const announcement = [...spoken, text].filter(Boolean).join(' ');
-    if (announcement) this.notify(announcement, gated?.interactionId);
-    if (followUp.length > 0) await this.followUpCompletions(followUp, reports);
+    if (announcement) {
+      this.notify(announcement, gated?.interactionId, {
+        source: batchSource(fresh),
+        agents: fresh.map((entry) => entry.conversationId),
+        // By the time it is told, an agent may have been looked at, or stopped waiting.
+        current: () => {
+          const still = stillAnnounced(told, this.canvas.agentEntries);
+          const now = still.length === told.length ? text : this.fixedAnnouncement(still, reports);
+          return [...spoken, now].filter(Boolean).join(' ') || null;
+        },
+      });
+    }
+    if (followUp.length > 0) {
+      await this.followUpCompletions(followUp, reports, undefined, gated?.interactionId);
+    }
+  }
+
+  /**
+   * Whether this agent's whole report stands for the turn it just finished: it is waiting to be
+   * told, or was told a moment ago (once). Null when it does not.
+   */
+  private reportStandsForTurn(conversationId: string): 'queued' | 'heard' | null {
+    if (this.calls.announcements.some((waiting) => waiting.standsForTurn === conversationId)) {
+      return 'queued';
+    }
+    const heardAt = this.reportHeardAt.get(conversationId);
+    this.reportHeardAt.delete(conversationId);
+    return heardAt !== undefined && Date.now() - heardAt < REPORT_STANDS_MS ? 'heard' : null;
   }
 
   /**
@@ -5334,8 +5717,22 @@ export class ConductorStore {
     for (const entry of narrate) {
       if (this.canFollowUp()) {
         // One short model turn per agent, so the call it produces has one caller.
-        await this.followUpCompletions([entry], reports, (text, interactionId) =>
-          this.offerCall(entry, isDone(entry) ? 'completion' : 'attention', text, { interactionId })
+        await this.followUpCompletions(
+          [entry],
+          reports,
+          (text, interactionId) =>
+            this.offerCall(entry, isDone(entry) ? 'completion' : 'attention', text, {
+              interactionId,
+            }),
+          gated?.interactionId
+        );
+        continue;
+      }
+      if (this.followUpWaits()) {
+        this.deferFollowUp([entry], reports, gated?.interactionId, (text, interactionId) =>
+          this.offerCall(entry, isDone(entry) ? 'completion' : 'attention', text, {
+            interactionId,
+          })
         );
         continue;
       }
@@ -5343,6 +5740,58 @@ export class ConductorStore {
       if (!text) continue;
       if (this.quietCompletions && isDone(entry)) this.showQuietly(text);
       else this.offerCall(entry, isDone(entry) ? 'completion' : 'attention', text);
+    }
+  }
+
+  /** Follow-ups are on and could run, but the conductor is busy or waiting for a yes. */
+  private followUpWaits(): boolean {
+    return (
+      this.configured &&
+      (this.settings?.completionFollowUp ?? DEFAULT_CONDUCTOR_SETTINGS.completionFollowUp) &&
+      (this.busy || this.pending !== null)
+    );
+  }
+
+  /** Keeps a follow-up until the conductor is free (see `resumeFollowUps`). */
+  private deferFollowUp(
+    entries: readonly AgentTileEntry[],
+    reports: ReadonlyMap<string, CompletionReport>,
+    interactionId: string | undefined,
+    deliver?: (text: string, interactionId: string | null) => void
+  ): void {
+    const id = interactionId ?? crypto.randomUUID();
+    this.deferredFollowUps.push({ entries, reports, interactionId: id, at: Date.now(), deliver });
+    this.trace('route', undefined, { status: 'follow-up-deferred', agents: entries.length }, id);
+  }
+
+  /**
+   * Runs the oldest follow-up that waited for the conductor, now that it is free. One that
+   * waited longer than news may is dropped, as waiting news is.
+   */
+  private resumeFollowUps(): void {
+    while (this.canFollowUp()) {
+      const next = this.deferredFollowUps.shift();
+      if (!next) return;
+      if (Date.now() - next.at > ANNOUNCEMENT_TTL_MS) {
+        this.trace('route', undefined, { status: 'follow-up-expired' }, next.interactionId);
+        // Too late to narrate, but not lost: the fixed sentence, shown.
+        const text = this.fixedAnnouncement(next.entries, next.reports);
+        if (text) {
+          this.notify(text, next.interactionId, {
+            source: next.entries.every(isDone) ? 'completion' : 'attention',
+            spoken: false,
+            agents: next.entries.map((entry) => entry.conversationId),
+          });
+        }
+        continue;
+      }
+      void this.followUpCompletions(
+        next.entries,
+        next.reports,
+        next.deliver,
+        next.interactionId
+      ).catch((error: unknown) => log.warn('conductor: follow-up failed', { error }));
+      return;
     }
   }
 
@@ -5518,9 +5967,14 @@ export class ConductorStore {
   private async followUpCompletions(
     entries: readonly AgentTileEntry[],
     reports: ReadonlyMap<string, CompletionReport>,
-    /** Where the sentence goes; by default it is announced at once. */
+    /** Where the sentence goes; by default it is announced. */
     deliver: (text: string, interactionId: string | null) => void = (text, interactionId) =>
-      this.notify(text, interactionId)
+      this.notify(text, interactionId, {
+        source: entries.every(isDone) ? 'completion' : 'attention',
+        agents: entries.map((entry) => entry.conversationId),
+      }),
+    /** The trace id of the completion gate that sent these agents on, so both share one. */
+    interactionId: string = crypto.randomUUID()
   ): Promise<void> {
     const agents: CompletedAgentReport[] = entries.flatMap((entry) => {
       const report = reports.get(entry.conversationId);
@@ -5532,6 +5986,9 @@ export class ConductorStore {
               taskName: entry.taskName,
               report,
               sentByConductor: this.ledger.sentTo(this.nameOf(entry)),
+              ...(this.toldAbout.has(entry.conversationId)
+                ? { lastToldDeveloper: this.toldAbout.get(entry.conversationId) }
+                : {}),
             },
           ]
         : [];
@@ -5541,8 +5998,24 @@ export class ConductorStore {
     // Every agent here finished and its verdict found nothing it needs: speak only what the
     // model finds the developer must hear.
     const attentionOnly = this.quietCompletions && entries.every(isDone);
+    // Nothing new from an agent the developer never heard about: say where it stands. One that
+    // waits for them did not "finish" anything.
+    const waitingFirst = (entry: AgentTileEntry) =>
+      !this.narratedAt.has(entry.conversationId) &&
+      (entryForConversation(this.canvas, entry.conversationId) ?? entry).status ===
+        'awaiting-input';
+    const noNewsLine = entries.some(waitingFirst)
+      ? entries
+          .map((entry) =>
+            waitingFirst(entry)
+              ? `${this.nameOf(entry)} is waiting for you.`
+              : (this.fixedAnnouncement([entry], reports) ?? '')
+          )
+          .filter(Boolean)
+          .join(' ')
+      : fallback;
     const startedAt = performance.now();
-    this.interactionId = crypto.randomUUID();
+    this.interactionId = interactionId;
     this.followUpActive = true;
     runInAction(() => {
       this.phase = 'thinking';
@@ -5607,7 +6080,7 @@ export class ConductorStore {
         : quiet
           ? `${names.join(' and ')}: finished a turn with nothing new.`
           : noNews
-            ? ownWords.join(' ') || fallback
+            ? ownWords.join(' ') || noNewsLine
             : reply || ownWords.join(' ') || fallback;
       if (quiet) {
         if (spoken) this.showQuietly(spoken);
@@ -5647,6 +6120,7 @@ export class ConductorStore {
     this.trace('route', undefined, { route: 'llm', mode: 'command' });
     const actions: ActionRecord[] = [];
     let reply = '';
+    let settledAs = '';
     let modelFailed = true;
     let tokens = 0;
     try {
@@ -5657,6 +6131,7 @@ export class ConductorStore {
         this.backgroundTurnExtras(),
         this.reportOf
       );
+      const base = this.history.length;
       const messages: Anthropic.Beta.BetaMessageParam[] = [
         ...this.history,
         { role: 'user', content: conductorUserMessage(context, requestTurnText(open)) },
@@ -5665,25 +6140,32 @@ export class ConductorStore {
         'command',
         messages,
         actions,
-        REQUEST_TURN_MAX_ITERATIONS
+        REQUEST_TURN_MAX_ITERATIONS,
+        true
       );
       tokens = result.tokens;
-      modelFailed = !result.completed;
-      if (result.completed) {
-        reply = result.reply;
-        this.history = this.remember(messages);
+      // Settled in this turn, though it may have run out of rounds after: it is kept, and its
+      // closing is the fixed sentence the desk says when the model wrote none.
+      settledAs = settledSentence(open, actions);
+      modelFailed = !result.completed && !settledAs;
+      if (result.completed && !result.settled) reply = result.reply;
+      if (result.completed || settledAs) {
+        // Only a valid sequence is kept: every call answered, ending on the conductor's word.
+        const kept = keptRequestTurn(messages, base, settledAs || null);
+        if (kept) this.history = this.remember(kept);
       }
     } finally {
       this.requestTurnActive = false;
       this.log({
         route: 'llm',
         actions,
-        reply,
+        reply: reply || settledAs,
         ...(modelFailed ? { modelFailed: true } : {}),
         startedAt,
         tokens,
         utterance: `[request ${open.id}] ${open.sender.name}: ${open.kind}`,
         about: requestLineSummary(open),
+        request: open.body,
       });
       this.finishTurn();
     }
@@ -5704,17 +6186,52 @@ export class ConductorStore {
    * never starts an agent: one the developer stopped stays stopped, and the caller is told.
    */
   private async sendWhenSafe(conversationId: string, text: string): Promise<void> {
-    const deadline = Date.now() + REQUEST_REPLY_WAIT_MS;
+    const startedAt = Date.now();
+    const deadline = startedAt + REQUEST_REPLY_WAIT_MS;
+    // Its own trace id: by the time it is typed, another turn may be the conductor's current one.
+    const interactionId = crypto.randomUUID();
+    this.sendTraceIds.set(conversationId, interactionId);
+    // The developer hears once that the conductor's message waits, and why.
+    let told = false;
+    const tellHeld = (entry: AgentTileEntry, reason: HoldReason) => {
+      if (told) return;
+      told = true;
+      this.notify(heldMessageNotice(this.nameOf(entry), reason), interactionId, {
+        source: 'request',
+        agents: [conversationId],
+      });
+    };
     for (;;) {
       const entry = entryForConversation(this.canvas, conversationId);
       if (!entry) throw new Error('it is no longer on the canvas.');
       if (!this.isRunning(entry)) throw new Error('it is not running.');
       if (!atBlockingPrompt(entry)) {
-        await sendToAgent(entry, plainText(text), true);
-        this.trace('action-result', undefined, { tool: 'send_to_agent', status: 'accepted' });
+        try {
+          await sendToAgent(entry, plainText(text), true, {
+            onHold: (hold) => tellHeld(entry, hold.reason),
+          });
+        } catch (error) {
+          const name = this.nameOf(entry);
+          if (error instanceof DeliveryHeldError) throw new Error(heldReasonText(error.reason));
+          const unsent = undeliveredText(error, name, 'my message');
+          if (unsent) throw new Error(unsent);
+          throw error;
+        }
+        this.trace(
+          'action-result',
+          undefined,
+          {
+            tool: 'send_to_agent',
+            status: 'accepted',
+            agent: this.nameOf(entry),
+            waitedMs: Date.now() - startedAt,
+          },
+          interactionId
+        );
         return;
       }
       if (Date.now() >= deadline) throw new Error('it stayed at a prompt that needs you.');
+      tellHeld(entry, 'prompt');
       await new Promise((resolve) => setTimeout(resolve, REQUEST_REPLY_POLL_MS));
     }
   }
@@ -5737,17 +6254,78 @@ export class ConductorStore {
     playNotificationSound('needs_attention', 'conductor-attention');
   }
 
-  private notify(text: string, interactionId?: string | null): void {
+  /**
+   * Tells the developer news. It waits on the call desk until they are free (see
+   * `freeToAnnounce`), so it never cuts off the conductor's answer to them or talks while they
+   * speak; it is shown, and its question becomes answerable, only once it is told.
+   */
+  private notify(
+    text: string,
+    interactionId?: string | null,
+    options: {
+      readonly source?: AnnounceSource;
+      readonly shown?: string;
+      readonly spoken?: boolean;
+      readonly agents?: readonly string[];
+      readonly asks?: string;
+      readonly current?: () => string | null;
+      readonly onShown?: () => void;
+      readonly standsForTurn?: string;
+    } = {}
+  ): void {
+    if (!text) return;
+    const { source, shown, spoken, agents, ...rest } = options;
+    this.calls.announce({
+      id: crypto.randomUUID(),
+      text,
+      ...(shown && shown !== text ? { shown } : {}),
+      source: source ?? 'other',
+      spoken: spoken !== false,
+      at: Date.now(),
+      interactionId: interactionId ?? crypto.randomUUID(),
+      agents: agents ?? [],
+      ...rest,
+    });
+  }
+
+  /** Shows and says one announcement the call desk let through (`text`: what to say now). */
+  private async tellAnnouncement(announcement: Announcement, text: string): Promise<void> {
+    const shown = text === announcement.text ? (announcement.shown ?? text) : text;
     // Announcements carry what agents wrote: a reply that names no action answers this.
     this.agentSpoke = true;
     runInAction(() => {
-      this.reply = text;
+      this.reply = shown;
       this.replyAt = Date.now();
     });
-    this.context.noteReply(text);
-    if (interactionId) this.trace('reply', text, { surface: 'announce' }, interactionId);
-    this.tellLine(text);
-    this.voice.announce(text);
+    this.context.noteReply(shown);
+    this.trace(
+      'reply',
+      shown,
+      {
+        surface: 'announce',
+        source: announcement.source,
+        ...(announcement.spoken ? {} : { spoken: false }),
+      },
+      announcement.interactionId
+    );
+    for (const agent of announcement.agents) this.toldAbout.set(agent, shown);
+    // From here a yes can answer what it asked.
+    announcement.onShown?.();
+    this.tellLine(shown);
+    if (!announcement.spoken) return;
+    // Said whole, the agent's turn ending meanwhile or a moment later is not news.
+    const agent = announcement.standsForTurn;
+    if (agent) this.reportHeardAt.set(agent, Date.now());
+    const result = this.voice.speak
+      ? await this.voice.speak(text, {
+          attention: true,
+          interactionId: announcement.interactionId,
+        })
+      : await this.voice.announce(text);
+    // Never said (muted, or speech failed): that turn is news after all.
+    if (agent && (result === 'suppressed' || result === 'failed')) {
+      this.reportHeardAt.delete(agent);
+    }
   }
 
   // ── Settings ───────────────────────────────────────────────────────────────
@@ -6100,9 +6678,10 @@ export class ConductorStore {
     return entry.type === 'acp' || entry.sessionActive;
   }
 
-  private deliveryReply(entry: AgentTileEntry, outcome: 'sent' | 'starting'): string {
+  private deliveryReply(entry: AgentTileEntry, outcome: Delivery): string {
     const name = this.nameOf(entry);
     if (outcome === 'sent') return `Sent to ${name}.`;
+    if (typeof outcome === 'object') return `Holding it for ${name} ${heldWhile(outcome.reason)}.`;
     // Waking a stopped agent is the surprising case, so say where it lives.
     const projects = new Set(this.canvas.agentEntries.map((other) => other.projectId));
     const where = projects.size > 1 ? ` in ${entry.projectName}` : '';
@@ -6133,11 +6712,58 @@ export class ConductorStore {
     text: string,
     submit: boolean,
     fromDeveloper = true
-  ): Promise<'sent' | 'starting'> {
+  ): Promise<Delivery> {
+    const name = this.nameOf(entry);
+    const interactionId = this.interactionId;
+    if (interactionId) this.sendTraceIds.set(entry.conversationId, interactionId);
+    // A send held for the developer's typing can wait minutes: the turn does not wait with it.
+    let onHold: (hold: DeliveryHold) => void = () => {};
+    const heldNow = new Promise<DeliveryHold>((resolve) => (onHold = resolve));
+    const options = { onHold: (hold: DeliveryHold) => onHold(hold) };
     // The session list can call a live agent stopped; its host knows, so ask it before starting.
-    let sent = true;
-    if (this.isRunning(entry)) await sendToAgent(entry, text, submit);
-    else sent = await sendToLiveSession(entry, text, submit);
+    const sending = this.isRunning(entry)
+      ? sendToAgent(entry, text, submit, options).then(() => true)
+      : sendToLiveSession(entry, text, submit, options);
+    let sent: boolean;
+    try {
+      const first = await Promise.race([sending, heldNow]);
+      if (typeof first === 'object') {
+        this.trace('action-result', undefined, {
+          tool: 'send_to_agent',
+          status: 'held',
+          reason: first.reason,
+        });
+        if (fromDeveloper) this.requests.noteDeveloperSend(entry.conversationId);
+        void sending.then(
+          (typed) => {
+            this.trace(
+              'action-result',
+              undefined,
+              { tool: 'send_to_agent', status: typed ? 'delivered' : 'failed', held: true },
+              interactionId
+            );
+            if (!typed) {
+              this.notify(`${name} did not get your message: it is not running.`, interactionId, {
+                source: 'failure',
+              });
+            }
+          },
+          (error: unknown) =>
+            this.notify(
+              undeliveredText(error, name, 'your message') ??
+                `${name} did not get your message: ${errorMessage(error)}`,
+              interactionId,
+              { source: 'failure' }
+            )
+        );
+        return first;
+      }
+      sent = first;
+    } catch (error) {
+      const unsent = undeliveredText(error, name, 'your message');
+      if (unsent) throw new Error(unsent);
+      throw error;
+    }
     if (sent) {
       this.trace('action-result', undefined, { tool: 'send_to_agent', status: 'accepted' });
       // The developer writing to an agent themselves answers whatever it asked them.
@@ -6145,14 +6771,16 @@ export class ConductorStore {
       return 'sent';
     }
     const started = await startAgentSession(entry.projectId, entry.taskId, entry.conversationId);
-    if (!started) throw new Error(`${this.nameOf(entry)} could not be started.`);
+    if (!started) throw new Error(`${name} could not be started.`);
     if (fromDeveloper) this.requests.noteDeveloperSend(entry.conversationId);
-    const interactionId = this.interactionId;
     this.trace('action-result', undefined, { tool: 'send_to_agent', status: 'scheduled' });
     const scheduledAt = performance.now();
     void deliverPromptWhenReady(this.canvas, entry.conversationId, text, submit)
-      .catch(() => false)
-      .then((delivered) => {
+      .then(
+        (delivered) => ({ delivered, error: null as unknown }),
+        (error: unknown) => ({ delivered: false, error })
+      )
+      .then(({ delivered, error }) => {
         // Named apart from an immediate send, so a log review can count deferred deliveries.
         this.trace(
           'action-result',
@@ -6168,8 +6796,12 @@ export class ConductorStore {
         if (delivered) return;
         // The developer was told it would arrive: say that it did not, rather than drop it.
         this.notify(
-          `${this.nameOf(entry)} did not start in time, so your message was not delivered. Send it again once it is running.`,
-          interactionId
+          error
+            ? (undeliveredText(error, name, 'your message') ??
+                `${name} did not get your message: ${errorMessage(error)}`)
+            : `${name} did not start in time, so your message was not delivered. Send it again once it is running.`,
+          interactionId,
+          { source: 'failure' }
         );
       });
     return 'starting';
@@ -6256,6 +6888,8 @@ export class ConductorStore {
     onLine?: boolean;
     /** What started the turn when Maestro did, as the voice line is told it. */
     about?: string;
+    /** What an agent's request asked, as it wrote it: redacted and shortened here. */
+    request?: string;
   }): void {
     const record: ConductorTurnRecord = {
       at: new Date().toISOString(),
@@ -6267,6 +6901,9 @@ export class ConductorStore {
       ...(entry.modelFailed ? { modelFailed: true } : {}),
       latencyMs: Math.round(performance.now() - entry.startedAt),
       ...(entry.tokens ? { tokens: entry.tokens } : {}),
+      ...(entry.request
+        ? { request: truncate(redactReply(entry.request), REQUEST_LOG_CHARS) }
+        : {}),
     };
     // A dropped transcription artifact is not something the developer said.
     if (entry.reply !== DIDNT_CATCH) this.ledger.noteRecord(record);
@@ -6289,15 +6926,6 @@ export class ConductorStore {
       .catch((error: unknown) => log.warn('conductor: log write failed', { error }));
     if (entry.route === 'llm') void this.refreshStatus();
   }
-}
-
-/** A pending action's label as it is read out: no quote marks, nothing a voice would spell. */
-function spokenLabel(label: string): string {
-  return label
-    .replace(/[“”"]/g, '')
-    .replace(/\s*·\s*/g, ', ')
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 /** Tools that flag a result as an error only to have it spoken; their change still happened. */
@@ -6480,6 +7108,67 @@ function spokenError(error: ConductorError): string {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** What the request desk says of a request settled in its turn: its sentence and the verdict. */
+const SETTLED_VERDICTS: Readonly<Record<string, string>> = {
+  approve: 'I approved it.',
+  deny: 'I said no.',
+  answer: 'I answered it.',
+};
+
+/**
+ * The closing of a request turn that settled its request with `answer_request`: the sentence
+ * the desk says when the model wrote none. Empty when nothing settled it.
+ */
+function settledSentence(open: OpenRequestView, actions: readonly ActionRecord[]): string {
+  const settle = [...actions]
+    .reverse()
+    .find((action) => action.tool === 'answer_request' && !action.status);
+  const decision = (settle?.input as { decision?: unknown } | undefined)?.decision;
+  const verdict = typeof decision === 'string' ? SETTLED_VERDICTS[decision] : undefined;
+  return verdict ? `${open.spoken} ${verdict}` : '';
+}
+
+/** Why a held message waits, as the end of "Holding it for Zulu …". */
+function heldWhile(reason: HoldReason): string {
+  if (reason === 'unsent-text') return 'until you send or clear the text in its input';
+  return reason === 'prompt' ? 'until its prompt is answered' : 'while you type there';
+}
+
+/** Why a held message was given up on, as a clause. */
+function heldReasonText(reason: HoldReason): string {
+  if (reason === 'unsent-text') return "it has text you haven't sent";
+  return reason === 'prompt' ? 'it stayed at a prompt that needs you' : 'you kept typing there';
+}
+
+/** The one notice that a message of the conductor's own waits for the developer. */
+function heldMessageNotice(name: string, reason: HoldReason): string {
+  if (reason === 'unsent-text')
+    return `Holding my message to ${name}: it has text you haven't sent.`;
+  if (reason === 'prompt') return `Holding my message to ${name} until its prompt is answered.`;
+  return `Holding my message to ${name} while you type.`;
+}
+
+function codexNotStarted(name: string): string {
+  return `Pasted into ${name}, but Codex didn't start; press Enter in its window.`;
+}
+
+/**
+ * What to tell the developer about text that never reached an agent: pasted and not sent (Codex
+ * did not start, or the developer was typing there), or held for their typing too long; null for
+ * any other failure. Each names the agent as the developer does, not by its task, and none of
+ * them may be reported as sent.
+ */
+function undeliveredText(error: unknown, name: string, what: string): string | null {
+  if (error instanceof CodexNotStartedError) return codexNotStarted(name);
+  if (error instanceof DeliveryLeftUnsentError) {
+    return `Left in ${name}'s input because you were typing there; press Enter when ready.`;
+  }
+  if (error instanceof DeliveryHeldError) {
+    return `${name} did not get ${what}: ${heldReasonText(error.reason)}.`;
+  }
+  return null;
 }
 
 function truncate(text: string, max: number): string {

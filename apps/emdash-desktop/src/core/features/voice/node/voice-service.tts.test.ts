@@ -150,13 +150,30 @@ describe('VoiceService custom Gemini voice', () => {
   it.each([
     ['gemini-flash', geminiSpeak],
     ['openrouter-gemini-flash-lite', openRouterSpeak],
-  ])('speaks %s in the custom voice instead of the prebuilt one', async (engine, speak) => {
-    const service = await serviceWith(engine, '  voice_abc123  ');
-    speak.mockImplementation(speakOnce);
+  ])(
+    'speaks %s in the prebuilt voice, since only Vertex can use a custom one',
+    async (engine, speak) => {
+      const service = await serviceWith(engine, '  voice_abc123  ');
+      speak.mockImplementation(speakOnce);
+      const emit = vi.fn();
+      await service.startTts('reply-id', 'Ready.', emit);
+      await vi.waitFor(() => expect(emit).toHaveBeenCalledWith({ type: 'done' }));
+      expect(speak).toHaveBeenCalledWith(
+        expect.objectContaining({ voice: 'Puck' }),
+        expect.any(Function)
+      );
+      service.dispose();
+    }
+  );
+
+  it('speaks a Vertex engine in the custom voice', async () => {
+    const service = await serviceWith('vertex-gemini-flash', '  voice_abc123  ');
+    vertexAdc.mockResolvedValue({ client_id: 'i', client_secret: 's', quota_project_id: 'p' });
+    vertexSpeak.mockImplementation(speakOnce);
     const emit = vi.fn();
     await service.startTts('reply-id', 'Ready.', emit);
     await vi.waitFor(() => expect(emit).toHaveBeenCalledWith({ type: 'done' }));
-    expect(speak).toHaveBeenCalledWith(
+    expect(vertexSpeak).toHaveBeenCalledWith(
       expect.objectContaining({ voice: 'voice_abc123' }),
       expect.any(Function)
     );
