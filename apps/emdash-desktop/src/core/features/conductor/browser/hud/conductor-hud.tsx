@@ -41,6 +41,7 @@ import { LocalUpdateCard } from './local-update-card';
 import { PendingActionCard } from './pending-action-card';
 import { pendingKeyAction } from './pending-keys';
 import { PlanPanel } from './plan-panel';
+import { collapsePastedLines, createTypedSubmitMerger, TYPED_MERGE_WINDOW_MS } from './typed-merge';
 import { VoiceSetupPanel } from './voice-setup';
 
 /** How long a conductor reply stays on screen. */
@@ -338,7 +339,7 @@ const ManualListenControls = observer(function ManualListenControls() {
   }
   return (
     <>
-      <HudIconButton label="Cancel (Esc)" onClick={() => voice.cancelListening()}>
+      <HudIconButton label="Cancel (Esc)" onClick={() => voice.cancelListening('hud-button')}>
         <X className="size-4" />
       </HudIconButton>
       <button
@@ -481,6 +482,18 @@ const CommandBox = observer(function CommandBox() {
   const [dismissed, setDismissed] = useState(false);
   const [focused, setFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  // A typed line ending in ":" waits briefly for the rest of the message.
+  const [heldLine, setHeldLine] = useState<string | null>(null);
+  const merger = useMemo(
+    () =>
+      createTypedSubmitMerger(
+        (message) => void conductor.handleUtterance(message, 'typed'),
+        TYPED_MERGE_WINDOW_MS,
+        setHeldLine
+      ),
+    [conductor]
+  );
+  useEffect(() => () => merger.flush(), [merger]);
 
   // Installed agents are cached for a minute; focusing the box picks up newly installed ones.
   const loadProviders = () => {
@@ -512,7 +525,7 @@ const CommandBox = observer(function CommandBox() {
         const chosen = open ? suggestions[active] : undefined;
         if (chosen) return pick(chosen);
         if (!text.trim()) return;
-        void conductor.handleUtterance(text, 'typed');
+        merger.submit(text);
         reset();
       }}
     >
@@ -568,6 +581,22 @@ const CommandBox = observer(function CommandBox() {
           loadProviders();
         }}
         onBlur={() => setFocused(false)}
+        onPaste={(event) => {
+          // A multi-line paste is one message, never one submit per line.
+          const pasted = event.clipboardData.getData('text');
+          if (!/[\r\n]/.test(pasted)) return;
+          event.preventDefault();
+          const input = event.currentTarget;
+          const start = input.selectionStart ?? input.value.length;
+          const end = input.selectionEnd ?? start;
+          setText(
+            input.value.slice(0, start) +
+              collapsePastedLines(pasted).trim() +
+              input.value.slice(end)
+          );
+          setHighlighted(0);
+          setDismissed(false);
+        }}
         onKeyDown={(event) => {
           if (event.key === 'ArrowDown' && open) {
             event.preventDefault();
@@ -582,6 +611,14 @@ const CommandBox = observer(function CommandBox() {
           }
         }}
       />
+      {heldLine && (
+        <p
+          role="status"
+          className="absolute inset-x-0 top-full mt-1 truncate px-1 text-xs text-foreground-muted"
+        >
+          sending… {heldLine}
+        </p>
+      )}
     </form>
   );
 });

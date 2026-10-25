@@ -16,6 +16,7 @@ import {
   getTaskManagerStore,
   getTaskStore,
 } from '@core/features/tasks/api/browser/task-state/task-selectors';
+import { forgetDeveloperTyping } from '@core/features/terminals/api/browser/pty/developer-typing';
 import {
   agentSupportsInitialPromptDelivery,
   type AgentMetadata,
@@ -23,6 +24,7 @@ import {
 import { resolveTaskBranchName, type CreateTaskParams } from '@core/primitives/tasks/api';
 import { matchProject, projectMatchError } from '../api/project-match';
 import { matchInstalledProvider } from '../api/provider-match';
+import { busyInFolderNote, safeTaskName, type SpawnPeer } from '../api/spawn-notes';
 import { buildSpawnWorkspaceConfig } from '../api/spawn-workspace';
 
 export type SpawnRequest = {
@@ -36,9 +38,19 @@ export type SpawnRequest = {
   title?: string;
   /** Give the agent its own branch and worktree instead of the project directory. */
   worktree?: boolean;
+  /** The agents already running, to keep the task name apart from theirs and to flag clashes. */
+  peers?: readonly SpawnPeer[];
 };
 
-export type SpawnResult = { taskId: string; conversationId: string; promptDeferred: boolean };
+export type SpawnResult = {
+  taskId: string;
+  conversationId: string;
+  promptDeferred: boolean;
+  /** The task name used; differs from the request when it would read as another agent's name. */
+  taskName: string;
+  /** Short facts for the tool result (a renamed task, another agent busy in the folder). */
+  notes: string[];
+};
 
 let metadataCache: Promise<AgentMetadata[]> | null = null;
 
@@ -130,10 +142,23 @@ export async function spawnAgentTask(request: SpawnRequest): Promise<SpawnResult
   const repository = getGitRepositoryStore(request.projectId);
 
   if (request.worktree) await prefetchAppSettingsKey('project').catch(() => {});
+  // The default branch is unknown until the repository's branches have loaded.
+  if (request.worktree && repository && !repository.defaultBranchRef) {
+    await repository.resync().catch(() => {});
+  }
   const workspaceConfig = buildSpawnWorkspaceConfig(request.worktree, {
     repositoryWorkspaceId: projectData(getProjectStore(request.projectId))?.repositoryWorkspaceId,
     fromBranch: repository?.defaultBranchRef,
     pushBranch: repository?.pushRemote != null,
+    ...(repository
+      ? {
+          branches: {
+            defaultName: repository.effectiveGitSettings.defaultBranch.value?.branch ?? null,
+            count: repository.branches.length,
+            loading: repository.loading,
+          },
+        }
+      : {}),
     branchName: () => {
       const projectSettings = getAppSettingValueSnapshot('project');
       return resolveTaskBranchName({
@@ -157,12 +182,16 @@ export async function spawnAgentTask(request: SpawnRequest): Promise<SpawnResult
   const taskId = crypto.randomUUID();
   const conversationId = request.conversationId ?? crypto.randomUUID();
   const prompt = request.prompt.trim();
+  const peers = request.peers ?? [];
+  const safe = safeTaskName(request.taskName, peers);
+  const busy = request.worktree ? null : busyInFolderNote(request.projectId, peers);
+  const notes = [safe.note, busy].filter((note): note is string => Boolean(note));
   const params: CreateTaskParams = {
     id: taskId,
     projectId: request.projectId,
     taskConfig: {
       version: '1',
-      name: request.taskName,
+      name: safe.name,
       initialConversation: {
         id: conversationId,
         provider: agent.id,
@@ -182,7 +211,13 @@ export async function spawnAgentTask(request: SpawnRequest): Promise<SpawnResult
     // add a second one.
     if (!(await taskWasCreated(request.projectId, taskId))) throw error;
   }
-  return { taskId, conversationId, promptDeferred: Boolean(prompt) && !canDeliverPrompt };
+  return {
+    taskId,
+    conversationId,
+    promptDeferred: Boolean(prompt) && !canDeliverPrompt,
+    taskName: safe.name,
+    notes,
+  };
 }
 
 const START_POLL_MS = 400;
@@ -224,6 +259,8 @@ export async function startAgentSession(
     const manager = conversationRegistry.get(taskId);
     if (task?.state === 'provisioned' && manager?.conversations.has(conversationId)) {
       if (manager.isSessionActive(conversationId)) return true;
+      // A new session has an empty input: what was typed into the last one is gone.
+      forgetDeveloperTyping(conversationId);
       await manager.hydrateConversation(conversationId);
       return true;
     }

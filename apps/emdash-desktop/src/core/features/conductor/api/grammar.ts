@@ -410,6 +410,21 @@ export function parseCommand(
   return null;
 }
 
+const SINGLE_AGENT_OBJECT =
+  /\b(?:start|spin up|create|launch|open|kick off|fire up|make|set up|get)\s+(?:up\s+)?(?:a|an|one)\s+(?:new\s+)?(?:[\w.-]+\s+){0,2}?agents?\b/i;
+const SUBAGENT_WORDING = /\bsub[- ]?agents?\b/i;
+const REAL_PLAN_CUE =
+  /\b(?:plan|split|parallel|break (?:it|this|that) (?:down|up)|fan out|divide|team of|(?:two|three|four|five|2|3|4|5|several|multiple|a few) (?:\w+ )?agents)\b/i;
+
+/**
+ * True when the developer asks for one new agent and the only multi-agent wording is sub-agents
+ * that agent should use ("start a Claude agent and have it spin up subagents").
+ */
+export function isSingleAgentWithSubagents(utterance: string): boolean {
+  if (!SINGLE_AGENT_OBJECT.test(utterance) || !SUBAGENT_WORDING.test(utterance)) return false;
+  return !REAL_PLAN_CUE.test(utterance.replace(/\bsub[- ]?agents?\b/gi, ''));
+}
+
 const PLAN_CUES =
   /\b(?:plan|split|parallel|in parallel|break (?:it|this|that) (?:down|up)|spin up|several agents|multiple agents|a few agents|team of|fan out|divide)\b/i;
 const BUILD_VERBS =
@@ -421,6 +436,7 @@ const BUILD_VERBS =
  */
 export function chooseMode(utterance: string): 'command' | 'plan' {
   const text = clean(utterance);
+  if (isSingleAgentWithSubagents(text)) return 'command';
   if (PLAN_CUES.test(text)) return 'plan';
   const words = text.split(/\s+/).filter(Boolean).length;
   return BUILD_VERBS.test(text) && words >= 8 ? 'plan' : 'command';

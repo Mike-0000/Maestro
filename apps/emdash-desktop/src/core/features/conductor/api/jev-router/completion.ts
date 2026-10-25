@@ -1,4 +1,5 @@
 import type { CompletionReport } from '@core/primitives/agents/api/completion-report';
+import { INPUT_LINE } from '../completion-follow-up';
 import { choiceOf, noulOf, type JevAnswers, type JevQuestions } from '../jev';
 import { splitSentences } from './spans';
 
@@ -23,6 +24,9 @@ export const COMPLETION_CONFIDENCE = 0.75;
 /** Upper bound on a spoken extractive line. */
 export const SPOKEN_MAX_CHARS = 220;
 const MAX_REPORT_SENTENCES = 40;
+/** A best sentence is spoken without the model only at this confidence and length. */
+const BEST_SPEAK_CONFIDENCE = 0.7;
+const BEST_SPEAK_MIN_WORDS = 6;
 const NO_QUESTION = '(none)';
 
 export type CompletionCandidate = {
@@ -54,6 +58,7 @@ export function reportSentences(text: string): string[] {
     .replace(/^\s*\|.*\|\s*$/gm, '\n');
   const sentences = splitSentences(cleaned, Number.MAX_SAFE_INTEGER)
     .map((sentence) => cleaned.slice(sentence.start, sentence.end).replace(/\s+/g, ' ').trim())
+    .map((sentence) => sentence.replace(REPLY_MARKER, ''))
     .filter((sentence) => sentence.split(' ').length >= 3)
     .map((sentence) => (sentence.length > 300 ? `${sentence.slice(0, 299)}…` : sentence));
   if (sentences.length <= MAX_REPORT_SENTENCES) return sentences;
@@ -69,12 +74,25 @@ export function spokenLine(prefix: string, sentence: string, max = SPOKEN_MAX_CH
   return `${space > max / 2 ? cut.slice(0, space) : cut}…`;
 }
 
+/** Claude Code's own status marks and lines, which are interface chrome and not the agent's words. */
+const CHROME_LINE = /^\s*(?:[✻✔✓✗⏵⏸※⎿✢✳✶✽]|[│╭╰├└─]+)|⏵⏵|bypass permissions|\(esc to interrupt\)/u;
+/** A tool call or status line behind Claude Code's reply marker: "Bash(npm test)", "Stop Task". */
+const TOOL_LINE = /^\s*(?:[⏺●]\s*)?(?:[A-Z][A-Za-z]*\(|Stop Task\b)/u;
+/** The marker Claude Code puts before its own reply lines. */
+const REPLY_MARKER = /^[⏺●]\s+/u;
+
+/** True for the developer's typed input lines and terminal chrome: never the agent's report. */
+export function isInputOrChrome(sentence: string): boolean {
+  return INPUT_LINE.test(sentence) || CHROME_LINE.test(sentence) || TOOL_LINE.test(sentence);
+}
+
 function sentenceOptions(sentences: readonly string[]): Record<string, null> {
   return Object.fromEntries(
-    sentences.map((sentence, index) => [
-      `#${index} ${sentence.split(' ').slice(0, 8).join(' ')}`,
-      null,
-    ])
+    sentences.flatMap((sentence, index): [string, null][] =>
+      isInputOrChrome(sentence)
+        ? []
+        : [[`#${index} ${sentence.split(' ').slice(0, 8).join(' ')}`, null]]
+    )
   );
 }
 
@@ -155,6 +173,12 @@ export function interpretCompletionGate(
       return index === null ? null : (sentences[index] ?? null);
     };
     const best = pick(`a${i}_best`);
+    // A one-liner like "I found and fixed it." says nothing: only a confident, full sentence is
+    // spoken as it stands.
+    const bestSpeakable =
+      best !== null &&
+      (choiceOf(answers, `a${i}_best`)?.confidence ?? 0) >= BEST_SPEAK_CONFIDENCE &&
+      best.split(' ').length >= BEST_SPEAK_MIN_WORDS;
     const asked = pick(`a${i}_question`);
     const fallback = asked
       ? spokenLine(`${agent.name} asks:`, asked)
@@ -176,7 +200,7 @@ export function interpretCompletionGate(
       reason,
     });
     const choice = kind.choice as CompletionKind;
-    if (choice === 'progress_no_news' && confident && (novel === null || novel < 0.5)) {
+    if (choice === 'progress_no_news' && confident) {
       return quiet('no-news');
     }
     if (
@@ -193,6 +217,7 @@ export function interpretCompletionGate(
       return { kind: 'speak', text: spokenLine(`${agent.name} asks:`, asked), reason: choice };
     }
     if (!best) return llm('no-sentence');
+    if (!bestSpeakable) return llm('thin-sentence');
     const prefix = choice === 'blocked_or_failed' ? `${agent.name} is stuck:` : `${agent.name}:`;
     return { kind: 'speak', text: spokenLine(prefix, best), reason: choice };
   });

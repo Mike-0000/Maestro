@@ -252,6 +252,21 @@ depend on the model's summary. The start/send countdown shows the prompt's size 
 and the tool result tells the conductor exactly how much was delivered. If you say an agent got
 too little, the conductor reads what the agent actually received before resending.
 
+Chorus skips the verbatim copy when the brief already contains your words. It never skips it when
+the brief drops a negation, a number, a path, or a name.
+
+Asking for one agent that uses sub-agents ("start an agent and have it spin up subagents") stays a
+single-agent request. It does not become a plan.
+
+Replies are short. Spawn and send acknowledgements are about 12 words. A confirmation says the
+action plus a short preview: `Send to Zulu "run the tests again…"? Say yes.` After a code check, your
+own explicit spawn or send into the same project no longer asks for confirmation (once per turn).
+
+The conductor keeps up to 14 turns of history, then cuts it to 8, keeping your newest 4 turns. The
+cut happens all at once so the start of each request stays the same between cuts. The conductor
+also sends a per-run OpenRouter `session_id`, so providers that cache prompts automatically (for
+example Mercury) can reuse them.
+
 ### What the conductor knows
 
 Every request carries the current state, so questions about your agents are answered from data
@@ -344,6 +359,11 @@ your request, or the model call fails, you get the fixed sentence instead, which
 reported app URL. Turn it off with **Report what finished agents said** in Settings → Voice &
 Conductor.
 
+Reports are cut at a sentence end, never mid-word, and the HUD shows the full text.
+
+Claude's idle reminder after a finished turn no longer announces the agent again, unless its reply
+ended in a question.
+
 #### Only what needs you
 
 Say "don't notify me when things don't need my attention" (or "only tell me when an agent needs
@@ -365,6 +385,24 @@ It takes effect only while **Let the conductor decide who needs you** is on and 
 key, since those verdicts are what tell a finished agent from one that needs you. Until then every
 finished agent is announced as before.
 
+### Agent news queue
+
+News from agents waits instead of cutting off a reply to you.
+
+- It also waits while the mic is open, a confirmation is pending, or a plan awaits approval.
+- It expires after 2 minutes, and at most 3 items wait.
+- "Stop" clears the queue. "Hold my calls" holds it, except failures.
+- A question from an agent counts as heard only once it is read out.
+
+### Failures you hear
+
+Chorus announces failures that used to be silent:
+
+- an agent that did not start;
+- "Codex didn't start; press Enter";
+- a message left in an agent's input because you were typing there;
+- a failed reply to an agent that left the canvas.
+
 Codex's notify hook sends no reply text, and neither does any hook without
 `last_assistant_message`. For these terminal agents Chorus reads the last 2,000 characters of the
 agent's terminal instead, about one screen, where the TUI prints its closing message. Box-drawing
@@ -385,6 +423,10 @@ ended, was suppressed, or was interrupted. They do **not** contain audio or prov
 microphone actually captured. Deepgram confidence, when supplied, describes the latest segment
 or selected alternative, not the reliability of the whole command; other adapters do not expose it. A reported agent send
 may mean only that it was accepted or scheduled, not that the agent completed the work.
+
+Newer trace fields cover speech reasons (suppressed, cancelled, fallback, engine), announcement
+queue events, the model id of each model call, capture cancel causes, and delivery holds. The
+conductor log also keeps request bodies, redacted and capped.
 
 Diagnostics are limited to 2 MB per file and 7 days by default (configurable up to 30 days).
 Turning the setting off deletes stored diagnostics. Use **Delete diagnostics** to erase them
@@ -413,6 +455,15 @@ reply is passed back to the one that asked. Turn all of this off with **Let agen
 conductor** in Settings → Voice & Conductor. See [agent requests](agent-requests.md) for the
 request format and the kinds.
 
+Routine message approvals and answers go to the HUD only. Spawns, denials, failures, and anything
+about publishing, uploading, pushing, releasing, deleting, or paying are spoken. The decisions
+themselves are unchanged.
+
+### Messages while you type
+
+Messages to an agent are held while you type in that agent's window, then sent one at a time.
+Nothing is pasted over your text or onto a permission prompt. Your own sends go first.
+
 ### Looking things up before it writes a prompt
 
 Off by default. Turn it on with **Let the conductor read project files** in Settings → Voice &
@@ -435,6 +486,10 @@ the project (and the extra folders you add) or any secret file, and runs no proj
 a check runs, a card shows what is being read, and Esc or "stop" cancels it. After a check,
 everything the conductor does in that turn asks for an explicit yes, because the files it read
 are not your words. A lookup by name reads no file contents, so it asks nothing extra.
+
+Projects on network shares (UNC paths) are refused. A check is stopped if Claude Code starts
+outside the project folder. After a check, your own explicit spawn or send into the same project
+asks for no confirmation (once per turn).
 
 **Extra folders.** By default a code check reads only the project (or the named agent's folder).
 **Add folder…** under Code checks lets it also read other folders you choose, read-only: another
@@ -657,6 +712,8 @@ engines stream 24 kHz PCM and stop when you start talking, mute, or another repl
 synthesis fails or times out, Chorus uses the chosen Windows fallback voice. The **Test** button
 previews the active output engine.
 
+A custom Gemini voice id is used only with the Google Cloud (Vertex) engines.
+
 The same two models are also available **through OpenRouter**: choose **Gemini 3.8 Flash via
 OpenRouter** (`google/gemini-3.8-flash-tts`) or **Gemini 3.8 Flash-Lite via OpenRouter**
 (`google/gemini-3.8-flash-lite-tts`). They use the OpenRouter key that already runs the conductor,
@@ -724,6 +781,10 @@ download from the same row. If it is missing or fails, the command shows an erro
 voice never silently switches back to a cloud engine. Parakeet is English only and takes no
 vocabulary hints.
 
+Parakeet warms up when a capture starts. Long captures are transcribed in phrases while you record,
+with a full-pass fallback. On local transcripts, misheard names are fixed ("Cloud Code" becomes
+Claude Code).
+
 ### Local whisper.cpp setup
 
 1. Download a Windows release of [whisper.cpp](https://github.com/ggml-org/whisper.cpp/releases)
@@ -758,6 +819,8 @@ after it needs the wake phrase again.
 With Deepgram and **Live transcript** on, audio streams while you speak and the words appear in
 the HUD as they are recognized. Other engines transcribe after you stop. If streaming fails,
 Chorus uploads the recording instead.
+
+In the HUD, a typed line that ends in ":" waits 3 seconds for the rest of the message.
 
 ## Jev (fast decisions)
 

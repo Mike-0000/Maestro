@@ -6,6 +6,7 @@ import type {
 } from '@core/features/canvas/api/browser/stores/canvas-store';
 import { GATHER_LABELS } from '@core/features/canvas/api/canvas-desks';
 import { spokenProviderLabel } from '@core/features/canvas/api/provider-names';
+import { VOICE_NAME_HINTS } from '@core/features/voice/api/name-fixups';
 import { subAgentCount } from '@core/primitives/agents/api';
 import type { CompletionReport } from '@core/primitives/agents/api/completion-report';
 import { log } from '@core/primitives/logging/browser/logger';
@@ -25,6 +26,7 @@ import {
 import { callFocus, focusLine, resolveFocus, type Focus, type WorkbenchView } from '../api/focus';
 import type { InstalledProvider } from '../api/provider-match';
 import { nameBase, normalizeSpoken, type Roster, type RosterAgent } from '../api/resolver';
+import type { SpawnPeer } from '../api/spawn-notes';
 import { agentMetadata } from './spawn';
 
 let readView: () => WorkbenchView = () => ({ kind: 'canvas' });
@@ -67,8 +69,11 @@ export function installedProviders(): Promise<InstalledProvider[]> {
   return providerSnapshot ? Promise.resolve(providerSnapshot) : current;
 }
 
-/** Forgets what detection found, so the next call waits for a fresh answer (tests). */
-export function resetInstalledProviders(): void {
+/**
+ * Forgets what detection found, so the next `installedProviders()` waits for a fresh detection.
+ * For when a CLI may have been installed or removed since (an agent failed to start), and tests.
+ */
+export function forgetInstalledProviders(): void {
   providerCache = null;
   providerSnapshot = null;
 }
@@ -94,6 +99,28 @@ function detectProviders(): Promise<InstalledProvider[]> {
   });
   providerCache = { at: Date.now(), value };
   return value;
+}
+
+/**
+ * The agents on the canvas as a new agent's spawn sees them (see `spawn-notes`): names it must
+ * not take, and who is busy in which project directory. `repositoryWorkspaceId` gives a
+ * project's own checkout; a task on it works in the project directory, not in a worktree.
+ */
+export function spawnPeers(
+  canvas: CanvasStore,
+  repositoryWorkspaceId: (projectId: string) => string | null | undefined
+): SpawnPeer[] {
+  return canvas.agentEntries.map((entry) => {
+    const title = otherTitle(canvas, entry);
+    const repository = repositoryWorkspaceId(entry.projectId);
+    return {
+      name: canvas.spokenName(entry.conversationId),
+      ...(title ? { title } : {}),
+      projectId: entry.projectId,
+      status: entry.status,
+      inProjectDirectory: Boolean(repository) && entry.workspaceId === repository,
+    };
+  });
 }
 
 export function toRosterAgent(canvas: CanvasStore, entry: AgentTileEntry): RosterAgent {
@@ -580,7 +607,8 @@ export function buildContext(
 
 /** Words the speech engine should expect: spoken names, providers, tasks, projects. */
 export function vocabulary(canvas: CanvasStore): string[] {
-  const words = new Set<string>(['Maestro', 'Claude', 'Codex', 'worktree']);
+  // Names the local transcriber gets wrong ("Cloud Code"), as the developer means them.
+  const words = new Set<string>(['Maestro', 'Claude', 'Codex', 'worktree', ...VOICE_NAME_HINTS]);
   for (const entry of canvas.agentEntries) {
     words.add(canvas.spokenName(entry.conversationId));
     words.add(spokenProviderLabel(entry.providerId));

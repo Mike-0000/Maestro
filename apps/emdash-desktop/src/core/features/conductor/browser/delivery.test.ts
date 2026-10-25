@@ -52,6 +52,8 @@ vi.mock('./deferred-prompt', () => ({
   deliverPromptWhenReady: mocks.deliverPromptWhenReady,
 }));
 vi.mock('./agent-io', () => ({
+  CodexNotStartedError: class extends Error {},
+  DeliveryLeftUnsentError: class extends Error {},
   answerPermission: vi.fn(),
   interruptAgent: vi.fn(),
   lastMeaningfulLine: vi.fn(),
@@ -153,8 +155,7 @@ function setup(entry: AgentTileEntry) {
     settings: { ...DEFAULT_CONDUCTOR_SETTINGS },
   } as unknown as ConductorStatus;
   store.status = mocks.status as ConductorStatus;
-  const deliver = (text: string): Promise<'sent' | 'starting'> =>
-    store['deliver'](entry, text, true);
+  const deliver = (text: string): Promise<unknown> => store['deliver'](entry, text, true);
   return { store, announce, deliver };
 }
 
@@ -177,7 +178,12 @@ describe('delivering to an agent the session list calls stopped', () => {
 
     await expect(deliver('how does it listen?')).resolves.toBe('sent');
 
-    expect(mocks.sendToLiveSession).toHaveBeenCalledWith(entry, 'how does it listen?', true);
+    expect(mocks.sendToLiveSession).toHaveBeenCalledWith(
+      entry,
+      'how does it listen?',
+      true,
+      expect.objectContaining({ onHold: expect.any(Function) })
+    );
     expect(mocks.startAgentSession).not.toHaveBeenCalled();
     expect(mocks.deliverPromptWhenReady).not.toHaveBeenCalled();
     expect(announce).not.toHaveBeenCalled();
@@ -225,7 +231,12 @@ describe('delivering to an agent the session list calls stopped', () => {
 
     await expect(deliver('hello')).resolves.toBe('sent');
 
-    expect(mocks.sendToAgent).toHaveBeenCalledWith(entry, 'hello', true);
+    expect(mocks.sendToAgent).toHaveBeenCalledWith(
+      entry,
+      'hello',
+      true,
+      expect.objectContaining({ onHold: expect.any(Function) })
+    );
     expect(mocks.sendToLiveSession).not.toHaveBeenCalled();
     store.dispose();
   });

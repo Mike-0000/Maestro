@@ -223,6 +223,8 @@ export const voiceContract = defineContract({
     data: z.object({ streamId: z.string() }),
     error: voiceErrorSchema,
   }),
+  /** Loads the on-device model ahead of an utterance; a no-op unless local transcription is on. */
+  warmDictation: procedure({ input: z.void(), output: z.void() }),
   closeDictation: fallible({
     input: z.object({ streamId: z.string() }),
     data: dictationResultSchema,

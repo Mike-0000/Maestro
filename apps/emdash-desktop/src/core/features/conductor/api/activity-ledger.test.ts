@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { ActivityLedger, formatAgo, ledgerAction, LEDGER_TURNS } from './activity-ledger';
+import {
+  ActivityLedger,
+  eventAgents,
+  formatAgo,
+  ledgerAction,
+  LEDGER_TURNS,
+} from './activity-ledger';
 import type { ConductorTurnRecord } from './contract';
 
 const MINUTE = 60_000;
@@ -145,6 +151,98 @@ describe('ActivityLedger', () => {
     expect(ledger.contextLines()[1]).toBe(
       '- 1 min ago: [request r-2] Atlas: question → replied “Told it main.”'
     );
+  });
+
+  it('drops quiet completions before taking the newest turns', () => {
+    // Oct 16: eight finished-agent reports in a row left the activity block empty.
+    const ledger = new ActivityLedger(() => NOW);
+    ledger.noteRecord(
+      record({
+        at: new Date(NOW - 30 * MINUTE).toISOString(),
+        route: 'llm',
+        utterance: 'keep Echo on the parser',
+        reply: 'Will do.',
+      })
+    );
+    for (let index = 0; index < 8; index++) {
+      ledger.noteRecord(
+        record({
+          at: new Date(NOW - (20 - index) * MINUTE).toISOString(),
+          route: 'llm',
+          utterance: `[completion] Agent ${index}`,
+          reply: 'NO_NEWS',
+        })
+      );
+    }
+    const lines = ledger.contextLines();
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toContain('you said “keep Echo on the parser”');
+  });
+
+  it("keeps the developer's newest turns in the context after a burst of requests", () => {
+    const ledger = new ActivityLedger(() => NOW);
+    for (const [index, said] of ['first thing', 'second thing', 'third thing'].entries()) {
+      ledger.noteRecord(
+        record({
+          at: new Date(NOW - (60 - index) * MINUTE).toISOString(),
+          route: 'llm',
+          utterance: said,
+          reply: 'ok',
+        })
+      );
+    }
+    for (let index = 0; index < 8; index++) {
+      ledger.noteRecord(
+        record({
+          at: new Date(NOW - (40 - index) * MINUTE).toISOString(),
+          route: 'llm',
+          utterance: `[request r-${index}] Atlas: ask_conductor`,
+          actions: [{ tool: 'answer_request', input: { id: `r-${index}` }, outcome: 'Answered.' }],
+          reply: 'Answered Atlas.',
+        })
+      );
+    }
+    const lines = ledger.contextLines().slice(1);
+    expect(lines).toHaveLength(8);
+    expect(lines[0]).toContain('[request r-7]');
+    expect(lines.slice(-2).map((line) => /you said “(.+?)”/.exec(line)?.[1])).toEqual([
+      'third thing',
+      'second thing',
+    ]);
+    expect(lines.join('\n')).not.toContain('first thing');
+  });
+
+  it('finds agents named in what started an event turn', () => {
+    expect(eventAgents('[request r-12] Atlas 3: ask_conductor')).toEqual(['Atlas 3']);
+    expect(eventAgents('[completion] Lima 3, Echo')).toEqual(['Lima 3', 'Echo']);
+    expect(eventAgents('tell Atlas about it')).toEqual([]);
+    const ledger = new ActivityLedger(() => NOW);
+    ledger.noteRecord(
+      record({
+        route: 'llm',
+        utterance: '[request r-12] Atlas 3: spawn_agent',
+        actions: [{ tool: 'answer_request', input: { id: 'r-12' }, outcome: 'Approved.' }],
+        reply: 'Started a helper for Atlas.',
+      })
+    );
+    ledger.noteRecord(
+      record({ route: 'llm', utterance: '[completion] Lima 3, Echo', reply: 'Lima is done.' })
+    );
+    ledger.noteRecord(
+      record({ route: 'llm', utterance: 'what is Atlas doing', reply: 'Working.' })
+    );
+    const atlas = ledger.describe(5, 'atlas');
+    expect(atlas).toContain(
+      'Maestro event, not the developer: [request r-12] Atlas 3: spawn_agent'
+    );
+    expect(atlas).not.toContain('the developer said: “[request');
+    // A developer's words that merely mention an agent are not an event about it.
+    expect(atlas).not.toContain('what is Atlas doing');
+    expect(ledger.describe(5, 'Echo', true)).toContain(
+      'Maestro event, not the developer: [completion] Lima 3, Echo'
+    );
+    expect(ledger.describe(5, 'lima 3', true)).toContain('[completion] Lima 3, Echo');
+    expect(ledger.describe(5)).toContain('the developer said: “what is Atlas doing”');
   });
 
   it('gives full texts, filtered by agent, to the recent_activity tool', () => {

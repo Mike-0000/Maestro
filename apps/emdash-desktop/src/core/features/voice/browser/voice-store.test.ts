@@ -1,12 +1,23 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { TraceEvent } from '@core/features/conductor/api/contract';
-import { DEFAULT_VOICE_SETTINGS } from '../api/contract';
+import { DEFAULT_VOICE_SETTINGS, type VoiceSettings } from '../api/contract';
 import { MicRecorder } from './mic-recorder';
-import { SpeechOutput } from './speech-output';
+import { firstAudioTimeoutMs, SpeechOutput } from './speech-output';
 import { VoiceStore, type CaptureEvent } from './voice-store';
 
-const { transcribe } = vi.hoisted(() => ({ transcribe: vi.fn() }));
-vi.mock('../api/browser/client', () => ({ getVoiceClient: async () => ({ transcribe }) }));
+const { transcribe, stream } = vi.hoisted(() => ({
+  transcribe: vi.fn(),
+  stream: {
+    openStream: vi.fn(),
+    pushAudio: vi.fn(async () => {}),
+    closeStream: vi.fn(),
+    abortStream: vi.fn(async () => {}),
+    warmDictation: vi.fn(async () => {}),
+  },
+}));
+vi.mock('../api/browser/client', () => ({
+  getVoiceClient: async () => ({ transcribe, ...stream }),
+}));
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -415,9 +426,11 @@ describe('speak', () => {
       });
     const id = crypto.randomUUID();
     await expect(store.speak('Atlas finished.', { interactionId: id })).resolves.toBe('ended');
-    expect(speak).toHaveBeenCalledWith('Atlas finished.', expect.any(Function), {
-      platform: false,
-    });
+    expect(speak).toHaveBeenCalledWith(
+      'Atlas finished.',
+      expect.any(Function),
+      expect.objectContaining({ platform: false })
+    );
     const statuses = events.filter((event) => event.kind === 'speech');
     expect(statuses.map((event) => event.detail?.status)).toEqual([
       'requested',
@@ -435,9 +448,11 @@ describe('speak', () => {
       .mockImplementation((_text, onStatus) => onStatus?.('ended'));
     const id = crypto.randomUUID();
     await store.speak('Send to Atlas.', { voice: 'system', interactionId: id });
-    expect(speak).toHaveBeenLastCalledWith('Send to Atlas.', expect.any(Function), {
-      platform: true,
-    });
+    expect(speak).toHaveBeenLastCalledWith(
+      'Send to Atlas.',
+      expect.any(Function),
+      expect.objectContaining({ platform: true })
+    );
 
     store.setMuted(true);
     await expect(store.speak('x', { interactionId: id })).resolves.toBe('suppressed');
@@ -447,6 +462,217 @@ describe('speak', () => {
     expect(speak).toHaveBeenCalledTimes(1);
     store.cancelListening();
     store.dispose();
+  });
+});
+
+describe('what speech and captures leave in the trace', () => {
+  function traced() {
+    const store = readyStore();
+    const events: TraceEvent[] = [];
+    store.setTraceHandler((event) => events.push(event));
+    const speech = (id?: string) =>
+      events
+        .filter((event) => event.kind === 'speech' && (!id || event.interactionId === id))
+        .map((event) => event.detail);
+    return { store, events, speech };
+  }
+
+  it('traces an announcement like a reply, with the engine that was heard', async () => {
+    const { store, speech } = traced();
+    vi.spyOn(SpeechOutput.prototype, 'speak').mockImplementation((_text, onStatus, options) => {
+      options?.onFallback?.({ engine: 'vertex-gemini-flash', reason: 'first-audio-timeout' });
+      onStatus?.('started', { engine: 'platform' });
+      onStatus?.('ended');
+    });
+    const id = crypto.randomUUID();
+    await expect(store.announce('Atlas needs permission.', id)).resolves.toBe('ended');
+    expect(speech(id)).toEqual([
+      { status: 'requested', attention: true },
+      {
+        status: 'fallback',
+        engine: 'vertex-gemini-flash',
+        reason: 'first-audio-timeout',
+        attention: true,
+      },
+      expect.objectContaining({ status: 'started', engine: 'platform', attention: true }),
+      { status: 'ended', attention: true },
+    ]);
+    expect(store.speechInFlight).toBe(false);
+    store.dispose();
+  });
+
+  it('says why an announcement or a reply was not said', async () => {
+    const { store, speech } = traced();
+    vi.spyOn(SpeechOutput.prototype, 'speak').mockImplementation(() => {});
+    const id = crypto.randomUUID();
+    store.setMuted(true);
+    await expect(store.announce('Atlas needs you.', id)).resolves.toBe('suppressed');
+    store.say('Sent.', id);
+    store.setMuted(false);
+    store.status = {
+      ...store.status!,
+      settings: { ...store.status!.settings, speakAttention: false, speakReplies: false },
+    };
+    await store.announce('Atlas needs you.', id);
+    store.say('Sent.', id);
+    store.status = {
+      ...store.status!,
+      settings: { ...store.status!.settings, speakAttention: true, speakReplies: true },
+    };
+    await store.startListening('hold');
+    await store.announce('Atlas needs you.', id);
+    expect(speech(id).map((detail) => detail?.reason)).toEqual([
+      'muted',
+      'muted',
+      'speak-attention-off',
+      'speak-replies-off',
+      'listening',
+    ]);
+    // Muting and unmuting are traced too.
+    expect(speech().map((detail) => detail?.status)).toEqual(
+      expect.arrayContaining(['muted', 'unmuted'])
+    );
+    store.cancelListening();
+    store.dispose();
+  });
+
+  it('says what cut speech off, and counts it in flight until then', async () => {
+    const { store, speech } = traced();
+    const listeners: ((status: 'started' | 'cancelled', detail?: { reason?: string }) => void)[] =
+      [];
+    vi.spyOn(SpeechOutput.prototype, 'speak').mockImplementation((_text, onStatus) => {
+      // As the real output does: whatever is playing is cancelled as replaced first.
+      listeners.at(-1)?.('cancelled', { reason: 'replaced' });
+      if (onStatus) listeners.push(onStatus);
+    });
+    vi.spyOn(SpeechOutput.prototype, 'stop').mockImplementation((reason) =>
+      listeners.at(-1)?.('cancelled', { reason: reason ?? 'stopped' })
+    );
+    const first = crypto.randomUUID();
+    const second = crypto.randomUUID();
+    void store.speak('One.', { interactionId: first });
+    expect(store.speechInFlight).toBe(true);
+    void store.speak('Two.', { interactionId: second });
+    expect(store.speechInFlight).toBe(true);
+    await store.startListening('hold');
+    expect(store.speechInFlight).toBe(false);
+    expect(speech(first).at(-1)).toEqual({ status: 'cancelled', reason: 'replaced' });
+    expect(speech(second).at(-1)).toEqual({ status: 'cancelled', reason: 'developer-capture' });
+    store.cancelListening();
+    store.dispose();
+  });
+
+  it('stops counting a sentence whose end never comes, so what follows can be said', async () => {
+    vi.useFakeTimers();
+    try {
+      const { store, speech } = traced();
+      const said: string[] = [];
+      vi.spyOn(SpeechOutput.prototype, 'speak').mockImplementation((text, onStatus) => {
+        said.push(text);
+        // Starts, and never reports an end.
+        onStatus?.('started', { engine: 'platform' });
+      });
+      // A cloud voice: its first audio may take its own timeout to come.
+      store.speech.configure({ ...DEFAULT_VOICE_SETTINGS, ttsEngine: 'vertex-gemini-flash' }, {});
+      expect(store.firstAudioWaitMs).toBe(firstAudioTimeoutMs('vertex-gemini-flash'));
+      const id = crypto.randomUUID();
+      const first = store.announce('Atlas needs you.', id);
+      expect(store.speechInFlight).toBe(true);
+      const words = 8_000 + 90 * 'Atlas needs you.'.length;
+      await vi.advanceTimersByTimeAsync(words);
+      // Still within the voice's own wait for its first audio.
+      expect(store.speechInFlight).toBe(true);
+      await vi.advanceTimersByTimeAsync(store.firstAudioWaitMs);
+      await expect(first).resolves.toBe('failed');
+      expect(store.speechInFlight).toBe(false);
+      expect(speech(id).at(-1)).toEqual({ status: 'timeout', attention: true });
+      void store.announce('Bravo finished.');
+      expect(said).toEqual(['Atlas needs you.', 'Bravo finished.']);
+      store.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('records why a capture was cancelled and whether speech was ever heard', async () => {
+    const { store, events } = traced();
+    await store.startListening('hold');
+    store['onChunk'](0.5, 100);
+    store.cancelListening('escape');
+    await store.startListening('toggle', 'command', 'user', { endOnPause: true });
+    for (let elapsed = 0; elapsed < 6_000; elapsed += 500) store['onChunk'](0.001, 500);
+    const cancels = events
+      .filter((event) => event.kind === 'ignored' && event.detail?.reason === 'cancelled')
+      .map((event) => event.detail);
+    expect(cancels).toEqual([
+      { reason: 'cancelled', cause: 'escape', heardSpeech: true },
+      { reason: 'cancelled', cause: 'no-speech-timeout', heardSpeech: false },
+    ]);
+    store.dispose();
+  });
+});
+
+describe('the on-device model', () => {
+  function localStore(settings: Partial<VoiceSettings> = {}) {
+    vi.spyOn(MicRecorder.prototype, 'stop').mockReturnValue({
+      wav: new Uint8Array(10000),
+      durationMs: 1000,
+    });
+    const store = readyStore();
+    store.status = {
+      ...store.status!,
+      settings: { ...store.status!.settings, localTranscriber: true, ...settings },
+    };
+    const handled: string[] = [];
+    store.setTranscriptHandler((text) => {
+      handled.push(text);
+    });
+    return { store, handled };
+  }
+
+  it('hears a command while it is spoken, and is warmed up when the capture starts', async () => {
+    const { store, handled } = localStore();
+    transcribe.mockClear();
+    stream.openStream.mockResolvedValueOnce({ supported: true, streamId: 'local-1' });
+    stream.closeStream.mockResolvedValueOnce({
+      success: true,
+      data: { text: 'focus Atlas', latencyMs: 40 },
+    });
+    await store.startListening('hold');
+    expect(stream.warmDictation).toHaveBeenCalled();
+    // The stream is open by the time the developer has said anything.
+    await store['streamOpening'];
+    store['onPcm'](new Uint8Array(new ArrayBuffer(4)));
+    await store.stopListening();
+    expect(handled).toEqual(['focus Atlas']);
+    expect(stream.pushAudio).toHaveBeenCalledWith({ streamId: 'local-1', pcm: expect.any(String) });
+    expect(transcribe).not.toHaveBeenCalled();
+    store.dispose();
+  });
+
+  it('uploads the recording when there is no model to stream to, or streaming is off', async () => {
+    const { store, handled } = localStore();
+    stream.openStream.mockResolvedValueOnce({ supported: false, streamId: null });
+    transcribe.mockResolvedValueOnce({
+      success: true,
+      data: { text: 'show all', latencyMs: 20, engine: 'parakeet-local' },
+    });
+    await store.startListening('hold');
+    await store.stopListening();
+    expect(handled).toEqual(['show all']);
+
+    const off = localStore({ streaming: false });
+    stream.openStream.mockClear();
+    transcribe.mockResolvedValueOnce({
+      success: true,
+      data: { text: 'next', latencyMs: 20, engine: 'parakeet-local' },
+    });
+    await off.store.startListening('hold');
+    await off.store.stopListening();
+    expect(stream.openStream).not.toHaveBeenCalled();
+    expect(off.handled).toEqual(['next']);
+    store.dispose();
+    off.store.dispose();
   });
 });
 

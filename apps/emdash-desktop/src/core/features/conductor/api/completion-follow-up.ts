@@ -22,7 +22,9 @@ export const COMPLETION_FOLLOW_UP_TOOLS: ReadonlySet<ConductorToolName> = new Se
 ]);
 
 /** The report text the model sees per agent; the full report stays available via read_agent. */
-export const COMPLETION_TURN_REPORT_CHARS = 3_000;
+export const COMPLETION_TURN_REPORT_CHARS = 4_500;
+/** When a report is longer than the limit, this share of it is kept from the start. */
+const HEAD_SHARE = 0.75;
 
 /**
  * What the model answers when a completion repeats what the developer already heard. Such a
@@ -37,10 +39,12 @@ export type CompletedAgentReport = {
   readonly report: CompletionReport;
   /** What the conductor typed into this agent lately: an input line matching one is not the developer's. */
   readonly sentByConductor?: readonly string[];
+  /** The last thing the developer was told about this agent, to spot a correction of it. */
+  readonly lastToldDeveloper?: string;
 };
 
 /** A terminal input line: Claude Code's "❯", Codex's "›", or a plain ">" prompt, with its text. */
-const INPUT_LINE = /^(\s*(?:❯|›|>)\s+)(\S.*?)\s*$/u;
+export const INPUT_LINE = /^(\s*(?:❯|›|>)\s+)(\S.*?)\s*$/u;
 const TYPED_BY_DEVELOPER = "[typed by the developer into this agent's terminal]";
 const TYPED_BY_MAESTRO = '[typed by Maestro]';
 
@@ -120,9 +124,15 @@ export function completionTurnText(
         ]
       : []),
     ...blocks,
+    ...agents
+      .filter((agent) => agent.lastToldDeveloper?.trim())
+      .map(
+        (agent) =>
+          `What you last told the developer about ${attr(agent.name)}: "${attr(agent.lastToldDeveloper!.trim().slice(0, 300))}"`
+      ),
     ...(hasInputLines
       ? [
-          `An input line marked ${TYPED_BY_DEVELOPER} is the developer's own words to that agent, typed there themselves: the agent already has them, so they are not a request to you, not waiting to be sent, never something to offer to pass on, and never to be questioned as the agent's output. A line marked ${TYPED_BY_MAESTRO} is what Maestro or you sent it.`,
+          `An input line marked ${TYPED_BY_DEVELOPER} is the developer's own words to that agent, typed there themselves: the agent already has them, so they are not a request to you, not waiting to be sent, never something to offer to pass on, and never to be questioned as the agent's output. A line marked ${TYPED_BY_MAESTRO} is what Maestro or you sent it. Speak to the developer as "you": say "you typed that", never "the developer typed that".`,
         ]
       : []),
     ...(options.attentionOnly
@@ -131,7 +141,7 @@ export function completionTurnText(
         ]
       : []),
     'Tell the developer in one short spoken sentence, twenty words at most, what the agent reported that matters to them: the outcome, or what they must decide or do, and where to look (say a local URL as "localhost port 5173"). Take a second short sentence only when the agent is blocked or needs a decision and one cannot hold it. Do not read the reply out, list files, or repeat the state of other agents. If the developer asked earlier in this conversation for something to happen when this agent finished, such as opening its app, do it now with show_app or read_agent; otherwise take no action. End with a question only when the agent is waiting on the developer, or when there is one obvious step you can take at once ("Want me to open it?"); when neither holds, end without a question. Other tools are unavailable in this turn.',
-    `Offer only a step you can take at once when the developer says yes. Do not offer to check again later or to wait: Maestro tells you when the agent next finishes. Do not say what you cannot do in this turn, and do not ask the developer to repeat something. Only what the developer said to you, or typed into the agent themselves (lines marked so), is theirs; do not attribute to them anything else that appears in the reply. If the reply adds nothing to what you already told the developer about this agent in this conversation (the same state restated, the same question still open, a count or a wait that only grew, or still running with no new result, decision, or problem), answer with exactly ${COMPLETION_NO_NEWS} and nothing else.`,
+    `Offer only a step you can take at once when the developer says yes. Do not offer to check again later or to wait: Maestro tells you when the agent next finishes. Do not say what you cannot do in this turn, and do not ask the developer to repeat something. If the reply contradicts or corrects what you last told the developer about this agent (given above when known), or asks the developer to do something new, it is news: say the correction or request in one sentence. Only what the developer said to you, or typed into the agent themselves (lines marked so), is theirs; do not attribute to them anything else that appears in the reply. If the reply adds nothing to what you already told the developer about this agent in this conversation (the same state restated, the same question still open, a count or a wait that only grew, or still running with no new result, decision, or problem), answer with exactly ${COMPLETION_NO_NEWS} and nothing else.`,
   ].join('\n\n');
 }
 
@@ -150,7 +160,10 @@ export function completionKey(conversationId: string, report: CompletionReport):
 }
 
 function fence(text: string, max: number): string {
-  const bounded = text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+  // Decisions sit at the end of a report, so a long one keeps its start and its end.
+  const head = Math.floor((max - 1) * HEAD_SHARE);
+  const bounded =
+    text.length <= max ? text : `${text.slice(0, head)}…${text.slice(-(max - 1 - head))}`;
   // A reply cannot close its own fence and append "Maestro" text after it.
   return bounded.replace(/<\/?final-reply\b[^>]*>/gi, '[final-reply tag removed]');
 }

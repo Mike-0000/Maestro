@@ -18,6 +18,7 @@ import {
   type RequestSender,
   type ValidAgentRequest,
 } from '../api/agent-requests';
+import { speaksRequestOutcome } from '../api/announcements';
 import type { ToolOutcome } from '../api/tools';
 
 /** Who a spoken sentence is about, and what it asks of the developer, if anything. */
@@ -26,6 +27,28 @@ export type RequestSayContext = {
   readonly requestId: string;
   /** `question`: the agent asked the developer. `request`: a yes or no. `report`: nothing. */
   readonly asks: 'question' | 'request' | 'report';
+};
+
+/** How a sentence from the request desk is told. */
+export type RequestSayOptions = {
+  /** What is shown, when more than is said: a report too long to say whole. */
+  readonly shown?: string;
+  /** False: shown, and not said (a routine outcome). */
+  readonly speak?: boolean;
+  /** What it is, for the trace; by default what `about` says, else a request's outcome. */
+  readonly source?: 'request' | 'report' | 'failure';
+  /** The agent it is about, when no `about` names it. */
+  readonly agent?: string;
+  /**
+   * Said whole, it tells the developer what the agent's next finished turn would: that turn is
+   * not announced again a moment later.
+   */
+  readonly standsForTurn?: boolean;
+  /**
+   * Called when the sentence is shown, which can be a while after `say`: the developer may be
+   * speaking, or hearing the conductor's answer to them.
+   */
+  readonly onShown?: () => void;
 };
 
 /** What the request desk needs from the conductor (kept structural so it tests without one). */
@@ -61,24 +84,37 @@ export interface AgentRequestHost {
    * `about` names the agent and request a sentence is about, when it is about exactly one: the
    * conductor can then deliver it as that agent's call, and bind the developer's answer to it.
    */
-  say(text: string, about?: RequestSayContext): void;
+  say(text: string, about?: RequestSayContext, options?: RequestSayOptions): void;
   /** Types text into a running agent's terminal, once that is safe. */
   send(conversationId: string, text: string): Promise<void>;
-  /** Writes one line of what happened to the conductor's turn log. */
-  record(entry: { said: string; tool: string; outcome: string; reply: string }): void;
+  /** Writes one line of what happened to the conductor's turn log, with what was asked. */
+  record(entry: {
+    said: string;
+    tool: string;
+    outcome: string;
+    reply: string;
+    request?: string;
+  }): void;
 }
 
 type OpenRequest = {
   readonly valid: ValidAgentRequest;
   readonly at: number;
+  /** The asking agent's name when it asked, for telling the developer after it has gone. */
+  readonly senderName: string;
   /** The agent the request names, resolved by exact name when it was accepted. */
   readonly targetId?: string;
   state: 'queued' | 'deciding' | 'awaiting-developer';
   timer: ReturnType<typeof setTimeout> | null;
-  /** The sentence that put it to the developer, and when. */
+  /**
+   * The sentence that put it to the developer, and when they could first have seen it: until
+   * then (it may wait to be told), `at` is infinitely far off and no yes can answer it.
+   */
   asked: { readonly sentence: string; readonly at: number } | null;
   /** How it ended, for the developer, when the model that settled it said nothing. */
   verdict: string;
+  /** How it ended, once it did. */
+  ended: RequestOutcome['status'] | null;
 };
 
 type Watch = { readonly requestId: string; readonly requesterId: string; readonly at: number };
@@ -303,24 +339,41 @@ export class AgentRequestDesk {
     if (!entry) return;
     const sender = this.host.sender(entry);
     const said = `[request ${request.id}] ${sender.name}: ${request.kind}`;
+    const body = spec.body(valid.payload);
     if (spec.decidedBy === 'nobody') {
       const spoken = spec.spoken(sender.name, valid.payload);
-      this.host.say(spoken, {
-        conversationId: request.from.conversationId,
-        requestId: request.id,
-        asks: 'report',
+      const shown = spec.shown?.(sender.name, valid.payload) ?? spoken;
+      const status = (valid.payload as { readonly status?: unknown }).status;
+      this.host.say(
+        spoken,
+        { conversationId: request.from.conversationId, requestId: request.id, asks: 'report' },
+        {
+          ...(shown !== spoken ? { shown } : {}),
+          // A finished or stuck agent's whole report is what its turn's end would say again.
+          ...(shown === spoken && (status === 'done' || status === 'blocked')
+            ? { standsForTurn: true }
+            : {}),
+        }
+      );
+      this.host.record({
+        said,
+        tool: 'agent_request',
+        outcome: 'spoken',
+        reply: shown,
+        request: body,
       });
-      this.host.record({ said, tool: 'agent_request', outcome: 'spoken', reply: spoken });
       return;
     }
     const open: OpenRequest = {
       valid,
       at: this.now(),
+      senderName: sender.name,
       ...(targetId ? { targetId } : {}),
       state: 'queued',
       timer: null,
       asked: null,
       verdict: '',
+      ended: null,
     };
     this.open.set(request.id, open);
     this.arm(open);
@@ -332,6 +385,7 @@ export class AgentRequestDesk {
         tool: 'agent_request',
         outcome: 'asked the developer',
         reply: spoken,
+        request: body,
       });
       return;
     }
@@ -372,9 +426,21 @@ export class AgentRequestDesk {
         })
         .finally(() => (this.decidingId = null));
     }
+    const from = open.valid.request.from.conversationId;
     if (this.open.get(view.id) !== open) {
-      // Settled in the turn: the model's sentence says how, or the fixed one does.
-      this.host.say(closing || `${view.spoken} ${open.verdict}`.trim());
+      // Settled in the turn: the model's sentence says how, or the fixed one does. A routine
+      // one is shown and not said; the decision is the same either way.
+      const sentence = closing || `${view.spoken} ${open.verdict}`.trim();
+      const speak = speaksRequestOutcome({
+        kind: view.kind,
+        status: open.ended,
+        words: `${view.body} ${sentence}`,
+      });
+      this.host.say(sentence, undefined, {
+        source: 'request',
+        agent: from,
+        ...(speak ? {} : { speak: false }),
+      });
       return;
     }
     if (!this.host.canDecide()) {
@@ -390,7 +456,10 @@ export class AgentRequestDesk {
     // The turn failed or ended without a decision. The developer may be away, so the agent is
     // not left waiting for them: it is told nothing was done and carries on.
     this.settle(open, { status: 'undecided' });
-    this.host.say(`${view.spoken} I could not decide it, so nothing was done.`);
+    this.host.say(`${view.spoken} I could not decide it, so nothing was done.`, undefined, {
+      source: 'request',
+      agent: from,
+    });
   }
 
   /**
@@ -420,8 +489,12 @@ export class AgentRequestDesk {
     /** When the developer began to say the words; they are an answer only if that was after. */
     saidAt: number = this.now()
   ): Promise<{ outcome: ToolOutcome; spoken: string } | null> {
+    // Only a question the developer has been shown: one still waiting to be told is not it.
     const latest = [...this.open.values()]
-      .filter((request) => request.state === 'awaiting-developer' && request.asked)
+      .filter(
+        (request) =>
+          request.state === 'awaiting-developer' && Number.isFinite(request.asked?.at ?? NaN)
+      )
       .sort((a, b) => (a.asked?.at ?? 0) - (b.asked?.at ?? 0))
       .at(-1);
     if (!latest?.asked) return null;
@@ -473,6 +546,10 @@ export class AgentRequestDesk {
     }
     if (!inRequestTurn && open.state !== 'awaiting-developer') {
       return refused(`${request.id} has not been put to the developer yet.`);
+    }
+    // Still waiting to be told: whatever the developer said, they have not heard this question.
+    if (!inRequestTurn && !told(open)) {
+      return refused(`${request.id} has not been told to the developer yet.`);
     }
     const entry = this.host.entryFor(request.from.conversationId);
     if (!entry) {
@@ -654,7 +731,9 @@ export class AgentRequestDesk {
         .catch((error: unknown) => {
           log.warn('conductor: passing a reply back failed', { error, id: watch.requestId });
           this.host.say(
-            `${this.host.sender(requester).name} did not get ${from.name}'s reply: ${reason(error)}`
+            `${this.host.sender(requester).name} did not get ${from.name}'s reply: ${reason(error)}`,
+            undefined,
+            { source: 'failure' }
           );
         });
     }
@@ -729,6 +808,7 @@ export class AgentRequestDesk {
       sender,
       at: open.at,
       awaitingDeveloper: open.state === 'awaiting-developer',
+      ...(open.state === 'awaiting-developer' && !told(open) ? { told: false } : {}),
       spoken: spec.spoken(sender.name, payload, targetName),
       body: spec.body(payload, targetName),
       ...(request.reason ? { reason: request.reason } : {}),
@@ -743,13 +823,25 @@ export class AgentRequestDesk {
   /** Puts a request to the developer with `sentence` and starts its wait over. */
   private ask(open: OpenRequest, sentence: string): void {
     open.state = 'awaiting-developer';
-    open.asked = { sentence, at: this.now() };
+    // Answerable from when it is shown, not from when it is handed over to be told.
+    const asked = { sentence, at: Number.POSITIVE_INFINITY };
+    open.asked = asked;
     this.arm(open);
-    this.host.say(sentence, {
-      conversationId: open.valid.request.from.conversationId,
-      requestId: open.valid.request.id,
-      asks: open.valid.spec.action ? 'request' : 'question',
-    });
+    this.host.say(
+      sentence,
+      {
+        conversationId: open.valid.request.from.conversationId,
+        requestId: open.valid.request.id,
+        asks: open.valid.spec.action ? 'request' : 'question',
+      },
+      {
+        onShown: () => {
+          if (open.asked === asked || open.asked?.sentence === sentence) {
+            open.asked = { sentence, at: this.now() };
+          }
+        },
+      }
+    );
   }
 
   /** No request stays open forever: unanswered, the agent is told to carry on. */
@@ -803,16 +895,18 @@ export class AgentRequestDesk {
 
   private reply(open: OpenRequest, outcome: RequestOutcome): void {
     const { request } = open.valid;
+    open.ended = outcome.status;
     void this.host
       .send(request.from.conversationId, requestReplyText(request, outcome))
       .catch((error: unknown) => {
         log.warn('conductor: replying to an agent request failed', { error, id: request.id });
+        // Said even when the agent has left the canvas: that is often why it did not arrive.
         const entry = this.host.entryFor(request.from.conversationId);
-        if (entry) {
-          this.host.say(
-            `${this.host.sender(entry).name} did not get my answer to its request: ${reason(error)}`
-          );
-        }
+        const name = entry ? this.host.sender(entry).name : open.senderName;
+        this.host.say(`${name} did not get my answer to its request: ${reason(error)}`, undefined, {
+          source: 'failure',
+          agent: request.from.conversationId,
+        });
       });
   }
 
@@ -838,6 +932,11 @@ function accepted(valid: ValidAgentRequest): string {
   return valid.spec.decidedBy === 'developer'
     ? `Request ${id} accepted: the conductor is asking the developer. ${ACCEPTED_TAIL}`
     : `Request ${id} accepted: the conductor will decide it. ${ACCEPTED_TAIL}`;
+}
+
+/** The developer could have heard the question by now (see `ask`). */
+function told(open: OpenRequest): boolean {
+  return Number.isFinite(open.asked?.at ?? 0);
 }
 
 function reason(error: unknown): string {

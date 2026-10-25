@@ -294,6 +294,30 @@ describe('ConductorService.runTurn via OpenRouter', () => {
     expect((await conductor.status()).configured).toBe(true);
   });
 
+  it('sends one sticky routing session for every turn of the run, with no provider order', async () => {
+    const conductor = service();
+    await useOpenRouter(conductor);
+    await conductor.updateSettings({ openrouterModel: 'inception/mercury-3' });
+    respond = json(200, {
+      choices: [{ finish_reason: 'stop', message: { content: 'Done.' } }],
+      usage: { prompt_tokens: 10, completion_tokens: 2 },
+    });
+    await conductor.runTurn('command', userTurn);
+    await conductor.runTurn('plan', [{ role: 'user', content: 'something else entirely' }]);
+    const [first, second] = captured;
+    const session = first?.body.session_id;
+    expect(typeof session).toBe('string');
+    expect(session as string).toMatch(/^conductor-[0-9a-f-]{36}$/);
+    expect((session as string).length).toBeLessThanOrEqual(256);
+    expect(second?.body.session_id).toBe(session);
+    expect(first?.body.provider).toBeUndefined();
+    // A new app run is a new session.
+    const next = service();
+    await useOpenRouter(next);
+    await next.runTurn('command', userTurn);
+    expect(captured[2]?.body.session_id).not.toBe(session);
+  });
+
   it('reports a missing OpenRouter key and a rejected one', async () => {
     const conductor = service();
     await conductor.updateSettings({ provider: 'openrouter' });

@@ -66,6 +66,8 @@ vi.mock('./spawn', () => ({
   startAgentSession: vi.fn(),
 }));
 vi.mock('./agent-io', () => ({
+  CodexNotStartedError: class extends Error {},
+  DeliveryLeftUnsentError: class extends Error {},
   answerPermission: vi.fn(),
   interruptAgent: vi.fn(),
   lastMeaningfulLine: vi.fn(),

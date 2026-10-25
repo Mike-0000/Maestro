@@ -6,6 +6,8 @@ import {
   CONTEXT_OMITTED,
   dropStaleContexts,
   hasCodeCheck,
+  HISTORY_BUDGET,
+  type HistoryBudget,
   MAESTRO_EVENT_MARK,
   pruneScreenshots,
   SCREENSHOT_OMITTED,
@@ -30,28 +32,113 @@ function turn(index: number, withTool: boolean): Message[] {
   return messages;
 }
 
+/** A turn Maestro started: an agent finished, or sent a request. */
+function eventTurn(index: number, withTool: boolean): Message[] {
+  const [, ...rest] = turn(index, withTool);
+  return [{ role: 'user', content: `${MAESTRO_EVENT_MARK} event ${index}` }, ...rest];
+}
+
+/** A plain sliding window of `turns`, for tests about where a cut lands. */
+const window = (turns: number): HistoryBudget => ({ high: turns, low: turns, developer: 0 });
+
+/** What a turn starts with, in order: "utterance 3", "event 4". */
+function starts(messages: readonly Message[]): string[] {
+  return messages.flatMap((message) =>
+    message.role === 'user' && typeof message.content === 'string'
+      ? [message.content.replace(`${MAESTRO_EVENT_MARK} `, '')]
+      : []
+  );
+}
+
+/** Starts on a turn, alternates roles, and every tool_use is answered by the next message. */
+function expectValidSequence(messages: readonly Message[]): void {
+  expect(messages[0]?.role).toBe('user');
+  expect(typeof messages[0]?.content).toBe('string');
+  for (const [index, message] of messages.entries()) {
+    if (index > 0) expect(message.role).not.toBe(messages[index - 1]?.role);
+    if (message.role !== 'assistant' || typeof message.content === 'string') continue;
+    const uses = message.content.flatMap((block) => (block.type === 'tool_use' ? [block.id] : []));
+    if (uses.length === 0) continue;
+    const next = messages[index + 1];
+    const answered =
+      next && Array.isArray(next.content)
+        ? next.content.flatMap((block) => (block.type === 'tool_result' ? [block.tool_use_id] : []))
+        : [];
+    expect(answered).toEqual(uses);
+  }
+}
+
 describe('trimHistory', () => {
   it('keeps short histories untouched', () => {
     const messages = [...turn(1, false), ...turn(2, true)];
-    expect(trimHistory(messages, 4)).toBe(messages);
+    expect(trimHistory(messages, window(4))).toBe(messages);
   });
 
   it('cuts at turn starts so tool pairs survive', () => {
     const messages = [1, 2, 3, 4, 5].flatMap((index) => turn(index, index % 2 === 0));
-    const trimmed = trimHistory(messages, 2);
+    const trimmed = trimHistory(messages, window(2));
     expect(trimmed[0]).toEqual({ role: 'user', content: 'utterance 4' });
     expect(trimmed).toHaveLength(turn(4, true).length + turn(5, false).length);
-    const toolUses = trimmed.flatMap((message) =>
-      Array.isArray(message.content)
-        ? message.content.filter((block) => block.type === 'tool_use')
-        : []
+    expectValidSequence(trimmed);
+  });
+
+  it('grows to the high mark and then cuts back to the low mark in one go', () => {
+    let history: Message[] = [];
+    const cutsAt: number[] = [];
+    for (let index = 1; index <= 40; index++) {
+      const before = history;
+      history = trimHistory([...history, ...turn(index, index % 3 === 0)]);
+      const turns = starts(history).length;
+      expect(turns).toBeLessThanOrEqual(HISTORY_BUDGET.high);
+      if (turns === HISTORY_BUDGET.low && index > HISTORY_BUDGET.low) {
+        cutsAt.push(index);
+        expect(starts(history)).toEqual(
+          Array.from({ length: HISTORY_BUDGET.low }, (_, i) => `utterance ${index - 7 + i}`)
+        );
+      } else {
+        // Between cuts the stored history only grows: the next request starts with the same
+        // bytes, so the cached prefix holds.
+        expect(history.slice(0, before.length)).toEqual(before);
+      }
+      expectValidSequence(history);
+    }
+    // One cut every (high - low + 1) turns, not one per turn.
+    expect(cutsAt).toEqual([15, 22, 29, 36]);
+  });
+
+  it("keeps the developer's newest turns through a burst of Maestro events", () => {
+    let history: Message[] = [1, 2, 3, 4, 5].flatMap((index) => turn(index, index === 2));
+    for (let index = 6; index <= 40; index++) {
+      history = trimHistory([...history, ...eventTurn(index, index % 2 === 0)]);
+      expectValidSequence(history);
+    }
+    const kept = starts(history);
+    // The last four things the developer said, then the newest events.
+    expect(kept.slice(0, 4)).toEqual(['utterance 2', 'utterance 3', 'utterance 4', 'utterance 5']);
+    expect(kept.at(-1)).toBe('event 40');
+    expect(kept.filter((start) => start.startsWith('event')).length).toBeGreaterThanOrEqual(
+      HISTORY_BUDGET.low - HISTORY_BUDGET.developer
     );
-    const toolResults = trimmed.flatMap((message) =>
-      Array.isArray(message.content)
-        ? message.content.filter((block) => block.type === 'tool_result')
-        : []
-    );
-    expect(toolUses).toHaveLength(toolResults.length);
+  });
+
+  it('cuts to the newest turns of any kind once the developer turns are kept', () => {
+    const messages = [
+      ...turn(1, false),
+      ...eventTurn(2, true),
+      ...turn(3, false),
+      ...eventTurn(4, false),
+      ...eventTurn(5, true),
+      ...turn(6, false),
+    ];
+    const trimmed = trimHistory(messages, { high: 5, low: 4, developer: 2 });
+    expect(starts(trimmed)).toEqual(['utterance 3', 'event 4', 'event 5', 'utterance 6']);
+    expectValidSequence(trimmed);
+    // Older developer turns are dropped like any other once the budget is full.
+    expect(starts(trimHistory(messages, { high: 5, low: 3, developer: 3 }))).toEqual([
+      'utterance 1',
+      'utterance 3',
+      'utterance 6',
+    ]);
   });
 });
 
@@ -98,7 +185,7 @@ describe('dropStaleContexts', () => {
     expect(kept[0]).toEqual({ role: 'user', content: `${CONTEXT_OMITTED}\n\nfocus Atlas` });
     expect(kept.slice(1)).toEqual(messages.slice(1));
     // Still a turn start for trimHistory.
-    expect(trimHistory(kept, 1)).toEqual(kept.slice(3));
+    expect(trimHistory(kept, window(1))).toEqual(kept.slice(3));
   });
 });
 

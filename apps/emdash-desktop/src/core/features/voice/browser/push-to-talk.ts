@@ -23,7 +23,7 @@ export function installPushToTalk(store: VoiceStore, target: Window = window): (
       void store.startListening('hold', output.intent);
     } else {
       listening = false;
-      if (output.type === 'cancel') store.cancelListening();
+      if (output.type === 'cancel') store.cancelListening('hold-key');
       else if (store.mode === 'hold') void store.stopListening();
     }
   });
@@ -46,7 +46,7 @@ export function installPushToTalk(store: VoiceStore, target: Window = window): (
       event.preventDefault();
       event.stopPropagation();
       forget();
-      store.cancelListening();
+      store.cancelListening('escape');
       return;
     }
     // Any other key before listening starts is a chord (e.g. RightCtrl+C): never record it. Once

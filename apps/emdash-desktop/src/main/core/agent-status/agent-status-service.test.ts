@@ -4,6 +4,7 @@ import type { AgentStatusSignal } from '@core/primitives/agents/api';
 import { setAttentionJudge } from '@core/primitives/agents/api/attention-judge';
 import {
   AgentStatusService,
+  endsInQuestion,
   setAgentStatusConversationEventPublisher,
 } from './agent-status-service';
 
@@ -282,6 +283,164 @@ describe('AgentStatusService', () => {
     expect(disposed).toBe(true);
   });
 
+  describe('the idle reminder without a verdict', () => {
+    const idleReminder = { payload: { notificationType: 'idle_prompt' as const } };
+    const done = { payload: { lastAssistantMessage: 'Fixed the login test. All checks pass.' } };
+    const asks = { payload: { lastAssistantMessage: 'Fixed the login test.\n\nShall I push it?' } };
+
+    function watched() {
+      const service = new AgentStatusService();
+      const handler = vi.fn();
+      service.on('agent:event', handler);
+      return { service, handler };
+    }
+
+    it('drops the reminder after a turn that did not end on a question', async () => {
+      const { service, handler } = watched();
+      mocks.updateRows.push(row());
+
+      await service.applySignal(signal('stop', done));
+      await service.applySignal(signal('notification', idleReminder));
+
+      expect(mocks.updateCalls.map((call) => call.agentStatus)).toEqual(['completed']);
+      expect(handler).toHaveBeenCalledTimes(1);
+      expect(handler).toHaveBeenCalledWith(expect.objectContaining({ type: 'stop' }));
+    });
+
+    it('drops it after a stop with no reply, and after a verdict that failed', async () => {
+      const judge = vi.fn().mockRejectedValue(new Error('timed out'));
+      setAttentionJudge({ enabled: async () => true, judge });
+      try {
+        const { service, handler } = watched();
+        mocks.updateRows.push(row(), row());
+
+        await service.applySignal(signal('stop'));
+        await service.applySignal(signal('notification', idleReminder));
+        await service.applySignal(signal('stop', done));
+        await service.applySignal(signal('notification', idleReminder));
+
+        expect(mocks.updateCalls.map((call) => call.agentStatus)).toEqual([
+          'completed',
+          'completed',
+        ]);
+        expect(handler).toHaveBeenCalledTimes(2);
+      } finally {
+        setAttentionJudge(null);
+      }
+    });
+
+    it('keeps the reminder after a question, with that reply and the seen flag as it was', async () => {
+      const { service, handler } = watched();
+      // The developer looked at the tile after the stop.
+      mocks.updateRows.push(row({ agentStatusSeen: 0 }), row({ agentStatusSeen: 1 }));
+
+      await service.applySignal(signal('stop', asks));
+      await service.applySignal(signal('notification', idleReminder));
+
+      expect(mocks.updateCalls).toEqual([
+        { agentStatus: 'completed', agentStatusSeen: 0 },
+        { agentStatus: 'awaiting-input' },
+      ]);
+      expect(mocks.emit.mock.calls[1]?.[1]).toMatchObject({
+        status: 'awaiting-input',
+        seen: true,
+        completionReport: { text: 'Fixed the login test.\n\nShall I push it?' },
+      });
+      expect(handler).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          type: 'notification',
+          payload: expect.objectContaining({ notificationType: 'idle_prompt' }),
+        })
+      );
+    });
+
+    it('reads a chat reply through the stop’s loadReply', async () => {
+      const { service } = watched();
+      mocks.updateRows.push(row(), row());
+      const loadReply = vi.fn(async () => 'Which branch should I use?');
+
+      await service.applySignal(signal('stop'), { loadReply });
+      await service.applySignal(signal('notification', idleReminder));
+
+      expect(loadReply).toHaveBeenCalledTimes(1);
+      expect(mocks.updateCalls.map((call) => call.agentStatus)).toEqual([
+        'completed',
+        'awaiting-input',
+      ]);
+    });
+
+    it('keeps a reminder that is not preceded by a stop: some providers end turns with it', async () => {
+      const { service, handler } = watched();
+      mocks.updateRows.push(row(), row(), row(), row());
+
+      // A conversation that never sent a stop (OpenCode, Kilo Code, Mimo).
+      await service.applySignal(signal('notification', idleReminder));
+      // A stop, then new activity before the reminder.
+      await service.applySignal(signal('stop', done));
+      await service.applySignal(signal('start'));
+      await service.applySignal(signal('notification', idleReminder));
+
+      expect(mocks.updateCalls).toEqual([
+        { agentStatus: 'awaiting-input', agentStatusSeen: 0 },
+        { agentStatus: 'completed', agentStatusSeen: 0 },
+        { agentStatus: 'working', agentStatusSeen: 1 },
+        { agentStatus: 'awaiting-input', agentStatusSeen: 0 },
+      ]);
+      expect(handler).toHaveBeenCalledTimes(4);
+    });
+
+    it('forgets the turn end once the conversation is reset', async () => {
+      const { service } = watched();
+      mocks.updateRows.push(row(), row(), row());
+
+      await service.applySignal(signal('stop', done));
+      await service.resetToIdle({ conversationId: 'conversation-1' });
+      await service.applySignal(signal('notification', idleReminder));
+
+      expect(mocks.updateCalls.map((call) => call.agentStatus)).toEqual([
+        'completed',
+        'idle',
+        'awaiting-input',
+      ]);
+    });
+
+    it('leaves permission and elicitation prompts after a stop alone', async () => {
+      const { service, handler } = watched();
+      mocks.updateRows.push(row(), row(), row());
+
+      await service.applySignal(signal('stop', done));
+      await service.applySignal(
+        signal('notification', { payload: { notificationType: 'permission_prompt' } })
+      );
+      await service.applySignal(
+        signal('notification', { payload: { notificationType: 'elicitation_dialog' } })
+      );
+
+      expect(mocks.updateCalls).toEqual([
+        { agentStatus: 'completed', agentStatusSeen: 0 },
+        { agentStatus: 'awaiting-input', agentStatusSeen: 0 },
+        { agentStatus: 'awaiting-input', agentStatusSeen: 0 },
+      ]);
+      expect(handler).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  it('reads a question from the last sentence of a reply', () => {
+    for (const reply of [
+      'Shall I push it?',
+      'Done.\n\nWhich database should I use?  \n',
+      '**Want me to open a PR?**',
+      'Should I keep `retry()`?`',
+      'Proceed with the "safe" option?"',
+      '続けますか？',
+    ]) {
+      expect(endsInQuestion(reply), reply).toBe(true);
+    }
+    for (const reply of ['', 'All done.', 'Is it safe? Yes, it is.', 'Run `git status?`.']) {
+      expect(endsInQuestion(reply), reply).toBe(false);
+    }
+  });
+
   describe('with the conductor judging finished turns', () => {
     const judge = vi.fn();
     const question = { payload: { lastAssistantMessage: 'Which database should I use?' } };
@@ -371,9 +530,12 @@ describe('AgentStatusService', () => {
         'completed',
       ]);
 
-      // Without a verdict the idle reminder still counts, as before.
+      // Without a verdict the idle reminder counts only after a turn that ended on a question.
       await service.applySignal(signal('notification', idleReminder));
-      expect(mocks.updateCalls[3]).toMatchObject({ agentStatus: 'awaiting-input' });
+      expect(mocks.updateCalls).toHaveLength(3);
+      await service.applySignal(signal('stop', question));
+      await service.applySignal(signal('notification', idleReminder));
+      expect(mocks.updateCalls[4]).toEqual({ agentStatus: 'awaiting-input' });
     });
 
     it('asks once for the same reply and reads a chat reply through loadReply', async () => {

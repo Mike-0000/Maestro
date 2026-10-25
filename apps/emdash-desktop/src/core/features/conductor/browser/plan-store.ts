@@ -8,6 +8,7 @@ import type { ConflictReport } from '../api/contract';
 import { SIZE_TOKEN_RANGE, type SubtaskSize } from '../api/jev';
 import { findPlanOverlaps, scopedPrompt, type PlanInput, type PlanSubtask } from '../api/plan';
 import { matchInstalledProvider, type InstalledProvider } from '../api/provider-match';
+import { CodexNotStartedError, DeliveryLeftUnsentError } from './agent-io';
 import { deliverPromptWhenReady } from './deferred-prompt';
 import { entryForConversation } from './roster';
 import { resolveSpokenProject, spawnAgentTask, startAgentSession } from './spawn';
@@ -296,13 +297,14 @@ export class PlanStore {
     try {
       const prompt = scopedPrompt(subtask, plan.goal);
       const conversationId = crypto.randomUUID();
+      const name = this.canvas.claimSpokenName(conversationId);
       const result = await spawnAgentTask({
         projectId: plan.projectId,
         providerId: subtask.provider,
         taskName: subtask.title,
         prompt,
         conversationId,
-        title: this.canvas.claimSpokenName(conversationId),
+        title: name,
         // Parallel subtasks need isolation: the conflict radar compares their branches.
         worktree: true,
       }).catch((error: unknown) => {
@@ -318,7 +320,9 @@ export class PlanStore {
       const started = await startAgentSession(plan.projectId, result.taskId, result.conversationId);
       if (!started) throw new Error('The agent did not start in time.');
       if (result.promptDeferred) {
-        void deliverPromptWhenReady(this.canvas, result.conversationId, prompt);
+        void deliverPromptWhenReady(this.canvas, result.conversationId, prompt).catch(
+          (error: unknown) => this.briefNotDelivered(subtask, name, error)
+        );
       }
     } catch (error) {
       log.warn('conductor: plan subtask failed to start', { error, title: subtask.title });
@@ -328,6 +332,21 @@ export class PlanStore {
       });
       this.events.notify(`${subtask.title} failed to start.`);
     }
+  }
+
+  /**
+   * Says why a started subtask's agent did not get its brief. A brief Codex did not take is
+   * waiting in its input, so the developer is told to press Enter there, not to send it again.
+   */
+  private briefNotDelivered(subtask: PlannedSubtask, name: string, error: unknown): void {
+    log.warn('conductor: plan subtask brief not delivered', { error, title: subtask.title });
+    this.events.notify(
+      error instanceof CodexNotStartedError
+        ? `Pasted the "${subtask.title}" brief into ${name}, but Codex didn't start; press Enter in its window.`
+        : error instanceof DeliveryLeftUnsentError
+          ? `Left the "${subtask.title}" brief in ${name}'s input because you were typing there; press Enter when ready.`
+          : `${name} did not get its "${subtask.title}" brief: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 
   /** Marks finished subtasks done and starts their dependents. */

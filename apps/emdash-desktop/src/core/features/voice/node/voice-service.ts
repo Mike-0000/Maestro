@@ -22,6 +22,7 @@ import {
   holdComboKeycodes,
 } from '../api/global-keys';
 import { HoldToTalkMachine, type HoldOutput } from '../api/hold-to-talk';
+import { fixTranscriptNames, VOICE_NAME_HINTS } from '../api/name-fixups';
 import { decodeWav, STT_SAMPLE_RATE } from '../api/wav';
 import type { BufferedDictationStream } from './buffered-dictation';
 import { DeepgramSttEngine } from './engines/deepgram';
@@ -31,6 +32,7 @@ import { OpenAiSttEngine } from './engines/openai';
 import { OpenRouterSttEngine } from './engines/openrouter';
 import { WhisperLocalSttEngine } from './engines/whisper-local';
 import { streamGeminiTts } from './gemini-tts';
+import { LocalCommandStream } from './local-command-stream';
 import { DICTATION_MODEL_NAME, DictationModel, LocalDictation } from './local-dictation';
 import { LocalTts } from './local-tts';
 import { OPENROUTER_TTS_MODELS, streamOpenRouterTts } from './openrouter-tts';
@@ -60,6 +62,10 @@ export class VoiceService {
   private readonly streams = new Map<
     string,
     { stream: DeepgramStream; startedAt: number; timer: ReturnType<typeof setTimeout> }
+  >();
+  private readonly localCommands = new Map<
+    string,
+    { stream: LocalCommandStream; timer: ReturnType<typeof setTimeout> }
   >();
   private readonly dictation: LocalDictation;
   private readonly dictations = new Map<
@@ -107,6 +113,7 @@ export class VoiceService {
     for (const id of [...this.ttsRequests.keys()]) this.stopTts(id);
     for (const id of [...this.streams.keys()]) this.abortStream(id);
     for (const id of [...this.dictations.keys()]) this.abortStream(id);
+    for (const id of [...this.localCommands.keys()]) this.abortStream(id);
     this.dictation.dispose();
     this.applyGlobalHold(HOLD_KEY_OFF);
     if (this.registeredShortcut) this.host.globalShortcuts.unregister(this.registeredShortcut);
@@ -165,7 +172,10 @@ export class VoiceService {
       ) => {
         if (!controller.signal.aborted) emit(event);
       };
-      const geminiVoice = settings.geminiCustomVoice.trim() || settings.geminiVoice;
+      // A custom voice id is scoped to a Google Cloud project; only Vertex engines can speak it.
+      const isVertex = settings.ttsEngine.startsWith('vertex-');
+      const customVoice = settings.geminiCustomVoice.trim();
+      const geminiVoice = isVertex && customVoice ? customVoice : settings.geminiVoice;
       let synthesis: Promise<void>;
       if (settings.ttsEngine === 'kitten') {
         synthesis = (this.localTts ??= new LocalTts()).speak(
@@ -267,21 +277,33 @@ export class VoiceService {
     this.ttsRequests.delete(requestId);
   }
 
+  /**
+   * Starts loading the on-device model ahead of an utterance, so it overlaps the speech instead
+   * of following it. A press that is cancelled leaves the model loaded until the idle unload.
+   */
+  async warmDictation(): Promise<void> {
+    const settings = await this.settings.read();
+    if (!settings.localTranscriber) return;
+    if (await this.dictation.model.ready()) this.dictation.warm();
+  }
+
   /** Opens a live stream if the current engine supports one; null means upload instead. */
   async openStream(
     vocabulary: readonly string[],
     onPartial: (streamId: string, text: string, confidence?: number) => void
   ): Promise<string | null> {
     const settings = await this.settings.read();
-    if (settings.localTranscriber || settings.engine !== 'deepgram' || !settings.streaming) {
-      return null;
-    }
+    if (settings.localTranscriber) return this.openLocalCommand();
+    if (settings.engine !== 'deepgram' || !settings.streaming) return null;
     const key = await this.credentials.get('deepgram');
     if (!key) return null;
     const streamId = crypto.randomUUID();
     const stream = new DeepgramStream(
       key,
-      { language: settings.language, vocabulary },
+      {
+        language: settings.language,
+        vocabulary: [...new Set([...vocabulary, ...VOICE_NAME_HINTS])],
+      },
       (text, confidence) => onPartial(streamId, text, confidence)
     );
     const timer = setTimeout(() => this.abortStream(streamId), STREAM_MAX_MS);
@@ -289,7 +311,27 @@ export class VoiceService {
     return streamId;
   }
 
+  /**
+   * A command capture on this computer. Opening it also loads the model, and long captures are
+   * transcribed in chunks while recording. Null (model missing) means upload instead, which
+   * reports the missing model.
+   */
+  private async openLocalCommand(): Promise<string | null> {
+    if (!(await this.dictation.model.ready())) return null;
+    this.dictation.warm();
+    const streamId = crypto.randomUUID();
+    const stream = new LocalCommandStream((samples) => this.dictation.transcribe(samples));
+    const timer = setTimeout(() => this.abortStream(streamId), STREAM_MAX_MS);
+    this.localCommands.set(streamId, { stream, timer });
+    return streamId;
+  }
+
   pushAudio(streamId: string, pcm: Uint8Array<ArrayBuffer>): void {
+    const local = this.localCommands.get(streamId);
+    if (local) {
+      local.stream.push(pcm);
+      return;
+    }
     const dictation = this.dictations.get(streamId);
     if (dictation) dictation.stream.push(pcm);
     else this.streams.get(streamId)?.stream.push(pcm);
@@ -323,13 +365,15 @@ export class VoiceService {
     this.dictations.delete(streamId);
     clearTimeout(entry.timer);
     const finishedAt = performance.now();
-    const text = (await entry.stream.finish()).trim();
+    const text = fixTranscriptNames((await entry.stream.finish()).trim());
     const latencyMs = Math.round(performance.now() - finishedAt);
     this.logger.info('voice: dictated', { latencyMs, chars: text.length });
     return { text, latencyMs };
   }
 
   async closeStream(streamId: string): Promise<Transcription> {
+    const local = this.localCommands.get(streamId);
+    if (local) return this.closeLocalCommand(streamId, local);
     const entry = this.streams.get(streamId);
     if (!entry) throw new SttEngineError('engine-failed', 'That transcription stream expired.');
     this.streams.delete(streamId);
@@ -347,7 +391,38 @@ export class VoiceService {
     };
   }
 
+  private async closeLocalCommand(
+    streamId: string,
+    entry: { stream: LocalCommandStream; timer: ReturnType<typeof setTimeout> }
+  ): Promise<Transcription> {
+    this.localCommands.delete(streamId);
+    clearTimeout(entry.timer);
+    const finishedAt = performance.now();
+    let text: string;
+    try {
+      text = fixTranscriptNames(await entry.stream.finish());
+    } catch (error) {
+      this.logger.error('voice: local Parakeet transcription failed', { error });
+      throw new SttEngineError('engine-failed', 'Local Parakeet transcription failed.');
+    }
+    const latencyMs = Math.round(performance.now() - finishedAt);
+    this.logger.info('voice: transcribed', {
+      engine: 'parakeet-local',
+      latencyMs,
+      chars: text.length,
+      chunked: entry.stream.usedChunks,
+    });
+    return { text, engine: 'parakeet-local', latencyMs };
+  }
+
   abortStream(streamId: string): void {
+    const local = this.localCommands.get(streamId);
+    if (local) {
+      this.localCommands.delete(streamId);
+      clearTimeout(local.timer);
+      local.stream.abort();
+      return;
+    }
     const dictation = this.dictations.get(streamId);
     if (dictation) {
       this.dictations.delete(streamId);
@@ -376,9 +451,15 @@ export class VoiceService {
     } else {
       const engine = this.engines[settings.engine];
       engineId = engine.id;
-      result = await engine.transcribe({ audio, vocabulary, language: settings.language });
+      result = await engine.transcribe({
+        audio,
+        vocabulary: [...new Set([...vocabulary, ...VOICE_NAME_HINTS])],
+        language: settings.language,
+      });
     }
-    const text = typeof result === 'string' ? result : result.text;
+    // Only the on-device model mishears these names; cloud engines get them as vocabulary hints.
+    const heard = typeof result === 'string' ? result : result.text;
+    const text = engineId === 'parakeet-local' ? fixTranscriptNames(heard) : heard;
     const latencyMs = Math.round(performance.now() - started);
     this.logger.info('voice: transcribed', { engine: engineId, latencyMs, chars: text.length });
     return {

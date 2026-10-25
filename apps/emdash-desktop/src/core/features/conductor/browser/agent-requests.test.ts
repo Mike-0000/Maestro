@@ -18,6 +18,7 @@ import {
   OVERRULE_MS,
   WATCH_MS,
   type AgentRequestHost,
+  type RequestSayOptions,
 } from './agent-requests';
 
 // The request desk on its own: what an agent's request does from the moment it arrives until the
@@ -69,12 +70,15 @@ const spawn = (overrides: Record<string, unknown> = {}, from = 'atlas') =>
 const question = (from = 'atlas', text = 'Keep the look or make the pod longer?') =>
   request('ask_developer', { question: text }, from);
 
-function setup(options: { free?: boolean; canDecide?: boolean } = {}) {
+function setup(options: { free?: boolean; canDecide?: boolean; showLater?: boolean } = {}) {
   const entries = new Map(
     ['atlas', 'bravo', 'carol', 'echo'].map((id) => [id, entry(id)] as [string, AgentTileEntry])
   );
   const state = { free: options.free ?? true, now: 1_000_000, enabled: true, sendFails: '' };
   const said: string[] = [];
+  const told: { text: string; options: RequestSayOptions }[] = [];
+  /** Sentences handed over but not shown yet (`showLater`): calling one shows it. */
+  const unshown: (() => void)[] = [];
   const sent: { to: string; text: string }[] = [];
   const acts: { action: RequestAction; from: string; targetId?: string }[] = [];
   let onDecide: (open: OpenRequestView) => Promise<string> = async () => '';
@@ -109,7 +113,14 @@ function setup(options: { free?: boolean; canDecide?: boolean } = {}) {
       });
       return actOutcome;
     }),
-    say: (text) => void said.push(text),
+    // Shown at once, as the conductor does when the developer is free.
+    // Shown at once, as the conductor does when the developer is free; or held back.
+    say: (text, _about, sayOptions) => {
+      said.push(text);
+      told.push({ text, options: sayOptions ?? {} });
+      if (sayOptions?.onShown && options.showLater) unshown.push(sayOptions.onShown);
+      else sayOptions?.onShown?.();
+    },
     send: async (to, text) => {
       if (state.sendFails) throw new Error(state.sendFails);
       sent.push({ to, text });
@@ -139,6 +150,8 @@ function setup(options: { free?: boolean; canDecide?: boolean } = {}) {
     host,
     state,
     said,
+    told,
+    unshown,
     sent,
     acts,
     acks,
@@ -865,5 +878,98 @@ describe('helpers', () => {
         ['d', 'working'],
       ])
     ).toEqual(['a']);
+  });
+});
+
+describe('telling the developer', () => {
+  it('takes no yes for a question until it was shown, and heard for a moment', async () => {
+    const { receive, desk, said, unshown, state, acts } = setup({
+      canDecide: false,
+      showLater: true,
+    });
+    await receive(spawn());
+    const sentence = said.at(-1)!;
+    // Held back (the developer was hearing the conductor's answer): the same words on screen
+    // and plenty of time are still no answer to it.
+    state.now += 60_000;
+    expect(await desk.answerLatest('approve', 'yes', sentence)).toBeNull();
+
+    unshown.shift()!();
+    expect(await desk.answerLatest('approve', 'yes', sentence)).toBeNull();
+    state.now += HEARD_MS;
+    // Words begun before it was shown do not count either.
+    expect(
+      await desk.answerLatest('approve', 'yes', sentence, state.now - HEARD_MS - 1)
+    ).toBeNull();
+    expect((await desk.answerLatest('approve', 'yes', sentence))?.spoken).toBe(
+      'Approved for Atlas.'
+    );
+    expect(acts).toHaveLength(1);
+  });
+
+  it('only shows a routine approval and says the ones that matter', async () => {
+    const { receive, desk, decideWith, told, actReturns } = setup();
+    actReturns({ content: 'Sent to Echo.', subject: { conversationId: 'echo' } });
+    decideWith(async (open) => {
+      await desk.answer(open.id, 'approve', undefined, true);
+      return 'Passed it on to Echo.';
+    });
+    await receive(request('message_agent', { agent: 'Echo', text: 'Which port is the API on?' }));
+    expect(told.at(-1)).toEqual({
+      text: 'Passed it on to Echo.',
+      options: { source: 'request', agent: 'atlas', speak: false },
+    });
+
+    decideWith(async (open) => {
+      await desk.answer(open.id, 'answer', 'Go ahead and publish 1.2.', true);
+      return 'Told Atlas to publish.';
+    });
+    await receive(request('ask_conductor', { question: 'Should I publish 1.2 to Nexus now?' }));
+    expect(told.at(-1)?.options.speak).toBeUndefined();
+
+    decideWith(async (open) => {
+      await desk.answer(open.id, 'deny', 'Not now.', true);
+      return 'Told Atlas no.';
+    });
+    await receive(request('message_agent', { agent: 'Echo', text: 'Stop your build.' }));
+    expect(told.at(-1)?.options.speak).toBeUndefined();
+  });
+
+  it('shows a long report whole, and lets a whole one stand for the finished turn', async () => {
+    const { receive, told } = setup();
+    const long = `${'The build passed and the installer is signed. '.repeat(6)}Do not push yet.`;
+    await receive(request('report', { status: 'done', message: long }));
+    const spoken = told.at(-1)!;
+    expect(spoken.text.length).toBeLessThan(spoken.options.shown!.length);
+    expect(spoken.options.shown).toContain('Do not push yet.');
+    expect(spoken.options.standsForTurn).toBeUndefined();
+
+    await receive(request('report', { status: 'done', message: 'the installer is signed' }));
+    expect(told.at(-1)?.options).toEqual({ standsForTurn: true });
+    await receive(request('report', { status: 'progress', message: 'halfway there' }));
+    expect(told.at(-1)?.options).toEqual({});
+  });
+
+  it('says a reply that did not arrive, by the name the agent had, after it left', async () => {
+    const { receive, desk, decideWith, told, host, entries } = setup();
+    // The agent leaves while its answer waits to be typed.
+    host.send = async () => {
+      entries.delete('atlas');
+      throw new Error('it is no longer on the canvas.');
+    };
+    decideWith(async (open) => {
+      await desk.answer(open.id, 'answer', 'Use port 8080.', true);
+      return '';
+    });
+    await receive(request('ask_conductor', { question: 'Which port?' }));
+    await vi.waitFor(() =>
+      expect(told.map((entry) => entry.text)).toContain(
+        'Atlas did not get my answer to its request: it is no longer on the canvas.'
+      )
+    );
+    expect(told.find((entry) => entry.text.startsWith('Atlas did not get'))?.options).toEqual({
+      source: 'failure',
+      agent: 'atlas',
+    });
   });
 });

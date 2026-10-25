@@ -157,6 +157,44 @@ describe('SpeechOutput', () => {
     output.stop();
   });
 
+  it('says why it fell back to the platform voice, and which engine was heard', async () => {
+    vi.useFakeTimers();
+    const output = new SpeechOutput();
+    const fallbacks: string[] = [];
+    const onFallback = ({ engine, reason }: { engine: string; reason: string }) =>
+      fallbacks.push(`${engine}:${reason}`);
+    output.configure({ ...DEFAULT_VOICE_SETTINGS, ttsEngine: 'gemini-flash' }, { gemini: true });
+    output.speak('x'.repeat(1201), undefined, { onFallback });
+    output.speak('Ready.', undefined, { onFallback });
+    await vi.advanceTimersByTimeAsync(3500);
+    output.configure({ ...DEFAULT_VOICE_SETTINGS, ttsEngine: 'gemini-flash' }, { gemini: false });
+    output.speak('Ready.', undefined, { onFallback });
+    // Asked for, or no cloud engine chosen: not a fallback.
+    output.speak('Ready.', undefined, { onFallback, platform: true });
+    output.configure({ ...DEFAULT_VOICE_SETTINGS, ttsEngine: 'platform' }, {});
+    output.speak('Ready.', undefined, { onFallback });
+    expect(fallbacks).toEqual([
+      'gemini-flash:too-long',
+      'gemini-flash:first-audio-timeout',
+      'gemini-flash:no-credentials',
+    ]);
+
+    output.configure({ ...DEFAULT_VOICE_SETTINGS, ttsEngine: 'gemini-flash' }, { gemini: true });
+    const statuses: string[] = [];
+    output.speak('Ready.', (status, detail) =>
+      statuses.push(`${status}:${detail?.engine ?? detail?.reason ?? ''}`)
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    const { requestId } = startTts.mock.calls.at(-1)![0];
+    output.handleEvent({
+      type: 'tts-chunk',
+      requestId,
+      pcm: Buffer.from([0, 0]).toString('base64'),
+    });
+    output.stop('muted');
+    expect(statuses).toEqual(['started:gemini-flash', 'cancelled:muted']);
+  });
+
   it('reports platform speech starting, finishing and barge-in without claiming cancelled speech finished', () => {
     type Utterance = { onstart?: () => void; onend?: () => void };
     const output = new SpeechOutput();

@@ -11,6 +11,7 @@ import {
   requestContextLines,
   requestReplyText,
   requestTurnText,
+  spokenClip,
   validateAgentRequest,
   type AgentRequest,
   type OpenRequestView,
@@ -245,6 +246,48 @@ describe('agent request kinds', () => {
         }).payload
       )
     ).toBe('Atlas asks: Keep the look or make the pod longer? Options: Keep the look, Longer pod.');
+  });
+
+  it('says a long report up to its last whole sentence and shows all of it', () => {
+    const message =
+      'The Y: drive install finished and the launcher opens. ' +
+      'Saves now go to the X: drive as you asked, and the old folder is kept for now. ' +
+      'The shortcut on the desktop points at the new launcher, and the old one was removed. ' +
+      'Warning: this session owns the Y: install, so do not start another installer until I report back.';
+    const { payload } = valid('report', { status: 'done', message });
+    const spoken = agentRequestKinds.report.spoken('Iris', payload);
+    expect(spoken).toBe(
+      'Iris is done: The Y: drive install finished and the launcher opens. Saves now go to the X: drive as you asked, and the old folder is kept for now. The shortcut on the desktop points at the new launcher, and the old one was removed.'
+    );
+    expect(agentRequestKinds.report.shown!('Iris', payload)).toBe(`Iris is done: ${message}`);
+    // A short report is said whole, and shown as said.
+    const short = valid('report', { status: 'done', message: 'the order is in' }).payload;
+    expect(agentRequestKinds.report.shown!('Iris', short)).toBe(
+      agentRequestKinds.report.spoken('Iris', short)
+    );
+  });
+});
+
+describe('spokenClip', () => {
+  it('leaves text that fits alone, on one line', () => {
+    expect(spokenClip('One line.\n  Two.', 240)).toBe('One line. Two.');
+  });
+
+  it('cuts after the last whole sentence that fits', () => {
+    expect(spokenClip('First part done. Second part is much longer than fits', 30)).toBe(
+      'First part done.'
+    );
+    // A sentence that ends exactly at the limit is whole.
+    expect(spokenClip('Exactly twenty chars. More', 21)).toBe('Exactly twenty chars.');
+  });
+
+  it('cuts between words when no sentence end keeps enough, never inside a word', () => {
+    expect(spokenClip('Hi. The deployment to the staging cluster failed', 30)).toBe(
+      'Hi. The deployment to the…'
+    );
+    const clipped = spokenClip('a'.repeat(10) + ' ' + 'b'.repeat(40), 30);
+    expect(clipped).toBe(`${'a'.repeat(10)}…`);
+    expect(spokenClip('x'.repeat(50), 30)).toBe(`${'x'.repeat(29)}…`);
   });
 });
 

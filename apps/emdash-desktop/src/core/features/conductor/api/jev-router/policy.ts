@@ -1,5 +1,5 @@
 import type { ConductorMode } from '../contract';
-import type { CloseScope } from '../grammar';
+import { isSingleAgentWithSubagents, type CloseScope } from '../grammar';
 import { choiceOf, noulOf, type JevAnswer, type JevAnswers } from '../jev';
 import { unknownSpokenNames, type RosterAgent } from '../resolver';
 import {
@@ -118,7 +118,8 @@ export function scoreMass(
 }
 
 /** Plan mode only when Jev expects several new agents, or plan wording backs a weaker signal. */
-export function planMode(answers: JevAnswers, planCue: boolean): ConductorMode {
+export function planMode(answers: JevAnswers, planCue: boolean, utterance?: string): ConductorMode {
+  if (utterance && isSingleAgentWithSubagents(utterance)) return 'command';
   const multi = scoreMass(answers.agent_count, AGENT_COUNT_LEVELS, 1);
   const intent = choiceOf(answers, 'intent');
   if (multi >= 0.7) return 'plan';
@@ -540,7 +541,7 @@ export function decideRoute(
   plan: RouterPlan,
   options: RouterOptions
 ): RouterDecision {
-  const mode = planMode(answers, options.planCue);
+  const mode = planMode(answers, options.planCue, plan.input.utterance);
   // Jev's project is the source of truth for one new piece of work, not for a split plan.
   const settled =
     mode === 'command' ? settledProject(answers, plan, options.thresholds.guarded) : null;

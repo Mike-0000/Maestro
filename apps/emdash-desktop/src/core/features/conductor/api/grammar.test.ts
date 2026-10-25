@@ -163,6 +163,12 @@ describe('chooseMode', () => {
     ['what is claude 2 doing', 'command'],
     ['add a note', 'command'],
     ['build it', 'command'],
+    ['start a Claude agent and have it spin up subagents to review the auth module', 'command'],
+    [
+      'spin up a new agent for the billing bug, maybe spin up some sub-agent review agents',
+      'command',
+    ],
+    ['spin up three agents to fix the lint errors', 'plan'],
   ] as const)('%s -> %s', (utterance, mode) => {
     expect(chooseMode(utterance)).toBe(mode);
   });

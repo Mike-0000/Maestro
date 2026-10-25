@@ -56,4 +56,17 @@ describe('buildSpawnWorkspaceConfig', () => {
       'no default branch'
     );
   });
+
+  it('names the real cause when there is no default branch', () => {
+    const fail = (branches: SpawnWorkspaceContext['branches']) => () =>
+      buildSpawnWorkspaceConfig(true, context({ fromBranch: undefined, branches }));
+    expect(fail({ defaultName: 'main', count: 0, loading: true })).toThrow('have not loaded yet');
+    expect(fail({ defaultName: 'main', count: 2, loading: false })).toThrow(
+      'default branch "main" was not found among its 2 branches'
+    );
+    expect(fail({ defaultName: null, count: 0, loading: false })).toThrow('no branches yet');
+    expect(fail({ defaultName: null, count: 3, loading: false })).toThrow(
+      'could not be worked out'
+    );
+  });
 });

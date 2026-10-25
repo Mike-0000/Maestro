@@ -8,7 +8,29 @@ export type SpawnWorkspaceContext = {
   branchName: () => string;
   fromBranch: GitBranchRef | undefined;
   pushBranch: boolean;
+  /** What the branch lookup found, to say why there is no default branch. */
+  branches?: {
+    /** The configured default branch (such as "main"), when the project has one. */
+    defaultName: string | null;
+    count: number;
+    loading: boolean;
+  };
 };
+
+/** Why a project has no usable default branch, in words that name the real cause. */
+function noDefaultBranchMessage(branches: SpawnWorkspaceContext['branches']): string {
+  if (!branches) return 'The project has no default branch yet (commit something first).';
+  if (branches.loading) {
+    return "The project's branches have not loaded yet, so its default branch is unknown. Try again in a moment.";
+  }
+  if (branches.count === 0) {
+    return 'The project has no branches yet (commit something first).';
+  }
+  if (branches.defaultName) {
+    return `The project's default branch "${branches.defaultName}" was not found among its ${branches.count} branches.`;
+  }
+  return "The project's default branch could not be worked out from its branches.";
+}
 
 /**
  * The task workspace for a conductor-spawned agent. By default the agent edits the project
@@ -31,7 +53,7 @@ export function buildSpawnWorkspaceConfig(
     };
   }
   if (!context.fromBranch) {
-    throw new Error('The project has no default branch yet (commit something first).');
+    throw new Error(noDefaultBranchMessage(context.branches));
   }
   return {
     version: '2',
