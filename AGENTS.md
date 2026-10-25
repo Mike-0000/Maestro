@@ -344,6 +344,11 @@ pnpm run test
   `src/core/features/mcp/browser/`.
 - Skills types and validation live in Core primitives; skills UI and service code live in
   `src/core/features/skills/browser/` and `src/core/features/skills/node/`.
+- Add-ons (Settings > Add-ons) bundle files and one marked instructions block per provider, such
+  as the vibe skill, worker agents, and a `CLAUDE.md` block. Definitions live in
+  `src/core/features/agent-addons/node/addons/` (one folder each, listed in `index.ts`); the
+  host-side installer with receipts and conflict checks is
+  `packages/core/src/runtimes/agent-config/node/runtime/addons.ts`.
 - Team-owned runtime settings live in each workspace's `.emdash.json`:
   `preservePatterns`, `scripts.prepare`, `scripts.setup`, `scripts.run`,
   `scripts.teardown`, and `shellSetup` (a per-workspace override of the host default).

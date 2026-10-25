@@ -216,6 +216,13 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     description: 'Manage reusable local agent skills.',
     keywords: ['skill modules', 'agents'],
   },
+  {
+    id: 'addons',
+    label: 'Add-ons',
+    tab: 'addons',
+    description: 'Install skills, worker agents, and instructions into your coding agents.',
+    keywords: ['vibe', 'director mode', 'claude.md', 'instructions', 'sub-agents'],
+  },
 
   // Integrations
   {

@@ -11,6 +11,7 @@ import {
 } from '@emdash/wire/rpc';
 import type { EmdashAccountService } from '@core/features/account/node/services/emdash-account-service';
 import { createAccountWireController } from '@core/features/account/node/wire-controller';
+import { createAgentAddonsWireController } from '@core/features/agent-addons/node/wire-controller';
 import { createAgentOperations } from '@core/features/agents/node/controller';
 import { createAgentsWireController } from '@core/features/agents/node/wire-controller';
 import type { AutomationsService } from '@core/features/automations/api/node/automations-service';
@@ -294,6 +295,9 @@ export const desktopNodeControllers = {
   },
   skills: {
     create: ({ runtimes }) => createSkillsWireController({ runtimes }),
+  },
+  agentAddons: {
+    create: ({ runtimes }) => createAgentAddonsWireController({ runtimes }),
   },
   terminals: {
     create: ({

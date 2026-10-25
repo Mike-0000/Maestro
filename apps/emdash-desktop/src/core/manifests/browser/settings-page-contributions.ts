@@ -1,3 +1,4 @@
+import { addonsSettingsPage } from '@core/features/agent-addons/contributions/settings-page';
 import { chorusSettingsPage } from '@core/features/conductor/contributions/settings-page';
 import { promptsSettingsPage } from '@core/features/library/contributions/settings-page';
 import {
@@ -34,6 +35,7 @@ export const settingsPageContributions = [
   agentsSettingsPage,
   mcpSettingsPage,
   skillsSettingsPage,
+  addonsSettingsPage,
   machinesConnectionsPage,
   remoteAccessSettingsPage,
 ] as const satisfies readonly SettingsPageContribution<Exclude<SettingsPageTab, 'docs'>>[];

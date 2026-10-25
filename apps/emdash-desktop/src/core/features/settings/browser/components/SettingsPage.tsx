@@ -41,6 +41,7 @@ const SIDEBAR_ITEMS: PageSidebarMenuItem[] = [
   navItemFor('clis-models'),
   navItemFor('mcp'),
   navItemFor('skills'),
+  navItemFor('addons'),
   REMOTE_SECTION,
   navItemFor('connections'),
   navItemFor('remote-access'),
