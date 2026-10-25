@@ -4,6 +4,7 @@ import type { Logger } from '@emdash/shared/logger';
 import { createController, type Controller } from '@emdash/wire/rpc';
 import { setAttentionJudge } from '@core/primitives/agents/api/attention-judge';
 import type { ChorusHostServices } from '@core/primitives/chorus-host/api/host-services';
+import { setQuietCompletionsPolicy } from '@core/primitives/notifications/api/quiet-completions';
 import { conductorContract } from '../api/contract';
 import { agentRequestEvents, agentRequestHub } from './agent-request-hub';
 import { ConductorService } from './conductor-service';
@@ -34,6 +35,9 @@ export function createConductorWireController(options: {
     judge: (input) => service.judgeAttention(input),
   });
   options.scope.add(() => setAttentionJudge(null));
+  // Notification routing asks whether finished agents with nothing for the developer stay quiet.
+  setQuietCompletionsPolicy({ quiet: () => service.quietCompletions() });
+  options.scope.add(() => setQuietCompletionsPolicy(null));
   // The two need each other: checks read settings and usage through the conductor service, and
   // its status reports on checks. Attaching afterwards breaks the circle.
   const investigations = new InvestigationService({

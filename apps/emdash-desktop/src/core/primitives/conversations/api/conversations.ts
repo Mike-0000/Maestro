@@ -86,6 +86,8 @@ export type ConversationEvent =
       completionSummary?: string | null;
       /** That turn's final reply, redacted and bounded; null if the agent reported none. */
       completionReport?: CompletionReport | null;
+      /** With 'working': how many subagents the agent is waiting on. Absent for none. */
+      backgroundAgents?: number;
     };
 
 export type RenameConversationParams = {

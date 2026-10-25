@@ -18,6 +18,7 @@ import { log } from '@main/lib/logger';
 import { agentStatusService } from './agent-status-service';
 import {
   eventFromTuiAgentState,
+  isBackgroundAgentsOnlyChange,
   shouldApplyAgentStateTransition,
 } from './tui-agent-status-transition';
 
@@ -185,6 +186,9 @@ export class TuiAgentStatusBridge {
       const previous = attachment.agentStates.get(state.conversationId);
       if (bootstrap) {
         await this.applyAgentStateSnapshot(state);
+      } else if (isBackgroundAgentsOnlyChange(previous, state)) {
+        const event = eventFromTuiAgentState(state);
+        if (event) await agentStatusService.updateBackgroundAgents(event);
       } else if (shouldApplyAgentStateTransition(previous, state)) {
         await this.applyAgentStateTransition(state);
       }

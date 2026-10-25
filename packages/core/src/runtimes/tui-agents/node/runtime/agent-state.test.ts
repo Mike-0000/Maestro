@@ -1,3 +1,4 @@
+import { noopLogger, type Logger } from '@emdash/shared/logger';
 import { peek } from '@emdash/wire/state';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -7,9 +8,10 @@ import {
   createTuiSessionsListModel,
   produceCell,
 } from '#runtimes/tui-agents/node/state/live-models';
+import type { BackgroundWork } from '#services/agent-plugins/api/plugins';
 import { TuiAgentStates } from './agent-state';
 
-function createTracker() {
+function createTracker(logger?: Logger) {
   const sessionsLiveModel = createTuiSessionsLiveModel();
   const agentStatesLiveModel = createTuiAgentStatesLiveModel();
   const sessions = createTuiSessionsListModel(sessionsLiveModel);
@@ -21,7 +23,8 @@ function createTracker() {
     agentStates,
     () => 1_000,
     onSessionIdChanged,
-    onAgentStateChanged
+    onAgentStateChanged,
+    logger
   );
   return { tracker, sessions, agentStates, onSessionIdChanged, onAgentStateChanged };
 }
@@ -51,7 +54,9 @@ describe('TuiAgentStates', () => {
   describe('background work', () => {
     const start = { kind: 'status', type: 'start' } as const;
     const wakeUp = { kind: 'status', type: 'start', initiator: 'background' } as const;
-    const stop = (backgroundWork?: string[]) =>
+    const shell = (id: string): BackgroundWork => ({ id: `task:${id}`, kind: 'process' });
+    const agent = (id: string): BackgroundWork => ({ id: `task:${id}`, kind: 'agent' });
+    const stop = (backgroundWork?: BackgroundWork[]) =>
       ({ kind: 'status', type: 'stop', backgroundWork, lastAssistantMessage: 'report' }) as const;
     const statuses = (onAgentStateChanged: ReturnType<typeof vi.fn>) =>
       onAgentStateChanged.mock.calls.map(([, state]) => state.status);
@@ -60,7 +65,7 @@ describe('TuiAgentStates', () => {
       const { tracker, agentStates, onAgentStateChanged } = createTracker();
 
       tracker.applyCanonicalEvent('conv-1', 'claude', start);
-      tracker.applyCanonicalEvent('conv-1', 'claude', stop(['task:build']));
+      tracker.applyCanonicalEvent('conv-1', 'claude', stop([shell('build')]));
 
       expect(peek(agentStates.states.list)['conv-1']).toMatchObject({
         status: 'working',
@@ -101,9 +106,9 @@ describe('TuiAgentStates', () => {
       const { tracker, agentStates } = createTracker();
 
       tracker.applyCanonicalEvent('conv-1', 'claude', start);
-      tracker.applyCanonicalEvent('conv-1', 'claude', stop(['task:build', 'task:publish']));
+      tracker.applyCanonicalEvent('conv-1', 'claude', stop([shell('build'), shell('publish')]));
       tracker.applyCanonicalEvent('conv-1', 'claude', wakeUp);
-      tracker.applyCanonicalEvent('conv-1', 'claude', stop(['task:publish']));
+      tracker.applyCanonicalEvent('conv-1', 'claude', stop([shell('publish')]));
 
       expect(peek(agentStates.states.list)['conv-1']).toMatchObject({
         status: 'working',
@@ -115,7 +120,7 @@ describe('TuiAgentStates', () => {
       const { tracker, agentStates } = createTracker();
 
       tracker.applyCanonicalEvent('conv-1', 'claude', start);
-      tracker.applyCanonicalEvent('conv-1', 'claude', stop(['task:build']));
+      tracker.applyCanonicalEvent('conv-1', 'claude', stop([shell('build')]));
       tracker.applyCanonicalEvent('conv-1', 'claude', {
         kind: 'status',
         type: 'notification',
@@ -133,7 +138,7 @@ describe('TuiAgentStates', () => {
       const { tracker, agentStates } = createTracker();
 
       tracker.applyCanonicalEvent('conv-1', 'claude', start);
-      tracker.applyCanonicalEvent('conv-1', 'claude', stop(['task:build']));
+      tracker.applyCanonicalEvent('conv-1', 'claude', stop([shell('build')]));
       tracker.applyCanonicalEvent('conv-1', 'claude', {
         kind: 'status',
         type: 'notification',
@@ -189,32 +194,192 @@ describe('TuiAgentStates', () => {
       const { tracker, agentStates } = createTracker();
 
       tracker.applyCanonicalEvent('conv-1', 'claude', start);
-      tracker.applyCanonicalEvent('conv-1', 'claude', stop(['task:dev-server']));
+      tracker.applyCanonicalEvent('conv-1', 'claude', stop([shell('dev-server')]));
       expect(peek(agentStates.states.list)['conv-1']?.status).toBe('working');
 
       tracker.applyCanonicalEvent('conv-1', 'claude', start);
-      tracker.applyCanonicalEvent('conv-1', 'claude', stop(['task:dev-server']));
+      tracker.applyCanonicalEvent('conv-1', 'claude', stop([shell('dev-server')]));
       expect(peek(agentStates.states.list)['conv-1']?.status).toBe('completed');
 
       // Work launched by the later turn holds completion again.
       tracker.applyCanonicalEvent('conv-1', 'claude', start);
-      tracker.applyCanonicalEvent('conv-1', 'claude', stop(['task:dev-server', 'task:tests']));
+      tracker.applyCanonicalEvent('conv-1', 'claude', stop([shell('dev-server'), shell('tests')]));
       expect(peek(agentStates.states.list)['conv-1']).toMatchObject({
         status: 'working',
         awaitingBackgroundWork: true,
       });
     });
 
+    it('waits for every subagent across user follow-ups and relays until the last reports', () => {
+      // The real sequence: 7 subagents launched, then a developer follow-up mid-wait, then one
+      // wake-up per returning subagent.
+      const { tracker, agentStates, onAgentStateChanged } = createTracker();
+      const agents = ['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7'].map(agent);
+
+      tracker.applyCanonicalEvent('conv-1', 'claude', start);
+      tracker.applyCanonicalEvent('conv-1', 'claude', stop(agents));
+      expect(peek(agentStates.states.list)['conv-1']?.status).toBe('working');
+
+      tracker.applyCanonicalEvent('conv-1', 'claude', start);
+      tracker.applyCanonicalEvent('conv-1', 'claude', stop(agents));
+      expect(peek(agentStates.states.list)['conv-1']).toMatchObject({
+        status: 'working',
+        awaitingBackgroundWork: true,
+      });
+
+      for (let remaining = 6; remaining >= 1; remaining--) {
+        tracker.applyCanonicalEvent('conv-1', 'claude', wakeUp);
+        tracker.applyCanonicalEvent('conv-1', 'claude', stop(agents.slice(0, remaining)));
+        expect(peek(agentStates.states.list)['conv-1']?.status).toBe('working');
+      }
+      expect(statuses(onAgentStateChanged)).not.toContain('completed');
+
+      tracker.applyCanonicalEvent('conv-1', 'claude', wakeUp);
+      tracker.applyCanonicalEvent('conv-1', 'claude', stop([]));
+      expect(peek(agentStates.states.list)['conv-1']?.status).toBe('completed');
+      expect(statuses(onAgentStateChanged).filter((s) => s === 'completed')).toHaveLength(1);
+    });
+
+    it('waits on a new subagent while ignoring an acknowledged dev server', () => {
+      const { tracker, agentStates } = createTracker();
+
+      tracker.applyCanonicalEvent('conv-1', 'claude', start);
+      tracker.applyCanonicalEvent('conv-1', 'claude', stop([shell('dev-server')]));
+      tracker.applyCanonicalEvent('conv-1', 'claude', start);
+      tracker.applyCanonicalEvent('conv-1', 'claude', stop([shell('dev-server'), agent('review')]));
+      expect(peek(agentStates.states.list)['conv-1']).toMatchObject({
+        status: 'working',
+        awaitingBackgroundWork: true,
+      });
+
+      // A further user prompt acknowledges nothing new: the subagent still holds.
+      tracker.applyCanonicalEvent('conv-1', 'claude', start);
+      tracker.applyCanonicalEvent('conv-1', 'claude', stop([shell('dev-server'), agent('review')]));
+      expect(peek(agentStates.states.list)['conv-1']?.status).toBe('working');
+
+      tracker.applyCanonicalEvent('conv-1', 'claude', wakeUp);
+      tracker.applyCanonicalEvent('conv-1', 'claude', stop([shell('dev-server')]));
+      expect(peek(agentStates.states.list)['conv-1']?.status).toBe('completed');
+    });
+
+    it('lets a user prompt acknowledge a scheduled wake-up but not a subagent', () => {
+      const { tracker, agentStates } = createTracker();
+      const wakeup: BackgroundWork = { id: 'cron:check', kind: 'wakeup' };
+
+      tracker.applyCanonicalEvent('conv-1', 'claude', start);
+      tracker.applyCanonicalEvent('conv-1', 'claude', stop([wakeup]));
+      tracker.applyCanonicalEvent('conv-1', 'claude', start);
+      tracker.applyCanonicalEvent('conv-1', 'claude', stop([wakeup]));
+
+      expect(peek(agentStates.states.list)['conv-1']?.status).toBe('completed');
+    });
+
+    it('logs each stop decision with ids by kind and never the reply text', () => {
+      const warn = vi.fn();
+      const { tracker } = createTracker({ ...noopLogger, warn });
+
+      tracker.applyCanonicalEvent('conv-1', 'claude', start);
+      tracker.applyCanonicalEvent('conv-1', 'claude', stop([shell('dev-server')]));
+      tracker.applyCanonicalEvent('conv-1', 'claude', start);
+      tracker.applyCanonicalEvent('conv-1', 'claude', stop([shell('dev-server'), agent('review')]));
+
+      expect(warn).toHaveBeenCalledWith(
+        'TuiAgentStates: turn opened with background work in flight',
+        {
+          conversationId: 'conv-1',
+          providerId: 'claude',
+          initiator: 'user',
+          awaited: [],
+          acknowledged: ['task:dev-server'],
+        }
+      );
+      expect(warn).toHaveBeenLastCalledWith('TuiAgentStates: stop applied', {
+        conversationId: 'conv-1',
+        providerId: 'claude',
+        agents: ['task:review'],
+        processes: ['task:dev-server'],
+        wakeups: [],
+        awaited: ['task:review'],
+        acknowledged: ['task:dev-server'],
+        status: 'working',
+      });
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('report');
+    });
+
+    it('logs a stop that reports no background work too', () => {
+      const warn = vi.fn();
+      const { tracker } = createTracker({ ...noopLogger, warn });
+
+      tracker.applyCanonicalEvent('conv-1', 'claude', start);
+      tracker.applyCanonicalEvent('conv-1', 'claude', stop());
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith('TuiAgentStates: stop applied', {
+        conversationId: 'conv-1',
+        providerId: 'claude',
+        agents: [],
+        processes: [],
+        wakeups: [],
+        awaited: [],
+        acknowledged: [],
+        status: 'completed',
+      });
+    });
+
+    it('counts the awaited subagents, through any turn, until the last reports back', () => {
+      const { tracker, agentStates } = createTracker();
+      const count = () => peek(agentStates.states.list)['conv-1']?.backgroundAgents;
+
+      tracker.applyCanonicalEvent('conv-1', 'claude', start);
+      expect(count()).toBeUndefined();
+      tracker.applyCanonicalEvent('conv-1', 'claude', stop([agent('a1'), agent('a2'), shell('b')]));
+      expect(count()).toBe(2);
+
+      // Neither a user follow-up nor a wake-up releases a subagent.
+      tracker.applyCanonicalEvent('conv-1', 'claude', start);
+      expect(count()).toBe(2);
+      tracker.applyCanonicalEvent('conv-1', 'claude', stop([agent('a1'), agent('a2'), shell('b')]));
+      expect(count()).toBe(2);
+      tracker.applyCanonicalEvent('conv-1', 'claude', wakeUp);
+      expect(count()).toBe(2);
+      tracker.applyCanonicalEvent('conv-1', 'claude', stop([agent('a1'), shell('b')]));
+      expect(count()).toBe(1);
+
+      // A permission prompt replaces the state; the next stop reports the count again.
+      tracker.applyCanonicalEvent('conv-1', 'claude', {
+        kind: 'status',
+        type: 'notification',
+        notificationType: 'permission_prompt',
+      });
+      expect(count()).toBeUndefined();
+
+      tracker.applyCanonicalEvent('conv-1', 'claude', wakeUp);
+      tracker.applyCanonicalEvent('conv-1', 'claude', stop([shell('b')]));
+      expect(peek(agentStates.states.list)['conv-1']?.status).toBe('completed');
+      expect(count()).toBeUndefined();
+    });
+
+    it('reports no subagent count for a wait on shells alone', () => {
+      const { tracker, agentStates } = createTracker();
+
+      tracker.applyCanonicalEvent('conv-1', 'claude', start);
+      tracker.applyCanonicalEvent('conv-1', 'claude', stop([shell('build')]));
+
+      const state = peek(agentStates.states.list)['conv-1'];
+      expect(state).toMatchObject({ status: 'working', awaitingBackgroundWork: true });
+      expect(state?.backgroundAgents).toBeUndefined();
+    });
+
     it('forgets tracked background work when the session is cleared', () => {
       const { tracker, agentStates } = createTracker();
 
       tracker.applyCanonicalEvent('conv-1', 'claude', start);
-      tracker.applyCanonicalEvent('conv-1', 'claude', stop(['task:dev-server']));
+      tracker.applyCanonicalEvent('conv-1', 'claude', stop([shell('dev-server')]));
       tracker.applyCanonicalEvent('conv-1', 'claude', start);
       tracker.clear('conv-1');
 
       // A fresh session reusing the id must not inherit the old acknowledgement.
-      tracker.applyCanonicalEvent('conv-1', 'claude', stop(['task:dev-server']));
+      tracker.applyCanonicalEvent('conv-1', 'claude', stop([shell('dev-server')]));
       expect(peek(agentStates.states.list)['conv-1']?.status).toBe('working');
     });
   });

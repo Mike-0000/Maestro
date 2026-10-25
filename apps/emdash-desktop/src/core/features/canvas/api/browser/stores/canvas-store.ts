@@ -41,6 +41,7 @@ import {
   deskSignals,
   gatherMatches,
   homeLooseOps,
+  looseWindows,
   mainDeskId,
   removeDeskOps,
   stampDeskOrder,
@@ -158,6 +159,8 @@ export type AgentTileEntry = {
   readonly completionSummary: string | null;
   /** The agent's final reply, redacted and bounded (status 'completed' only). */
   readonly completionReport: CompletionReport | null;
+  /** Subagents the agent is waiting on (status 'working' only); absent for none. */
+  readonly backgroundAgents?: number;
   /** True when the task workspace is provisioned (its sessions can attach). */
   readonly taskProvisioned: boolean;
   /** True when the host reports a running session for this conversation. */
@@ -321,6 +324,27 @@ export type LayoutRunResult =
 
 /** Result of undo/redo: what it reverted and how many fields were changed since and kept. */
 export type LayoutUndoResult = { readonly label: string; readonly conflicts: number };
+
+/** A window that has just appeared, with what decides where it goes. */
+type NewTile = {
+  readonly tileId: string;
+  readonly conversationId?: string;
+  readonly projectId: string;
+  readonly projectName: string;
+};
+
+/** Windows bound for the same place. */
+type NewTileHome = { readonly home: NewWindowHome; readonly tiles: string[] };
+
+/** Tags each project region the windows went to, so it is found again after a rename. */
+function tagProjectHomes(state: LayoutState, homes: readonly NewTileHome[]): LayoutState {
+  const tags = homes.flatMap(({ home }) => {
+    if (home.kind !== 'project') return [];
+    const regionId = home.regionId ?? projectRegionId(state, home.projectId, home.name);
+    return regionId ? [{ regionId, projectId: home.projectId }] : [];
+  });
+  return withProjectRegionTags(state, tags);
+}
 
 type StageHistoryEntry = {
   readonly key: string;
@@ -1214,22 +1238,34 @@ export class CanvasStore {
   }
 
   /**
-   * New windows join a region: a reserved plan region, the region in view when that setting is on,
-   * or the project's main sub-canvas (created if needed). Not undoable (birth placement).
+   * New windows join a region: a reserved region (a plan's, or the one the developer named), in
+   * Canvas Pro their project's desk, the region in view when that setting is on, or the project's
+   * main sub-canvas (created if needed). Not undoable (birth placement).
    */
-  private joinNewTiles(
-    tiles: readonly {
-      tileId: string;
-      conversationId?: string;
-      projectId: string;
-      projectName: string;
-    }[]
-  ): void {
-    const settings = this.layoutSettings;
+  private joinNewTiles(tiles: readonly NewTile[]): void {
     // A gathering desk only hosts visitors: nothing is born on it.
     const currentRegionId = this.gatheringHere ? null : this.currentRegion();
     const layout = this.layoutState;
-    const buckets = new Map<string, { home: NewWindowHome; tiles: string[] }>();
+    const homes = this.homesForNewTiles(layout, tiles, { currentRegionId, pro: this.proMode });
+    const ops = homes.flatMap(({ home, tiles: ids }) => opsForNewWindowHome(home, ids));
+    if (ops.length === 0) return;
+    const result = this.planOps(ops);
+    if (!result.ok) return;
+    this.writeLayout(tagProjectHomes(result.plan.state, homes));
+    const created = result.plan.created.filter(isRegionId).at(-1);
+    if (created) this.newestRegionId = created;
+    // A window born on another page of the desk does not pull the user off the one they are on.
+    this.markChanged(result.plan.summary, result.plan.targets, 'command', [], !this.proMode);
+  }
+
+  /** Where each new window goes, with the windows bound for the same place put together. */
+  private homesForNewTiles(
+    layout: LayoutState,
+    tiles: readonly NewTile[],
+    where: { currentRegionId: string | null; pro: boolean }
+  ): NewTileHome[] {
+    const settings = this.layoutSettings;
+    const buckets = new Map<string, NewTileHome>();
     for (const tile of tiles) {
       const reservedName = tile.conversationId
         ? this.pendingRegions.get(tile.conversationId)
@@ -1237,10 +1273,11 @@ export class CanvasStore {
       if (tile.conversationId) this.pendingRegions.delete(tile.conversationId);
       const home = homeForNewWindow({
         reservedName,
-        currentRegionId,
+        currentRegionId: where.currentRegionId,
         projectId: tile.projectId,
         projectName: tile.projectName,
         layout,
+        pro: where.pro,
         settings,
       });
       if (home.kind === 'root') continue;
@@ -1254,23 +1291,16 @@ export class CanvasStore {
       if (bucket) bucket.tiles.push(tile.tileId);
       else buckets.set(key, { home, tiles: [tile.tileId] });
     }
-    const ops = [...buckets.values()].flatMap(({ home, tiles: ids }) =>
-      opsForNewWindowHome(home, ids)
-    );
-    if (ops.length === 0) return;
-    const result = this.planOps(ops);
-    if (!result.ok) return;
-    const tags = [...buckets.values()].flatMap(({ home }) => {
-      if (home.kind !== 'project') return [];
-      const regionId =
-        home.regionId ?? projectRegionId(result.plan.state, home.projectId, home.name);
-      return regionId ? [{ regionId, projectId: home.projectId }] : [];
-    });
-    this.writeLayout(withProjectRegionTags(result.plan.state, tags));
-    const created = result.plan.created.filter(isRegionId).at(-1);
-    if (created) this.newestRegionId = created;
-    // A window born on another page of the desk does not pull the user off the one they are on.
-    this.markChanged(result.plan.summary, result.plan.targets, 'command', [], !this.proMode);
+    return [...buckets.values()];
+  }
+
+  /** The project a window belongs to: agents, app browsers, and documents have one; notes not. */
+  private projectOfTile(tileId: string): { projectId: string; projectName: string } | null {
+    const entry =
+      this.agentEntries.find((candidate) => candidate.tileId === tileId) ??
+      this.browserEntries.find((candidate) => candidate.tileId === tileId) ??
+      this.docEntries.find((candidate) => candidate.tileId === tileId);
+    return entry?.projectId ? { projectId: entry.projectId, projectName: entry.projectName } : null;
   }
 
   /** The region the user is looking at: the board scope or the stage's region. */
@@ -3044,28 +3074,40 @@ export class CanvasStore {
 
   /**
    * Switches between the classic canvas (one board) and Canvas Pro (desks). Entering Pro puts every
-   * loose window on a desk called Main and gives the top-level regions their order, as one
-   * undoable change; undoing it also goes back to the classic canvas (in Pro a window is always
-   * on a desk, so the move to Main could not be undone on its own). Leaving Pro changes nothing
-   * but the presentation.
+   * loose window on its project's desk (made when missing; with that setting on), the rest on a
+   * desk called Main, and gives the top-level regions their order, as one undoable change; undoing
+   * it also goes back to the classic canvas (in Pro a window is always on a desk, so the move to
+   * Main could not be undone on its own). Leaving Pro changes nothing but the presentation.
    */
-  setMode(mode: CanvasMode): { changed: boolean; desks: number; gathered: number } {
+  setMode(mode: CanvasMode): {
+    changed: boolean;
+    desks: number;
+    /** Loose windows put on Main. */
+    gathered: number;
+    /** Loose windows put on their project's desk. */
+    sorted: number;
+  } {
     const layout = this.layoutState;
-    if (mode === this.mode) return { changed: false, desks: deskIds(layout).length, gathered: 0 };
+    if (mode === this.mode) {
+      return { changed: false, desks: deskIds(layout).length, gathered: 0, sorted: 0 };
+    }
     this.ghost = null;
     this.visitorIds = [];
     if (mode === 'classic') {
       this.updateState((state) => ({ ...state, mode }));
       this.boardFromDesks();
-      return { changed: true, desks: deskIds(layout).length, gathered: 0 };
+      return { changed: true, desks: deskIds(layout).length, gathered: 0, sorted: 0 };
     }
     this.setPaneCount(1);
-    const gathered = this.looseTileIds().length;
-    const hadMain = mainDeskId(layout);
-    const ops = homeLooseOps(layout, this.visibleTileIds());
     const env = { ...this.layoutEnv(), desks: true };
-    const planned = ops.length > 0 ? planLayout(layout, ops, env) : null;
-    const homed = planned?.ok ? planned.plan.state : layout;
+    const loose = this.looseTileIds();
+    const byProject = this.sortOntoProjectDesks(layout, loose, env);
+    const sorted = loose.length - looseWindows(byProject, loose).length;
+    const gathered = loose.length - sorted;
+    const hadMain = mainDeskId(layout);
+    const ops = homeLooseOps(byProject, this.visibleTileIds());
+    const planned = ops.length > 0 ? planLayout(byProject, ops, env) : null;
+    const homed = planned?.ok ? planned.plan.state : byProject;
     // Every region that becomes a desk is laid out as one, whatever arrangement it had: part of
     // the same undoable change, so undoing the switch gives the old arrangement back.
     const settled = settleDesks(homed, env, deskIds(homed));
@@ -3086,7 +3128,28 @@ export class CanvasStore {
     );
     this.proEntryId = committed ? (this.undoStack.at(-1)?.id ?? null) : null;
     this.showDesk(start);
-    return { changed: true, desks: deskIds(next).length, gathered };
+    return { changed: true, desks: deskIds(next).length, gathered, sorted };
+  }
+
+  /**
+   * Entering Canvas Pro: loose windows that belong to a project go to its desk, made when missing,
+   * as they would if they were opened on Pro. Returns the layout unchanged when the setting is off.
+   */
+  private sortOntoProjectDesks(
+    layout: LayoutState,
+    loose: readonly string[],
+    env: LayoutEnv
+  ): LayoutState {
+    if (!this.layoutSettings.placeNewWindowsOnProjectDesk) return layout;
+    const tiles = loose.flatMap((tileId) => {
+      const project = this.projectOfTile(tileId);
+      return project ? [{ tileId, ...project }] : [];
+    });
+    if (tiles.length === 0) return layout;
+    const homes = this.homesForNewTiles(layout, tiles, { currentRegionId: null, pro: true });
+    const ops = homes.flatMap(({ home, tiles: ids }) => opsForNewWindowHome(home, ids));
+    const planned = ops.length > 0 ? planLayout(layout, ops, env) : null;
+    return planned?.ok ? tagProjectHomes(planned.plan.state, homes) : layout;
   }
 
   /**
@@ -3859,6 +3922,7 @@ function toAgentEntry(
     notificationType: conversation.lastNotificationType,
     completionSummary: conversation.completionSummary,
     completionReport: conversation.completionReport,
+    ...(conversation.backgroundAgents ? { backgroundAgents: conversation.backgroundAgents } : {}),
     taskProvisioned: isProvisioned(task),
     sessionActive: runtime.sessionActive,
     workspaceId: task.workspaceId,

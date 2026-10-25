@@ -93,4 +93,25 @@ describe('defaultRoutingPolicy', () => {
       )
     ).toEqual({ system: false, sound: false, push: false });
   });
+
+  it('silences finished agents but never waiting ones when completions are quiet', () => {
+    const complete: AppNotification = {
+      ...baseNotification,
+      kind: 'agent-complete',
+      sound: 'task_complete',
+    };
+    expect(
+      defaultRoutingPolicy(complete, { appFocused: false, settings, quietCompletions: true })
+    ).toEqual({ system: false, sound: false, push: false });
+    expect(
+      defaultRoutingPolicy(baseNotification, {
+        appFocused: false,
+        settings,
+        quietCompletions: true,
+      })
+    ).toEqual({ system: true, sound: true, push: true });
+    expect(
+      defaultRoutingPolicy(complete, { appFocused: false, settings, quietCompletions: false })
+    ).toEqual({ system: true, sound: true, push: true });
+  });
 });

@@ -10,6 +10,11 @@ export type NotificationRoutingSettings = {
 export type RoutingContext = {
   appFocused: boolean;
   settings: NotificationRoutingSettings;
+  /**
+   * The conductor judged that finished agents with nothing for the developer stay quiet. An
+   * agent that needs the developer arrives as agent-attention, which this never silences.
+   */
+  quietCompletions?: boolean;
 };
 
 export type RoutingDecision = {
@@ -27,6 +32,9 @@ export type RoutingPolicy = (
 export const defaultRoutingPolicy: RoutingPolicy = (notification, context) => {
   if (!context.settings.enabled) return { system: false, sound: false, push: false };
   if (notification.kind === 'update-error' || notification.kind === 'update-available') {
+    return { system: false, sound: false, push: false };
+  }
+  if (notification.kind === 'agent-complete' && context.quietCompletions) {
     return { system: false, sound: false, push: false };
   }
 

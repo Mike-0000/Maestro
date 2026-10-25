@@ -14,6 +14,14 @@ export type AnnouncedAgent = {
   readonly riskLevel?: 'low' | 'moderate' | 'elevated' | 'high' | null;
 };
 
+/**
+ * Which finished agents are announced. all: every finished agent is spoken and sounds. attention_only:
+ * only those that need the developer are; one that finished with nothing for them shows on the HUD,
+ * with no speech and no notification sound. Waiting agents are always announced.
+ */
+export const completionAnnouncementModes = ['all', 'attention_only'] as const;
+export type CompletionAnnouncementMode = (typeof completionAnnouncementModes)[number];
+
 /** More agents than this at once collapse into a count. */
 export const MAX_NAMED_ANNOUNCEMENTS = 3;
 

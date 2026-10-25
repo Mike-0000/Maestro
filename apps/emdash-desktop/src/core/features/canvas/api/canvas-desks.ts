@@ -123,6 +123,31 @@ export function mainDeskId(state: LayoutState): string | null {
 }
 
 /**
+ * A project's desk: a desk tagged with the project, else one named after it that no other project
+ * claims. Gathering desks are never anyone's. Unlike a project's sub-canvas on the classic board, a
+ * desk the developer named after the project counts: on Pro that is how they say it is its desk.
+ */
+export function projectDeskId(
+  state: LayoutState,
+  projectId: string,
+  projectName: string
+): string | null {
+  const desks = deskIds(state).filter((id) => !state.regions[id]?.gather);
+  if (projectId) {
+    const tagged = desks.find((id) => state.regions[id]?.projectId === projectId);
+    if (tagged) return tagged;
+  }
+  const key = nameKey(projectName);
+  if (!key) return null;
+  return (
+    desks.find((id) => {
+      const region = state.regions[id];
+      return region && !region.projectId && nameKey(region.name) === key;
+    }) ?? null
+  );
+}
+
+/**
  * Ops that leave every window on a desk: loose ones go to `preferred`, else to Main (made when
  * missing). With no desk at all an empty Main is made, so there is always somewhere to be.
  */

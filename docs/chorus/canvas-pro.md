@@ -150,14 +150,16 @@ homing loose windows, signals, and visitor layout.
 ### 3.4 Entering and leaving Pro
 
 - **Entering** (`setMode('pro')`). Top-level regions become desks, in the order the board shows
-  them (reading order) unless they were ordered before. Loose root windows are put on a desk
-  called **Main**, as one undoable change. With nothing on the canvas, an empty Main is made.
+  them (reading order) unless they were ordered before. Loose root windows that belong to a
+  project go to that project's desk (§4.2), the rest (notes) to a desk called **Main**, as one
+  undoable change. With nothing on the canvas, an empty Main is made.
   **Undoing that change also goes back to the classic canvas** (and redo switches again): in Pro
   a window must be on a desk, so the move to Main cannot be undone on its own.
 - **Leaving.** Nothing is converted. The desks are regions on the board again.
 - **Strays.** A window that ends up on no desk while in Pro (a new note, an undo, a drag outside
   the desk) is put on the desk in view by a reaction, since it would otherwise never be drawn.
-  A gathering desk takes no residents: strays and new agents go to Main instead.
+  A gathering desk takes no residents: strays go to Main instead, and new agents to their
+  project's desk.
 
 ---
 
@@ -197,8 +199,16 @@ in view as they did.
 
 - **Focusing a window brings its desk into view.** `requestFocus` switches desk first, so
   `focus_agent`, the attention jump, and reopen never act on something off screen.
-- **New windows** follow the existing settings: the desk in view, or the project's desk
-  (`projectRegionId`). With the project setting on, Pro gives one desk per project.
+- **New windows go to their project's desk** (added 2026-10-25). Before, the "join the region in
+  view" setting caught every new window, since on Pro the user is always on some desk. Now
+  `homeForNewWindow` puts a new agent or app browser on its project's desk (`projectDeskId`: the
+  desk tagged with the project, else a desk named after it that no other project claims; never a
+  gathering desk), made and tagged when missing. The desk in view does not change: the edge
+  signals and the strip show where it went, and an agent the developer asked for is focused,
+  which brings its desk into view. A destination the developer names wins: `spawn_agent` takes an
+  optional `desk` ("on this desk", "on the Review desk"; a new name makes that desk), and a plan's
+  region still collects its agents. The setting "Canvas Pro: one desk per project"
+  (`placeNewWindowsOnProjectDesk`, on by default) turns it off, back to the desk in view.
 - **Removing a desk** moves its windows to the desk before it, or a named one. The last desk
   stays.
 - **A desk too full for one screen** pages (§4.3). It never shrinks its windows or zooms out.

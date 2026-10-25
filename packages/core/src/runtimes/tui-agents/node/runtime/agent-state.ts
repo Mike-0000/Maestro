@@ -1,3 +1,4 @@
+import type { Logger } from '@emdash/shared/logger';
 import { peek } from '@emdash/wire/state';
 import type { TuiAgentState } from '#runtimes/tui-agents/api';
 import {
@@ -5,8 +6,12 @@ import {
   type TuiAgentStatesListModel,
   type TuiSessionsListModel,
 } from '#runtimes/tui-agents/node/state/live-models';
-import type { ResolvedTuiProvider } from '#services/agent-plugins/api/plugins';
-import type { CanonicalHookEvent } from '#services/agent-plugins/api/plugins';
+import type {
+  BackgroundWork,
+  BackgroundWorkKind,
+  CanonicalHookEvent,
+  ResolvedTuiProvider,
+} from '#services/agent-plugins/api/plugins';
 import { defaultHookEventParser } from '#services/agent-plugins/api/plugins/helpers';
 
 const ATTENTION_NOTIFICATION_TYPES = new Set([
@@ -22,22 +27,31 @@ export type ProviderSessionIdChangedHandler = (
 
 export type AgentStateChangedHandler = (conversationId: string, state: TuiAgentState) => void;
 
-type BackgroundWork = {
-  /** Ids the latest stop reported as still in flight. */
-  inFlight: ReadonlySet<string>;
-  /** Ids already in flight when the user last opened a turn; they no longer hold completion. */
+type TrackedBackgroundWork = {
+  /** Work the latest stop reported as still in flight. */
+  inFlight: readonly BackgroundWork[];
+  /**
+   * Ids of long-lived work already in flight when the user last opened a turn; they no longer
+   * hold completion. Agent work is never acknowledged: it reports back into the conversation.
+   */
   acknowledged: ReadonlySet<string>;
 };
 
+/** Work a later user turn may stop waiting on; agent work holds until it reports back. */
+function isAcknowledgeable(kind: BackgroundWorkKind): boolean {
+  return kind !== 'agent';
+}
+
 export class TuiAgentStates {
-  private readonly backgroundWork = new Map<string, BackgroundWork>();
+  private readonly backgroundWork = new Map<string, TrackedBackgroundWork>();
 
   constructor(
     private readonly sessions: TuiSessionsListModel,
     private readonly agentStates: TuiAgentStatesListModel,
     private readonly now: () => number,
     private readonly onProviderSessionIdChanged?: ProviderSessionIdChangedHandler,
-    private readonly onAgentStateChanged?: AgentStateChangedHandler
+    private readonly onAgentStateChanged?: AgentStateChangedHandler,
+    private readonly logger?: Logger
   ) {}
 
   applyRawHookEvent(
@@ -67,11 +81,13 @@ export class TuiAgentStates {
     }
 
     if (event.type === 'start') {
-      if (event.initiator !== 'background') this.acknowledgeBackgroundWork(conversationId);
+      this.openTurn(conversationId, providerId, event.initiator ?? 'user');
       this.setStatus(conversationId, {
         providerId,
         source: 'hook',
         status: 'working',
+        // Subagents are never acknowledged, so the ones still out stay awaited through any turn.
+        backgroundAgents: this.awaitedAgentCount(conversationId),
         title: event.title,
         message: event.message,
         lastAssistantMessage: event.lastAssistantMessage,
@@ -82,12 +98,27 @@ export class TuiAgentStates {
     if (event.type === 'stop') {
       // A turn that ends with background work it is waiting on is paused, not finished: the
       // provider wakes the session when that work settles and reports a further stop.
-      const awaiting = this.recordBackgroundWork(conversationId, event.backgroundWork ?? []);
+      const reported = event.backgroundWork ?? [];
+      const awaited = this.recordBackgroundWork(conversationId, reported);
+      const awaiting = awaited.length > 0;
+      const status = awaiting ? 'working' : 'completed';
+      // Warn on purpose: the app's file log drops info by default, and this line is a temporary
+      // diagnostic for unexplained completions, to downgrade once they are understood. Ids and
+      // kinds only: descriptions and command lines stay out of the shared log.
+      this.logger?.warn('TuiAgentStates: stop applied', {
+        conversationId,
+        providerId,
+        ...idsByKind(reported),
+        awaited: awaited.map((work) => work.id),
+        acknowledged: reported.filter((work) => !awaited.includes(work)).map((work) => work.id),
+        status,
+      });
       this.setStatus(conversationId, {
         providerId,
         source: 'hook',
-        status: awaiting ? 'working' : 'completed',
+        status,
         awaitingBackgroundWork: awaiting || undefined,
+        backgroundAgents: countAgents(awaited),
         title: event.title,
         message: event.message,
         lastAssistantMessage: event.lastAssistantMessage,
@@ -185,23 +216,53 @@ export class TuiAgentStates {
   }
 
   /**
-   * A user-opened turn acknowledges whatever was already running: that work (a dev server, a
-   * build the user asked about mid-flight) must not hold back this turn's completion.
+   * A user-opened turn acknowledges the long-lived work already running: that work (a dev
+   * server, a build the user asked about mid-flight) must not hold back this turn's completion.
+   * Agent work stays awaited, and a background wake-up acknowledges nothing.
    */
-  private acknowledgeBackgroundWork(conversationId: string): void {
+  private openTurn(
+    conversationId: string,
+    providerId: string | undefined,
+    initiator: 'user' | 'background'
+  ): void {
     const work = this.backgroundWork.get(conversationId);
-    if (work) this.backgroundWork.set(conversationId, { ...work, acknowledged: work.inFlight });
+    if (!work) return;
+    let { acknowledged } = work;
+    if (initiator === 'user') {
+      acknowledged = new Set(
+        work.inFlight.filter((item) => isAcknowledgeable(item.kind)).map((item) => item.id)
+      );
+      this.backgroundWork.set(conversationId, { ...work, acknowledged });
+    }
+    // Warn on purpose, like the stop line: a temporary diagnostic the default file log keeps.
+    this.logger?.warn('TuiAgentStates: turn opened with background work in flight', {
+      conversationId,
+      providerId,
+      initiator,
+      awaited: work.inFlight.filter((item) => !acknowledged.has(item.id)).map((item) => item.id),
+      acknowledged: [...acknowledged],
+    });
   }
 
-  /** Records the in-flight ids a stop reported; true when any of them is still awaited. */
-  private recordBackgroundWork(conversationId: string, ids: readonly string[]): boolean {
+  /** Records the in-flight work a stop reported; returns the part that is still awaited. */
+  private recordBackgroundWork(
+    conversationId: string,
+    inFlight: readonly BackgroundWork[]
+  ): BackgroundWork[] {
     const acknowledged = this.backgroundWork.get(conversationId)?.acknowledged ?? new Set<string>();
-    if (ids.length === 0 && acknowledged.size === 0) {
+    if (inFlight.length === 0 && acknowledged.size === 0) {
       this.backgroundWork.delete(conversationId);
-      return false;
+      return [];
     }
-    this.backgroundWork.set(conversationId, { inFlight: new Set(ids), acknowledged });
-    return ids.some((id) => !acknowledged.has(id));
+    this.backgroundWork.set(conversationId, { inFlight, acknowledged });
+    return inFlight.filter((work) => !acknowledged.has(work.id));
+  }
+
+  /** How many in-flight subagents the conversation is waiting on; undefined for none. */
+  private awaitedAgentCount(conversationId: string): number | undefined {
+    const work = this.backgroundWork.get(conversationId);
+    if (!work) return undefined;
+    return countAgents(work.inFlight.filter((item) => !work.acknowledged.has(item.id)));
   }
 
   /**
@@ -211,7 +272,7 @@ export class TuiAgentStates {
   private awaitsBackgroundWork(conversationId: string): boolean {
     const work = this.backgroundWork.get(conversationId);
     if (!work) return this.current(conversationId)?.awaitingBackgroundWork === true;
-    return [...work.inFlight].some((id) => !work.acknowledged.has(id));
+    return work.inFlight.some((item) => !work.acknowledged.has(item.id));
   }
 
   private setStatus(
@@ -231,6 +292,7 @@ export class TuiAgentStates {
         message: patch.message,
         lastAssistantMessage: patch.lastAssistantMessage,
         awaitingBackgroundWork: patch.awaitingBackgroundWork,
+        backgroundAgents: patch.backgroundAgents,
         updatedAt: this.now(),
       };
 
@@ -243,7 +305,8 @@ export class TuiAgentStates {
         previous.title === next.title &&
         previous.message === next.message &&
         previous.lastAssistantMessage === next.lastAssistantMessage &&
-        previous.awaitingBackgroundWork === next.awaitingBackgroundWork
+        previous.awaitingBackgroundWork === next.awaitingBackgroundWork &&
+        previous.backgroundAgents === next.backgroundAgents
       ) {
         return;
       }
@@ -253,4 +316,19 @@ export class TuiAgentStates {
     });
     if (changedState) this.onAgentStateChanged?.(conversationId, changedState);
   }
+}
+
+function idsByKind(work: readonly BackgroundWork[]): Record<string, string[]> {
+  const ids = { agents: [] as string[], processes: [] as string[], wakeups: [] as string[] };
+  for (const item of work) {
+    if (item.kind === 'agent') ids.agents.push(item.id);
+    else if (item.kind === 'wakeup') ids.wakeups.push(item.id);
+    else ids.processes.push(item.id);
+  }
+  return ids;
+}
+
+function countAgents(work: readonly BackgroundWork[]): number | undefined {
+  const count = work.filter((item) => item.kind === 'agent').length;
+  return count > 0 ? count : undefined;
 }

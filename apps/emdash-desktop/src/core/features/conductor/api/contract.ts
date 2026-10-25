@@ -2,6 +2,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { defineContract, eventStream, fallible, liveJob, procedure } from '@emdash/wire/rpc';
 import { z } from 'zod';
 import { agentRequestAckSchema, agentRequestSchema } from './agent-requests';
+import { completionAnnouncementModes } from './announcements';
 import { callModes, DEFAULT_CALL_WINDOW_SEC } from './calls';
 import { jevAnswerSchema, type JevQuestions } from './jev';
 import { instructionChangeSchema, standingInstructionSchema } from './standing-instructions';
@@ -46,6 +47,13 @@ export const conductorSettingsSchema = z.object({
    * the agent needs the developer or is done. Off: hook events alone decide, as before.
    */
   attentionVerdicts: z.boolean(),
+  /**
+   * Which finished agents reach the developer: all of them, or only those that need the developer
+   * (attention_only). In attention_only, a finished agent with nothing for the developer stays on
+   * the HUD: it is not spoken, and its notification sound, desktop notification and phone push are
+   * dropped. It takes effect only while attention verdicts run, since they tell the two apart.
+   */
+  announceCompletions: z.enum(completionAnnouncementModes),
   /**
    * Calls: what agents need reaches the developer one caller at a time, and what the developer
    * says after picking a call up goes to that caller. off keeps the batched announcements,
@@ -114,6 +122,7 @@ export const DEFAULT_CONDUCTOR_SETTINGS: ConductorSettings = {
   completionFollowUp: true,
   agentRequests: true,
   attentionVerdicts: true,
+  announceCompletions: 'all',
   calls: 'off',
   callWindowSec: DEFAULT_CALL_WINDOW_SEC,
   maxAgentsPerPlan: 4,

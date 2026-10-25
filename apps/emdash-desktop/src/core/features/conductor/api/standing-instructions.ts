@@ -220,6 +220,10 @@ const ADJUSTS_CONDUCTOR = new RegExp(
     'stop being',
     '(?:forget|drop|remove|undo) (?:that|the|this|your) (?:last )?(?:rule|instruction|preference)',
     'by default',
+    "(?:don['’]?t|do not|stop|never) (?:notify(?:ing)?|ding(?:ing)?|ping(?:ing)?|alert(?:ing)?|bother(?:ing)?) me",
+    '(?:only|just) (?:notify|tell|ping|alert|ding) me',
+    '(?:unless|when|if) (?:it|they|something|an agent|one) (?:really )?needs? me',
+    "(?:doesn['’]?t|don['’]?t|do not|does not) need my attention",
   ]
     .map((phrase) => `\\b${phrase}\\b`)
     .join('|'),

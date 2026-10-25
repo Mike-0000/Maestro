@@ -7,6 +7,7 @@ import {
   DESTRUCTIVE_INTENTS,
   DIRECT_CLASS,
   FOCUSED_PROJECT,
+  INTENT_RUBRICS,
   NOT_MENTIONED,
   SAME_AS_LAST,
   SENTINEL,
@@ -72,7 +73,17 @@ export type RouterDecision =
       reason: string;
     }
   | { kind: 'artifact'; confidence: number }
-  | { kind: 'llm'; mode: ConductorMode; reason: string; hints: string };
+  | {
+      kind: 'llm';
+      mode: ConductorMode;
+      reason: string;
+      hints: string;
+      /** The project Jev is sure the developer named for new work; spawns and plans use it. */
+      project: SettledProject | null;
+    };
+
+/** A project Jev read with at least the guarded confidence: the source of truth for new work. */
+export type SettledProject = { readonly project: ProjectOption; readonly confidence: number };
 
 export type RouterOptions = {
   readonly thresholds: RouterThresholds;
@@ -152,27 +163,46 @@ function bindProvider(answers: JevAnswers, plan: RouterPlan): Bound<ProviderOpti
   return { ok: true, value: found, confidence: provider.confidence };
 }
 
-/** The project for new work; "not mentioned" means the focused agent's project, as spawn does. */
-function bindProject(answers: JevAnswers, plan: RouterPlan): Bound<ProjectOption | null> {
+/**
+ * The project for new work: one the developer named, "here" (the focused agent's or on-screen
+ * project), or the last spawn's. Nothing named is no project unless only one is open: with
+ * several, the developer is asked rather than the focused one guessed.
+ */
+function bindProject(answers: JevAnswers, plan: RouterPlan): Bound<ProjectOption> {
   const project = choiceOf(answers, 'project');
   if (!project) return fail('no-project-answer');
   const { projects, focusedProject, context } = plan.input;
-  const resolve = (option: string): ProjectOption | null | undefined => {
-    if (option === NOT_MENTIONED || option === FOCUSED_PROJECT) return focusedProject;
+  const resolve = (option: string): ProjectOption | undefined => {
+    if (option === NOT_MENTIONED) return projects.length === 1 ? projects[0] : undefined;
+    if (option === FOCUSED_PROJECT) return focusedProject ?? undefined;
     if (option === SAME_AS_LAST) {
       const name = context.lastSpawned?.projectName;
-      return name ? projects.find((candidate) => candidate.name === name) : focusedProject;
+      return name ? projects.find((candidate) => candidate.name === name) : undefined;
     }
     return projects.find((candidate) => candidate.name === option);
   };
   const chosen = resolve(project.choice);
-  if (chosen === undefined) return fail(`project:${project.choice}`);
+  if (!chosen) {
+    return fail(
+      project.choice === NOT_MENTIONED ? 'project-not-named' : `project:${project.choice}`
+    );
+  }
   let mass = 0;
   for (const [option, probability] of Object.entries(project.probabilities)) {
-    const other = resolve(option);
-    if (other !== undefined && (other?.id ?? null) === (chosen?.id ?? null)) mass += probability;
+    if (resolve(option)?.id === chosen.id) mass += probability;
   }
   return { ok: true, value: chosen, confidence: Math.max(mass, project.confidence) };
+}
+
+/** The project Jev is sure of, at `threshold` or above, or null. */
+export function settledProject(
+  answers: JevAnswers,
+  plan: RouterPlan,
+  threshold: number
+): SettledProject | null {
+  const bound = bindProject(answers, plan);
+  if (!bound.ok || bound.confidence < threshold) return null;
+  return { project: bound.value, confidence: bound.confidence };
 }
 
 const SEND_LEAD = /^(?:please\s+)?(?:tell|ask|send|message|say to|let)\b/i;
@@ -212,37 +242,125 @@ function intentMass(answers: JevAnswers, intents: ReadonlySet<RouterIntent>, exc
 }
 
 function pct(value: number): string {
-  return value.toFixed(2).replace(/^0/, '');
+  return `${Math.round(value * 100)}%`;
+}
+
+/** Why Jev handed the turn to the model, in words the model can act on. */
+const REASON_TEXT: Record<string, string> = {
+  'low-intent-confidence': 'it was not sure enough what the developer wants to act alone',
+  'answers-question': 'the developer seems to be answering your last question',
+  'pending-question': 'your last question is still open and this may answer it',
+  conversation: 'the developer is talking with you, not giving a command',
+  cancel: 'the developer may be calling something off',
+  correction: 'the developer is correcting your last action',
+  'several-agents': 'it expects several new agents',
+  'destructive-mass': 'part of its reading is a destructive command',
+  'unknown-agent-name': 'a numbered agent name that no agent has was said',
+  'catalog-disagrees': 'its reading of the parts disagrees with its reading of the whole',
+  'project-not-named': 'no project was named and several are open',
+  'low-project-confidence': 'it was unsure which project',
+  'provider-not-mentioned': 'no provider was named',
+  'low-provider-confidence': 'it was unsure which provider',
+  'span-uncertain': 'it could not cleanly separate the message from the instructions to you',
+  'span-includes-command': 'it could not cleanly separate the message from the instructions to you',
+  'verbatim-routing-off': "acting on the developer's words directly is turned off",
+};
+
+function reasonText(reason: string): string {
+  if (REASON_TEXT[reason]) return REASON_TEXT[reason];
+  if (reason.startsWith('intent:')) return 'this kind of request is yours to handle';
+  return reason;
+}
+
+/** An intent in words ("Start one new agent and give it a task…"), else its id. */
+function intentText(intent: string): string {
+  const rubric = (INTENT_RUBRICS as Record<string, { what: string } | undefined>)[intent];
+  return rubric ? rubric.what : intent;
+}
+
+/** The two best options of a choice answer, highest first. */
+function topTwo(answer: JevAnswer & { type: 'choice' }): [string, number][] {
+  return Object.entries(answer.probabilities)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 2);
+}
+
+/** What Jev read about the project, and what the model must do with it. */
+function projectHint(
+  answers: JevAnswers,
+  plan: RouterPlan,
+  settled: SettledProject | null
+): string | null {
+  if (settled) {
+    return `Project: ${settled.project.name} (${pct(settled.confidence)}). Settled: spawn_agent and propose_plan put new work there even if you leave project out.`;
+  }
+  const project = choiceOf(answers, 'project');
+  if (!project) return null;
+  const { projects, focusedProject } = plan.input;
+  if (project.choice === NOT_MENTIONED && project.confidence >= 0.6) {
+    if (projects.length < 2) return null;
+    return `Project: none named, and ${projects.length} are open. If this starts new work and the conversation has not already settled where, ask which project in one short question; never pick one for them.`;
+  }
+  const label = (option: string): string => {
+    if (option === FOCUSED_PROJECT)
+      return `${focusedProject?.name ?? 'the current project'} ("here")`;
+    if (option === SAME_AS_LAST) return 'the same project as last time';
+    if (option === NOT_MENTIONED) return 'none named';
+    return option;
+  };
+  const options = topTwo(project)
+    .filter(([, probability]) => probability >= 0.1)
+    .map(([option, probability]) => `${label(option)} ${pct(probability)}`);
+  return `Project: unsure (${options.join(', ')}). Pass project only when the context makes it clear; otherwise ask which project.`;
 }
 
 /**
- * Jev's partial reading for Claude when it does not act: only answers with some confidence, and
- * a warning when the transcript may confuse two agent names.
+ * Jev's reading for the model when it does not act: why it handed over, what it thinks the
+ * request is and its runner-up, each slot it is fairly sure of, what is settled about the project,
+ * and a warning when the transcript may confuse two agent names.
  */
-export function routerHints(answers: JevAnswers, plan: RouterPlan): string {
-  const parts: string[] = [];
+export function routerHints(
+  answers: JevAnswers,
+  plan: RouterPlan,
+  reason = '',
+  settled: SettledProject | null = null
+): string {
+  const lines: string[] = [];
+  if (reason) lines.push(`- It handed this to you because ${reasonText(reason)}.`);
+  const intent = choiceOf(answers, 'intent');
+  if (intent) lines.push(`- Request: ${intentText(intent.choice)} (${pct(intent.confidence)}).`);
+  const joint = choiceOf(answers, 'action');
+  const readings = joint ? topTwo(joint) : [];
+  if (readings.length === 2 && readings[1][1] >= 0.15) {
+    lines.push(
+      `- Torn between: ${readings.map(([option, p]) => `${option} (${pct(p)})`).join(' or ')}.`
+    );
+  }
   const show = (id: string, label: string, skip: readonly string[] = []) => {
     const answer = choiceOf(answers, id);
     if (answer && answer.confidence >= 0.6 && !skip.includes(answer.choice)) {
-      parts.push(`${label} ${answer.choice} (${pct(answer.confidence)})`);
+      lines.push(`- ${label}: ${answer.choice} (${pct(answer.confidence)}).`);
     }
   };
-  show('intent', 'intent');
-  show('target', 'agent', [SENTINEL.none]);
-  show('project', 'project', [NOT_MENTIONED]);
-  show('provider', 'provider', [NOT_MENTIONED]);
+  show('target', 'Agent', [SENTINEL.none]);
+  const project = projectHint(answers, plan, settled);
+  if (project) lines.push(`- ${project}`);
+  show('provider', 'Provider', [NOT_MENTIONED]);
   const multi = scoreMass(answers.agent_count, AGENT_COUNT_LEVELS, 1);
-  if (multi >= 0.6) parts.push(`several new agents (${pct(multi)})`);
+  if (multi >= 0.6) lines.push(`- Several new agents (${pct(multi)}).`);
   const verbatim = noulOf(answers, 'wants_verbatim');
-  if (verbatim !== null && verbatim >= 0.7)
-    parts.push(`wants their words verbatim (${pct(verbatim)})`);
+  if (verbatim !== null && verbatim >= 0.7) {
+    lines.push(`- Wants their words passed on verbatim (${pct(verbatim)}).`);
+  }
   const target = choiceOf(answers, 'target');
   const split = target ? confusableSplit(target.probabilities, plan.confusable, 0.5) : null;
-  const warning = split
-    ? ` Careful: "${split[0]}" and "${split[1]}" are both live and sound alike.`
-    : '';
-  if (parts.length === 0 && !warning) return '';
-  return `Fast router's reading (probabilities; verify before relying on it): ${parts.join('; ') || 'nothing confident'}.${warning}`;
+  if (split)
+    lines.push(`- Careful: "${split[0]}" and "${split[1]}" are both live and sound alike.`);
+  if (lines.length === 0) return '';
+  return [
+    'Fast router (Jev) read this request first; percentages are its confidence. Check them against the context, except what it marks settled:',
+    ...lines,
+  ].join('\n');
 }
 
 function sendAction(
@@ -392,7 +510,7 @@ function correction(
     } else {
       const bound = bindProject(answers, plan);
       const chosen = choiceOf(answers, 'project')?.choice;
-      if (!bound.ok || bound.confidence < threshold || !bound.value) return null;
+      if (!bound.ok || bound.confidence < threshold) return null;
       if (chosen === NOT_MENTIONED || chosen === SAME_AS_LAST) return null;
       if (bound.value.name === last.projectName) return null;
       project = bound.value;
@@ -423,11 +541,15 @@ export function decideRoute(
   options: RouterOptions
 ): RouterDecision {
   const mode = planMode(answers, options.planCue);
+  // Jev's project is the source of truth for one new piece of work, not for a split plan.
+  const settled =
+    mode === 'command' ? settledProject(answers, plan, options.thresholds.guarded) : null;
   const llm = (reason: string): RouterDecision => ({
     kind: 'llm',
     mode,
     reason,
-    hints: routerHints(answers, plan),
+    hints: routerHints(answers, plan, reason, settled),
+    project: settled,
   });
 
   const artifact = noulOf(answers, 'stt_artifact') ?? 0;

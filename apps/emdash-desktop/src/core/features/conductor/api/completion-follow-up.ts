@@ -87,7 +87,13 @@ export function followUpToolRefusal(name: string): string {
  * The synthetic user message for a completion turn. The final replies are fenced and labeled as
  * agent output; the instruction after them is Maestro's, not the agent's.
  */
-export function completionTurnText(agents: readonly CompletedAgentReport[]): string {
+export function completionTurnText(
+  agents: readonly CompletedAgentReport[],
+  options: {
+    /** The developer asked to hear only about agents that need them (announce_completions). */
+    attentionOnly?: boolean;
+  } = {}
+): string {
   const marked = agents.map((agent) => markInputLines(agent.report.text, agent.sentByConductor));
   const hasInputLines = marked.some(
     (text) => text.includes(TYPED_BY_DEVELOPER) || text.includes(TYPED_BY_MAESTRO)
@@ -117,6 +123,11 @@ export function completionTurnText(agents: readonly CompletedAgentReport[]): str
     ...(hasInputLines
       ? [
           `An input line marked ${TYPED_BY_DEVELOPER} is the developer's own words to that agent, typed there themselves: the agent already has them, so they are not a request to you, not waiting to be sent, never something to offer to pass on, and never to be questioned as the agent's output. A line marked ${TYPED_BY_MAESTRO} is what Maestro or you sent it.`,
+        ]
+      : []),
+    ...(options.attentionOnly
+      ? [
+          `The developer asked to hear only about agents that need them. Unless an agent here waits on the developer to answer, decide, approve or do something, is blocked or failed, or the developer asked earlier for something to happen when it finished, answer with exactly ${COMPLETION_NO_NEWS} and nothing else, even when it finished with a good result: Maestro shows that on screen without a word or a sound.`,
         ]
       : []),
     'Tell the developer in one short spoken sentence, twenty words at most, what the agent reported that matters to them: the outcome, or what they must decide or do, and where to look (say a local URL as "localhost port 5173"). Take a second short sentence only when the agent is blocked or needs a decision and one cannot hold it. Do not read the reply out, list files, or repeat the state of other agents. If the developer asked earlier in this conversation for something to happen when this agent finished, such as opening its app, do it now with show_app or read_agent; otherwise take no action. End with a question only when the agent is waiting on the developer, or when there is one obvious step you can take at once ("Want me to open it?"); when neither holds, end without a question. Other tools are unavailable in this turn.',

@@ -114,6 +114,14 @@ export class AgentStatusService implements Hookable<AgentStatusServiceHooks> {
     return this.applySignal(signal, { deliver: false, preserveSeen: true });
   }
 
+  /**
+   * Republishes a working conversation whose count of awaited subagents changed. It is the same
+   * turn going on: no sequence step, no verdict retired, no seen flag or agent event touched.
+   */
+  updateBackgroundAgents(signal: AgentStatusSignal): Promise<void> {
+    return this.enqueue(signal.conversationId, () => this.updateBackgroundAgentsQueued(signal));
+  }
+
   resetToIdle(params: { conversationId: string }): Promise<void> {
     return this.enqueue(params.conversationId, () => this.resetToIdleQueued(params.conversationId));
   }
@@ -187,6 +195,9 @@ export class AgentStatusService implements Hookable<AgentStatusServiceHooks> {
         projectId: row.projectId,
         status,
         seen: (row.agentStatusSeen ?? derivedSeen) === 1,
+        ...(status === 'working' && signal.payload.backgroundAgents
+          ? { backgroundAgents: signal.payload.backgroundAgents }
+          : {}),
         // The final reply leaves the main process only redacted and bounded; reasoning and the
         // rest of the transcript never do.
         // A turn that ended needing the developer still reports what the agent said.
@@ -267,6 +278,31 @@ export class AgentStatusService implements Hookable<AgentStatusServiceHooks> {
   private retireVerdict(conversationId: string): void {
     const verdict = this.verdicts.get(conversationId);
     if (verdict?.current) this.verdicts.set(conversationId, { ...verdict, current: false });
+  }
+
+  private async updateBackgroundAgentsQueued(signal: AgentStatusSignal): Promise<void> {
+    const [row] = await getAppDb()
+      .select({
+        ...conversationContextSelection(),
+        agentStatus: conversations.agentStatus,
+        agentStatusSeen: conversations.agentStatusSeen,
+      })
+      .from(conversations)
+      .where(eq(conversations.id, signal.conversationId))
+      .limit(1);
+    // Only a conversation still shown as working has a count to refresh.
+    if (!row || row.agentStatus !== 'working') return;
+    if (row.projectId === null || row.taskId === null) return;
+    const { backgroundAgents } = signal.payload;
+    publishConversationEvent({
+      type: 'agent-status-changed',
+      conversationId: signal.conversationId,
+      taskId: row.taskId,
+      projectId: row.projectId,
+      status: 'working',
+      seen: (row.agentStatusSeen ?? 1) === 1,
+      ...(backgroundAgents ? { backgroundAgents } : {}),
+    });
   }
 
   private async resetToIdleQueued(conversationId: string): Promise<void> {

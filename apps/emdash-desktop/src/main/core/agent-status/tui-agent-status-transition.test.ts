@@ -2,6 +2,7 @@ import type { TuiAgentState } from '@emdash/core/runtimes/tui-agents/api';
 import { describe, expect, it } from 'vitest';
 import {
   eventFromTuiAgentState,
+  isBackgroundAgentsOnlyChange,
   shouldApplyAgentStateTransition,
 } from './tui-agent-status-transition';
 
@@ -70,5 +71,22 @@ describe('TUI agent status transition mapping', () => {
 
     expect(shouldApplyAgentStateTransition(state({ status: 'working' }), waiting)).toBe(false);
     expect(eventFromTuiAgentState(waiting)).toMatchObject({ type: 'start' });
+  });
+
+  it('publishes each change in the awaited subagent count while the agent stays working', () => {
+    const waiting = (backgroundAgents?: number) =>
+      state({ status: 'working', awaitingBackgroundWork: true, backgroundAgents });
+
+    expect(shouldApplyAgentStateTransition(state(), waiting(7))).toBe(true);
+    expect(shouldApplyAgentStateTransition(waiting(7), waiting(6))).toBe(true);
+    expect(shouldApplyAgentStateTransition(waiting(6), waiting(6))).toBe(false);
+    expect(isBackgroundAgentsOnlyChange(waiting(7), waiting(6))).toBe(true);
+    expect(isBackgroundAgentsOnlyChange(undefined, waiting(6))).toBe(false);
+    // Finishing is a real transition, not a count update.
+    expect(isBackgroundAgentsOnlyChange(waiting(1), state({ status: 'completed' }))).toBe(false);
+    expect(eventFromTuiAgentState(waiting(6))).toMatchObject({
+      type: 'start',
+      payload: { backgroundAgents: 6 },
+    });
   });
 });

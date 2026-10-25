@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { projectDeskId } from './canvas-desks';
 import {
   EMPTY_LAYOUT,
   projectRegionId,
@@ -10,6 +11,7 @@ import { homeForNewWindow, opsForNewWindowHome, withProjectRegionTags } from './
 const settings = {
   placeNewAgentsInCurrentRegion: true,
   placeNewWindowsInProjectRegion: true,
+  placeNewWindowsOnProjectDesk: true,
 };
 
 function region(name: string, extra: Partial<RegionState> = {}): RegionState {
@@ -136,6 +138,90 @@ describe('homeForNewWindow', () => {
         settings: { ...settings, placeNewWindowsInProjectRegion: false },
       })
     ).toEqual({ kind: 'root' });
+  });
+});
+
+describe('projectDeskId', () => {
+  it('prefers the desk tagged with the project', () => {
+    const state: LayoutState = {
+      ...EMPTY_LAYOUT,
+      regions: {
+        'region:named': region('Emdash'),
+        'region:tagged': region('Renamed', { projectId: 'p1' }),
+      },
+    };
+    expect(projectDeskId(state, 'p1', 'Emdash')).toBe('region:tagged');
+  });
+
+  it('takes a desk the developer named after the project', () => {
+    const state: LayoutState = { ...EMPTY_LAYOUT, regions: { 'region:user': region('emdash') } };
+    expect(projectDeskId(state, 'p1', 'Emdash')).toBe('region:user');
+  });
+
+  it('skips gathering desks, regions inside a desk, and desks of another project', () => {
+    const state: LayoutState = {
+      ...EMPTY_LAYOUT,
+      regions: {
+        'region:triage': region('Emdash', { gather: 'needs-you', projectId: 'p1' }),
+        'region:main': region('Main'),
+        'region:nested': region('Emdash', { parentId: 'region:main', projectId: 'p1' }),
+        'region:other': region('Emdash', { projectId: 'p2' }),
+      },
+    };
+    expect(projectDeskId(state, 'p1', 'Emdash')).toBeNull();
+  });
+});
+
+describe('homeForNewWindow on Canvas Pro', () => {
+  const layout: LayoutState = {
+    ...EMPTY_LAYOUT,
+    regions: {
+      'region:view': region('Review'),
+      'region:desk': region('Emdash', { projectId: 'p1' }),
+    },
+  };
+  const input = {
+    currentRegionId: 'region:view',
+    projectId: 'p1',
+    projectName: 'Emdash',
+    layout,
+    pro: true,
+    settings,
+  };
+
+  it("goes to the project's desk, not the desk in view", () => {
+    expect(homeForNewWindow(input)).toEqual({
+      kind: 'project',
+      regionId: 'region:desk',
+      name: 'Emdash',
+      projectId: 'p1',
+    });
+  });
+
+  it('makes the desk when the project has none', () => {
+    expect(homeForNewWindow({ ...input, layout: EMPTY_LAYOUT, currentRegionId: null })).toEqual({
+      kind: 'project',
+      regionId: null,
+      name: 'Emdash',
+      projectId: 'p1',
+    });
+  });
+
+  it('still goes where the developer said', () => {
+    expect(homeForNewWindow({ ...input, reservedName: 'Review' })).toEqual({
+      kind: 'reserved',
+      name: 'Review',
+      regionId: 'region:view',
+    });
+  });
+
+  it('joins the desk in view when the setting is off', () => {
+    expect(
+      homeForNewWindow({
+        ...input,
+        settings: { ...settings, placeNewWindowsOnProjectDesk: false },
+      })
+    ).toEqual({ kind: 'current', regionId: 'region:view' });
   });
 });
 

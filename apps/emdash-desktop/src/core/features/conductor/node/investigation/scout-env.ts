@@ -26,6 +26,10 @@ const KEPT_NAMES = new Set(
     'TEMP',
     'TMP',
     'SystemRoot',
+    // Without these the scout's tools write a literal `%SystemDrive%` folder into the project.
+    'SystemDrive',
+    'ProgramData',
+    'ALLUSERSPROFILE',
     'windir',
     'ComSpec',
     'PATHEXT',

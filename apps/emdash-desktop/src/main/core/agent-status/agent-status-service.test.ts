@@ -12,6 +12,7 @@ type TestConversationRow = {
   taskId: string;
   providerId: string | null;
   agentStatusSeen: number | null;
+  agentStatus?: string;
 };
 
 const mocks = vi.hoisted(() => ({
@@ -180,6 +181,48 @@ describe('AgentStatusService', () => {
       undefined,
       expect.objectContaining({ status: 'completed', seen: true })
     );
+  });
+
+  it('publishes the awaited subagent count with a working status, and drops it after', async () => {
+    const service = new AgentStatusService();
+    mocks.updateRows.push(row(), row());
+
+    await service.applySignal(signal('start', { payload: { backgroundAgents: 7 } }));
+    await service.applySignal(signal('stop', { payload: { backgroundAgents: 7 } }));
+
+    expect(mocks.emit.mock.calls[0]?.[1]).toMatchObject({ status: 'working', backgroundAgents: 7 });
+    expect(mocks.emit.mock.calls[1]?.[1]).toMatchObject({ status: 'completed' });
+    expect(mocks.emit.mock.calls[1]?.[1]).not.toHaveProperty('backgroundAgents');
+  });
+
+  it('republishes a count change as the same turn: no write or agent event', async () => {
+    const service = new AgentStatusService();
+    const handler = vi.fn();
+    service.on('agent:event', handler);
+    mocks.selectRows.push(row({ agentStatus: 'working', agentStatusSeen: 0 }));
+
+    await service.updateBackgroundAgents(signal('start', { payload: { backgroundAgents: 6 } }));
+
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
+    expect(mocks.emit).toHaveBeenCalledWith(undefined, {
+      type: 'agent-status-changed',
+      conversationId: 'conversation-1',
+      taskId: 'task-1',
+      projectId: 'project-1',
+      status: 'working',
+      seen: false,
+      backgroundAgents: 6,
+    });
+  });
+
+  it('ignores a count change for a conversation no longer shown as working', async () => {
+    const service = new AgentStatusService();
+    mocks.selectRows.push(row({ agentStatus: 'awaiting-input' }));
+
+    await service.updateBackgroundAgents(signal('start', { payload: { backgroundAgents: 5 } }));
+
+    expect(mocks.emit).not.toHaveBeenCalled();
   });
 
   it('publishes a completion synopsis, never the full final reply', async () => {
@@ -390,6 +433,24 @@ describe('AgentStatusService', () => {
       expect(mocks.updateCalls.map((call) => call.agentStatus)).toEqual(['working']);
       expect(handler).toHaveBeenCalledTimes(1);
       expect(handler).toHaveBeenCalledWith(expect.objectContaining({ type: 'start' }));
+    });
+
+    it('does not let a subagent count change overtake a held turn end', async () => {
+      const service = new AgentStatusService();
+      let answer: (verdict: { needsDeveloper: boolean; reason: string }) => void = () => {};
+      judge.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+      mocks.updateRows.push(row());
+      mocks.selectRows.push(row({ agentStatus: 'completed' }));
+
+      const stopped = service.applySignal(signal('stop', question));
+      await vi.waitFor(() => expect(judge).toHaveBeenCalledTimes(1));
+      const counted = service.updateBackgroundAgents(
+        signal('start', { payload: { backgroundAgents: 2 } })
+      );
+      answer({ needsDeveloper: true, reason: 'Asks which database to use.' });
+      await Promise.all([stopped, counted]);
+
+      expect(mocks.updateCalls.map((call) => call.agentStatus)).toEqual(['awaiting-input']);
     });
   });
 });

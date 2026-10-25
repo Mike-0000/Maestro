@@ -37,6 +37,7 @@ import {
   workbenchNavigationMemento,
 } from '@core/primitives/navigation/api/mementos';
 import { getNavigation } from '@core/primitives/navigation/browser/navigation-selectors';
+import { setNotificationSoundPlayer } from '@core/primitives/notifications/browser/notification-sound';
 import { createAppScope } from '@core/primitives/scoped-stores/browser';
 import { appSubject } from '@core/primitives/subjects/api';
 import { assertViewRuntimesComplete, registerViewRuntime } from '@core/primitives/views/react';
@@ -113,6 +114,7 @@ async function bootstrap() {
     .then(() => bootMark('monaco-ready'));
   initSoundPlayer();
   initNotificationDeliveryListener((sound, dedupeKey) => soundPlayer.play(sound, dedupeKey));
+  setNotificationSoundPlayer((sound, dedupeKey) => soundPlayer.playIfEnabled(sound, dedupeKey));
   initRendererPerfVitals();
   configureDevPerfClient(async () => (await getDesktopWireClient()).devPerf);
 

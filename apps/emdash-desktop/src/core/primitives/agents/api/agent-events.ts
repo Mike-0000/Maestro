@@ -34,9 +34,16 @@ export interface AgentEvent {
     title?: string;
     message?: string;
     lastAssistantMessage?: string;
+    /** Subagents a working agent is waiting on (they report back into its conversation). */
+    backgroundAgents?: number;
   };
 }
 
 export type AgentStatusSignal = Omit<AgentEvent, 'projectId' | 'taskId'>;
+
+/** "6 sub-agents": the subagents a working agent is waiting on, as words. */
+export function subAgentCount(count: number): string {
+  return `${count} sub-agent${count === 1 ? '' : 's'}`;
+}
 
 export type SoundEvent = 'needs_attention' | 'task_complete';

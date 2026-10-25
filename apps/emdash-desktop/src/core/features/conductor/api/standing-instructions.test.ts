@@ -144,6 +144,9 @@ describe('standing instructions', () => {
       'what are your instructions',
       'forget that last rule',
       'use Codex by default',
+      "don't notify me when things don't need my attention",
+      'only tell me when an agent needs me',
+      'stop dinging me unless it needs me',
     ]) {
       expect(asksToAdjustConductor(text), text).toBe(true);
     }

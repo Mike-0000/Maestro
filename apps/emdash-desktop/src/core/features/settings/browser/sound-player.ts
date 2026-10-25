@@ -202,6 +202,16 @@ export const soundPlayer = {
     }
   },
 
+  /**
+   * Plays a sound the renderer decided on itself, under the same settings the main process
+   * routes notification sounds by: notifications and sound on, and the focus mode.
+   */
+  playIfEnabled(event: SoundEvent, dedupeKey?: string): void {
+    if (!settings.enabled || !settings.sound) return;
+    if (settings.soundFocusMode === 'unfocused' && document.hasFocus()) return;
+    this.play(event, dedupeKey);
+  },
+
   preview(path?: string): void {
     stopActivePreview();
     const generation = ++previewGeneration;

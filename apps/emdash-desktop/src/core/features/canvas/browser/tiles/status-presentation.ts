@@ -1,13 +1,19 @@
 import type { AgentTileEntry } from '@core/features/canvas/api/browser/stores/canvas-store';
+import { subAgentCount } from '@core/primitives/agents/api';
 
 export type StatusPresentation = { label: string; className: string };
 
 export function statusPresentation(
-  entry: Pick<AgentTileEntry, 'status' | 'notificationType'>
+  entry: Pick<AgentTileEntry, 'status' | 'notificationType' | 'backgroundAgents'>
 ): StatusPresentation {
   switch (entry.status) {
     case 'working':
-      return { label: 'Working', className: 'bg-blue-500/15 text-blue-700 dark:text-blue-300' };
+      return {
+        label: entry.backgroundAgents
+          ? `Working · ${subAgentCount(entry.backgroundAgents)}`
+          : 'Working',
+        className: 'bg-blue-500/15 text-blue-700 dark:text-blue-300',
+      };
     case 'awaiting-input':
       return {
         label: entry.notificationType === 'permission_prompt' ? 'Needs permission' : 'Needs you',

@@ -85,7 +85,7 @@ describe('claude hooks', () => {
       kind: 'status',
       type: 'stop',
       lastAssistantMessage: 'The push is running in the background (about 20 minutes).',
-      backgroundWork: ['task:bjfo4wxom'],
+      backgroundWork: [{ id: 'task:bjfo4wxom', kind: 'process' }],
       providerSessionId: RESUMED_SESSION_ID,
     });
   });
@@ -114,7 +114,70 @@ describe('claude hooks', () => {
           { id: 'daily', schedule: '0 9 * * 1-5', recurring: true, prompt: 'standup' },
         ],
       })
-    ).toEqual({ kind: 'status', type: 'stop', backgroundWork: ['task:a1', 'cron:wake'] });
+    ).toEqual({
+      kind: 'status',
+      type: 'stop',
+      backgroundWork: [
+        { id: 'task:a1', kind: 'agent' },
+        { id: 'cron:wake', kind: 'wakeup' },
+      ],
+    });
+  });
+
+  it('reports a running subagent as agent work, which a later user turn cannot acknowledge', () => {
+    // The Stop payload Claude Code 2.1.310 sent while a background subagent ran.
+    expect(
+      parse('stop', {
+        hook_event_name: 'Stop',
+        stop_hook_active: false,
+        background_tasks: [
+          {
+            id: 'a0e74c182008ca32f',
+            type: 'subagent',
+            status: 'running',
+            description: 'Run sleep 25 and reply',
+            agent_type: 'general-purpose',
+          },
+          {
+            id: 'byuv79cbh',
+            type: 'shell',
+            status: 'running',
+            description: 'Sleep for 25 seconds in background',
+            command: 'sleep 25',
+          },
+        ],
+        session_crons: [],
+      })
+    ).toEqual({
+      kind: 'status',
+      type: 'stop',
+      backgroundWork: [
+        { id: 'task:a0e74c182008ca32f', kind: 'agent' },
+        { id: 'task:byuv79cbh', kind: 'process' },
+      ],
+    });
+  });
+
+  it('classifies every task label Claude reports, and unknown ones as long-lived', () => {
+    const kinds = {
+      subagent: 'agent',
+      workflow: 'agent',
+      shell: 'process',
+      monitor: 'process',
+      'MCP task': 'process',
+      teammate: 'process',
+      'cloud session': 'process',
+      some_future_type: 'process',
+    };
+    const event = parse('stop', {
+      hook_event_name: 'Stop',
+      background_tasks: Object.keys(kinds).map((type) => ({ id: type, type, status: 'running' })),
+    });
+    expect(event).toEqual({
+      kind: 'status',
+      type: 'stop',
+      backgroundWork: Object.entries(kinds).map(([type, kind]) => ({ id: `task:${type}`, kind })),
+    });
   });
 
   it('marks a start submitted by a settled background task as a background wake-up', () => {

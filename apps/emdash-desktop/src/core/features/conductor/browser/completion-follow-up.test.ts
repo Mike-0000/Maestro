@@ -24,11 +24,14 @@ const mocks = vi.hoisted(() => ({
   stopAgentSession: vi.fn(async () => {}),
   readFinalChatReply: vi.fn(async (): Promise<string | null> => null),
   readFinishedTerminal: vi.fn(async (): Promise<string | null> => null),
+  playNotificationSound: vi.fn(),
+  decide: vi.fn(),
 }));
 
 vi.mock('../api/browser/client', () => ({
   getConductorClient: async () => ({
     runTurn: mocks.runTurn,
+    decide: mocks.decide,
     appendLog: vi.fn(async () => {}),
     appendTrace: vi.fn(async () => {}),
     getStatus: vi.fn(async () => status()),
@@ -48,6 +51,9 @@ vi.mock('@core/features/projects/api/browser/stores/project-selectors', () => ({
 }));
 vi.mock('@core/primitives/logging/browser/logger', () => ({
   log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
+}));
+vi.mock('@core/primitives/notifications/browser/notification-sound', () => ({
+  playNotificationSound: mocks.playNotificationSound,
 }));
 vi.mock('./spawn', () => ({
   agentMetadata: vi.fn(async () => []),
@@ -381,5 +387,150 @@ describe('completion follow-ups', () => {
     const outcome = await store['executeTool']('read_agent', { agent: 'Zulu' });
     expect(outcome.content).toContain('final reply to the developer');
     expect(outcome.content).toContain(NODE_APP_REPLY);
+  });
+});
+
+describe('completions announced only when they need the developer', () => {
+  const quiet = { announceCompletions: 'attention_only' } as const;
+
+  it('keeps a finished agent the model finds nothing to say about on the HUD', async () => {
+    const { store, speech, announce } = setup(agent(), quiet);
+    mocks.runTurn.mockResolvedValueOnce(text('NO_NEWS'));
+
+    await announce();
+
+    const event = lastUserText(sentMessages(0));
+    expect(event).toContain('asked to hear only about agents that need them');
+    expect(speech.announce).not.toHaveBeenCalled();
+    expect(mocks.playNotificationSound).not.toHaveBeenCalled();
+    expect(store.reply).toContain('Zulu');
+  });
+
+  it('speaks and sounds once when the model finds the developer is needed', async () => {
+    const { speech, announce } = setup(agent(), quiet);
+    mocks.runTurn.mockResolvedValueOnce(text('Zulu is blocked: it needs you to sign in to npm.'));
+
+    await announce();
+
+    expect(speech.announce).toHaveBeenCalledWith(
+      'Zulu is blocked: it needs you to sign in to npm.'
+    );
+    expect(mocks.playNotificationSound).toHaveBeenCalledTimes(1);
+    expect(mocks.playNotificationSound).toHaveBeenCalledWith(
+      'needs_attention',
+      'conductor-attention'
+    );
+  });
+
+  it('stays quiet when the model turn fails, since the verdict found the agent done', async () => {
+    const { speech, announce } = setup(agent(), quiet);
+    mocks.runTurn.mockResolvedValueOnce({
+      success: false,
+      error: { type: 'api-error', message: 'boom' },
+    });
+
+    await announce();
+
+    expect(speech.announce).not.toHaveBeenCalled();
+    expect(mocks.playNotificationSound).not.toHaveBeenCalled();
+  });
+
+  it('shows the fixed sentence on the HUD when no model reads the reply', async () => {
+    const { store, speech, announce } = setup(agent(), { ...quiet, completionFollowUp: false });
+
+    await announce();
+
+    expect(mocks.runTurn).not.toHaveBeenCalled();
+    expect(speech.announce).not.toHaveBeenCalled();
+    expect(store.reply).toContain('Zulu');
+  });
+
+  it('still announces an agent that waits for the developer', async () => {
+    const waiting = agent({
+      status: 'awaiting-input',
+      notificationType: 'permission_prompt',
+      completionReport: null,
+    });
+    const { speech, announce } = setup(waiting, { ...quiet, completionFollowUp: false });
+
+    await announce();
+
+    expect(speech.announce).toHaveBeenCalledWith('Zulu needs permission.');
+    // Routing already sounded the attention notification for a waiting agent.
+    expect(mocks.playNotificationSound).not.toHaveBeenCalled();
+  });
+
+  it('announces every finished agent while attention verdicts are off', async () => {
+    const { speech, announce } = setup(agent(), {
+      ...quiet,
+      attentionVerdicts: false,
+      completionFollowUp: false,
+    });
+
+    await announce();
+
+    expect(speech.announce).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('the completion gate when only what needs the developer is announced', () => {
+  /** Jev's answers for one agent: its kind, and the report's first sentence as its best. */
+  function jevSays(kind: string) {
+    mocks.decide.mockImplementation(
+      async ({ questions }: { questions: Record<string, { criteria?: object }> }) => {
+        const first = Object.keys(questions.a0_best?.criteria ?? {})[0] ?? '';
+        const choice = (pick: string) => ({
+          type: 'choice',
+          choice: pick,
+          confidence: 0.9,
+          probabilities: { [pick]: 0.9 },
+        });
+        return {
+          success: true,
+          data: {
+            answers: {
+              a0_kind: choice(kind),
+              a0_best: choice(first),
+              a0_question: choice(kind === 'needs_decision' ? first : '(none)'),
+              a0_followup: { type: 'noul', noul: 0 },
+            },
+            model: 'jev',
+            latencyMs: 1,
+            via: 'openrouter',
+          },
+        };
+      }
+    );
+  }
+
+  function gated(kind: string) {
+    jevSays(kind);
+    const setup_ = setup(agent(), { announceCompletions: 'attention_only' });
+    setup_.store.status = { ...setup_.store.status!, jevReady: true };
+    return setup_;
+  }
+
+  it('shows a plain result on the HUD without a word or a sound', async () => {
+    const { store, speech, announce } = gated('done_with_result');
+
+    await announce();
+
+    expect(mocks.runTurn).not.toHaveBeenCalled();
+    expect(speech.announce).not.toHaveBeenCalled();
+    expect(mocks.playNotificationSound).not.toHaveBeenCalled();
+    expect(store.reply).toContain('Zulu');
+  });
+
+  it('speaks a question and calls the developer with the attention sound', async () => {
+    const { speech, announce } = gated('needs_decision');
+
+    await announce();
+
+    expect(speech.announce).toHaveBeenCalledTimes(1);
+    expect(speech.announce.mock.calls[0]![0]).toContain('Zulu asks:');
+    expect(mocks.playNotificationSound).toHaveBeenCalledWith(
+      'needs_attention',
+      'conductor-attention'
+    );
   });
 });

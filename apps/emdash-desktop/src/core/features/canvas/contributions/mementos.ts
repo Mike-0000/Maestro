@@ -115,6 +115,11 @@ const layoutSettingsSchema = z.object({
   placeNewAgentsInCurrentRegion: z.boolean(),
   /** New agents and app browsers open in that project's main sub-canvas. */
   placeNewWindowsInProjectRegion: z.boolean().default(true),
+  /**
+   * Canvas Pro: new agents and app browsers go to their project's desk (made when missing), not
+   * the desk in view, unless the developer said where.
+   */
+  placeNewWindowsOnProjectDesk: z.boolean().default(true),
 });
 
 const panesSchema = z.object({
@@ -186,6 +191,7 @@ export const DEFAULT_LAYOUT_SETTINGS = {
   groupPlanAgents: true,
   placeNewAgentsInCurrentRegion: true,
   placeNewWindowsInProjectRegion: true,
+  placeNewWindowsOnProjectDesk: true,
 };
 
 export const canvasBoardSchema = defineVersionedSchema()

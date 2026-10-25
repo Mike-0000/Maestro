@@ -176,6 +176,11 @@ export const tuiAgentStateSchema = z.object({
    * a subagent, a scheduled wakeup) is still in flight and will wake the session.
    */
   awaitingBackgroundWork: z.boolean().optional(),
+  /**
+   * How many subagents (delegated work that reports back) the agent is waiting on, while
+   * `working`; absent for none. Unlike other background work, they hold through any turn.
+   */
+  backgroundAgents: z.number().int().positive().optional(),
   updatedAt: z.number().int(),
 });
 

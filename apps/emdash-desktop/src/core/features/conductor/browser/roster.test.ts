@@ -5,11 +5,13 @@ import type {
 } from '@core/features/canvas/api/browser/stores/canvas-store';
 import type { WorkbenchView } from '../api/focus';
 import {
+  agentFact,
   buildContext,
   buildRoster,
   currentFocus,
   focusedConversationId,
   seedWorkbenchView,
+  workingStatus,
 } from './roster';
 
 vi.mock('@core/features/agents/api/browser/client', () => ({ getAgentsClient: vi.fn() }));
@@ -236,5 +238,21 @@ describe('buildContext', () => {
     expect(onFile).toContain('Focused agent: none (task view:');
     expect(onFile).toContain('Bravo, Cedar');
     expect(onFile).toContain('website (its view is on screen)');
+  });
+});
+
+describe('a working agent waiting on subagents', () => {
+  it('says how many it is waiting on', () => {
+    expect(workingStatus({ backgroundAgents: 6 })).toBe('working, waiting on 6 sub-agents');
+    expect(workingStatus({ backgroundAgents: 1 })).toBe('working, waiting on 1 sub-agent');
+    expect(workingStatus({})).toBe('working');
+  });
+
+  it('reads that way in the per-turn context', () => {
+    const canvas = fakeCanvas();
+    expect(agentFact(canvas, { ...agent('a', 't1'), backgroundAgents: 6 }).status).toBe(
+      'working, waiting on 6 sub-agents'
+    );
+    expect(agentFact(canvas, agent('b', 't2')).status).toBe('working');
   });
 });

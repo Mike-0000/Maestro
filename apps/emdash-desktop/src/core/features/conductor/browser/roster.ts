@@ -6,6 +6,7 @@ import type {
 } from '@core/features/canvas/api/browser/stores/canvas-store';
 import { GATHER_LABELS } from '@core/features/canvas/api/canvas-desks';
 import { spokenProviderLabel } from '@core/features/canvas/api/provider-names';
+import { subAgentCount } from '@core/primitives/agents/api';
 import type { CompletionReport } from '@core/primitives/agents/api/completion-report';
 import { log } from '@core/primitives/logging/browser/logger';
 import type { CanvasDeskContext, CanvasEntity, CanvasRefContext } from '../api/canvas-refs';
@@ -444,7 +445,15 @@ function describeStatus(entry: AgentTileEntry): string {
       : 'waiting for input';
   }
   if (!entry.sessionActive && entry.type === 'pty') return `${entry.status}, not running`;
+  if (entry.status === 'working') return workingStatus(entry);
   return entry.status;
+}
+
+/** "working, waiting on 6 sub-agents": a working agent, and the subagents it waits on. */
+export function workingStatus(entry: Pick<AgentTileEntry, 'backgroundAgents'>): string {
+  return entry.backgroundAgents
+    ? `working, waiting on ${subAgentCount(entry.backgroundAgents)}`
+    : 'working';
 }
 
 /** How much of each finished agent's final reply rides along in every turn's context. */

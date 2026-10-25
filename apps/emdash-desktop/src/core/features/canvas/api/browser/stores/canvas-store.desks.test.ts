@@ -67,7 +67,7 @@ describe('CanvasStore desks (Canvas Pro)', () => {
     const second = noteTileId(store.addNote('two'));
     const undoBefore = store.undoStack.length;
 
-    expect(store.setMode('pro')).toEqual({ changed: true, desks: 1, gathered: 2 });
+    expect(store.setMode('pro')).toEqual({ changed: true, desks: 1, gathered: 2, sorted: 0 });
 
     expect(store.desks.map((desk) => desk.name)).toEqual(['Main']);
     const main = deskNamed(store, 'Main');

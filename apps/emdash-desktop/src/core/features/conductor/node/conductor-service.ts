@@ -353,6 +353,16 @@ export class ConductorService {
   }
 
   /**
+   * True when a finished agent with nothing for the developer makes no sound or alert: they asked
+   * for attention_only, and attention verdicts run, so a finished turn that needs them arrives as
+   * an attention notification instead.
+   */
+  async quietCompletions(): Promise<boolean> {
+    const settings = await this.settings.read();
+    return settings.announceCompletions === 'attention_only' && (await this.attentionEnabled());
+  }
+
+  /**
    * One short call on the conductor's own provider and model: does the agent that wrote this
    * final reply need the developer? No tools, no history, no conductor prompt. Never throws and
    * resolves null when it cannot answer (off, no key, over budget, an error, an unreadable

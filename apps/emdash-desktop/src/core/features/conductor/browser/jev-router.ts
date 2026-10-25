@@ -11,13 +11,8 @@ import { decideRoute, type RouterDecision, type RouterOptions } from '../api/jev
 import { buildRouterRequest } from '../api/jev-router/questions';
 import { answersDetail } from '../api/jev-router/trace';
 import { jevDecide } from './jev';
-import {
-  buildRoster,
-  entryForConversation,
-  focusedConversationId,
-  installedProviders,
-} from './roster';
-import { agentMetadata, resolveProjectId } from './spawn';
+import { buildRoster, currentProject, focusedConversationId, installedProviders } from './roster';
+import { agentMetadata } from './spawn';
 
 type Detail = NonNullable<TraceEvent['detail']>;
 
@@ -51,14 +46,14 @@ export async function routerInput(
   const focusedId = focusedConversationId(canvas);
   const focused = roster.find((agent) => agent.id === focusedId) ?? null;
   const projects = availableProjects();
-  const focusedEntry = focusedId ? entryForConversation(canvas, focusedId) : undefined;
-  const defaultProjectId = resolveProjectId(focusedEntry?.projectId);
+  // "Here" is the project on screen; with none on screen it is nothing, never the first project.
+  const here = currentProject(canvas)?.name;
   return {
     utterance,
     roster,
     focused,
     projects,
-    focusedProject: projects.find((project) => project.id === defaultProjectId) ?? null,
+    focusedProject: projects.find((project) => project.name === here) ?? null,
     providers: await routerProviders(),
     context,
   };
