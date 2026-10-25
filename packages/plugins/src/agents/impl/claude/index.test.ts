@@ -18,6 +18,7 @@ describe('claude provider delegation policy', () => {
 
   it('covers sub-agents, being stuck, and Codex for computer use', () => {
     expect(CLAUDE_SYSTEM_PROMPT_APPEND).toMatch(/sub-agents/);
+    expect(CLAUDE_SYSTEM_PROMPT_APPEND).toMatch(/vibe skill/);
     expect(CLAUDE_SYSTEM_PROMPT_APPEND).toMatch(/If you get stuck/);
     expect(CLAUDE_SYSTEM_PROMPT_APPEND).toMatch(/computer use.*provider codex/);
   });

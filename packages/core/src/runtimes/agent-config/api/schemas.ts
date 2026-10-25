@@ -62,6 +62,49 @@ export const agentConfigSkillsErrorSchema = z.union([
   agentConfigIoErrorSchema,
   runtimeUnavailableErrorSchema,
 ]);
+export const agentConfigAddonsErrorSchema = z.union([
+  agentConfigUnknownProviderErrorSchema,
+  agentConfigInvalidStateErrorSchema,
+  agentConfigIoErrorSchema,
+  /** Files the add-on would overwrite that hold something else; retried with `replace`. */
+  z.object({ type: z.literal('conflict'), paths: z.array(z.string()) }),
+  runtimeUnavailableErrorSchema,
+]);
+
+/** One file of an add-on, at a path relative to the provider's config folder. */
+export const addonFileSchema = z.object({
+  path: z.string().min(1),
+  content: z.string(),
+});
+
+/**
+ * What an add-on writes for one provider: whole files it owns, and optionally one block of
+ * instructions inside a shared file such as `CLAUDE.md`, which it never touches outside its block.
+ */
+export const addonInstallPayloadSchema = z.object({
+  id: z.string(),
+  version: z.number().int().positive(),
+  providerId: z.string(),
+  files: z.array(addonFileSchema),
+  instructions: addonFileSchema.optional(),
+});
+
+/** `edited` means the file or block changed since Maestro wrote it. */
+export const addonPartStateSchema = z.enum(['intact', 'edited', 'missing']);
+
+export const installedAddonSchema = z.object({
+  id: z.string(),
+  version: z.number().int().positive(),
+  providerId: z.string(),
+  /** Absolute config folder the add-on was installed into. */
+  root: z.string(),
+  installedAt: z.string(),
+  files: z.array(z.object({ path: z.string(), state: addonPartStateSchema })),
+  instructions: z.object({ path: z.string(), state: addonPartStateSchema }).optional(),
+});
+
+export const installedAddonsSchema = z.array(installedAddonSchema);
+
 export const authPendingUrlSchema = z.object({
   id: z.string(),
   url: z.url(),
@@ -122,6 +165,10 @@ export type AgentConfigError = z.infer<typeof agentConfigErrorSchema>;
 export type AgentConfigAuthError = z.infer<typeof agentConfigAuthErrorSchema>;
 export type AgentConfigMcpError = z.infer<typeof agentConfigMcpErrorSchema>;
 export type AgentConfigSkillsError = z.infer<typeof agentConfigSkillsErrorSchema>;
+export type AgentConfigAddonsError = z.infer<typeof agentConfigAddonsErrorSchema>;
+export type AddonInstallPayload = z.infer<typeof addonInstallPayloadSchema>;
+export type AddonPartState = z.infer<typeof addonPartStateSchema>;
+export type InstalledAddon = z.infer<typeof installedAddonSchema>;
 export type AuthStatusModelState = z.infer<typeof authStatusModelStateSchema>;
 export type AuthLoginState = z.infer<typeof authLoginStateSchema>;
 export type AuthPendingUrl = z.infer<typeof authPendingUrlSchema>;

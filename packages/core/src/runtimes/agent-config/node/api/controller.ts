@@ -11,5 +11,6 @@ export function createAgentConfigController(runtime: AgentConfigRuntime) {
     loginOutput: (key) => runtime.loginOutputLog(key.providerId),
     mcpServers: runtime.mcpLiveHost(),
     skills: runtime.skillsLiveHost(),
+    addons: runtime.addonsLiveHost(),
   });
 }

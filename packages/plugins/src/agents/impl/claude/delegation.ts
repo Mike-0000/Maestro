@@ -12,7 +12,9 @@ export const CLAUDE_DELEGATION_POLICY =
   'conclusion matters, or when a finished change deserves an independent check. Work inline when ' +
   'the task is a small or single-file change, when its steps depend on each other in sequence, ' +
   'when a quick lookup answers it, or when the work needs context from this conversation that ' +
-  'would be costly to hand over. Sub-agents cost extra time and tokens, so use them only where ' +
+  'would be costly to hand over. When the vibe skill is available and a task splits into several ' +
+  'independent workstreams, run it in vibe mode by invoking that skill instead of spawning ' +
+  'sub-agents ad hoc. Sub-agents cost extra time and tokens, so use them only where ' +
   'they shorten the work or improve the result. If the developer says to use sub-agents, or says ' +
   'not to, follow that instead.';
 

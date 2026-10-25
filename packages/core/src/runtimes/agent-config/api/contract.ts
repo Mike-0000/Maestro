@@ -9,6 +9,8 @@ import {
 import { z } from 'zod';
 import { agentAuthStatusSchema } from '#services/agent-plugins/api/plugins/capabilities/auth';
 import {
+  addonInstallPayloadSchema,
+  agentConfigAddonsErrorSchema,
   agentConfigAuthErrorSchema,
   agentConfigListSchema,
   agentConfigMcpErrorSchema,
@@ -16,6 +18,7 @@ import {
   createSkillInputSchema,
   installedSkillsSchema,
   hooksStatusSchema,
+  installedAddonsSchema,
   markUrlHandledCommandSchema,
   mcpServerListSchema,
   mcpServerSchema,
@@ -117,6 +120,23 @@ export const agentConfigContract = defineContract({
     input: createSkillInputSchema,
     data: z.object({ skills: installedSkillsSchema }),
     error: agentConfigSkillsErrorSchema,
+  }),
+
+  addons: liveModel({
+    key: z.void().optional(),
+    states: {
+      list: liveState({ data: installedAddonsSchema }),
+    },
+  }),
+  installAddon: fallible({
+    input: z.object({ addon: addonInstallPayloadSchema, replace: z.boolean().optional() }),
+    data: z.object({ addons: installedAddonsSchema }),
+    error: agentConfigAddonsErrorSchema,
+  }),
+  removeAddon: fallible({
+    input: z.object({ id: z.string(), providerId: z.string() }),
+    data: z.object({ addons: installedAddonsSchema }),
+    error: agentConfigAddonsErrorSchema,
   }),
 });
 

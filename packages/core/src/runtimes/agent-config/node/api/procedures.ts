@@ -2,10 +2,12 @@ import { ok, type Result } from '@emdash/shared';
 import type { McpServer } from '#primitives/mcp/api';
 import type { CatalogSkill } from '#primitives/skills/api';
 import type {
+  AgentConfigAddonsError,
   AgentConfigAuthError,
   AgentConfigMcpError,
   AgentConfigSkillsError,
   HooksStatus,
+  InstalledAddon,
 } from '#runtimes/agent-config/api';
 import type { AgentConfigRuntime } from '#runtimes/agent-config/node/runtime/runtime';
 import type { AgentAuthStatus } from '#services/agent-plugins/api/plugins';
@@ -89,6 +91,18 @@ export function createAgentConfigProcedures(runtime: AgentConfigRuntime) {
     ): Promise<Result<{ skills: CatalogSkill[] }, AgentConfigSkillsError>> {
       const created = await runtime.createSkill(input);
       return created.success ? ok({ skills: created.data }) : created;
+    },
+    async installAddon(
+      input: Parameters<AgentConfigRuntime['installAddon']>[0]
+    ): Promise<Result<{ addons: InstalledAddon[] }, AgentConfigAddonsError>> {
+      const installed = await runtime.installAddon(input);
+      return installed.success ? ok({ addons: installed.data }) : installed;
+    },
+    async removeAddon(
+      input: Parameters<AgentConfigRuntime['removeAddon']>[0]
+    ): Promise<Result<{ addons: InstalledAddon[] }, AgentConfigAddonsError>> {
+      const removed = await runtime.removeAddon(input);
+      return removed.success ? ok({ addons: removed.data }) : removed;
     },
   };
 }
