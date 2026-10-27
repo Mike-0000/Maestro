@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { FakePtySpawner } from '#services/pty/testing';
 import { PtyRegistry } from './pty-registry';
 import { TerminalCapabilityResponder } from './terminal-capability-responder';
@@ -73,7 +73,9 @@ describe('TerminalCapabilityResponder', () => {
     process.emitData('prompt\x1b[');
     process.emitData('>c');
     expect(process.writes).toEqual(['\x1b[>0;276;0c']);
-    expect(session.output.snapshot().data.text).toBe('prompt');
+    await vi.waitFor(() => {
+      expect(session.output.snapshot().data.text).toBe('prompt');
+    });
     const input = 'paste\x1b[?1;2c\r';
     session.write(input);
     expect(process.writes.at(-1)).toBe(input);

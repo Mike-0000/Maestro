@@ -177,9 +177,11 @@ describe('AgentConfigRuntime', () => {
     });
 
     ptySpawner.processes[0]?.emitData('Open https://example.com/login\n');
-    expect((await runtime.loginOutputLog('claude')?.snapshot())?.data.text).toBe(
-      'Open https://example.com/login\n'
-    );
+    await vi.waitFor(async () => {
+      expect((await runtime.loginOutputLog('claude')?.snapshot())?.data.text).toBe(
+        'Open https://example.com/login\n'
+      );
+    });
 
     expect(runtime.sendLoginInput('claude', 'code\n')).toEqual(ok(undefined));
     expect(ptySpawner.processes[0]?.writes).toEqual(['code\n']);
@@ -300,9 +302,12 @@ describe('AgentConfigRuntime', () => {
     expect(authCheckStatus).not.toHaveBeenCalled();
 
     second?.emitData('Open https://example.com/current\n');
-    expect((await runtime.loginOutputLog('claude')?.snapshot())?.data.text).toBe(
-      'Open https://example.com/current\n'
-    );
+    // Waiting out the output batch also shows the replaced login's text never landed.
+    await vi.waitFor(async () => {
+      expect((await runtime.loginOutputLog('claude')?.snapshot())?.data.text).toBe(
+        'Open https://example.com/current\n'
+      );
+    });
     await runtime.dispose();
   });
 

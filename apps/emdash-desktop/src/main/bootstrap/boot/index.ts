@@ -10,7 +10,7 @@ import { bootControllers } from './phases/controllers';
 import { bootDatabase, type DatabaseBundle } from './phases/database';
 import { installGateway } from './phases/gateway';
 import { bootInfrastructure } from './phases/infrastructure';
-import { startStartupStallLog } from './phases/perf-vitals';
+import { startStallLog } from './phases/perf-vitals';
 import { bootRuntimes } from './phases/runtimes';
 import { bootServices } from './phases/services';
 
@@ -27,7 +27,7 @@ export async function finishBoot(config: AppConfig): Promise<void> {
     // Capture runs alongside boot. Spawn-capable workers resolve through the
     // parent-owned service, whose first request awaits this in-flight capture.
     startUserEnvCapture();
-    startStartupStallLog();
+    startStallLog();
     database = await step('database', () => bootDatabase(config));
     const databaseBundle = database;
     const infrastructure = await step('infrastructure', () => bootInfrastructure(databaseBundle));

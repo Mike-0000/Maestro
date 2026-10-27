@@ -125,7 +125,7 @@ export function initRendererPerfVitals(): void {
   });
 }
 
-function performanceObserve(
+export function performanceObserve(
   options: { type: 'longtask' | 'event'; durationThreshold?: number },
   callback: (entries: readonly RendererPerfEntry[]) => void
 ): () => void {
