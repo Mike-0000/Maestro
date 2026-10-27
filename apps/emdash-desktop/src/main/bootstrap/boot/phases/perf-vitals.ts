@@ -32,16 +32,17 @@ export function startPerfVitalsTelemetry(runtimes: DesktopRuntimes): void {
 }
 
 const STALL_SAMPLE_MS = 10_000;
-const STALL_WATCH_MS = 5 * 60_000;
+const STARTUP_MS = 5 * 60_000;
 const STALL_LOG_THRESHOLD_MS = 1_000;
 
 /**
- * Logs main-process event-loop stalls during the first minutes after launch, when projects attach
- * and every wire call has a timeout. The log keeps warnings only, so this is how a startup where
- * all wire calls time out together shows whether the main thread itself was blocked. Local only:
- * nothing is sent anywhere, and it stops on its own.
+ * Logs main-process event-loop stalls for the life of the app: one warning per 10 s window whose
+ * longest delay passed a second. The log keeps warnings only, so this is how a window where wire
+ * calls time out together, or where typing into an agent lags, shows whether the main thread
+ * itself was blocked. The renderer logs its own stalls with the sessions that were streaming
+ * (`renderer/utils/stall-log.ts`). Local only: nothing is sent anywhere.
  */
-export function startStartupStallLog(): void {
+export function startStallLog(): void {
   // Its own histogram: the shared vitals sampler resets the spawn counters telemetry reports.
   const loopDelay = monitorEventLoopDelay({ resolution: 20 });
   loopDelay.enable();
@@ -50,17 +51,14 @@ export function startStartupStallLog(): void {
     const sinceLaunchMs = Date.now() - startedAt;
     const maxDelayMs = Math.round(loopDelay.max / 1e6);
     if (maxDelayMs >= STALL_LOG_THRESHOLD_MS) {
-      log.warn('main: event loop stalled during startup', {
+      const during = sinceLaunchMs < STARTUP_MS ? ' during startup' : '';
+      log.warn(`main: event loop stalled${during}`, {
         sinceLaunchMs,
         loopDelayMaxMs: maxDelayMs,
         loopDelayP99Ms: Math.round(loopDelay.percentile(99) / 1e6),
       });
     }
     loopDelay.reset();
-    if (sinceLaunchMs >= STALL_WATCH_MS) {
-      clearInterval(timer);
-      loopDelay.disable();
-    }
   }, STALL_SAMPLE_MS);
   timer.unref();
 }

@@ -58,6 +58,7 @@ import { getDesktopWireClient } from '@renderer/lib/runtime/desktop-wire-client'
 import { seedDesktopWire } from '@renderer/lib/runtime/seed-desktop-wire';
 import { seedRendererNavigationHost } from '@renderer/lib/runtime/seed-navigation-host';
 import { initRendererPerfVitals } from '@renderer/utils/perf-vitals';
+import { initStallLog } from '@renderer/utils/stall-log';
 import { initNotificationDeliveryListener } from '@root/src/core/services/notifications/browser';
 import { App } from './App';
 import { wireNavigationTelemetry } from './lib/stores/navigation-telemetry';
@@ -116,6 +117,7 @@ async function bootstrap() {
   initNotificationDeliveryListener((sound, dedupeKey) => soundPlayer.play(sound, dedupeKey));
   setNotificationSoundPlayer((sound, dedupeKey) => soundPlayer.playIfEnabled(sound, dedupeKey));
   initRendererPerfVitals();
+  initStallLog();
   configureDevPerfClient(async () => (await getDesktopWireClient()).devPerf);
 
   // Stores may acquire memento spaces while project data loads, so initialize

@@ -1,10 +1,18 @@
 import type { LogSink } from '@emdash/wire/live';
 import type { LiveLogSnapshotData } from '@emdash/wire/rpc';
 import type { Terminal } from '@xterm/xterm';
+import { noteTerminalOutput } from './terminal-output-tally';
 
 type XtermLogTerminal = Pick<Terminal, 'reset' | 'write'>;
 
 const TRUNCATED_NOTICE = '\r\n[output truncated]\r\n';
+
+/**
+ * Largest single `terminal.write`. xterm parses each write whole and only yields to the browser
+ * between writes, so a 1 MB replay handed over in one piece blocks the renderer until it is
+ * parsed; in pieces, xterm's own scheduler keeps the window responsive while it catches up.
+ */
+export const XTERM_WRITE_PIECE_CHARS = 64 * 1024;
 
 export type XtermLogSinkOptions = {
   /**
@@ -12,6 +20,8 @@ export type XtermLogSinkOptions = {
    * available and a 16 ms timeout otherwise. Injectable for tests.
    */
   scheduleFlush?: (flush: () => void) => void;
+  /** Names this output in the renderer stall log's per-session output tally. */
+  label?: string;
 };
 
 /**
@@ -23,6 +33,7 @@ export function createXtermLogSink(
   options: XtermLogSinkOptions = {}
 ): LogSink {
   const scheduleFlush = options.scheduleFlush ?? defaultScheduleFlush;
+  const label = options.label;
   let pending = '';
   let epoch = 0;
   let flushScheduled = false;
@@ -32,11 +43,12 @@ export function createXtermLogSink(
     if (scheduledEpoch !== epoch || pending.length === 0) return;
     const chunk = pending;
     pending = '';
-    terminal.write(chunk);
+    writeInPieces(terminal, chunk);
   };
 
   const queue = (chunk: string): void => {
     if (!chunk) return;
+    if (label) noteTerminalOutput(label, chunk.length);
     pending += chunk;
     if (flushScheduled) return;
     flushScheduled = true;
@@ -51,12 +63,31 @@ export function createXtermLogSink(
       flushScheduled = false;
       terminal.reset();
       if (data.truncated) terminal.write(TRUNCATED_NOTICE);
-      if (data.text.length > 0) terminal.write(data.text);
+      if (data.text.length > 0) {
+        if (label) noteTerminalOutput(label, data.text.length);
+        writeInPieces(terminal, data.text);
+      }
     },
     append(chunk) {
       queue(chunk);
     },
   };
+}
+
+/** Writes text in pieces of at most {@link XTERM_WRITE_PIECE_CHARS}, never splitting a surrogate pair. */
+function writeInPieces(terminal: XtermLogTerminal, text: string): void {
+  let start = 0;
+  while (text.length - start > XTERM_WRITE_PIECE_CHARS) {
+    let end = start + XTERM_WRITE_PIECE_CHARS;
+    if (isHighSurrogate(text.charCodeAt(end - 1))) end -= 1;
+    terminal.write(text.slice(start, end));
+    start = end;
+  }
+  terminal.write(start === 0 ? text : text.slice(start));
+}
+
+function isHighSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff;
 }
 
 function defaultScheduleFlush(flush: () => void): void {
