@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { TerminalOutputTallyEntry } from '@core/features/terminals/api/browser/pty/terminal-output-tally';
 import type { RendererPerfEntry } from './perf-vitals';
 import {
+  STALL_LOG_ASSUME_SLEEP_MS,
   STALL_LOG_OUTPUT_CHARS,
   STALL_LOG_WINDOW_MS,
   startStallLog,
@@ -70,6 +71,18 @@ describe('startStallLog', () => {
     await clock.advanceBy(STALL_LOG_WINDOW_MS);
 
     expect(warnings.map((warning) => warning.message)).toEqual(['renderer: heavy terminal output']);
+  });
+
+  it('does not take the machine sleeping through a task for a freeze', async () => {
+    const { clock, task, warnings } = setup();
+
+    task(STALL_LOG_ASSUME_SLEEP_MS);
+    await clock.advanceBy(STALL_LOG_WINDOW_MS);
+    expect(warnings).toEqual([]);
+
+    task(STALL_LOG_ASSUME_SLEEP_MS - 1);
+    await clock.advanceBy(STALL_LOG_WINDOW_MS);
+    expect(warnings).toHaveLength(1);
   });
 
   it('stops observing and logging once disposed', async () => {

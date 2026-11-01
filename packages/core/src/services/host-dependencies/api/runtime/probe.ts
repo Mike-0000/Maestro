@@ -20,9 +20,10 @@ export type CommandPathProbe =
 
 /**
  * Looks up all absolute paths for a command binary in PATH order, telling "not on PATH" apart from
- * a lookup that failed. Uses `where` on Windows (which already lists all matches) and `which -a`
- * on macOS/Linux; both exit 1 when nothing matches. Any other failure, such as a timeout, a crash,
- * or endpoint security killing the process, is a failed probe, not a missing binary.
+ * a lookup that failed. Prefers the context's in-process lookup, then `where` on Windows (which
+ * already lists all matches) and `which -a` on macOS/Linux; both exit 1 when nothing matches. Any
+ * other failure, such as a timeout, a crash, or endpoint security killing the process, is a failed
+ * probe, not a missing binary.
  *
  * The first path is the PATH winner (same result as resolveCommandPath).
  */
@@ -33,6 +34,7 @@ export async function probeCommandPaths(
 ): Promise<CommandPathProbe> {
   const windows = targetPlatform(platform) === 'windows';
   try {
+    if (windows && ctx.findOnPath) return { ok: true, paths: await ctx.findOnPath(command) };
     const { stdout } = windows
       ? await ctx.exec('where', [command], { timeout: WHICH_TIMEOUT_MS })
       : await ctx.exec('which', ['-a', command], { timeout: WHICH_TIMEOUT_MS });
@@ -72,7 +74,7 @@ export async function resolveAllCommandPaths(
 
 /**
  * Resolves the absolute path of a command binary.
- * Uses `where` on Windows and `which` on macOS/Linux.
+ * Prefers the context's in-process lookup, then `where` on Windows and `which` on macOS/Linux.
  * Returns `null` if the command is not found or the resolution fails.
  */
 export async function resolveCommandPath(
@@ -80,8 +82,10 @@ export async function resolveCommandPath(
   ctx: IExecutionContext,
   platform?: Platform
 ): Promise<string | null> {
-  const resolveCmd = targetPlatform(platform) === 'windows' ? 'where' : 'which';
+  const windows = targetPlatform(platform) === 'windows';
+  const resolveCmd = windows ? 'where' : 'which';
   try {
+    if (windows && ctx.findOnPath) return (await ctx.findOnPath(command))[0] ?? null;
     const { stdout } = await ctx.exec(resolveCmd, [command], { timeout: WHICH_TIMEOUT_MS });
     const firstLine = stdout.trim().split('\n')[0]?.trim();
     return firstLine ?? null;
