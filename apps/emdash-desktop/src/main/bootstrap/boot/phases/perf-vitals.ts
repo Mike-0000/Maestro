@@ -1,9 +1,15 @@
-import { monitorEventLoopDelay } from 'node:perf_hooks';
-import { startVitalsReporting, type ProcessVitals } from '@emdash/shared/perf/node';
-import { app } from 'electron';
+import path from 'node:path';
+import {
+  startLoopStallLog,
+  startProcessHeartbeat,
+  startVitalsReporting,
+  type ProcessVitals,
+} from '@emdash/shared/perf/node';
+import { app, powerMonitor } from 'electron';
 import type { DesktopRuntimes } from '@main/gateway/desktop-runtimes';
 import { log } from '@main/lib/logger';
 import { telemetryService } from '@main/lib/telemetry';
+import { createStallProfiler } from './stall-profiler';
 
 /** Slow steady cadence: 12 reports/hour per process in sampled sessions. */
 export const PERF_VITALS_INTERVAL_MS = 5 * 60_000;
@@ -31,36 +37,63 @@ export function startPerfVitalsTelemetry(runtimes: DesktopRuntimes): void {
   });
 }
 
-const STALL_SAMPLE_MS = 10_000;
 const STARTUP_MS = 5 * 60_000;
-const STALL_LOG_THRESHOLD_MS = 1_000;
+const HEARTBEAT_MS = 5 * 60_000;
 
 /**
  * Logs main-process event-loop stalls for the life of the app: one warning per 10 s window whose
  * longest delay passed a second. The log keeps warnings only, so this is how a window where wire
  * calls time out together, or where typing into an agent lags, shows whether the main thread
  * itself was blocked. The renderer logs its own stalls with the sessions that were streaming
- * (`renderer/utils/stall-log.ts`). Local only: nothing is sent anywhere.
+ * (`renderer/utils/stall-log.ts`), and each worker logs its own. A stall also starts a CPU profile
+ * that catches the next one. A periodic heartbeat puts memory and process counts next to all of
+ * this, and sleep and wake are logged so a gap in the log reads as what it is. Local only: nothing
+ * is sent anywhere.
  */
 export function startStallLog(): void {
-  // Its own histogram: the shared vitals sampler resets the spawn counters telemetry reports.
-  const loopDelay = monitorEventLoopDelay({ resolution: 20 });
-  loopDelay.enable();
-  const startedAt = Date.now();
-  const timer = setInterval(() => {
-    const sinceLaunchMs = Date.now() - startedAt;
-    const maxDelayMs = Math.round(loopDelay.max / 1e6);
-    if (maxDelayMs >= STALL_LOG_THRESHOLD_MS) {
-      const during = sinceLaunchMs < STARTUP_MS ? ' during startup' : '';
+  const profiler = createStallProfiler({
+    dir: path.join(app.getPath('userData'), 'logs', 'stall-profiles'),
+    warn: (message, details) => log.warn(message, details),
+  });
+  const stalls = startLoopStallLog({
+    onStall: (report) => {
+      const during = report.sinceStartMs < STARTUP_MS ? ' during startup' : '';
       log.warn(`main: event loop stalled${during}`, {
-        sinceLaunchMs,
-        loopDelayMaxMs: maxDelayMs,
-        loopDelayP99Ms: Math.round(loopDelay.percentile(99) / 1e6),
+        sinceLaunchMs: report.sinceStartMs,
+        loopDelayMaxMs: report.loopDelayMaxMs,
+        loopDelayP99Ms: report.loopDelayP99Ms,
       });
-    }
-    loopDelay.reset();
-  }, STALL_SAMPLE_MS);
-  timer.unref();
+      profiler.noteStall(report.loopDelayMaxMs);
+    },
+  });
+  powerMonitor.on('suspend', () => {
+    stalls.markSuspended();
+    log.warn('main: system suspending');
+  });
+  powerMonitor.on('resume', () => {
+    stalls.markResumed();
+    log.warn('main: system resumed');
+  });
+  startProcessHeartbeat({
+    intervalMs: HEARTBEAT_MS,
+    report: (heartbeat) => {
+      log.warn('main: heartbeat', { ...heartbeat, ...appProcessSummary() });
+    },
+  });
+}
+
+/** Electron's own processes, including the renderer and GPU that cannot report for themselves. */
+function appProcessSummary(): { appProcesses?: number; appWorkingSetMb?: number } {
+  try {
+    const metrics = app.getAppMetrics();
+    const workingSetKb = metrics.reduce(
+      (total, metric) => total + (metric.memory?.workingSetSize ?? 0),
+      0
+    );
+    return { appProcesses: metrics.length, appWorkingSetMb: Math.round(workingSetKb / 1024) };
+  } catch {
+    return {};
+  }
 }
 
 /**

@@ -15,6 +15,28 @@ describe('NodeExecutionContext', () => {
     expect(refreshShellEnv).toHaveBeenCalledOnce();
   });
 
+  it('offers an in-process PATH lookup only on Windows', () => {
+    expect(new NodeExecutionContext({ platform: 'win32' }).findOnPath).toBeTypeOf('function');
+    expect(new NodeExecutionContext({ platform: 'linux' }).findOnPath).toBeUndefined();
+    expect(new NodeExecutionContext({ platform: 'darwin' }).findOnPath).toBeUndefined();
+  });
+
+  it('sees a binary installed since the last lookup once the shell env is refreshed', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'emdash-path-scan-'));
+    const context = new NodeExecutionContext({
+      platform: 'win32',
+      env: { PATH: dir, PATHEXT: '.EXE' },
+    });
+
+    await expect(context.findOnPath?.('tool')).resolves.toEqual([]);
+    await writeFile(path.join(dir, 'tool.exe'), '');
+    await expect(context.findOnPath?.('tool')).resolves.toEqual([]);
+
+    await context.refreshShellEnv();
+
+    await expect(context.findOnPath?.('tool')).resolves.toEqual([path.win32.join(dir, 'tool.exe')]);
+  });
+
   it('returns the exit code from a streaming command', async () => {
     const context = new NodeExecutionContext();
 

@@ -1,6 +1,6 @@
 import { hostDependenciesContract } from '@emdash/core/services/host-dependencies/node';
 import { err, ok } from '@emdash/shared';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAgentOperations } from './controller';
 
 const runRuntimeLiveJob = vi.hoisted(() => vi.fn());
@@ -127,5 +127,111 @@ describe('executable overrides', () => {
       key: undefined,
       input: { id: 'claude', selection: { kind: 'cli', command: 'wrapper' } },
     });
+  });
+});
+
+describe('status reads and probing', () => {
+  const FIVE_MINUTES = 5 * 60_000;
+
+  function setup(probe = vi.fn(async () => {})) {
+    const snapshot = vi.fn(async () => ({
+      data: { hostId: 'local', generation: 1, hostElevation: null, dependencies: {} },
+    }));
+    const manager = { snapshot: { state: () => ({ snapshot }) } } as never;
+    const operations = createAgentOperations({
+      ensureAgentDependenciesProbed: probe,
+      getDependencyManager: vi.fn(),
+      providerOverrideSettings: {} as never,
+    });
+    return { manager, operations, probe, snapshot };
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('probes for the first read, then answers later reads from the snapshot', async () => {
+    const { manager, operations, probe, snapshot } = setup();
+
+    await operations.listAgentInstallationStatus(undefined, manager);
+    await operations.listAgentInstallationStatus(undefined, manager);
+    await operations.listAgentInstallationStatus(undefined, manager);
+
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(snapshot).toHaveBeenCalledTimes(3);
+  });
+
+  it('makes a read made during the first probe wait, without probing again', async () => {
+    let finish = () => {};
+    const probe = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
+    const { manager, operations, snapshot } = setup(probe);
+
+    const first = operations.listAgentInstallationStatus(undefined, manager);
+    const second = operations.listAgentInstallationStatus(undefined, manager);
+    await Promise.resolve();
+    expect(snapshot).not.toHaveBeenCalled();
+
+    finish();
+    await Promise.all([first, second]);
+    expect(probe).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshes in the background once stale, without making the read wait', async () => {
+    vi.useFakeTimers();
+    const probe = vi.fn(async () => {});
+    const { manager, operations } = setup(probe);
+    await operations.listAgentInstallationStatus(undefined, manager);
+
+    vi.setSystemTime(Date.now() + FIVE_MINUTES - 1);
+    await operations.listAgentInstallationStatus(undefined, manager);
+    expect(probe).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(Date.now() + 1);
+    probe.mockImplementationOnce(() => new Promise<void>(() => {}));
+    await operations.listAgentInstallationStatus(undefined, manager);
+    expect(probe).toHaveBeenCalledTimes(2);
+
+    // That probe never finishes, and it is not started over by the reads behind it.
+    await operations.listAgentInstallationStatus(undefined, manager);
+    expect(probe).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps serving the snapshot when a background refresh fails', async () => {
+    vi.useFakeTimers();
+    const probe = vi.fn(async () => {});
+    const { manager, operations, snapshot } = setup(probe);
+    await operations.listAgentInstallationStatus(undefined, manager);
+
+    vi.setSystemTime(Date.now() + FIVE_MINUTES);
+    probe.mockRejectedValueOnce(new Error('probe failed'));
+    await operations.listAgentInstallationStatus(undefined, manager);
+    await vi.advanceTimersByTimeAsync(0);
+    await operations.listAgentInstallationStatus(undefined, manager);
+
+    expect(snapshot).toHaveBeenCalledTimes(3);
+    expect(probe).toHaveBeenCalledTimes(2);
+  });
+
+  it('tries again on the next read when the first probe failed', async () => {
+    const probe = vi.fn(async () => {});
+    probe.mockRejectedValueOnce(new Error('probe failed'));
+    const { manager, operations } = setup(probe);
+
+    await expect(operations.listAgentInstallationStatus(undefined, manager)).rejects.toThrow(
+      'probe failed'
+    );
+    await operations.listAgentInstallationStatus(undefined, manager);
+
+    expect(probe).toHaveBeenCalledTimes(2);
+  });
+
+  it('always probes on an explicit refresh', async () => {
+    const { manager, operations, probe } = setup();
+
+    await operations.listAgentInstallationStatus(undefined, manager);
+    await operations.probeAll(undefined, manager);
+    await operations.probeAll(undefined, manager);
+
+    expect(probe).toHaveBeenCalledTimes(3);
   });
 });

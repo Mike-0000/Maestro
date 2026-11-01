@@ -3,9 +3,11 @@ import { classifySpawnPurpose, recordSpawn } from '@emdash/shared/perf';
 import type { EnvSource } from '#primitives/exec/api';
 import {
   createChildProcessTreeTerminator,
+  createWindowsPathScanner,
   planExecutableLaunch,
   toChildProcessLaunch,
   type FileExists,
+  type WindowsPathScanner,
 } from '#primitives/exec/node';
 import { createBoundExec } from './bound-exec';
 import type {
@@ -31,6 +33,8 @@ export class NodeExecutionContext implements IExecutionContext {
   private readonly refreshShellEnvDelegate: (() => Promise<void>) | undefined;
   private readonly platform: NodeJS.Platform;
   private readonly fileExists: FileExists | undefined;
+  private readonly pathScanner: WindowsPathScanner | undefined;
+  readonly findOnPath: IExecutionContext['findOnPath'];
 
   constructor(options: NodeExecutionContextOptions = {}) {
     this.root = options.root ?? '';
@@ -38,6 +42,13 @@ export class NodeExecutionContext implements IExecutionContext {
     this.refreshShellEnvDelegate = options.refreshShellEnv;
     this.platform = options.platform ?? process.platform;
     this.fileExists = options.fileExists;
+    if (this.platform === 'win32') {
+      const scanner = createWindowsPathScanner({
+        readEnv: async () => (await this.resolveEnv()) ?? process.env,
+      });
+      this.pathScanner = scanner;
+      this.findOnPath = (command) => scanner.find(command);
+    }
   }
 
   private readonly env: NodeJS.ProcessEnv | EnvSource | undefined;
@@ -156,6 +167,8 @@ export class NodeExecutionContext implements IExecutionContext {
   }
 
   async refreshShellEnv(): Promise<void> {
+    // Called after an install, whose new binary a recent folder listing would not show.
+    this.pathScanner?.clear();
     await this.refreshShellEnvDelegate?.();
   }
 

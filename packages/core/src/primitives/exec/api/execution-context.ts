@@ -39,6 +39,12 @@ export interface IExecutionContext {
   ): Promise<{ stdout: string; stderr: string }>;
 
   /**
+   * Every match for `command` on this context's PATH, found without starting a program. Present
+   * only where that is possible and worth it; callers fall back to `where` or `which`.
+   */
+  findOnPath?(command: string): Promise<string[]>;
+
+  /**
    * Refresh any cached shell environment for this context. Installers often
    * write shell startup files or install into paths that become visible only
    * after recapturing the user's shell environment.

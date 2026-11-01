@@ -16,3 +16,8 @@ export {
   type TaskkillRunner,
 } from './process-tree-terminator';
 export { planShellLaunch } from './shell-launch';
+export {
+  createWindowsPathScanner,
+  type WindowsPathScanner,
+  type WindowsPathScannerDeps,
+} from './windows-path-scan';

@@ -11,6 +11,8 @@ export const STALL_LOG_WINDOW_MS = 10_000;
 export const STALL_LOG_TASK_MS = 1_000;
 /** Terminal output this large within one window is a flood worth naming even without a freeze. */
 export const STALL_LOG_OUTPUT_CHARS = 4 * 1024 * 1024;
+/** A task this long is the machine having slept through it, which is not a freeze. */
+export const STALL_LOG_ASSUME_SLEEP_MS = 10 * 60_000;
 const TOP_SESSIONS = 5;
 
 export type StallLogReport = {
@@ -42,6 +44,7 @@ export function startStallLog(deps: StartStallLogDeps): () => void {
 
   const disposeObserver = deps.observe({ type: 'longtask' }, (entries) => {
     for (const entry of entries) {
+      if (entry.duration >= STALL_LOG_ASSUME_SLEEP_MS) continue;
       longTasks += 1;
       longTaskTotalMs += entry.duration;
       longestTaskMs = Math.max(longestTaskMs, entry.duration);
