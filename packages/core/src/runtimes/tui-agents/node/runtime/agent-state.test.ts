@@ -11,7 +11,7 @@ import {
 import type { BackgroundWork } from '#services/agent-plugins/api/plugins';
 import { TuiAgentStates } from './agent-state';
 
-function createTracker(logger?: Logger) {
+function createTracker(logger?: Logger, now: () => number = () => 1_000) {
   const sessionsLiveModel = createTuiSessionsLiveModel();
   const agentStatesLiveModel = createTuiAgentStatesLiveModel();
   const sessions = createTuiSessionsListModel(sessionsLiveModel);
@@ -21,13 +21,70 @@ function createTracker(logger?: Logger) {
   const tracker = new TuiAgentStates(
     sessions,
     agentStates,
-    () => 1_000,
+    now,
     onSessionIdChanged,
     onAgentStateChanged,
     logger
   );
   return { tracker, sessions, agentStates, onSessionIdChanged, onAgentStateChanged };
 }
+
+describe('TuiAgentStates late prompt report', () => {
+  const hooked = { hooks: { kind: 'http', supportedEvents: ['start'] } } as never;
+  const start = { kind: 'status', type: 'start' } as never;
+
+  function setup() {
+    let time = 0;
+    const warn = vi.fn();
+    const { tracker } = createTracker({ warn } as unknown as Logger, () => time);
+    return { tracker, warn, advance: (ms: number) => (time += ms) };
+  }
+
+  it('reports an agent that took over a second to report a submitted prompt', () => {
+    const { tracker, warn, advance } = setup();
+
+    tracker.markInputSubmitted('c1', hooked, '\r');
+    advance(12_000);
+    tracker.applyCanonicalEvent('c1', 'claude', start);
+
+    expect(warn).toHaveBeenCalledWith('TuiAgentStates: agent reported the submitted prompt late', {
+      conversationId: 'c1',
+      elapsedMs: 12_000,
+    });
+  });
+
+  it('stays quiet for a prompt reported promptly, and for later starts in that turn', () => {
+    const { tracker, warn, advance } = setup();
+
+    tracker.markInputSubmitted('c1', hooked, '\r');
+    advance(999);
+    tracker.applyCanonicalEvent('c1', 'claude', start);
+    advance(60_000);
+    tracker.applyCanonicalEvent('c1', 'claude', start);
+
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('does not tie a start to an Enter that answered a menu long ago', () => {
+    const { tracker, warn, advance } = setup();
+
+    tracker.markInputSubmitted('c1', hooked, '\r');
+    advance(5 * 60_000);
+    tracker.applyCanonicalEvent('c1', 'claude', start);
+
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('ignores keys other than Enter', () => {
+    const { tracker, warn, advance } = setup();
+
+    tracker.markInputSubmitted('c1', hooked, 'hello');
+    advance(12_000);
+    tracker.applyCanonicalEvent('c1', 'claude', start);
+
+    expect(warn).not.toHaveBeenCalled();
+  });
+});
 
 describe('TuiAgentStates', () => {
   it('maps canonical status hook events to agent state', () => {

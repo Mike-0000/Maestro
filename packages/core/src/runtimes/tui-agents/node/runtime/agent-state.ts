@@ -14,6 +14,10 @@ import type {
 } from '#services/agent-plugins/api/plugins';
 import { defaultHookEventParser } from '#services/agent-plugins/api/plugins/helpers';
 
+const LATE_START_MS = 1_000;
+/** Past this, Enter answered a menu and this start belongs to some later prompt. */
+const LATE_START_UNRELATED_MS = 5 * 60_000;
+
 const ATTENTION_NOTIFICATION_TYPES = new Set([
   'permission_prompt',
   'idle_prompt',
@@ -44,6 +48,9 @@ function isAcknowledgeable(kind: BackgroundWorkKind): boolean {
 
 export class TuiAgentStates {
   private readonly backgroundWork = new Map<string, TrackedBackgroundWork>();
+
+  /** When Enter last went to each agent that will report the prompt through a hook. */
+  private readonly submittedAt = new Map<string, number>();
 
   constructor(
     private readonly sessions: TuiSessionsListModel,
@@ -81,6 +88,7 @@ export class TuiAgentStates {
     }
 
     if (event.type === 'start') {
+      this.logLateStart(conversationId);
       this.openTurn(conversationId, providerId, event.initiator ?? 'user');
       this.setStatus(conversationId, {
         providerId,
@@ -165,9 +173,28 @@ export class TuiAgentStates {
     data: string
   ): void {
     if (!data.includes('\r')) return;
-    if (provider?.hooks.kind !== 'none' && provider?.hooks.supportedEvents.includes('start'))
+    if (provider?.hooks.kind !== 'none' && provider?.hooks.supportedEvents.includes('start')) {
+      this.submittedAt.set(conversationId, this.now());
       return;
+    }
     this.setStatus(conversationId, { status: 'working', source: 'input' });
+  }
+
+  /**
+   * How long the agent took to report a prompt after Enter was written to it. Time spent here is
+   * inside the agent and its hooks, not on Maestro's way to the terminal.
+   */
+  private logLateStart(conversationId: string): void {
+    const submittedAt = this.submittedAt.get(conversationId);
+    if (submittedAt === undefined) return;
+    this.submittedAt.delete(conversationId);
+    const elapsedMs = this.now() - submittedAt;
+    if (elapsedMs >= LATE_START_MS && elapsedMs < LATE_START_UNRELATED_MS) {
+      this.logger?.warn('TuiAgentStates: agent reported the submitted prompt late', {
+        conversationId,
+        elapsedMs,
+      });
+    }
   }
 
   markInitialPromptSubmitted(

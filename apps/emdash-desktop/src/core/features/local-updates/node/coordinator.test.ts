@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 import { REQUIRED_BUILD_CHECKS } from './coordinator/build-validation.mjs';
 import { createCoordinator } from './coordinator/coordinator.mjs';
+import { acquireDispatchLease } from './coordinator/install-target-gate.mjs';
 
 const exec = promisify(execFile);
 const temporaryDirectories: string[] = [];
@@ -719,3 +720,109 @@ describe('persistent Chorus delivery coordinator', { timeout: GIT_TEST_TIMEOUT_M
     });
   });
 });
+
+describe(
+  'coordinator calls made for every submitted prompt',
+  { timeout: GIT_TEST_TIMEOUT_MS },
+  () => {
+    async function fixtureWithGitCount() {
+      const fixture = await createFixture();
+      const gitCalls: string[][] = [];
+      const counted = createCoordinator({
+        stateRoot: join(fixture.root, 'state'),
+        git: async (cwd, args) => {
+          gitCalls.push(args);
+          return `${await git(cwd, args)}\n`;
+        },
+      });
+      const task = {
+        repositoryPath: fixture.repositoryPath,
+        projectId: 'project-a',
+        taskId: 'task-a',
+        taskName: 'Task A',
+        worktreePath: fixture.worktreePath,
+      };
+      return { ...fixture, counted, gitCalls, task };
+    }
+
+    it('starts no Git for a task already enrolled and working, after the first lookup', async () => {
+      const { counted, gitCalls, task } = await fixtureWithGitCount();
+      const { repositoryPath, taskId } = task;
+
+      await counted.status(repositoryPath);
+      await counted.join(task);
+      await counted.invalidate({ repositoryPath, taskId });
+      gitCalls.length = 0;
+
+      await counted.status(repositoryPath);
+      expect(await counted.join(task)).toMatchObject({ result: { joined: false } });
+      await counted.invalidate({ repositoryPath, taskId });
+
+      expect(gitCalls).toEqual([]);
+    });
+
+    it('writes nothing when invalidating a task that is already working', async () => {
+      const { counted, task } = await fixtureWithGitCount();
+      const { repositoryPath, taskId } = task;
+      await counted.invalidate({ repositoryPath, taskId });
+      const before = await counted.status(repositoryPath);
+
+      const again = await counted.invalidate({ repositoryPath, taskId });
+
+      expect(again).toMatchObject({ event: null, result: { invalidated: false } });
+      expect((await counted.status(repositoryPath)).generation).toBe(before.generation);
+    });
+
+    it('looks a repository up again once its identity has aged out', async () => {
+      const { repositoryPath, root } = await createFixture();
+      let time = 0;
+      const gitCalls: string[][] = [];
+      const counted = createCoordinator({
+        stateRoot: join(root, 'state'),
+        now: () => time,
+        git: async (cwd, args) => {
+          gitCalls.push(args);
+          return `${await git(cwd, args)}\n`;
+        },
+      });
+
+      await counted.status(repositoryPath);
+      expect(gitCalls).toHaveLength(2);
+      await counted.status(repositoryPath);
+      expect(gitCalls).toHaveLength(2);
+
+      time = 5 * 60_000;
+      await counted.status(repositoryPath);
+      expect(gitCalls).toHaveLength(4);
+    });
+
+    it('lets input that is still being recorded land before preparing a candidate', async () => {
+      const { coordinator, repositoryPath, root } = await createFixture();
+      const stateRoot = join(root, 'state');
+      const release = await acquireDispatchLease({ stateRoot, ownerId: randomUUID() });
+      let settled = false;
+      const preparing = coordinator
+        .prepare({ repositoryPath })
+        .catch(() => null)
+        .finally(() => {
+          settled = true;
+        });
+
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(settled).toBe(false);
+
+      release();
+      await preparing;
+      expect(settled).toBe(true);
+    });
+
+    it('still rejects enrolling a task that is new and from another repository', async () => {
+      const { counted, task } = await fixtureWithGitCount();
+      const other = await createFixture();
+
+      await expect(
+        counted.join({ ...task, taskId: 'task-other', worktreePath: other.worktreePath })
+      ).rejects.toThrow('different Git repository');
+    });
+  }
+);

@@ -135,8 +135,12 @@ export async function acquireDispatchLease({ stateRoot, ownerId }) {
   };
 }
 
-export async function waitForDispatchLeases(stateRoot, { pollIntervalMs = 100 } = {}) {
+export async function waitForDispatchLeases(
+  stateRoot,
+  { pollIntervalMs = 100, timeoutMs = Number.POSITIVE_INFINITY } = {}
+) {
   const leasesRoot = join(stateRoot, DISPATCH_LEASES_DIRECTORY);
+  const giveUpAt = Date.now() + timeoutMs;
   for (;;) {
     let entries;
     try {
@@ -169,7 +173,7 @@ export async function waitForDispatchLeases(stateRoot, { pollIntervalMs = 100 } 
         }
       }
     }
-    if (!active) return;
+    if (!active || Date.now() >= giveUpAt) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, pollIntervalMs));
   }
 }

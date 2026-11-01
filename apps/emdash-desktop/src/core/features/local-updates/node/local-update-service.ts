@@ -25,12 +25,21 @@ import { launchInstallWorker, requestInstallWorkerCancel } from './coordinator/i
 
 type Coordinator = ReturnType<typeof createCoordinator>;
 
+const INPUT_DB_BUSY_TIMEOUT_MS = 100;
+const INPUT_DB_RETRY_FOR_MS = 30_000;
+const SLOW_INPUT_RECORDING_MS = 1_000;
+
 export function createLocalUpdateService(
   db: AppDb,
   host: ChorusHostServices,
   dependencies: { getActiveSessionSummary(): Promise<ActiveSessionSummary> }
 ) {
   const coordinator: Coordinator = createCoordinator();
+  // For work on the main thread while someone waits on it: never block on another writer, retry.
+  const inputCoordinator: Coordinator = createCoordinator({
+    busyTimeoutMs: INPUT_DB_BUSY_TIMEOUT_MS,
+  });
+  const inputRecordings = new Map<string, { rerun: boolean; done: Promise<void> }>();
   const stateRoot = defaultStateRoot();
   const processOwnerId = randomUUID();
   let activeDispatchLeases = 0;
@@ -423,12 +432,17 @@ export function createLocalUpdateService(
     return { task, path: workspace.path };
   }
 
-  async function joinTask(projectId: string, repositoryPath: string, taskId: string) {
+  async function joinTask(
+    projectId: string,
+    repositoryPath: string,
+    taskId: string,
+    using: Coordinator = coordinator
+  ) {
     const workspace = await taskWorkspace(projectId, taskId);
     if (!workspace) return false;
     try {
       await access(workspace.path);
-      await coordinator.join({
+      await using.join({
         repositoryPath,
         projectId,
         taskId,
@@ -887,7 +901,8 @@ export function createLocalUpdateService(
     return current?.enabled ? 'chorus/main' : null;
   }
 
-  async function recordWorkStarted(projectId: string, taskId: string): Promise<() => void> {
+  /** Takes a dispatch lease, or throws if an install has new work paused. Touches no Git. */
+  async function enterDispatch(projectId: string): Promise<() => void> {
     const release = createDispatchLease();
     let releaseShared: (() => void) | undefined;
     try {
@@ -901,21 +916,107 @@ export function createLocalUpdateService(
         });
       }
       await assertInstallTargetAvailable();
-      const repositoryPath = await localRepository(projectId).catch(() => null);
-      if (!repositoryPath) return combineReleases(releaseShared, release);
-      const current = await coordinator.status(repositoryPath).catch(() => null);
-      if (!current?.enabled) return combineReleases(releaseShared, release);
-      const joined = await joinTask(projectId, repositoryPath, taskId);
-      if (!joined)
-        throw new Error('Chorus cannot start this agent until its local Git worktree is ready.');
-      await coordinator.invalidate({ repositoryPath, taskId });
-      await assertInstallTargetAvailable();
       return combineReleases(releaseShared, release);
     } catch (error) {
       releaseShared?.();
       release();
       throw error;
     }
+  }
+
+  async function recordWorkStarted(projectId: string, taskId: string): Promise<() => void> {
+    const release = await enterDispatch(projectId);
+    try {
+      const repositoryPath = await localRepository(projectId).catch(() => null);
+      if (!repositoryPath) return release;
+      const current = await coordinator.status(repositoryPath).catch(() => null);
+      if (!current?.enabled) return release;
+      const joined = await joinTask(projectId, repositoryPath, taskId);
+      if (!joined)
+        throw new Error('Chorus cannot start this agent until its local Git worktree is ready.');
+      await coordinator.invalidate({ repositoryPath, taskId });
+      await assertInstallTargetAvailable();
+      return release;
+    } catch (error) {
+      release();
+      throw error;
+    }
+  }
+
+  /**
+   * For Enter in a running agent, where someone is waiting on the key. Checks only that an install
+   * has not paused new work, then lets the input go while the coordinator records it behind. The
+   * returned function says the input was delivered. The lease is held until that and the recording
+   * are both done, so an install or a new candidate waits for the recording to land.
+   */
+  async function recordInputSubmitted(projectId: string, taskId: string): Promise<() => void> {
+    const release = await enterDispatch(projectId);
+    let pending = 2;
+    const finish = (): void => {
+      pending -= 1;
+      if (pending === 0) release();
+    };
+    void recordInputInBackground(projectId, taskId).finally(finish);
+    let delivered = false;
+    return () => {
+      if (delivered) return;
+      delivered = true;
+      finish();
+    };
+  }
+
+  /** Enter pressed again while a recording runs shares it, and earns one more pass after it. */
+  function recordInputInBackground(projectId: string, taskId: string): Promise<void> {
+    const running = inputRecordings.get(taskId);
+    if (running) {
+      running.rerun = true;
+      return running.done;
+    }
+    const entry = { rerun: false, done: Promise.resolve() };
+    inputRecordings.set(taskId, entry);
+    entry.done = (async () => {
+      const startedAt = Date.now();
+      try {
+        do {
+          entry.rerun = false;
+          await recordInputWithRetry(projectId, taskId);
+        } while (entry.rerun);
+      } catch (error) {
+        log.warn('local updates: recording submitted input failed', { projectId, taskId, error });
+      } finally {
+        inputRecordings.delete(taskId);
+        const elapsedMs = Date.now() - startedAt;
+        if (elapsedMs >= SLOW_INPUT_RECORDING_MS) {
+          log.warn('local updates: recording submitted input was slow', { taskId, elapsedMs });
+        }
+      }
+    })();
+    return entry.done;
+  }
+
+  async function recordInputWithRetry(projectId: string, taskId: string): Promise<void> {
+    const giveUpAt = Date.now() + INPUT_DB_RETRY_FOR_MS;
+    for (let delayMs = 200; ; delayMs = Math.min(delayMs * 2, 2_000)) {
+      try {
+        return await recordInput(projectId, taskId);
+      } catch (error) {
+        if (!isDatabaseBusy(error) || Date.now() >= giveUpAt) throw error;
+        await new Promise((resolveWait) => setTimeout(resolveWait, delayMs));
+      }
+    }
+  }
+
+  async function recordInput(projectId: string, taskId: string): Promise<void> {
+    const repositoryPath = await localRepository(projectId).catch(() => null);
+    if (!repositoryPath) return;
+    const current = await inputCoordinator.status(repositoryPath).catch((error: unknown) => {
+      if (isDatabaseBusy(error)) throw error;
+      return null;
+    });
+    if (!current?.enabled) return;
+    const joined = await joinTask(projectId, repositoryPath, taskId, inputCoordinator);
+    if (!joined) return;
+    await inputCoordinator.invalidate({ repositoryPath, taskId });
   }
 
   async function reconcile(): Promise<void> {
@@ -976,6 +1077,7 @@ export function createLocalUpdateService(
     onTaskWorkspaceReady,
     resolveTaskBase,
     recordWorkStarted,
+    recordInputSubmitted,
     reconcile,
   };
 }
@@ -1020,6 +1122,10 @@ async function pathExists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function isDatabaseBusy(error: unknown): boolean {
+  return error instanceof Error && /database is (locked|busy)/i.test(error.message);
 }
 
 function combineReleases(...releases: Array<() => void>): () => void {

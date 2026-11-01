@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -100,5 +101,16 @@ describe('local install target gate', () => {
     await expect(
       requestInstallWorkerCancel({ stateRoot, candidateId: 'candidate-b' })
     ).resolves.toMatchObject({ cancelled: false, applying: true });
+  });
+
+  it('stops waiting for a lease at the timeout when one is given', async () => {
+    const stateRoot = await makeRoot();
+    const release = await acquireDispatchLease({ stateRoot, ownerId: randomUUID() });
+
+    await expect(
+      waitForDispatchLeases(stateRoot, { pollIntervalMs: 1, timeoutMs: 10 })
+    ).resolves.toBeUndefined();
+
+    release();
   });
 });

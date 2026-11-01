@@ -271,6 +271,143 @@ describe('createConversationsWireController', () => {
     }
   );
 
+  describe('Enter', () => {
+    function deferred<T>() {
+      let resolve: (value: T) => void = () => {};
+      const promise = new Promise<T>((done) => (resolve = done));
+      return { promise, resolve };
+    }
+
+    it('takes only the install check on its way to the agent, and then says it arrived', async () => {
+      const order: string[] = [];
+      const recordWorkStarted = vi.fn(async () => () => undefined);
+      const recordInputSubmitted = vi.fn(async () => {
+        order.push('check');
+        return () => order.push('delivered');
+      });
+      const sendInput = vi.fn(async () => {
+        order.push('send');
+        return ok(undefined);
+      });
+      const controller = setupController({
+        client: { tuiAgents: { sendInput } },
+        localUpdates: { recordWorkStarted, recordInputSubmitted },
+      });
+
+      await controller.call('tui.sendInput', {
+        conversationId: target.conversationId,
+        data: '\r',
+      });
+
+      expect(order).toEqual(['check', 'send', 'delivered']);
+      expect(recordInputSubmitted).toHaveBeenCalledWith(target.projectId, target.taskId);
+      expect(recordWorkStarted).not.toHaveBeenCalled();
+    });
+
+    it('does not touch delivery for ordinary keys', async () => {
+      const recordInputSubmitted = vi.fn(async () => () => undefined);
+      const sendInput = vi.fn(async () => ok(undefined));
+      const controller = setupController({
+        client: { tuiAgents: { sendInput } },
+        localUpdates: { recordInputSubmitted },
+      });
+
+      await controller.call('tui.sendInput', {
+        conversationId: target.conversationId,
+        data: 'a',
+      });
+
+      expect(recordInputSubmitted).not.toHaveBeenCalled();
+      expect(sendInput).toHaveBeenCalledOnce();
+    });
+
+    it('blocks the key when an install has paused new work', async () => {
+      const sendInput = vi.fn(async () => ok(undefined));
+      const controller = setupController({
+        client: { tuiAgents: { sendInput } },
+        localUpdates: {
+          recordInputSubmitted: async () => {
+            throw new Error('new sessions are paused');
+          },
+        },
+      });
+
+      await expect(
+        controller.call('tui.sendInput', { conversationId: target.conversationId, data: '\r' })
+      ).rejects.toThrow('new sessions are paused');
+      expect(sendInput).not.toHaveBeenCalled();
+    });
+
+    it('is not overtaken by keys typed after it, and a failure does not hold them up', async () => {
+      const check = deferred<() => void>();
+      const sent: string[] = [];
+      const sendInput = vi.fn(async (input: { data: string }) => {
+        sent.push(input.data);
+        return ok(undefined);
+      });
+      const controller = setupController({
+        client: { tuiAgents: { sendInput } },
+        localUpdates: { recordInputSubmitted: () => check.promise },
+      });
+      const send = (data: string) =>
+        controller.call('tui.sendInput', { conversationId: target.conversationId, data });
+
+      const enter = send('\r');
+      const typed = send('next');
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(sent).toEqual([]);
+
+      check.resolve(() => undefined);
+      await Promise.all([enter, typed]);
+      expect(sent).toEqual(['\r', 'next']);
+    });
+
+    it('logs where the time went when Enter is slow', async () => {
+      const warn = vi.fn();
+      vi.useFakeTimers();
+      try {
+        const controller = setupController({
+          client: {
+            tuiAgents: {
+              sendInput: async () => {
+                vi.setSystemTime(Date.now() + 1_500);
+                return ok(undefined);
+              },
+            },
+          },
+          logger: { warn },
+        });
+
+        await controller.call('tui.sendInput', {
+          conversationId: target.conversationId,
+          data: '\r',
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+
+      expect(warn).toHaveBeenCalledWith(
+        'conversations: Enter reached the agent slowly',
+        expect.objectContaining({ conversationId: target.conversationId, sendMs: 1_500 })
+      );
+    });
+
+    it('does not log a quick Enter', async () => {
+      const warn = vi.fn();
+      const controller = setupController({
+        client: { tuiAgents: { sendInput: async () => ok(undefined) } },
+        logger: { warn },
+      });
+
+      await controller.call('tui.sendInput', {
+        conversationId: target.conversationId,
+        data: '\r',
+      });
+
+      expect(warn).not.toHaveBeenCalled();
+    });
+  });
+
   it('records submitted TUI input only after a successful carriage return', async () => {
     const sendInput = vi.fn(async () => ok(undefined));
     const recordTuiInput = vi.fn(async () => {});
@@ -518,7 +655,11 @@ function setupController(options: {
   attachmentError?: { type: 'project-missing'; projectId: string };
   resolvedHosts?: HostRef[];
   acpInput?: object;
-  localUpdates?: { recordWorkStarted(projectId: string, taskId: string): Promise<() => void> };
+  localUpdates?: {
+    recordWorkStarted?(projectId: string, taskId: string): Promise<() => void>;
+    recordInputSubmitted?(projectId: string, taskId: string): Promise<() => void>;
+  };
+  logger?: { warn: (...args: unknown[]) => void };
   hooks?: Partial<{
     persistAcpConfigOption: (
       target: TestRuntimeTarget,
@@ -536,7 +677,7 @@ function setupController(options: {
   return createConversationsWireController({
     terminalFileSources: { prepare: vi.fn() },
     db: {} as never,
-    logger: { warn: vi.fn() } as never,
+    logger: (options.logger ?? { warn: vi.fn() }) as never,
     runtimes: {
       client: async (host: HostRef) => {
         options.resolvedHosts?.push(host);
@@ -554,7 +695,7 @@ function setupController(options: {
     taskSessions: { getTask: vi.fn() },
     withCompensation: async ({ action }) => action(),
     hostIsReachable: () => true,
-    localUpdates: options.localUpdates,
+    localUpdates: options.localUpdates as never,
     resolveTarget: async () => ({
       ...target,
       host: options.host ?? target.host,

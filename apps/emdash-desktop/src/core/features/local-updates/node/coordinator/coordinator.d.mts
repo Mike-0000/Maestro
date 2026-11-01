@@ -101,6 +101,9 @@ export type DeliveryStatus = {
 
 export function createCoordinator(options?: {
   stateRoot?: string;
+  /** How long a state database call blocks this thread waiting for another writer. */
+  busyTimeoutMs?: number;
+  now?: () => number;
   git?: (cwd: string, args: string[]) => Promise<string>;
   runValidation?: (input: {
     repositoryPath: string;
