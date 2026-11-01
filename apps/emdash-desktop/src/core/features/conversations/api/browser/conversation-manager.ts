@@ -29,6 +29,9 @@ import { makePtySessionId } from '@core/primitives/pty/api';
 import { getConversationsClient } from './client';
 import { acquireProjectSessionLists } from './project-session-lists';
 
+/** Enter taking this long is a delay someone notices. */
+const SLOW_ENTER_MS = 1_000;
+
 /**
  * Supplies measured terminal dimensions for a conversation's PTY spawn.
  * Injected by the workbench composition (which owns the pane layout); may wait
@@ -606,10 +609,19 @@ function createTuiAgentsConnector(
     sendInput(data: string) {
       const sentGeneration = generation();
       if (sentGeneration === undefined) return;
+      const pressedAt = Date.now();
       void client()
         .then(async (runtime) => {
           if (generation() !== sentGeneration) return;
           const result = await runtime.tui.sendInput({ conversationId, data });
+          const elapsedMs = Date.now() - pressedAt;
+          // Read against the main process's own timing: the gap is the trip between the two.
+          if (data.includes('\r') && elapsedMs >= SLOW_ENTER_MS) {
+            log.warn('ConversationManagerStore: Enter took long to reach the agent', {
+              conversationId,
+              elapsedMs,
+            });
+          }
           if (!result.success) {
             log.warn('ConversationManagerStore: TUI input failed', {
               conversationId,

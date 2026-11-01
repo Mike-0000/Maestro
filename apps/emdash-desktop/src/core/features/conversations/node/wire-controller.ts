@@ -44,6 +44,9 @@ import {
 } from '../api/runtime-adapter';
 import { conversationWireEvents } from './event-host';
 
+/** Enter taking this long is a delay someone notices. */
+const SLOW_ENTER_MS = 1_000;
+
 type ConversationRuntimeTarget = Readonly<{
   conversationId: string;
   projectId: string;
@@ -100,6 +103,7 @@ export type CreateConversationsWireControllerOptions = Readonly<{
   telemetry: TelemetryService;
   localUpdates?: {
     recordWorkStarted(projectId: string, taskId: string): Promise<() => void>;
+    recordInputSubmitted(projectId: string, taskId: string): Promise<() => void>;
   };
   taskSessions: Pick<TaskSessionManager, 'getTask'>;
   withCompensation: CompensationRunner;
@@ -132,6 +136,18 @@ export function createConversationsWireController(
     recordWorkStarted: options.localUpdates?.recordWorkStarted,
   });
   const target = (conversationId: string) => resolveTarget(conversationId);
+  // Input arrives in order but takes different paths; Enter must not be overtaken by later keys.
+  const inputQueues = new Map<string, Promise<unknown>>();
+  const inOrder = <T>(conversationId: string, work: () => Promise<T>): Promise<T> => {
+    const run = (inputQueues.get(conversationId) ?? Promise.resolve()).then(work);
+    const tail: Promise<unknown> = run
+      .catch(() => {})
+      .then(() => {
+        if (inputQueues.get(conversationId) === tail) inputQueues.delete(conversationId);
+      });
+    inputQueues.set(conversationId, tail);
+    return run;
+  };
   const run = <T, E>(
     conversationId: string,
     work: (
@@ -356,30 +372,48 @@ export function createConversationsWireController(
         run(input.conversationId, (client) => client.tuiAgents.delete(input, callOptions(meta))),
       kill: (input, meta) =>
         run(input.conversationId, (client) => client.tuiAgents.kill(input, callOptions(meta))),
-      sendInput: async (input, meta) => {
-        const runtimeTarget = await target(input.conversationId);
-        let releaseDispatch: (() => void) | undefined;
-        if (input.data.includes('\r')) {
-          releaseDispatch = await options.localUpdates?.recordWorkStarted(
-            runtimeTarget.projectId,
-            runtimeTarget.taskId
-          );
-        }
-        try {
-          return await withConversationRuntime(
-            options,
-            Promise.resolve(runtimeTarget),
-            async (client) => {
-              const result = await client.tuiAgents.sendInput(input, callOptions(meta));
-              if (result.success && input.data.includes('\r')) {
-                await hooks.recordTuiInput(runtimeTarget);
+      sendInput: (input, meta) => {
+        const receivedAt = Date.now();
+        return inOrder(input.conversationId, async () => {
+          const startedAt = Date.now();
+          const runtimeTarget = await target(input.conversationId);
+          const submitted = input.data.includes('\r');
+          const resolvedAt = Date.now();
+          // Only an install's hold on new work can stop this. Recording the work runs behind it.
+          const delivered = submitted
+            ? await options.localUpdates?.recordInputSubmitted(
+                runtimeTarget.projectId,
+                runtimeTarget.taskId
+              )
+            : undefined;
+          const checkedAt = Date.now();
+          try {
+            return await withConversationRuntime(
+              options,
+              Promise.resolve(runtimeTarget),
+              async (client) => {
+                const result = await client.tuiAgents.sendInput(input, callOptions(meta));
+                if (result.success && submitted) {
+                  await hooks.recordTuiInput(runtimeTarget);
+                }
+                return result;
               }
-              return result;
+            );
+          } finally {
+            delivered?.();
+            const finishedAt = Date.now();
+            if (submitted && finishedAt - receivedAt >= SLOW_ENTER_MS) {
+              options.logger.warn('conversations: Enter reached the agent slowly', {
+                conversationId: input.conversationId,
+                totalMs: finishedAt - receivedAt,
+                queuedMs: startedAt - receivedAt,
+                resolveMs: resolvedAt - startedAt,
+                installCheckMs: checkedAt - resolvedAt,
+                sendMs: finishedAt - checkedAt,
+              });
             }
-          );
-        } finally {
-          releaseDispatch?.();
-        }
+          }
+        });
       },
       resize: (input, meta) =>
         run(input.conversationId, (client) => client.tuiAgents.resize(input, callOptions(meta))),

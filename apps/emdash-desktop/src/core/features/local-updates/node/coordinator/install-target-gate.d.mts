@@ -30,5 +30,5 @@ export function acquireDispatchLease(input: {
 }): Promise<() => void>;
 export function waitForDispatchLeases(
   stateRoot: string,
-  options?: { pollIntervalMs?: number }
+  options?: { pollIntervalMs?: number; timeoutMs?: number }
 ): Promise<void>;

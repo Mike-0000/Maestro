@@ -5,19 +5,40 @@ import { dirname, isAbsolute, join as joinPath, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { promisify } from 'node:util';
 import { REQUIRED_BUILD_CHECKS, validateIntegratedCandidate } from './build-validation.mjs';
+import { waitForDispatchLeases } from './install-target-gate.mjs';
 import { applyEvent, createProjectState, isCandidateEligible, requireTask } from './model.mjs';
 
 const execFile = promisify(execFileCallback);
 const LIFECYCLE_WITHDRAWALS = new Set(['archived', 'deleted']);
+/** A checkout's Git identity only changes if its folder is replaced, which is rare and slow to do. */
+const REPOSITORY_IDENTITY_TTL_MS = 5 * 60_000;
+/** How long preparing a candidate waits for submitted input to finish being recorded. */
+const PREPARE_DISPATCH_WAIT_MS = 60_000;
 
 export function createCoordinator({
   stateRoot = defaultStateRoot(),
   git = runGit,
   runValidation = validateIntegratedCandidate,
+  busyTimeoutMs = 15_000,
+  now = Date.now,
 } = {}) {
+  /** Every call needs this, and each lookup starts two Git processes. */
+  const repositoryIdentities = new Map();
+
   async function repositoryIdentity(worktreePath) {
     const resolvedPath = resolve(worktreePath);
     if (!isAbsolute(resolvedPath)) throw new Error('Repository path must be absolute.');
+    const cached = repositoryIdentities.get(resolvedPath);
+    if (cached && cached.expiresAt > now()) return cached.identity;
+    const identity = await readRepositoryIdentity(resolvedPath);
+    repositoryIdentities.set(resolvedPath, {
+      identity,
+      expiresAt: now() + REPOSITORY_IDENTITY_TTL_MS,
+    });
+    return identity;
+  }
+
+  async function readRepositoryIdentity(resolvedPath) {
     const commonDir = await git(resolvedPath, [
       'rev-parse',
       '--path-format=absolute',
@@ -35,7 +56,7 @@ export function createCoordinator({
   async function openStateDb() {
     await mkdir(stateRoot, { recursive: true });
     const database = new DatabaseSync(joinPath(stateRoot, 'coordinators.sqlite'));
-    database.exec('PRAGMA synchronous = FULL; PRAGMA busy_timeout = 15000;');
+    database.exec(`PRAGMA synchronous = FULL; PRAGMA busy_timeout = ${Number(busyTimeoutMs)};`);
     database.exec(`CREATE TABLE IF NOT EXISTS coordinators (
       repository_id TEXT PRIMARY KEY NOT NULL,
       state_json TEXT NOT NULL,
@@ -237,12 +258,19 @@ export function createCoordinator({
     if (!['shipping', 'research'].includes(mode))
       throw new Error('Task mode must be shipping or research.');
     const identity = await repositoryIdentity(repositoryPath);
+    const state = await loadState(identity);
+    // Already enrolled, which is nearly every call: nothing to look up and nothing to write.
+    const enrolled = state.tasks[taskId];
+    const rejoining =
+      enrolled?.state === 'withdrawn' && LIFECYCLE_WITHDRAWALS.has(enrolled.withdrawnReason);
+    if (state.enabled && enrolled && !rejoining) {
+      return { event: null, result: { joined: false, generation: state.generation } };
+    }
     const taskIdentity = await repositoryIdentity(worktreePath);
     if (taskIdentity.repositoryId !== identity.repositoryId) {
       throw new Error('Task worktree belongs to a different Git repository.');
     }
     const path = resolve(worktreePath);
-    const state = await loadState(identity);
     const head = (await git(path, ['rev-parse', 'HEAD'])).trim();
     const baseCommit = (await git(path, ['merge-base', state.mainRef, head])).trim();
     assertSha(baseCommit, 'task base');
@@ -276,26 +304,29 @@ export function createCoordinator({
     });
   }
 
+  function invalidation(state, taskId, reason) {
+    const task = requireTask(state, taskId);
+    if (state.applyingCandidateId) {
+      throw new Error('A local Maestro update is applying; new agent work is temporarily blocked.');
+    }
+    if (task.mode === 'research' || task.state === 'withdrawn') {
+      return { event: null, result: { invalidated: false, generation: state.generation } };
+    }
+    if (task.state === 'working' && task.ready === null) {
+      return { event: null, result: { invalidated: false, generation: state.generation } };
+    }
+    return {
+      event: { type: 'task-work-started', taskId, reason },
+      result: { invalidated: true, generation: state.generation + 1 },
+    };
+  }
+
   async function invalidate({ repositoryPath, taskId, reason = 'new coding work' }) {
     const identity = await repositoryIdentity(repositoryPath);
-    return record(identity, async (state) => {
-      const task = requireTask(state, taskId);
-      if (state.applyingCandidateId) {
-        throw new Error(
-          'A local Maestro update is applying; new agent work is temporarily blocked.'
-        );
-      }
-      if (task.mode === 'research' || task.state === 'withdrawn') {
-        return { event: null, result: { invalidated: false, generation: state.generation } };
-      }
-      if (task.state === 'working' && task.ready === null) {
-        return { event: null, result: { invalidated: false, generation: state.generation } };
-      }
-      return {
-        event: { type: 'task-work-started', taskId, reason },
-        result: { invalidated: true, generation: state.generation + 1 },
-      };
-    });
+    // Most calls change nothing. Reading first spares them a durable write of the whole state.
+    const preview = invalidation(await loadState(identity), taskId, reason);
+    if (!preview.event) return preview;
+    return record(identity, async (state) => invalidation(state, taskId, reason));
   }
 
   async function submit({
@@ -463,6 +494,10 @@ export function createCoordinator({
   async function prepare({ repositoryPath, policy = 'snapshot', taskIds = null }) {
     if (!['snapshot', 'follow-project'].includes(policy))
       throw new Error('Policy must be snapshot or follow-project.');
+    // Submitted input reaches the agent before it is recorded here. Let that recording land, so a
+    // task that just got new work is not picked up as ready. Bounded: a lease whose process id was
+    // reused would otherwise hold every push forever.
+    await waitForDispatchLeases(stateRoot, { timeoutMs: PREPARE_DISPATCH_WAIT_MS });
     const identity = await repositoryIdentity(repositoryPath);
     const database = await openStateDb();
     let snapshot;
