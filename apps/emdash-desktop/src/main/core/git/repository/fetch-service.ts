@@ -9,6 +9,8 @@ import type { GitRuntimeClient } from '@main/gateway/desktop-workers';
 import { log } from '@main/lib/logger';
 
 const DEFAULT_INTERVAL_MS = 2 * 60 * 1000;
+/** The longest a repository whose fetches keep failing waits before it is tried again. */
+const MAX_BACKOFF_MS = 30 * 60 * 1000;
 
 type GitRepositoryFetchResult = Result<void, FetchError>;
 
@@ -16,6 +18,9 @@ export class GitRepositoryFetchService {
   private _timer: ReturnType<typeof setInterval> | undefined;
   private _inflight: Promise<GitRepositoryFetchResult> | undefined;
   private readonly intervalMs = DEFAULT_INTERVAL_MS;
+  private _failures = 0;
+  /** Polls still to pass up before a fetch that failed is tried again. */
+  private _skipTicks = 0;
 
   constructor(
     private readonly git: GitRuntimeClient,
@@ -26,9 +31,7 @@ export class GitRepositoryFetchService {
 
   /** Start the background fetch loop: immediate fetch, then every `intervalMs`. */
   start(): void {
-    void this._canBackgroundFetchWithoutPrompt().then((canFetch) => {
-      if (canFetch) void this._doFetch();
-    });
+    void this._tick();
     this._scheduleNext();
   }
 
@@ -60,11 +63,35 @@ export class GitRepositoryFetchService {
   }
 
   private _scheduleNext(): void {
-    this._timer = setInterval(() => {
-      void this._canBackgroundFetchWithoutPrompt().then((canFetch) => {
-        if (canFetch) void this._doFetch();
-      });
-    }, this.intervalMs);
+    this._timer = setInterval(() => void this._tick(), this.intervalMs);
+  }
+
+  /**
+   * One poll. A fetch that fails is not repeated every interval: each failure in a row doubles
+   * the wait, up to `MAX_BACKOFF_MS`, so a broken repository or remote is not hit forever at the
+   * full rate. The first success returns to the normal interval.
+   */
+  private async _tick(): Promise<void> {
+    // A fetch still running from an earlier poll is not counted twice.
+    if (this._inflight) return;
+    if (this._skipTicks > 0) {
+      this._skipTicks -= 1;
+      return;
+    }
+    if (!(await this._canBackgroundFetchWithoutPrompt())) return;
+    const result = await this._doFetch();
+    if (result.success) {
+      this._failures = 0;
+      return;
+    }
+    this._failures += 1;
+    const backoff = Math.min(this.intervalMs * 2 ** (this._failures - 1), MAX_BACKOFF_MS);
+    this._skipTicks = Math.round(backoff / this.intervalMs) - 1;
+    log.warn('GitRepositoryFetchService: background fetch failed; backing off', {
+      failures: this._failures,
+      retryInMs: backoff,
+      error: gitErrorMessage(result.error),
+    });
   }
 
   private async _canBackgroundFetchWithoutPrompt(): Promise<boolean> {

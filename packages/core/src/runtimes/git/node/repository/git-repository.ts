@@ -81,6 +81,10 @@ export class GitRepository {
         [
           'fetch',
           '--progress',
+          // Fetch is the app's background poll. Git's own auto maintenance after it would run a
+          // detached `gc`, and a `gc` that fails (a repository missing objects) leaves a partial
+          // `tmp_pack_*` behind on every poll; maintenance belongs to the user's own commands.
+          '--no-auto-maintenance',
           ...(options.force ? ['--force'] : []),
           ...(remote ? [remote] : []),
           ...(options.refspec ? [options.refspec] : []),
@@ -156,6 +160,7 @@ export class GitRepository {
           [
             'fetch',
             '--progress',
+            '--no-auto-maintenance',
             forkRemote,
             '--force',
             '--',
@@ -187,6 +192,7 @@ export class GitRepository {
         [
           'fetch',
           '--progress',
+          '--no-auto-maintenance',
           remote,
           '--force',
           '--',
