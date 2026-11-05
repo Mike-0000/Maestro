@@ -12,6 +12,19 @@ export type SttEngineId = z.infer<typeof sttEngineIdSchema>;
 export const transcriptionEngineSchema = z.enum([...sttEngineIds, 'parakeet-local']);
 export type TranscriptionEngine = z.infer<typeof transcriptionEngineSchema>;
 
+/**
+ * The on-device speech models (both NVIDIA Parakeet 0.6B transducers run by sherpa-onnx), used by
+ * dictation and by "Transcribe on this computer". Ultra is Moondream's post-trained Parakeet TDT v3
+ * and covers 25 European languages; Unified is NVIDIA's English-only model.
+ */
+export const localSpeechModelIds = ['parakeet-ultra', 'parakeet-unified-en'] as const;
+export const localSpeechModelSchema = z.enum(localSpeechModelIds);
+export type LocalSpeechModelId = z.infer<typeof localSpeechModelSchema>;
+export const LOCAL_SPEECH_MODEL_LABELS: Record<LocalSpeechModelId, string> = {
+  'parakeet-ultra': 'Parakeet Ultra (25 languages)',
+  'parakeet-unified-en': 'Parakeet Unified (English)',
+};
+
 /** The longest Google Cloud voice style the settings page accepts. */
 export const GEMINI_VOICE_STYLE_MAX_CHARS = 1_000;
 
@@ -26,6 +39,8 @@ export const voiceSettingsSchema = z.object({
    * Parakeet) instead of `engine`; no audio is sent to a speech-to-text API.
    */
   localTranscriber: z.boolean(),
+  /** Which on-device model dictation and `localTranscriber` use. */
+  localSpeechModel: localSpeechModelSchema,
   language: z.string(),
   /** Electron accelerator for the global toggle-to-talk shortcut; empty disables it. */
   globalShortcut: z.string(),
@@ -83,6 +98,7 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   whisperUrl: 'http://127.0.0.1:8178',
   openrouterSttModel: 'google/gemini-3.5-flash-lite',
   localTranscriber: false,
+  localSpeechModel: 'parakeet-ultra',
   language: 'en',
   globalShortcut: 'Control+Alt+Space',
   globalHoldKey: 'off',
@@ -117,7 +133,7 @@ export const voiceErrorSchema = z.object({
 });
 export type VoiceError = z.infer<typeof voiceErrorSchema>;
 
-/** The on-device dictation model (NVIDIA Parakeet), fetched once on first use. */
+/** The selected on-device speech model (`localSpeechModel`), fetched once on first use. */
 export const dictationModelStatusSchema = z.object({
   state: z.enum(['missing', 'downloading', 'ready', 'failed']),
   receivedBytes: z.number(),

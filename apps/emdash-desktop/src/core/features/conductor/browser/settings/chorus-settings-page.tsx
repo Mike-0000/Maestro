@@ -12,7 +12,11 @@ import {
 } from '@core/features/talk/api/contract';
 import { TALK_MODELS } from '@core/features/talk/api/usage';
 import { getTalkStore } from '@core/features/talk/contributions/browser/app-stores';
-import { GEMINI_VOICE_STYLE_MAX_CHARS } from '@core/features/voice/api/contract';
+import {
+  GEMINI_VOICE_STYLE_MAX_CHARS,
+  LOCAL_SPEECH_MODEL_LABELS,
+  localSpeechModelSchema,
+} from '@core/features/voice/api/contract';
 import {
   acceleratorFromCodes,
   acceleratorLabel,
@@ -155,20 +159,22 @@ function isTalkEffort(value: string): value is TalkEffort {
   return value in TALK_EFFORT_LABELS;
 }
 
-/** The Parakeet model behind "Transcribe on this computer": its state, and fetching it. */
+/** The selected on-device model behind dictation and "Transcribe on this computer". */
 const LocalTranscriberModel = observer(function LocalTranscriberModel() {
   const dictation = getDictationStore();
   const model = dictation.model;
   if (!model) return <span className="text-xs text-foreground-muted">Checking the model…</span>;
   if (model.state === 'ready') {
-    return <span className="text-xs text-foreground-muted">The Parakeet model is ready.</span>;
+    return (
+      <span className="text-xs text-foreground-muted">The model is downloaded and ready.</span>
+    );
   }
   if (model.state === 'downloading') {
     const percent =
       model.totalBytes > 0 ? Math.round((model.receivedBytes / model.totalBytes) * 100) : 0;
     return (
       <span className="text-xs text-foreground-muted tabular-nums" role="status">
-        Downloading the Parakeet model: {percent}%
+        Downloading the model: {percent}%
       </span>
     );
   }
@@ -350,7 +356,7 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
         />
         <SettingsRow
           label="Transcribe on this computer"
-          description="Off by default. Transcribe voice commands locally with NVIDIA Parakeet (the dictation model) instead of the speech-to-text engine above; the text goes straight to the conductor and no audio is sent to a transcription API. English only."
+          description="Off by default. Transcribe voice commands locally with Parakeet (the dictation model) instead of the speech-to-text engine above; the text goes straight to the conductor and no audio is sent to a transcription API."
           control={
             <Switch
               checked={voiceSettings?.localTranscriber ?? false}
@@ -362,9 +368,39 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
             />
           }
         />
+        <SettingsRow
+          label="On-device speech model"
+          description="Used by dictation, and by Transcribe on this computer. Ultra (Moondream's Parakeet, about 670 MB) detects 25 European languages and copes better with noise; Unified (NVIDIA, about 660 MB) is English only. Each is a one-time download, and switching keeps the other on disk."
+          control={
+            <Select.Root
+              value={voiceSettings?.localSpeechModel ?? 'parakeet-ultra'}
+              disabled={!voiceSettings}
+              onValueChange={(value) => {
+                const parsed = localSpeechModelSchema.safeParse(value);
+                if (!parsed.success) return;
+                void voice
+                  .updateSettings({ localSpeechModel: parsed.data })
+                  .then(() => dictation.refreshModel());
+              }}
+            >
+              <Select.Trigger className="w-[230px]">
+                <Select.Value>
+                  {LOCAL_SPEECH_MODEL_LABELS[voiceSettings?.localSpeechModel ?? 'parakeet-ultra']}
+                </Select.Value>
+              </Select.Trigger>
+              <Select.Content align="end">
+                {Object.entries(LOCAL_SPEECH_MODEL_LABELS).map(([id, label]) => (
+                  <Select.Item key={id} value={id}>
+                    {label}
+                  </Select.Item>
+                ))}
+              </Select.Content>
+            </Select.Root>
+          }
+        />
         {voiceSettings?.localTranscriber && (
           <SettingsRow
-            label="Parakeet model"
+            label="Model download"
             description="A one-time download; after that, transcription works offline."
             control={<LocalTranscriberModel />}
           />

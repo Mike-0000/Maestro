@@ -4,7 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DictationModelStatus } from '../api/contract';
-import { DictationModel, LocalDictation, type ModelFile } from './local-dictation';
+import {
+  DICTATION_MODELS,
+  DictationModel,
+  LocalDictation,
+  type DictationModelSource,
+  type ModelFile,
+} from './local-dictation';
 
 const { createAsync } = vi.hoisted(() => ({ createAsync: vi.fn() }));
 vi.mock('sherpa-onnx-node', () => ({ default: { OfflineRecognizer: { createAsync } } }));
@@ -17,6 +23,10 @@ function fileOf(name: keyof typeof CONTENT, body: string = CONTENT[name]): Model
     size: Buffer.byteLength(body),
     sha256: createHash('sha256').update(body).digest('hex'),
   };
+}
+
+function sourceOf(...files: ModelFile[]): DictationModelSource {
+  return { revision: 'r1', baseUrl: 'https://m', files };
 }
 
 let dir: string;
@@ -48,18 +58,18 @@ async function downloaded(model: DictationModel): Promise<DictationModelStatus> 
 describe('DictationModel', () => {
   it('fetches the files once, checks them, and is ready afterwards', async () => {
     serve(CONTENT);
-    const model = new DictationModel(dir, [fileOf('a.onnx'), fileOf('tokens.txt')], 'https://m');
+    const model = new DictationModel(dir, sourceOf(fileOf('a.onnx'), fileOf('tokens.txt')));
     expect((await model.status()).state).toBe('missing');
     expect((await downloaded(model)).state).toBe('ready');
     expect(await readFile(join(dir, 'a.onnx'), 'utf8')).toBe('model bytes');
     // A second model object over the same directory needs no download.
-    const again = new DictationModel(dir, [fileOf('a.onnx'), fileOf('tokens.txt')], 'https://m');
+    const again = new DictationModel(dir, sourceOf(fileOf('a.onnx'), fileOf('tokens.txt')));
     expect((await again.status()).state).toBe('ready');
   });
 
   it('keeps nothing that does not match its checksum', async () => {
     serve({ ...CONTENT, 'a.onnx': 'other bytes' });
-    const model = new DictationModel(dir, [fileOf('a.onnx'), fileOf('tokens.txt')], 'https://m');
+    const model = new DictationModel(dir, sourceOf(fileOf('a.onnx'), fileOf('tokens.txt')));
     const status = await downloaded(model);
     expect(status.state).toBe('failed');
     expect(status.message).toMatch(/checksum/);
@@ -69,7 +79,7 @@ describe('DictationModel', () => {
 
   it('reports a failed request and can be retried', async () => {
     serve({});
-    const model = new DictationModel(dir, [fileOf('a.onnx')], 'https://m');
+    const model = new DictationModel(dir, sourceOf(fileOf('a.onnx')));
     expect((await downloaded(model)).state).toBe('failed');
     serve(CONTENT);
     expect((await downloaded(model)).state).toBe('ready');
@@ -84,7 +94,9 @@ describe('LocalDictation', () => {
       decodeAsync,
       getResult: () => ({ text: ' Hello there. ' }),
     });
-    const dictation = new LocalDictation(new DictationModel(dir));
+    const dictation = new LocalDictation(
+      new DictationModel(dir, DICTATION_MODELS['parakeet-ultra'])
+    );
     const first = dictation.open(() => {});
     const samples = new Int16Array(16_000).fill(8000);
     first.push(new Uint8Array(samples.buffer));

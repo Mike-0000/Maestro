@@ -188,8 +188,8 @@ const ModelSetup = observer(function ModelSetup({ dictation }: { dictation: Dict
         {model.state === 'failed' && (
           <span className="text-amber-700 dark:text-amber-300">{model.message} </span>
         )}
-        It needs NVIDIA’s Parakeet speech model, a one-time {megabytes(model.totalBytes)} MB
-        download. After that your voice never leaves this computer.
+        It needs the Parakeet speech model, a one-time {megabytes(model.totalBytes)} MB download.
+        After that your voice never leaves this computer.
       </p>
       <button
         type="button"

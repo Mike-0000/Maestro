@@ -44,7 +44,7 @@ export const VoiceSetupPanel = observer(function VoiceSetupPanel({
   const keyReady = local
     ? dictation.model?.state === 'ready'
     : engine === 'whisper-local' || Boolean(voice.status?.credentials[engine]);
-  const engineName = local ? 'NVIDIA Parakeet on this computer' : ENGINE_NAMES[engine];
+  const engineName = local ? 'Parakeet on this computer' : ENGINE_NAMES[engine];
   const finish = () => {
     void voice.updateSettings({ onboarded: true });
     onClose();

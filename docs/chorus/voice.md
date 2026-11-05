@@ -37,13 +37,26 @@ talks to the conductor; dictation goes straight to the agent that is open, in yo
 | Send | Click **Send** or the button again, or tap the key again. The final text is sent to the open agent at once, with no cancel window |
 | Drop it | **Esc** or **Discard** |
 
-Transcription runs on this computer with NVIDIA's
-[Parakeet Unified English 0.6B](https://huggingface.co/nvidia/parakeet-unified-en-0.6b) (English
-only, with punctuation and capitals), through the same sherpa-onnx runtime as the offline voice.
-No audio or text leaves the machine and no API key is used. The model is not in the installer: the
-first time you start dictation the panel offers a one-time download of about 660 MB into the app
-profile. Each file is checked against a pinned SHA-256 before it is used. Once loaded the model
-holds about 700 MB of memory, and is released after ten minutes without dictation.
+Transcription runs on this computer, through the same sherpa-onnx runtime as the offline voice,
+with the model picked in **Settings → Voice & Conductor → Voice → On-device speech model**:
+
+| Model | Languages | Download |
+|---|---|---|
+| [Moondream Parakeet Ultra](https://huggingface.co/moondream/parakeet-ultra) (default) | 25 European languages, detected automatically | about 670 MB |
+| [NVIDIA Parakeet Unified English 0.6B](https://huggingface.co/nvidia/parakeet-unified-en-0.6b) | English only | about 660 MB |
+
+Ultra is NVIDIA's Parakeet TDT 0.6B v3 post-trained by Moondream for lower error rates, most of
+all in noise. Moondream publishes it only as safetensors for its own GPU runtime, so Chorus uses an
+int8 ONNX export made with sherpa-onnx's own v3 recipe
+([leogaudin/sherpa-onnx-nemo-parakeet-ultra-int8](https://huggingface.co/leogaudin/sherpa-onnx-nemo-parakeet-ultra-int8),
+pinned to one revision; its export script is in that repository). It runs on the CPU at about the
+speed of Unified. Both models write punctuation and capitals.
+
+No audio or text leaves the machine and no API key is used. Neither model is in the installer: the
+first time you start dictation the panel offers a one-time download into the app profile. Each
+file is checked against a pinned SHA-256 before it is used. Switching models keeps the other one's
+files, so switching back needs no download. Once loaded a model holds about 700 MB of memory, and
+is released after ten minutes without dictation, or at once when you switch away from it.
 
 The model transcribes whole recordings, so live text is done by transcribing the phrase you are
 saying again every quarter of a second (buffered streaming). A pause of about 0.7 seconds makes
@@ -771,15 +784,16 @@ API keys are encrypted with Windows DPAPI (Electron `safeStorage`) and only ever
 process; the UI never sees them. Environment variables `OPENAI_API_KEY`, `DEEPGRAM_API_KEY`, and
 `ANTHROPIC_API_KEY` are used as fallbacks.
 
-### Transcribe on this computer (NVIDIA Parakeet)
+### Transcribe on this computer (Parakeet)
 
 **Settings → Voice & Conductor → Voice → Transcribe on this computer** is off by default. When it
 is on, every voice command is transcribed by the same on-device Parakeet model that dictation uses,
 whatever engine is chosen above, and the text goes straight to the conductor: no audio is sent to
 a speech-to-text API, and the live Deepgram transcript is not used. The model is a one-time
 download from the same row. If it is missing or fails, the command shows an error naming the cause;
-voice never silently switches back to a cloud engine. Parakeet is English only and takes no
-vocabulary hints.
+voice never silently switches back to a cloud engine. The model is the one picked in **On-device
+speech model** (see dictation above); Unified is English only, Ultra detects 25 European languages,
+and neither takes vocabulary hints.
 
 Parakeet warms up when a capture starts. Long captures are transcribed in phrases while you record,
 with a full-pass fallback. On local transcripts, misheard names are fixed ("Cloud Code" becomes
