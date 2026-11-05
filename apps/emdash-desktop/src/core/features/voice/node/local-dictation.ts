@@ -4,43 +4,94 @@ import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { availableParallelism } from 'node:os';
 import { join } from 'node:path';
 import type { OfflineRecognizer } from 'sherpa-onnx-node';
-import type { DictationModelStatus } from '../api/contract';
+import type { DictationModelStatus, LocalSpeechModelId } from '../api/contract';
 import { STT_SAMPLE_RATE } from '../api/wav';
 import { BufferedDictationStream } from './buffered-dictation';
 
-/**
- * NVIDIA Parakeet Unified English 0.6B (NVIDIA Open Model License), 8-bit ONNX export by
- * sherpa-onnx. Too large to ship in the installer, so it is fetched once, on request, from a
- * pinned revision, and every file is checked against its SHA-256 before it is used.
- */
-export const DICTATION_MODEL_NAME = 'parakeet-unified-en-0.6b-int8';
-const MODEL_REVISION = '8c3a10fb13408c7a7054f6898958bf1c64a8d6c7';
-const MODEL_BASE_URL = `https://huggingface.co/csukuangfj2/sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming/resolve/${MODEL_REVISION}`;
-
 export type ModelFile = { readonly name: string; readonly size: number; readonly sha256: string };
 
-export const DICTATION_MODEL_FILES: readonly ModelFile[] = [
-  {
-    name: 'encoder.int8.onnx',
-    size: 654_040_552,
-    sha256: '6716910b7a0833997fec7a410494c995d70124001a0e9b66d6370d6aced577e0',
+/** Where one model's files come from: a pinned Hugging Face revision and every file's SHA-256. */
+export type DictationModelSource = {
+  readonly revision: string;
+  readonly baseUrl: string;
+  readonly files: readonly ModelFile[];
+};
+
+export type DictationModelSpec = DictationModelSource & {
+  /** Folder under `<dataDir>/models`. */
+  readonly dirName: string;
+};
+
+/**
+ * The on-device models, as int8 ONNX transducers for sherpa-onnx. They are too large to ship in
+ * the installer, so each is fetched once, on request, from a pinned revision, and every file is
+ * checked against its SHA-256 before it is used.
+ */
+export const DICTATION_MODELS: Record<LocalSpeechModelId, DictationModelSpec> = {
+  /**
+   * Moondream Parakeet Ultra (CC-BY-4.0): NVIDIA Parakeet TDT 0.6B v3 post-trained by Moondream,
+   * 25 European languages. Moondream publishes it only as transformers safetensors, so this is the
+   * int8 export made with sherpa-onnx's own v3 recipe (its `export_ultra.py` is in the repository);
+   * the decoder and joiner are byte-identical across several independent exports of the weights.
+   */
+  'parakeet-ultra': {
+    dirName: 'parakeet-ultra-0.6b-int8',
+    revision: 'f7bc472677ff70be95cdb0ef9df509fee6f5ec0b',
+    baseUrl:
+      'https://huggingface.co/leogaudin/sherpa-onnx-nemo-parakeet-ultra-int8/resolve/f7bc472677ff70be95cdb0ef9df509fee6f5ec0b',
+    files: [
+      {
+        name: 'encoder.int8.onnx',
+        size: 652_282_340,
+        sha256: '8bd3b8dc07056def6dfd19910e9f90c9e1a4e7e20901f58bdfe2a570a8081a2a',
+      },
+      {
+        name: 'decoder.int8.onnx',
+        size: 11_845_275,
+        sha256: '94373c6405c8149d1c9d1e9862514e0e3e88dab1c7de18fac9d5df9c6ba5efdd',
+      },
+      {
+        name: 'joiner.int8.onnx',
+        size: 6_355_277,
+        sha256: '8a71aaccfdba3d451775507a889afd2257d2e754463fd81095a8c8f290f924c2',
+      },
+      {
+        name: 'tokens.txt',
+        size: 93_939,
+        sha256: 'd58544679ea4bc6ac563d1f545eb7d474bd6cfa467f0a6e2c1dc1c7d37e3c35d',
+      },
+    ],
   },
-  {
-    name: 'decoder.int8.onnx',
-    size: 7_257_753,
-    sha256: 'a5e223392c90e75f8144cdb5eb95af7625db389e39edef2bd1a9c872b3298fe6',
+  /** NVIDIA Parakeet Unified English 0.6B (NVIDIA Open Model License), exported by sherpa-onnx. */
+  'parakeet-unified-en': {
+    dirName: 'parakeet-unified-en-0.6b-int8',
+    revision: '8c3a10fb13408c7a7054f6898958bf1c64a8d6c7',
+    baseUrl:
+      'https://huggingface.co/csukuangfj2/sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-non-streaming/resolve/8c3a10fb13408c7a7054f6898958bf1c64a8d6c7',
+    files: [
+      {
+        name: 'encoder.int8.onnx',
+        size: 654_040_552,
+        sha256: '6716910b7a0833997fec7a410494c995d70124001a0e9b66d6370d6aced577e0',
+      },
+      {
+        name: 'decoder.int8.onnx',
+        size: 7_257_753,
+        sha256: 'a5e223392c90e75f8144cdb5eb95af7625db389e39edef2bd1a9c872b3298fe6',
+      },
+      {
+        name: 'joiner.int8.onnx',
+        size: 1_735_860,
+        sha256: '869f43f7d24595c55581ad3bf249a935fb8a71389fbdaa7504b9f46f93140f8a',
+      },
+      {
+        name: 'tokens.txt',
+        size: 8_952,
+        sha256: 'dc0b4584ab2e4ddbf888425c076c61b736e7356a015250db7d307e6f1a8188ff',
+      },
+    ],
   },
-  {
-    name: 'joiner.int8.onnx',
-    size: 1_735_860,
-    sha256: '869f43f7d24595c55581ad3bf249a935fb8a71389fbdaa7504b9f46f93140f8a',
-  },
-  {
-    name: 'tokens.txt',
-    size: 8_952,
-    sha256: 'dc0b4584ab2e4ddbf888425c076c61b736e7356a015250db7d307e6f1a8188ff',
-  },
-];
+};
 
 const VERIFIED_MARKER = '.verified';
 const PROGRESS_INTERVAL_MS = 250;
@@ -54,13 +105,14 @@ export class DictationModel {
   private received = 0;
   private failure: string | null = null;
   private readonly total: number;
+  private readonly files: readonly ModelFile[];
 
   constructor(
     readonly dir: string,
-    private readonly files: readonly ModelFile[] = DICTATION_MODEL_FILES,
-    private readonly baseUrl: string = MODEL_BASE_URL
+    private readonly source: DictationModelSource
   ) {
-    this.total = files.reduce((sum, file) => sum + file.size, 0);
+    this.files = source.files;
+    this.total = source.files.reduce((sum, file) => sum + file.size, 0);
   }
 
   path(name: string): string {
@@ -81,7 +133,7 @@ export class DictationModel {
 
   async ready(): Promise<boolean> {
     try {
-      if ((await readFile(this.path(VERIFIED_MARKER), 'utf8')).trim() !== MODEL_REVISION) {
+      if ((await readFile(this.path(VERIFIED_MARKER), 'utf8')).trim() !== this.source.revision) {
         return false;
       }
       for (const file of this.files) {
@@ -136,7 +188,7 @@ export class DictationModel {
     };
     for (const file of this.files) {
       const partial = this.path(`${file.name}.part`);
-      const response = await fetch(`${this.baseUrl}/${file.name}`, { signal });
+      const response = await fetch(`${this.source.baseUrl}/${file.name}`, { signal });
       if (!response.ok || !response.body) {
         throw new Error(`The model download failed (${response.status}).`);
       }
@@ -163,7 +215,7 @@ export class DictationModel {
       }
       await rename(partial, this.path(file.name));
     }
-    await writeFile(this.path(VERIFIED_MARKER), `${MODEL_REVISION}\n`);
+    await writeFile(this.path(VERIFIED_MARKER), `${this.source.revision}\n`);
   }
 }
 
@@ -185,6 +237,7 @@ export class LocalDictation {
     void this.load().catch(() => {});
   }
 
+  /** Stops a download and releases the loaded model; the next use starts over. */
   dispose(): void {
     if (this.unloadTimer) clearTimeout(this.unloadTimer);
     this.unloadTimer = null;

@@ -8,12 +8,15 @@ import { DEFAULT_VOICE_SETTINGS, type VoiceSettings } from '../api/contract';
 import { encodeWav } from '../api/wav';
 import { VoiceService } from './voice-service';
 
-const { cloudTranscribe, localTranscribe, modelReady, warmModel } = vi.hoisted(() => ({
-  warmModel: vi.fn(),
-  cloudTranscribe: vi.fn(),
-  localTranscribe: vi.fn(),
-  modelReady: vi.fn(),
-}));
+const { cloudTranscribe, disposedModel, localTranscribe, modelReady, usedModel, warmModel } =
+  vi.hoisted(() => ({
+    disposedModel: vi.fn(),
+    usedModel: vi.fn(),
+    warmModel: vi.fn(),
+    cloudTranscribe: vi.fn(),
+    localTranscribe: vi.fn(),
+    modelReady: vi.fn(),
+  }));
 vi.mock('./engines/openrouter', () => ({
   OpenRouterSttEngine: class {
     readonly id = 'openrouter';
@@ -21,16 +24,25 @@ vi.mock('./engines/openrouter', () => ({
   },
 }));
 vi.mock('./local-dictation', () => ({
-  DICTATION_MODEL_NAME: 'parakeet-test',
+  DICTATION_MODELS: {
+    'parakeet-ultra': { dirName: 'ultra-test' },
+    'parakeet-unified-en': { dirName: 'unified-test' },
+  },
   DictationModel: class {
+    constructor(readonly dir: string) {}
     ready = modelReady;
     dispose() {}
   },
   LocalDictation: class {
-    constructor(readonly model: unknown) {}
-    transcribe = localTranscribe;
+    constructor(readonly model: { dir: string }) {}
+    transcribe = (samples: Float32Array) => {
+      usedModel(this.model.dir.split(/[\\/]/).at(-1));
+      return localTranscribe(samples);
+    };
     warm = warmModel;
-    dispose() {}
+    dispose() {
+      disposedModel(this.model.dir.split(/[\\/]/).at(-1));
+    }
   },
 }));
 
@@ -45,6 +57,8 @@ afterEach(async () => {
   localTranscribe.mockReset();
   modelReady.mockReset();
   warmModel.mockReset();
+  usedModel.mockReset();
+  disposedModel.mockReset();
 });
 
 async function serviceWith(stored: Partial<VoiceSettings>): Promise<VoiceService> {
@@ -164,6 +178,20 @@ describe('VoiceService local Parakeet transcription', () => {
     expect(warmModel).toHaveBeenCalledOnce();
     off.dispose();
     on.dispose();
+  });
+
+  it('uses Parakeet Ultra by default and releases a model that is switched away from', async () => {
+    expect(DEFAULT_VOICE_SETTINGS.localSpeechModel).toBe('parakeet-ultra');
+    const service = await serviceWith({ localTranscriber: true });
+    modelReady.mockResolvedValue(true);
+    localTranscribe.mockResolvedValue('hello');
+    await service.transcribe(UTTERANCE, []);
+    expect(usedModel).toHaveBeenLastCalledWith('ultra-test');
+    await service.updateSettings({ localSpeechModel: 'parakeet-unified-en' });
+    expect(disposedModel).toHaveBeenCalledExactlyOnceWith('ultra-test');
+    await service.transcribe(UTTERANCE, []);
+    expect(usedModel).toHaveBeenLastCalledWith('unified-test');
+    service.dispose();
   });
 
   it('does not warm a model that is not downloaded', async () => {

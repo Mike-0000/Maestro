@@ -6,9 +6,11 @@ import { ChorusCredentials } from '@core/primitives/chorus-host/node/credentials
 import { JsonSettingsFile } from '@core/primitives/chorus-host/node/json-settings-file';
 import {
   DEFAULT_VOICE_SETTINGS,
+  localSpeechModelIds,
   voiceSettingsSchema,
   type DictationModelStatus,
   type DictationResult,
+  type LocalSpeechModelId,
   type SttEngineId,
   type Transcription,
   type TranscriptionEngine,
@@ -33,7 +35,7 @@ import { OpenRouterSttEngine } from './engines/openrouter';
 import { WhisperLocalSttEngine } from './engines/whisper-local';
 import { streamGeminiTts } from './gemini-tts';
 import { LocalCommandStream } from './local-command-stream';
-import { DICTATION_MODEL_NAME, DictationModel, LocalDictation } from './local-dictation';
+import { DICTATION_MODELS, DictationModel, LocalDictation } from './local-dictation';
 import { LocalTts } from './local-tts';
 import { OPENROUTER_TTS_MODELS, streamOpenRouterTts } from './openrouter-tts';
 import { streamVertexTts, VERTEX_TTS_MODELS, VertexAuth } from './vertex-tts';
@@ -67,7 +69,9 @@ export class VoiceService {
     string,
     { stream: LocalCommandStream; timer: ReturnType<typeof setTimeout> }
   >();
-  private readonly dictation: LocalDictation;
+  /** One per on-device model; only the selected one (`localModelId`) loads or downloads. */
+  private readonly localModels: Record<LocalSpeechModelId, LocalDictation>;
+  private localModelId: LocalSpeechModelId = DEFAULT_VOICE_SETTINGS.localSpeechModel;
   private readonly dictations = new Map<
     string,
     { stream: BufferedDictationStream; timer: ReturnType<typeof setTimeout> }
@@ -81,9 +85,15 @@ export class VoiceService {
   ) {
     this.hold = new HoldToTalkMachine(onGlobalHold);
     this.credentials = new ChorusCredentials(host.secrets);
-    this.dictation = new LocalDictation(
-      new DictationModel(join(host.dataDir, 'models', DICTATION_MODEL_NAME))
-    );
+    const localModel = (id: LocalSpeechModelId) => {
+      const spec = DICTATION_MODELS[id];
+      return new LocalDictation(
+        new DictationModel(join(host.dataDir, 'models', spec.dirName), spec)
+      );
+    };
+    this.localModels = Object.fromEntries(
+      localSpeechModelIds.map((id) => [id, localModel(id)])
+    ) as Record<LocalSpeechModelId, LocalDictation>;
     this.settings = JsonSettingsFile.inDir(
       host.dataDir,
       'voice-settings.json',
@@ -114,7 +124,7 @@ export class VoiceService {
     for (const id of [...this.streams.keys()]) this.abortStream(id);
     for (const id of [...this.dictations.keys()]) this.abortStream(id);
     for (const id of [...this.localCommands.keys()]) this.abortStream(id);
-    this.dictation.dispose();
+    for (const model of Object.values(this.localModels)) model.dispose();
     this.applyGlobalHold(HOLD_KEY_OFF);
     if (this.registeredShortcut) this.host.globalShortcuts.unregister(this.registeredShortcut);
     this.registeredShortcut = null;
@@ -136,6 +146,11 @@ export class VoiceService {
       await this.applyGlobalShortcut(next.globalShortcut);
     }
     if (next.globalHoldKey !== previous.globalHoldKey) this.applyGlobalHold(next.globalHoldKey);
+    if (next.localSpeechModel !== previous.localSpeechModel) {
+      // Free the memory and bandwidth of the model that is no longer used; its files stay.
+      this.localModels[previous.localSpeechModel].dispose();
+      this.localModelId = next.localSpeechModel;
+    }
     return this.status();
   }
 
@@ -284,7 +299,8 @@ export class VoiceService {
   async warmDictation(): Promise<void> {
     const settings = await this.settings.read();
     if (!settings.localTranscriber) return;
-    if (await this.dictation.model.ready()) this.dictation.warm();
+    const dictation = await this.localDictation();
+    if (await dictation.model.ready()) dictation.warm();
   }
 
   /** Opens a live stream if the current engine supports one; null means upload instead. */
@@ -317,10 +333,11 @@ export class VoiceService {
    * reports the missing model.
    */
   private async openLocalCommand(): Promise<string | null> {
-    if (!(await this.dictation.model.ready())) return null;
-    this.dictation.warm();
+    const dictation = await this.localDictation();
+    if (!(await dictation.model.ready())) return null;
+    dictation.warm();
     const streamId = crypto.randomUUID();
-    const stream = new LocalCommandStream((samples) => this.dictation.transcribe(samples));
+    const stream = new LocalCommandStream((samples) => dictation.transcribe(samples));
     const timer = setTimeout(() => this.abortStream(streamId), STREAM_MAX_MS);
     this.localCommands.set(streamId, { stream, timer });
     return streamId;
@@ -337,23 +354,35 @@ export class VoiceService {
     else this.streams.get(streamId)?.stream.push(pcm);
   }
 
-  dictationModel(): Promise<DictationModelStatus> {
-    return this.dictation.model.status();
+  async dictationModel(): Promise<DictationModelStatus> {
+    return (await this.localDictation()).model.status();
   }
 
-  downloadDictationModel(
+  async downloadDictationModel(
     onProgress: (status: DictationModelStatus) => void
   ): Promise<DictationModelStatus> {
-    return this.dictation.model.start(onProgress);
+    const dictation = await this.localDictation();
+    const id = this.localModelId;
+    // Progress of a model that was switched away from would overwrite the selected one's status.
+    return dictation.model.start((status) => {
+      if (this.localModelId === id) onProgress(status);
+    });
+  }
+
+  /** The selected on-device model. */
+  private async localDictation(): Promise<LocalDictation> {
+    this.localModelId = (await this.settings.read()).localSpeechModel;
+    return this.localModels[this.localModelId];
   }
 
   /** Opens an on-device dictation stream; it never leaves this computer. */
   async openDictation(onPartial: (streamId: string, text: string) => void): Promise<string> {
-    if (!(await this.dictation.model.ready())) {
+    const dictation = await this.localDictation();
+    if (!(await dictation.model.ready())) {
       throw new SttEngineError('not-configured', 'The dictation model is not downloaded yet.');
     }
     const streamId = crypto.randomUUID();
-    const stream = this.dictation.open((text) => onPartial(streamId, text));
+    const stream = dictation.open((text) => onPartial(streamId, text));
     const timer = setTimeout(() => this.abortStream(streamId), DICTATION_MAX_MS);
     this.dictations.set(streamId, { stream, timer });
     return streamId;
@@ -478,7 +507,8 @@ export class VoiceService {
    * is reported instead.
    */
   private async transcribeLocally(audio: Uint8Array): Promise<string> {
-    if (!(await this.dictation.model.ready())) {
+    const dictation = await this.localDictation();
+    if (!(await dictation.model.ready())) {
       throw new SttEngineError(
         'not-configured',
         'The local Parakeet speech model is not downloaded. Download it in Settings → Voice, or turn off “Transcribe on this computer”.'
@@ -489,7 +519,7 @@ export class VoiceService {
       throw new SttEngineError('engine-failed', 'The recording is not 16 kHz mono audio.');
     }
     try {
-      return (await this.dictation.transcribe(decoded.samples)).trim();
+      return (await dictation.transcribe(decoded.samples)).trim();
     } catch (error) {
       this.logger.error('voice: local Parakeet transcription failed', { error });
       throw new SttEngineError(

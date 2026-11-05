@@ -29,7 +29,7 @@ const LEFT_OPEN_MS = 2 * 60_000;
 const SENT_VISIBLE_MS = 4_000;
 
 /**
- * Dictation to the agent that is open, transcribed on this computer by NVIDIA Parakeet. The words
+ * Dictation to the agent that is open, transcribed on this computer by Parakeet. The words
  * appear as they are spoken; finishing sends them straight to that agent. It is separate from
  * the command microphone, which goes to the conductor.
  */
@@ -228,7 +228,7 @@ export class DictationStore {
     }
   }
 
-  /** Fetches the model (about 660 MB, once). Progress arrives on events. */
+  /** Fetches the selected model (about 670 MB, once). Progress arrives on events. */
   async downloadModel(): Promise<void> {
     try {
       const model = await (await getVoiceClient()).downloadDictationModel();
