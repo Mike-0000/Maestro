@@ -1,3 +1,4 @@
+import { LiveMicrophone } from '../api/browser/live-microphone';
 import { concatFloat32, downsample, encodeWav, pcm16Bytes, rms, STT_SAMPLE_RATE } from '../api/wav';
 
 /** Posts each render quantum batch (~43 ms at 48 kHz) of mono samples to the main thread. */
@@ -45,15 +46,23 @@ const WARM_MS = 30_000;
 /** Audio kept from before speech onset in hands-free mode, so first syllables are not lost. */
 const PRE_ROLL_MS = 400;
 
+const CAPTURE_CONSTRAINTS: MediaTrackConstraints = {
+  channelCount: 1,
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
+};
+
 /**
  * Microphone capture for push-to-talk. The stream stays warm briefly between utterances to avoid
- * the ~200 ms device start cost, then releases so the OS mic indicator turns off.
+ * the ~200 ms device start cost, then releases so the OS mic indicator turns off. While open it
+ * follows the device in use (a picked microphone, or a new Windows default).
  */
 export class MicRecorder {
-  private stream: MediaStream | null = null;
+  private microphone: LiveMicrophone | null = null;
   private context: AudioContext | null = null;
   private node: AudioWorkletNode | null = null;
-  private source: MediaStreamAudioSourceNode | null = null;
+  private opening: Promise<void> | null = null;
   private chunks: Float32Array[] = [];
   private preRoll: Float32Array[] = [];
   private recording = false;
@@ -119,41 +128,42 @@ export class MicRecorder {
     this.release();
   }
 
-  private async ensureOpen(): Promise<void> {
-    if (this.stream && this.context && this.node) return;
+  private ensureOpen(): Promise<void> {
+    if (this.microphone && this.context && this.node) return Promise.resolve();
+    // Hands-free monitoring and a key press can both ask at once: one microphone serves both.
+    this.opening ??= this.open().finally(() => {
+      this.opening = null;
+    });
+    return this.opening;
+  }
+
+  private async open(): Promise<void> {
+    const context = new AudioContext({ latencyHint: 'interactive' });
+    let microphone: LiveMicrophone | null = null;
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      const moduleUrl = URL.createObjectURL(
+        new Blob([WORKLET_SOURCE], { type: 'application/javascript' })
+      );
+      try {
+        await context.audioWorklet.addModule(moduleUrl);
+      } finally {
+        URL.revokeObjectURL(moduleUrl);
+      }
+      const node = new AudioWorkletNode(context, 'chorus-capture');
+      microphone = new LiveMicrophone(context, node, CAPTURE_CONSTRAINTS);
+      try {
+        await microphone.open();
+      } catch (error) {
+        throw micError(error);
+      }
+      this.context = context;
+      this.node = node;
+      this.microphone = microphone;
     } catch (error) {
-      const name = error instanceof DOMException ? error.name : '';
-      if (name === 'NotAllowedError' || name === 'SecurityError') {
-        throw new MicError(
-          'permission-denied',
-          'Windows is blocking microphone access for desktop apps.'
-        );
-      }
-      if (name === 'NotFoundError' || name === 'OverconstrainedError') {
-        throw new MicError('no-device', 'No microphone was found.');
-      }
-      throw new MicError('unavailable', 'The microphone could not be opened.');
+      microphone?.close();
+      void context.close().catch(() => {});
+      throw error;
     }
-    this.context = new AudioContext({ latencyHint: 'interactive' });
-    const moduleUrl = URL.createObjectURL(
-      new Blob([WORKLET_SOURCE], { type: 'application/javascript' })
-    );
-    try {
-      await this.context.audioWorklet.addModule(moduleUrl);
-    } finally {
-      URL.revokeObjectURL(moduleUrl);
-    }
-    this.source = this.context.createMediaStreamSource(this.stream);
-    this.node = new AudioWorkletNode(this.context, 'chorus-capture');
     this.node.port.onmessage = (event: MessageEvent<Float32Array>) => {
       const chunk = event.data;
       const durationMs = (chunk.length / (this.context?.sampleRate ?? 48_000)) * 1000;
@@ -168,7 +178,6 @@ export class MicRecorder {
       }
       this.onChunk?.(rms(chunk), durationMs);
     };
-    this.source.connect(this.node);
   }
 
   private emitPcm(chunk: Float32Array): void {
@@ -185,13 +194,27 @@ export class MicRecorder {
 
   private release(): void {
     this.releaseTimer = null;
+    this.microphone?.close();
+    if (this.node) this.node.port.onmessage = null;
     this.node?.disconnect();
-    this.source?.disconnect();
-    for (const track of this.stream?.getTracks() ?? []) track.stop();
     void this.context?.close().catch(() => {});
+    this.microphone = null;
     this.node = null;
-    this.source = null;
-    this.stream = null;
     this.context = null;
   }
+}
+
+/** The reason a microphone could not be opened, as the voice bar explains it. */
+function micError(error: unknown): MicError {
+  const name = error instanceof DOMException ? error.name : '';
+  if (name === 'NotAllowedError' || name === 'SecurityError') {
+    return new MicError(
+      'permission-denied',
+      'Windows is blocking microphone access for desktop apps.'
+    );
+  }
+  if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+    return new MicError('no-device', 'No microphone was found.');
+  }
+  return new MicError('unavailable', 'The microphone could not be opened.');
 }
