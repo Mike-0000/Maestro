@@ -1,3 +1,4 @@
+import { getAudioDevices } from '../api/browser/audio-devices';
 import { getVoiceClient } from '../api/browser/client';
 import type { VoiceEvent, VoiceSettings } from '../api/contract';
 
@@ -26,6 +27,8 @@ export class SpeechOutput {
   private requestId: string | null = null;
   private starting: Promise<void> | null = null;
   private context: AudioContext | null = null;
+  /** Stops routing the current context to the picked speaker. */
+  private unrouteOutput: (() => void) | null = null;
   private sources = new Set<AudioBufferSourceNode>();
   private nextStart = 0;
   private receivedAudio = false;
@@ -144,7 +147,7 @@ export class SpeechOutput {
   private playChunk(pcm: string, sampleRate: number): void {
     const bytes = Uint8Array.from(atob(pcm), (char) => char.charCodeAt(0));
     if (!bytes.length || bytes.length % 2) throw new Error('Invalid PCM chunk');
-    const context = (this.context ??= new AudioContext({ sampleRate: 24_000 }));
+    const context = (this.context ??= this.createContext());
     // A buffer at another rate is resampled by the context on playback.
     const buffer = context.createBuffer(1, bytes.length / 2, sampleRate);
     const samples = buffer.getChannelData(0);
@@ -186,6 +189,25 @@ export class SpeechOutput {
         }
       );
     }
+  }
+
+  /** The context cloud speech plays in, routed to the speaker picked on the voice bar. */
+  private createContext(): AudioContext {
+    const devices = getAudioDevices();
+    const sinkId = devices.outputSinkId;
+    // Chromium takes the speaker up front, so the first sound is already on it.
+    const options: AudioContextOptions & { sinkId?: string } = { sampleRate: 24_000 };
+    if (sinkId) options.sinkId = sinkId;
+    const context: SinkableContext = new AudioContext(options);
+    if (typeof context.setSinkId === 'function') {
+      const route = () => {
+        if (this.context !== context) return;
+        void context.setSinkId?.(devices.outputSinkId).catch(() => undefined);
+      };
+      this.unrouteOutput?.();
+      this.unrouteOutput = devices.onOutputChange(route);
+    }
+    return context;
   }
 
   private finishCloud(): void {
@@ -297,6 +319,9 @@ export class SpeechOutput {
     if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel();
   }
 }
+
+/** `AudioContext.setSinkId` (Chromium 110+), which the DOM typings do not have yet. */
+type SinkableContext = AudioContext & { setSinkId?: (sinkId: string) => Promise<void> };
 
 /** How long to wait for an engine's first audio before falling back to the system voice. */
 export function firstAudioTimeoutMs(engine: VoiceSettings['ttsEngine']): number {

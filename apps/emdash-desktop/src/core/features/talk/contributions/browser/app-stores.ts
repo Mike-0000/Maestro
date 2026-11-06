@@ -1,4 +1,6 @@
 import { conductorStoreToken } from '@core/features/conductor/contributions/browser/app-stores';
+import { getAudioDevices } from '@core/features/voice/api/browser/audio-devices';
+import { openLiveMicrophoneTrack } from '@core/features/voice/api/browser/live-microphone';
 import { voiceStoreToken } from '@core/features/voice/contributions/browser/app-stores';
 import {
   contributeScopedStore,
@@ -24,7 +26,15 @@ function play(stream: MediaStream | null, muted: boolean): void {
     }
     return;
   }
-  player ??= new Audio();
+  if (!player) {
+    const created = new Audio();
+    player = created;
+    // The voice plays through the speaker picked on the voice bar, or the Windows default.
+    const devices = getAudioDevices();
+    const route = () => void created.setSinkId(devices.outputSinkId).catch(() => undefined);
+    devices.onOutputChange(route);
+    route();
+  }
   player.autoplay = true;
   player.muted = muted;
   player.srcObject = stream;
@@ -33,19 +43,17 @@ function play(stream: MediaStream | null, muted: boolean): void {
   });
 }
 
-/** The microphone as the line hears it. Echo cancellation keeps the voice out of it. */
-async function microphone(): Promise<MediaStreamTrack> {
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      channelCount: 1,
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-    },
+/**
+ * The microphone as the line hears it. Echo cancellation keeps the voice out of it. The track
+ * follows the device in use, so a new Windows default or a picked microphone is heard at once.
+ */
+function microphone(): Promise<MediaStreamTrack> {
+  return openLiveMicrophoneTrack({
+    channelCount: 1,
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
   });
-  const track = stream.getAudioTracks()[0];
-  if (!track) throw new Error('No microphone is available.');
-  return track;
 }
 
 // Resolves the voice and conductor stores at create time; register after both.

@@ -32,6 +32,7 @@ import {
   type SuggestableProvider,
 } from '../../api/agent-suggestions';
 import { getConductorStore } from '../../contributions/browser/app-stores';
+import { AudioDeviceMenu } from './audio-device-menu';
 import { CallCard } from './call-card';
 import { ConductorLogPanel } from './conductor-log-panel';
 import { DictationPanel } from './dictation-panel';
@@ -147,6 +148,7 @@ export const ConductorHud = observer(function ConductorHud() {
               Set up voice
             </button>
           )}
+          <AudioDeviceMenu />
           <HudIconButton
             label={voice.muted ? 'Unmute spoken replies' : 'Mute spoken replies'}
             onClick={() => voice.setMuted(!voice.muted)}
