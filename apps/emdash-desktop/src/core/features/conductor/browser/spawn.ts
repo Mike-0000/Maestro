@@ -38,6 +38,8 @@ export type SpawnRequest = {
   title?: string;
   /** Give the agent its own branch and worktree instead of the project directory. */
   worktree?: boolean;
+  /** The Claude account a claude agent runs on; the default account when absent. */
+  claudeAccountId?: string;
   /** The agents already running, to keep the task name apart from theirs and to flag clashes. */
   peers?: readonly SpawnPeer[];
 };
@@ -199,6 +201,7 @@ export async function spawnAgentTask(request: SpawnRequest): Promise<SpawnResult
         autoApprove: false,
         type: 'pty',
         ...(prompt && canDeliverPrompt ? { initialPrompt: prompt } : {}),
+        ...(request.claudeAccountId ? { claudeAccountId: request.claudeAccountId } : {}),
       },
     },
     workspaceConfig,
