@@ -1,15 +1,19 @@
 import { observer } from 'mobx-react-lite';
+import { ChatConductorLayer } from '@core/features/conductor/contributions/browser/chat-conductor-layer';
 import type { TaskTabContext } from '@core/features/workbench/api/browser/tabs/task-tab-context';
 import type {
+  TabContentProps,
   TabEntry,
   TabHandle,
   TabProvider,
   TabViewContext,
 } from '@core/primitives/workbench-shell/browser/tabs/core/tab-provider';
 import { createTabProvider } from '@core/primitives/workbench-shell/browser/tabs/core/tab-provider-registry';
+import { usePaneContext } from '@core/primitives/workbench-shell/browser/tabs/pane-context';
 import { ConversationTabBarItem, ConversationTabBarItemDragPreview } from './conversation-tab-item';
 import { ConversationTabResource } from './conversation-tab-resource';
 import { ConversationsPanel } from './conversations-panel';
+import { activeConversationId } from './pane-selectors';
 import { getConversationSessionManager } from './stores/conversation-session-manager';
 
 export interface ConversationState {
@@ -24,8 +28,18 @@ export interface ConversationOpenArgs {
  * Mounts ConversationsPanel unconditionally. Visibility is managed by PaneContent
  * via visibility:hidden + inert so PTY sessions survive tab switches.
  */
-const ConversationTabContent = observer(function ConversationTabContent() {
-  return <ConversationsPanel />;
+const ConversationTabContent = observer(function ConversationTabContent({ ctx }: TabContentProps) {
+  const { pane } = usePaneContext();
+  // The chat's conductor sits in front; ConversationsPanel stays mounted under it as the raw view.
+  return (
+    <ChatConductorLayer
+      kind="conversation"
+      conversationId={activeConversationId(pane)}
+      taskId={(ctx as TaskTabContext).taskId}
+    >
+      <ConversationsPanel />
+    </ChatConductorLayer>
+  );
 });
 
 export const conversationTabProvider: TabProvider<

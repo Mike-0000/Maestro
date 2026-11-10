@@ -13,6 +13,9 @@ import type { Logger } from '@emdash/shared/logger';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChorusHostServices } from '@core/primitives/chorus-host/api/host-services';
 import type { SecretStore } from '@core/primitives/secrets/api/secret-store';
+import { CHAT_CONDUCTOR_SYSTEM_PROMPT } from '../api/chat-conductor/prompt';
+import { chatConductorToolDefinitions } from '../api/chat-conductor/tools';
+import { CONDUCTOR_SYSTEM_PROMPT } from '../api/system-prompt';
 import { ConductorService } from './conductor-service';
 
 type Captured = { headers: IncomingHttpHeaders; body: Record<string, unknown> };
@@ -641,5 +644,159 @@ describe('ConductorService standing instructions', () => {
     const saved = (await service().status()).instructions;
     expect(saved.map((entry) => entry.id)).toEqual(['i1', 'i2', 'i3']);
     expect(saved[2]?.text).not.toContain(key);
+  });
+});
+
+describe('ConductorService.runChatTurn', () => {
+  it('asks for a key before calling the API, and reports chat conductors as not ready', async () => {
+    const conductor = service();
+    const result = await conductor.runChatTurn(userTurn);
+    expect(!result.success && result.error.type).toBe('not-configured');
+    expect(captured).toHaveLength(0);
+    expect((await conductor.status()).chatConductorReady).toBe(false);
+  });
+
+  it("sends the chat conductor's prompt, tools, effort and budget, and nothing of Maestro's", async () => {
+    await withKey();
+    const conductor = service();
+    await conductor.adjustInstructions({ action: 'add', text: 'Always use Codex for reviews.' });
+    expect((await conductor.status()).chatConductorReady).toBe(true);
+    const result = await conductor.runChatTurn(userTurn);
+    expect(result.success).toBe(true);
+
+    const body = captured[0]?.body ?? {};
+    expect(body.model).toBe('claude-opus-5');
+    expect(body.max_tokens).toBe(8000);
+    expect(body.thinking).toEqual({ type: 'adaptive' });
+    expect(body.output_config).toEqual({ effort: 'medium' });
+    expect(body.fallbacks).toEqual([{ model: 'claude-opus-4-8' }]);
+    // One system block: the fixed prompt, cached an hour, with no standing instructions after it.
+    expect(body.system).toEqual([
+      {
+        type: 'text',
+        text: CHAT_CONDUCTOR_SYSTEM_PROMPT,
+        cache_control: { type: 'ephemeral', ttl: '1h' },
+      },
+    ]);
+    const tools = body.tools as { name: string; cache_control?: unknown }[];
+    expect(tools.map((tool) => tool.name)).toEqual(
+      chatConductorToolDefinitions().map((tool) => tool.name)
+    );
+    expect(tools.at(-1)?.cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
+    expect(tools.slice(0, -1).every((tool) => tool.cache_control === undefined)).toBe(true);
+    expect(body.messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: userTurn[0]!.content, cache_control: { type: 'ephemeral' } },
+        ],
+      },
+    ]);
+
+    // The conductor's own turn still sends its own prompt, tools and the standing instructions.
+    await conductor.runTurn('command', userTurn);
+    const own = captured[1]?.body ?? {};
+    expect((own.system as { text: string }[]).map((block) => block.text)).toEqual([
+      CONDUCTOR_SYSTEM_PROMPT,
+      expect.stringContaining('Always use Codex for reviews.'),
+    ]);
+    expect((own.tools as { name: string }[]).map((tool) => tool.name)).toContain('propose_plan');
+    expect(own.max_tokens).toBe(4096);
+  });
+
+  it('follows its own effort setting and records usage against the shared budget', async () => {
+    await withKey();
+    const conductor = service();
+    await conductor.updateSettings({ chatConductorEffort: 'high', dailyTokenBudget: 100 });
+    const first = await conductor.runChatTurn(userTurn);
+    expect(captured[0]?.body.output_config).toEqual({ effort: 'high' });
+    expect(first.success && first.data.usage).toEqual({
+      inputTokens: 110,
+      outputTokens: 20,
+      cacheReadTokens: 50,
+    });
+    const blocked = await conductor.runChatTurn(userTurn);
+    expect(!blocked.success && blocked.error.type).toBe('budget-exceeded');
+    // One budget for both: Maestro's conductor is stopped by what the chat conductor spent.
+    const own = await conductor.runTurn('command', userTurn);
+    expect(!own.success && own.error.type).toBe('budget-exceeded');
+    expect(captured).toHaveLength(1);
+  });
+
+  it('runs nothing while chat conductors are turned off', async () => {
+    await withKey();
+    const conductor = service();
+    const status = await conductor.updateSettings({ chatConductors: false });
+    expect(status.chatConductorReady).toBe(false);
+    expect(status.configured).toBe(true);
+    const result = await conductor.runChatTurn(userTurn);
+    expect(!result.success && result.error).toEqual({
+      type: 'not-configured',
+      message: 'Chat conductors are turned off in Settings → Voice & Conductor.',
+    });
+    expect(captured).toHaveLength(0);
+    // The conductor itself is unaffected.
+    expect((await conductor.runTurn('command', userTurn)).success).toBe(true);
+  });
+
+  it('maps a rejected key and a refusal like the conductor does', async () => {
+    await withKey();
+    respond = json(401, {
+      type: 'error',
+      error: { type: 'authentication_error', message: 'invalid x-api-key' },
+    });
+    const rejected = await service().runChatTurn(userTurn);
+    expect(!rejected.success && rejected.error.type).toBe('not-configured');
+    respond = json(200, { ...toolUseMessage, content: [], stop_reason: 'refusal' });
+    const refused = await service().runChatTurn(userTurn);
+    expect(!refused.success && refused.error.type).toBe('refused');
+  });
+
+  it('goes through OpenRouter with its own sticky session', async () => {
+    const conductor = service();
+    await secrets.setSecret('chorus.credential.openrouter', secret('sk-or-test', 'openrouter'));
+    process.env.OPENROUTER_BASE_URL = baseUrl;
+    await conductor.updateSettings({ provider: 'openrouter' });
+    await conductor.adjustInstructions({ action: 'add', text: 'Always use Codex for reviews.' });
+    respond = json(200, {
+      model: 'anthropic/claude-opus-5',
+      choices: [{ finish_reason: 'stop', message: { content: 'The agent wants a decision.' } }],
+      usage: { prompt_tokens: 30, completion_tokens: 6 },
+    });
+    const result = await conductor.runChatTurn(userTurn);
+    await conductor.runChatTurn(userTurn);
+    await conductor.runTurn('command', userTurn);
+    const [first, second, own] = captured;
+    expect(first?.headers.authorization).toBe('Bearer sk-or-test');
+    expect(first?.body.max_tokens).toBe(8000);
+    expect(first?.body.reasoning).toEqual({ effort: 'medium' });
+    const sent = (first?.body.messages ?? []) as { role: string; content: unknown }[];
+    const system = sent[0];
+    expect(system?.role).toBe('system');
+    expect(JSON.stringify(system?.content)).toContain(CHAT_CONDUCTOR_SYSTEM_PROMPT.slice(0, 60));
+    expect(JSON.stringify(system?.content)).not.toContain('Always use Codex');
+    const tools = first?.body.tools as { function: { name: string } }[];
+    expect(tools.map((tool) => tool.function.name)).toEqual(
+      chatConductorToolDefinitions().map((tool) => tool.name)
+    );
+    expect(first?.body.session_id as string).toMatch(/^chat-conductor-[0-9a-f-]{36}$/);
+    expect(second?.body.session_id).toBe(first?.body.session_id);
+    expect(own?.body.session_id).not.toBe(first?.body.session_id);
+    expect(result.success && result.data.content).toMatchObject([
+      { type: 'text', text: 'The agent wants a decision.' },
+    ]);
+  });
+
+  it('loads a settings file written before chat conductors existed without resetting it', async () => {
+    writeFileSync(
+      join(dataDir, 'conductor-settings.json'),
+      JSON.stringify({ model: 'claude-haiku-4-5', maxAgentsPerPlan: 7, investigations: true })
+    );
+    const status = await service().status();
+    expect(status.settings.model).toBe('claude-haiku-4-5');
+    expect(status.settings.maxAgentsPerPlan).toBe(7);
+    expect(status.settings.chatConductors).toBe(true);
+    expect(status.settings.chatConductorEffort).toBe('medium');
+    expect(status.settings.chatConductorAutonomy).toBe(true);
   });
 });

@@ -37,11 +37,14 @@ export function isDeveloperTurnStart(message: Anthropic.Beta.BetaMessageParam): 
  * message sequence. Below the mark the same array comes back. A cut keeps whole turns in their
  * order, at most `budget.low` of them: the newest `budget.developer` developer turns, then the
  * newest of the rest. A dropped turn between two kept ones leaves a valid sequence, since a stored
- * turn ends on the assistant's answer and the next starts with a user message.
+ * turn ends on the assistant's answer and the next starts with a user message. `isDeveloperTurn`
+ * tells a developer turn's first message from an event's, for callers whose events carry a mark
+ * other than Maestro's.
  */
 export function trimHistory(
   messages: Anthropic.Beta.BetaMessageParam[],
-  budget: HistoryBudget = HISTORY_BUDGET
+  budget: HistoryBudget = HISTORY_BUDGET,
+  isDeveloperTurn: (start: Anthropic.Beta.BetaMessageParam) => boolean = isDeveloperTurnStart
 ): Anthropic.Beta.BetaMessageParam[] {
   const turnStarts = messages.flatMap((message, index) => (isTurnStart(message) ? [index] : []));
   if (turnStarts.length <= budget.high) return messages;
@@ -51,7 +54,7 @@ export function trimHistory(
   let developerKept = 0;
   for (let turn = turnStarts.length - 1; turn >= 0 && developerKept < developer; turn--) {
     const start = messages[turnStarts[turn] ?? -1];
-    if (start && isDeveloperTurnStart(start)) {
+    if (start && isDeveloperTurn(start)) {
       kept.add(turn);
       developerKept++;
     }

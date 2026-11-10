@@ -1013,6 +1013,47 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
         />
       </SettingsSection>
 
+      <SettingsSection title="Chat conductors">
+        <SettingsRow
+          label="Give each chat its own conductor"
+          description="Separate from Maestro, the voice conductor above that speaks for all your agents. A chat's conductor reads that one agent for you, tells you in writing what you need to know, and can direct the agent. Opening a chat then shows your thread with it first; the raw chat is one click away. It uses the same provider, key and daily token budget as Maestro. Off: chats open as they always did."
+          control={
+            <Switch
+              checked={conductorSettings?.chatConductors ?? true}
+              disabled={!conductorSettings}
+              onCheckedChange={(chatConductors) =>
+                void conductor.updateSettings({ chatConductors })
+              }
+            />
+          }
+        />
+        <SettingsRow
+          label="Chat conductor effort"
+          description="Reasoning effort for a chat conductor's turns. Higher reads the agent's work more carefully and costs more per turn."
+          control={
+            <EffortSelect
+              value={conductorSettings?.chatConductorEffort}
+              onChange={(chatConductorEffort) =>
+                void conductor.updateSettings({ chatConductorEffort })
+              }
+            />
+          }
+        />
+        <SettingsRow
+          label="New chats start with acting on my behalf"
+          description="On: when the agent finishes or asks something while you are away, its conductor may prompt it, answer it or interrupt it on its own, within what you asked for. Off: it only reports and waits for you. Each chat has its own switch under its thread; this sets where new ones start."
+          control={
+            <Switch
+              checked={conductorSettings?.chatConductorAutonomy ?? true}
+              disabled={!conductorSettings}
+              onCheckedChange={(chatConductorAutonomy) =>
+                void conductor.updateSettings({ chatConductorAutonomy })
+              }
+            />
+          }
+        />
+      </SettingsSection>
+
       <StandingInstructionSettings />
 
       <TalkLineSettings />

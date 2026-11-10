@@ -18,6 +18,8 @@ import {
   attentionVerdictPrompt,
   parseAttentionVerdict,
 } from '../api/attention-verdict';
+import { CHAT_CONDUCTOR_SYSTEM_PROMPT } from '../api/chat-conductor/prompt';
+import { chatConductorToolDefinitions } from '../api/chat-conductor/tools';
 import {
   conductorSettingsSchema,
   conductorTurnRecordSchema,
@@ -106,6 +108,23 @@ function withCacheBreakpoint(tools: Anthropic.Beta.BetaTool[]): Anthropic.Beta.B
 
 /** The code-check and project-lookup tools are sent only while the setting is on. */
 const LOOKUP_TOOLS: ReadonlySet<string> = new Set(['investigate', 'find_in_project']);
+/** Room for a descriptive message to the developer, or a whole prompt for the agent. */
+const CHAT_TURN_MAX_TOKENS = 8_000;
+
+/** What differs between the model calls this service runs with tools: whose turn it is. */
+type TurnSpec = {
+  /** The fixed prompt, cached. */
+  system: string;
+  /** Text that follows the fixed prompt and may change between turns; '' adds nothing. */
+  standing: string;
+  /** A tool list that carries the cache breakpoint on its last tool. */
+  tools: Anthropic.Beta.BetaTool[];
+  maxTokens: number;
+  effort: ConductorSettings['commandEffort'];
+  /** OpenRouter's sticky routing session for this kind of turn. */
+  openRouterSession: string;
+};
+
 /** A verdict holds an agent's status back while it runs, so it gets seconds, not the usual 90. */
 const ATTENTION_TIMEOUT_MS = 8_000;
 
@@ -125,6 +144,8 @@ export class ConductorService {
     conductorToolDefinitions().filter((tool) => !LOOKUP_TOOLS.has(tool.name))
   );
   private readonly toolsWithInvestigate = withCacheBreakpoint(conductorToolDefinitions());
+  /** The chat conductors' tools: their own list and prefix, cached apart from the conductor's. */
+  private readonly chatTools = withCacheBreakpoint(chatConductorToolDefinitions());
   private client: { key: string; client: Anthropic } | null = null;
   private readonly diagnostics: InteractionDiagnostics;
   private logWrites: Promise<void> = Promise.resolve();
@@ -141,6 +162,11 @@ export class ConductorService {
    * derived from what anyone said.
    */
   private readonly openRouterSession = `conductor-${randomUUID()}`;
+  /**
+   * The chat conductors' session, apart from the conductor's: their prompt and tools are a
+   * different prefix. One for all chats, since a turn arrives here without its conversation.
+   */
+  private readonly chatOpenRouterSession = `chat-conductor-${randomUUID()}`;
 
   constructor(
     private readonly host: ChorusHostServices,
@@ -194,14 +220,16 @@ export class ConductorService {
 
   async status(): Promise<ConductorStatus> {
     const settings = await this.settings.read();
+    const configured = (await this.credentials.get(await this.providerCredential())) !== null;
     return {
-      configured: (await this.credentials.get(await this.providerCredential())) !== null,
+      configured,
       jevReady: (await this.jevRoute()) !== null,
       jevVia: (await this.jevRoute())?.via ?? null,
       settings,
       usageToday: await this.usageToday(),
       investigator: this.investigator?.(settings) ?? { state: 'off', reason: null },
       instructions: (await this.instructions.read()).entries,
+      chatConductorReady: settings.chatConductors && configured,
     };
   }
 
@@ -278,6 +306,51 @@ export class ConductorService {
     messages: Anthropic.Beta.BetaMessageParam[]
   ): Promise<Result<ConductorTurnResult, ConductorError>> {
     const settings = await this.settings.read();
+    return this.runModelTurn(settings, messages, async () => ({
+      system: CONDUCTOR_SYSTEM_PROMPT,
+      standing: await this.standingBlock(),
+      tools: this.toolsFor(settings),
+      maxTokens: mode === 'plan' ? 16000 : 4096,
+      effort: mode === 'plan' ? settings.planEffort : settings.commandEffort,
+      openRouterSession: this.openRouterSession,
+    }));
+  }
+
+  /**
+   * One model call for a chat's own conductor. It shares the conductor's provider, key, daily
+   * budget and usage record, and differs in what it sends: the chat conductor's prompt and tools,
+   * and no standing instructions, which the developer gave to Maestro's conductor.
+   */
+  async runChatTurn(
+    messages: Anthropic.Beta.BetaMessageParam[]
+  ): Promise<Result<ConductorTurnResult, ConductorError>> {
+    const settings = await this.settings.read();
+    if (!settings.chatConductors) {
+      return err({
+        type: 'not-configured',
+        message: 'Chat conductors are turned off in Settings → Voice & Conductor.',
+      });
+    }
+    return this.runModelTurn(settings, messages, async () => ({
+      system: CHAT_CONDUCTOR_SYSTEM_PROMPT,
+      standing: '',
+      tools: this.chatTools,
+      maxTokens: CHAT_TURN_MAX_TOKENS,
+      effort: settings.chatConductorEffort,
+      openRouterSession: this.chatOpenRouterSession,
+    }));
+  }
+
+  /**
+   * The model call behind `runTurn` and `runChatTurn`: the key and budget checks, the request on
+   * the configured provider, usage recording, and errors as values. `specFor` runs only once the
+   * checks pass.
+   */
+  private async runModelTurn(
+    settings: ConductorSettings,
+    messages: Anthropic.Beta.BetaMessageParam[],
+    specFor: () => Promise<TurnSpec>
+  ): Promise<Result<ConductorTurnResult, ConductorError>> {
     const key = await this.credentials.get(
       settings.provider === 'openrouter' ? 'openrouter' : 'anthropic'
     );
@@ -302,25 +375,24 @@ export class ConductorService {
       });
     }
 
-    if (settings.provider === 'openrouter')
-      return this.runOpenRouterTurn(key, settings, mode, messages);
+    if (settings.provider === 'openrouter') {
+      return this.runOpenRouterTurn(key, settings, await specFor(), messages);
+    }
 
-    const standing = await this.standingBlock();
+    const spec = await specFor();
     const adaptive = startsWithAny(settings.model, ADAPTIVE_MODEL_PREFIXES);
     const withFallback = startsWithAny(settings.model, FALLBACK_MODEL_PREFIXES);
     try {
       const response = await this.clientFor(key).beta.messages.create({
         model: settings.model,
-        max_tokens: mode === 'plan' ? 16000 : 4096,
+        max_tokens: spec.maxTokens,
         ...(withFallback
           ? { betas: [FALLBACK_BETA], fallbacks: [{ model: settings.fallbackModel }] }
           : {}),
         ...(adaptive
           ? {
               thinking: { type: 'adaptive' as const },
-              output_config: {
-                effort: mode === 'plan' ? settings.planEffort : settings.commandEffort,
-              },
+              output_config: { effort: spec.effort },
             }
           : {}),
         // The fixed prompt keeps its own breakpoint: standing instructions come after it, so
@@ -328,10 +400,10 @@ export class ConductorService {
         // their own: the conversation's breakpoints after them cache them too, and the four
         // allowed are tools, prompt, and the two in the conversation.
         system: [
-          { type: 'text', text: CONDUCTOR_SYSTEM_PROMPT, cache_control: PREFIX_CACHE },
-          ...(standing ? [{ type: 'text' as const, text: standing }] : []),
+          { type: 'text', text: spec.system, cache_control: PREFIX_CACHE },
+          ...(spec.standing ? [{ type: 'text' as const, text: spec.standing }] : []),
         ],
-        tools: this.toolsFor(settings),
+        tools: spec.tools,
         messages: withConversationBreakpoints(messages),
       });
       const turnUsage = {
@@ -511,24 +583,22 @@ export class ConductorService {
   private async runOpenRouterTurn(
     key: Secret<string>,
     settings: ConductorSettings,
-    mode: ConductorMode,
+    spec: TurnSpec,
     messages: Anthropic.Beta.BetaMessageParam[]
   ): Promise<Result<ConductorTurnResult, ConductorError>> {
     try {
       const response = await openRouterChat(key, {
         model: settings.openrouterModel,
-        max_tokens: mode === 'plan' ? 16000 : 4096,
-        messages: toOpenAiMessages(CONDUCTOR_SYSTEM_PROMPT, messages, {
+        max_tokens: spec.maxTokens,
+        messages: toOpenAiMessages(spec.system, messages, {
           cacheSystem: cachesByBreakpoint(settings.openrouterModel),
           cacheConversation: cachesByBreakpoint(settings.openrouterModel),
-          standing: await this.standingBlock(),
+          standing: spec.standing,
         }),
-        tools: toOpenAiTools(this.toolsFor(settings)),
-        reasoning: {
-          effort: openRouterEffort(mode === 'plan' ? settings.planEffort : settings.commandEffort),
-        },
+        tools: toOpenAiTools(spec.tools),
+        reasoning: { effort: openRouterEffort(spec.effort) },
         // Never with provider.order, which turns stickiness off.
-        session_id: this.openRouterSession,
+        session_id: spec.openRouterSession,
       });
       const choice = response.choices?.[0];
       if (!choice) return err({ type: 'api-error', message: 'OpenRouter returned no answer.' });

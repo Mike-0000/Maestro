@@ -10,12 +10,16 @@ import {
   type AppScopedStoreContribution,
 } from '@core/primitives/scoped-stores/browser';
 import { startAgentRequestBridge } from '../../browser/agent-request-bridge';
+import { ChatConductorManager } from '../../browser/chat-conductor/manager';
 import { ConductorStore } from '../../browser/conductor-store';
 import { startRemoteVoiceBridge } from '../../browser/remote-voice-bridge';
 import { seedWorkbenchView } from '../../browser/roster';
 import { readWorkbenchView } from '../../browser/workbench-view';
 
 export const conductorStoreToken = scopedStoreToken<ConductorStore>('conductor');
+export const chatConductorManagerToken = scopedStoreToken<ChatConductorManager>(
+  'conductor.chat-conductors'
+);
 
 let stopRemoteVoiceBridge: (() => void) | undefined;
 let stopAgentRequestBridge: (() => void) | undefined;
@@ -48,7 +52,20 @@ export const conductorAppStoreContributions: readonly AppScopedStoreContribution
       store.dispose();
     },
   }),
+  // Each chat's own conductor. Reads readiness and defaults from the conductor store's status.
+  contributeScopedStore({
+    token: chatConductorManagerToken,
+    create: (_context, stores) =>
+      new ChatConductorManager(stores.get(canvasStoreToken), stores.get(conductorStoreToken)),
+    activate: (manager) => manager.activate(),
+    dispose: (manager) => manager.dispose(),
+  }),
 ];
+
+/** Returns the app-scoped manager of the per-chat conductors. */
+export function getChatConductorManager(): ChatConductorManager {
+  return getAppStores().get(chatConductorManagerToken);
+}
 
 /** Returns the app-scoped ConductorStore. */
 export function getConductorStore(): ConductorStore {
