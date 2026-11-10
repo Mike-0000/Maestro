@@ -26,6 +26,10 @@ import {
   type ClaudeAccountsService,
 } from '@core/features/claude-accounts/node/claude-accounts-service';
 import { createClaudeCliRunner } from '@core/features/claude-accounts/node/claude-cli';
+import {
+  createClaudeUsageService,
+  type ClaudeUsageService,
+} from '@core/features/claude-accounts/node/usage-service';
 import { conversationEvents } from '@core/features/conversations/api/node/conversation-events';
 import { installMaestroHostAdoption } from '@core/features/conversations/node/maestro-host-adoption';
 import { createConversationDeletionSweepKind } from '@core/features/conversations/node/sweep/conversation-deletion-sweep';
@@ -176,6 +180,8 @@ import type { InfrastructureBundle } from './infrastructure';
 export type ServicesBundle = {
   readonly account: ReturnType<typeof createEmdashAccountService>;
   readonly claudeAccounts: ClaudeAccountsService;
+  /** The one usage service: the settings page and the automatic account switch share it. */
+  readonly claudeUsage: ClaudeUsageService;
   readonly automations: AutomationsService;
   readonly github: {
     cliImport: GitHubCliAccountImportService;
@@ -287,6 +293,7 @@ export async function bootServices(
       homeDir: homedir(),
     }),
   });
+  const claudeUsage = createClaudeUsageService(() => claudeAccounts.signInFolders());
   const workspacePlacement = new WorkspacePlacementResolver({
     broker: runtimes,
     getSettings: () => appSettingsService,
@@ -911,6 +918,7 @@ export async function bootServices(
     account: accountService,
     automations: automationsService,
     claudeAccounts,
+    claudeUsage,
     github: githubServices,
     gitCredentials,
     hostIsReachable,

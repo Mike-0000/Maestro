@@ -22,6 +22,7 @@ export function createClaudeAccountsWireController(
     setDefault: ({ accountId }) => service.setDefault(accountId),
     refreshIdentity: ({ accountId }) => service.refreshIdentity(accountId),
     usage: (input) => usage.usage(input),
+    setAutoSwitchOnLimit: ({ enabled }) => service.setAutoSwitchOnLimit(enabled),
     events: claudeAccountsEvents,
   });
   return { controller, dispose };

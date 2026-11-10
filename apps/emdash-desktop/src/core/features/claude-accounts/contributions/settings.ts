@@ -34,12 +34,15 @@ export type ClaudeAccountsSettings = {
   defaultAccountId: string;
   /** Last identity seen for the primary account. A display cache, not the account itself. */
   primaryIdentity: StoredClaudeIdentity;
+  /** Move a conversation that stops on a usage limit to another signed-in account. */
+  autoSwitchOnLimit: boolean;
 };
 
 export const DEFAULT_CLAUDE_ACCOUNTS_SETTINGS: ClaudeAccountsSettings = {
   accounts: [],
   defaultAccountId: PRIMARY_CLAUDE_ACCOUNT_ID,
   primaryIdentity: {},
+  autoSwitchOnLimit: true,
 };
 
 export const claudeAccountsSettingsContribution = defineSettingsContribution<
@@ -51,6 +54,8 @@ export const claudeAccountsSettingsContribution = defineSettingsContribution<
     accounts: z.array(storedAccountSchema),
     defaultAccountId: z.string().min(1),
     primaryIdentity: identitySchema,
+    // On unless the user turned it off: stored values from before the setting existed get it.
+    autoSwitchOnLimit: z.boolean().default(true),
   }),
   defaults: DEFAULT_CLAUDE_ACCOUNTS_SETTINGS,
 });

@@ -49,7 +49,20 @@ export const claudeAccountsContract = defineContract({
     input: z.object({ accountId: z.string().min(1).optional(), force: z.boolean().optional() }),
     output: z.custom<ClaudeAccountUsage[]>(),
   }),
-  /** Fires after every change to the accounts or the default, with the whole new state. */
+  /**
+   * Turns the automatic move of conversations that hit a usage limit on or off. Answers with a
+   * `changed` event like every other setting change.
+   */
+  setAutoSwitchOnLimit: procedure({
+    input: z.object({ enabled: z.boolean() }),
+    output: z.void(),
+  }),
+  /**
+   * `changed` after every change to the accounts, the default or the automatic switch, with the
+   * whole new state; `conversation-moved` when a conversation now runs on another account (a
+   * manual move through `conversations.moveClaudeAccount`, or the automatic switch);
+   * `limit-unhandled` when a conversation stopped on a usage limit and stayed where it was.
+   */
   events: eventStream({ key: z.void(), event: z.custom<ClaudeAccountsEvent>() }),
 });
 

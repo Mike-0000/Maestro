@@ -67,8 +67,23 @@ describe('ClaudeAccountsService', () => {
     expect(await service.list()).toEqual({
       accounts: [{ id: 'primary', label: 'Primary', kind: 'primary', loggedIn: false }],
       defaultAccountId: 'primary',
+      autoSwitchOnLimit: true,
     });
     expect(stored.accounts).toEqual([]);
+  });
+
+  it('switches on a usage limit by default, and remembers when that is turned off', async () => {
+    const { service } = createService();
+    const changes: boolean[] = [];
+    service.onChanged((state) => changes.push(state.autoSwitchOnLimit === true));
+
+    expect(await service.autoSwitchOnLimit()).toBe(true);
+    await service.setAutoSwitchOnLimit(false);
+
+    expect(await service.autoSwitchOnLimit()).toBe(false);
+    expect(stored.autoSwitchOnLimit).toBe(false);
+    expect((await service.list()).autoSwitchOnLimit).toBe(false);
+    expect(changes).toEqual([false]);
   });
 
   it('creates an account with a prepared folder and stores no path or credential', async () => {

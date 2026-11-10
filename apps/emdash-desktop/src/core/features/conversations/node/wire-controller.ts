@@ -18,6 +18,7 @@ import {
   type ClaudeAccountLaunchResolver,
 } from '@core/features/claude-accounts/api/node/launch';
 import { conversationRegistryTable as conversations } from '@core/features/conversations/api/node/registry';
+import type { ClaudeAccountMover } from '@core/features/conversations/node/claude-account-move';
 import { createConversationOperations } from '@core/features/conversations/node/controller';
 import type {
   ClaudeAccountIdResolver,
@@ -56,7 +57,7 @@ import { conversationWireEvents } from './event-host';
 /** Enter taking this long is a delay someone notices. */
 const SLOW_ENTER_MS = 1_000;
 
-type ConversationRuntimeTarget = Readonly<{
+export type ConversationRuntimeTarget = Readonly<{
   conversationId: string;
   projectId: string;
   taskId: string;
@@ -124,23 +125,41 @@ export type CreateConversationsWireControllerOptions = Readonly<{
   taskSessions: Pick<TaskSessionManager, 'getTask'>;
   withCompensation: CompensationRunner;
   hostIsReachable: (hostRef: SerializedHostRef) => boolean;
+  /** Moves a Claude conversation to another account; absent where accounts do not apply. */
+  claudeAccountMoves?: Pick<ClaudeAccountMover, 'move'>;
 }>;
+
+/**
+ * Resolves a conversation to the host, workspace and fresh agent launch input its session runs
+ * with, from the stored conversation and current settings (including its Claude account).
+ */
+export function createConversationRuntimeTargetResolver(
+  options: Pick<
+    CreateConversationsWireControllerOptions,
+    | 'workspaceIdentity'
+    | 'db'
+    | 'getProviderEnv'
+    | 'sessionLaunchContexts'
+    | 'getSessionMcpServers'
+    | 'claudeAccounts'
+  >
+): (conversationId: string) => Promise<ConversationRuntimeTarget> {
+  return (conversationId) =>
+    resolveConversationRuntimeTarget(
+      conversationId,
+      options.workspaceIdentity,
+      options.db,
+      options.getProviderEnv,
+      options.sessionLaunchContexts,
+      options.getSessionMcpServers,
+      options.claudeAccounts
+    );
+}
 
 export function createConversationsWireController(
   options: CreateConversationsWireControllerOptions
 ): Controller {
-  const resolveTarget =
-    options.resolveTarget ??
-    ((conversationId) =>
-      resolveConversationRuntimeTarget(
-        conversationId,
-        options.workspaceIdentity,
-        options.db,
-        options.getProviderEnv,
-        options.sessionLaunchContexts,
-        options.getSessionMcpServers,
-        options.claudeAccounts
-      ));
+  const resolveTarget = options.resolveTarget ?? createConversationRuntimeTargetResolver(options);
   const hooks = options.hooks ?? createDefaultRuntimeHooks(options);
   const claudeAccounts = options.claudeAccounts;
   const conversationOperations = createConversationOperations({
@@ -253,6 +272,16 @@ export function createConversationsWireController(
       }),
     renameConversation: ({ conversationId, name }) =>
       conversationOperations.renameConversation(conversationId, name),
+    moveClaudeAccount: async (input) => {
+      const moves = options.claudeAccountMoves;
+      if (!moves) {
+        return err({
+          type: 'unsupported' as const,
+          message: 'Claude accounts are not available here',
+        });
+      }
+      return moves.move({ ...input, reason: 'manual' });
+    },
     getConversationsForTask: ({ projectId, taskId }) =>
       conversationOperations.getConversationsForTask(projectId, taskId),
     getConversationsForProject: ({ projectId }) =>

@@ -34,6 +34,11 @@ import {
   localTerminalFilesSchema,
   preparedTerminalFileSchema,
 } from '@core/services/attachments/api/terminal-files';
+import {
+  MAX_CLAUDE_MOVE_FOLLOW_UP_LENGTH,
+  type MoveClaudeAccountError,
+  type MoveClaudeAccountResult,
+} from './claude-account-move';
 
 const conversationKey = z.object({ conversationId: z.string() });
 const conversationLocation = z.object({
@@ -216,6 +221,21 @@ export const conversationsContract = defineContract({
   renameConversation: procedure({
     input: z.object({ conversationId: z.string(), name: z.string() }),
     output: z.void(),
+  }),
+  /**
+   * Moves a local Claude Code conversation to another signed-in Claude account: records the
+   * account, and when a session is running, stops it and resumes the same session on the new
+   * account. A restart that fails puts the previous account back. Moves of one conversation run
+   * one at a time. Emits `claudeAccounts.events` `conversation-moved` with reason `manual`.
+   */
+  moveClaudeAccount: fallible({
+    input: z.object({
+      conversationId: z.string().min(1),
+      accountId: z.string().min(1),
+      followUpPrompt: z.string().trim().min(1).max(MAX_CLAUDE_MOVE_FOLLOW_UP_LENGTH).optional(),
+    }),
+    data: z.custom<MoveClaudeAccountResult>(),
+    error: z.custom<MoveClaudeAccountError>(),
   }),
   getConversationsForTask: procedure({
     input: z.object({ projectId: z.string(), taskId: z.string() }),
