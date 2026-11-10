@@ -16,6 +16,11 @@ export const acpStartInputSchema = z.object({
   initialQueue: z.array(promptInputSchema).optional(),
   env: z.record(z.string(), z.string()).optional(),
   /**
+   * Variables removed from the agent process environment after every layer is merged, so an
+   * inherited value cannot reach the agent. Part of the connection key, like `env`.
+   */
+  unsetEnv: z.array(z.string()).optional(),
+  /**
    * Host-provided HTTP MCP servers for this session only (e.g. Chorus's per-conversation browser
    * control server). Appended to the provider's configured servers when the agent supports HTTP
    * MCP; never part of the connection key, so they do not fork agent processes.

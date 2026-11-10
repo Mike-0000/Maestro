@@ -2,6 +2,12 @@ import type { GitCredentialsSessionSpec } from '@emdash/core/primitives/git-cred
 import { isLocalHostRef, type HostRef } from '@emdash/core/primitives/host/api';
 import type { TuiAgentStartInput } from '@emdash/core/runtimes/tui-agents/api';
 import { and, eq } from 'drizzle-orm';
+import {
+  applyClaudeAccountEnv,
+  CLAUDE_ACCOUNTS_PROVIDER_ID,
+  type ClaudeAccountLaunch,
+  type ClaudeAccountLaunchResolver,
+} from '@core/features/claude-accounts/api/node/launch';
 import { conversationRegistryTable as conversations } from '@core/features/conversations/api/node/registry';
 import type {
   ConversationProvider,
@@ -70,6 +76,11 @@ export type TuiConversationProviderDependencies = {
     taskId: string;
     title: string;
   }): Promise<TuiSessionMcp | undefined>;
+  /**
+   * Claude accounts: which account a Claude Code session runs under. Without it every session
+   * uses the primary sign-in.
+   */
+  claudeAccounts?: ClaudeAccountLaunchResolver;
   /** Whether the host is a WSL2 distro on this computer. */
   isWslHost?(host: HostRef): Promise<boolean>;
   /**
@@ -189,12 +200,29 @@ export class TuiConversationProvider implements ConversationProvider {
     const autoApprove =
       conversation.autoApprove === true ||
       (await this.localAutoApproveInWsl(conversation.providerId, wslOnLocalHost));
-    const providerVars = {
+    const sessionVars = {
       ...(providerConfig?.env ?? {}),
       ...colorEnv,
       ...launchContext.data.env,
       ...sessionMcp?.env,
     };
+    const claudeAccount = await this.prepareClaudeAccount(conversation);
+    // Primary account: the variables are left exactly as they were.
+    const accountEnv = claudeAccount
+      ? applyClaudeAccountEnv(sessionVars, claudeAccount)
+      : undefined;
+    // The account's folder is on this computer. A session asked to run inside WSL2 keeps the
+    // distro's own sign-in there, and gets the account only if it starts natively after all;
+    // the runtime knows which, so it is handed both.
+    const providerVars = accountEnv && !wslOnLocalHost ? accountEnv.env : sessionVars;
+    const wslLaunch = wslOnLocalHost
+      ? {
+          ...wslLaunchFor(conversation.providerId),
+          ...(accountEnv
+            ? { native: { providerVars: accountEnv.env, unsetEnv: accountEnv.unsetEnv } }
+            : {}),
+        }
+      : undefined;
     const sessionId = makePtySessionId(this.projectId, this.taskId, conversation.id);
 
     return {
@@ -211,14 +239,31 @@ export class TuiConversationProvider implements ConversationProvider {
       trustWorkspace,
       extraArgs: parseExtraArgs(providerConfig?.extraArgs),
       providerVars,
+      ...(accountEnv && !wslOnLocalHost ? { unsetEnv: accountEnv.unsetEnv } : {}),
       gitCredentials,
       ...(sessionMcp ? { sessionMcp: sessionMcp.sessionMcp } : {}),
       cols: initialSize.cols,
       rows: initialSize.rows,
       shellSetup: launchContext.data.shellSetup,
       tmux: launchContext.data.tmux ? { identity: sessionId } : undefined,
-      ...(wslOnLocalHost ? { wsl: wslLaunchFor(conversation.providerId) } : {}),
+      ...(wslLaunch ? { wsl: wslLaunch } : {}),
     };
+  }
+
+  /**
+   * The extra Claude account this session runs under, with its folder brought up to date, or
+   * null for the primary account. The folder is on this computer, so sessions on another host
+   * keep that host's own sign-in.
+   */
+  private async prepareClaudeAccount(
+    conversation: Conversation
+  ): Promise<ClaudeAccountLaunch | null> {
+    const accounts = this.dependencies.claudeAccounts;
+    if (!accounts || conversation.providerId !== CLAUDE_ACCOUNTS_PROVIDER_ID) return null;
+    if (!isLocalHostRef(this.host)) return null;
+    const launch = await accounts.resolve(conversation.claudeAccountId);
+    if (launch) await accounts.prepare(launch);
+    return launch;
   }
 
   /**

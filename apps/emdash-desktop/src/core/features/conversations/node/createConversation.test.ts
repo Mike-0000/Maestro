@@ -221,4 +221,48 @@ describe('createConversation', () => {
     expect((deps.db as unknown as ReturnType<typeof fakeDatabase>).delete).toHaveBeenCalled();
     expect(hostConversations.delete).toHaveBeenCalledWith({ conversationId: 'conv-1' });
   });
+
+  describe('Claude accounts', () => {
+    const claudeParams = { ...baseParams, provider: 'claude' };
+    const hostConfig = () =>
+      (hostConversations.create.mock.calls[0][0] as unknown as { config: Record<string, unknown> })
+        .config;
+
+    it('records the default account on a Claude conversation created without a choice', async () => {
+      const resolveClaudeAccountId = vi.fn(async () => 'account-1');
+
+      const conversation = await createConversation(
+        claudeParams,
+        dependencies({ resolveClaudeAccountId })
+      );
+
+      expect(resolveClaudeAccountId).toHaveBeenCalledWith(undefined);
+      expect(hostConfig()).toMatchObject({ claudeAccountId: 'account-1' });
+      expect(conversation.claudeAccountId).toBe('account-1');
+    });
+
+    it('passes an explicit choice to the resolver, for terminal conversations too', async () => {
+      const resolveClaudeAccountId = vi.fn(async (explicit?: string) => explicit ?? 'primary');
+
+      await createConversation(
+        { ...claudeParams, type: 'pty' as const, claudeAccountId: 'account-2' },
+        dependencies({ resolveClaudeAccountId })
+      );
+
+      expect(resolveClaudeAccountId).toHaveBeenCalledWith('account-2');
+      expect(hostConfig()).toMatchObject({ type: 'pty', claudeAccountId: 'account-2' });
+    });
+
+    it('records nothing for other providers', async () => {
+      const resolveClaudeAccountId = vi.fn(async () => 'account-1');
+
+      await createConversation(
+        { ...baseParams, provider: 'codex', claudeAccountId: 'account-1' },
+        dependencies({ resolveClaudeAccountId })
+      );
+
+      expect(resolveClaudeAccountId).not.toHaveBeenCalled();
+      expect(hostConfig()).not.toHaveProperty('claudeAccountId');
+    });
+  });
 });

@@ -12,6 +12,12 @@ import { createXtermLogSink } from '@core/features/terminals/api/browser/pty/xte
 type AuthStatusHandle = {
   readonly ready: Promise<void>;
   current(): AuthStatusModelState;
+  /**
+   * Calls the listener with the provider's auth state every time the model publishes. `current`
+   * is a plain read, so this is how a caller follows the login as it runs. Returns the
+   * unsubscribe.
+   */
+  subscribe(listener: (state: AuthStatusModelState) => void): () => void;
   dispose(): Promise<void>;
 };
 
@@ -39,6 +45,12 @@ export class AcpAuthLoginBinding {
      * the post-attach resize then converges the PTY.
      */
     initialDims?: { cols: number; rows: number };
+    /**
+     * Claude Code on this computer only: sign in to this Claude account rather than the
+     * provider's own sign-in. Such a login reports through `login.exit`, not through the
+     * provider's status.
+     */
+    claudeAccountId?: string;
   }): Promise<AcpAuthLoginBinding> {
     const scope = createScope({ label: `auth-login:${args.providerId}` });
     const cancellation = { cancelOnDispose: true };
@@ -60,6 +72,7 @@ export class AcpAuthLoginBinding {
           providerId: args.providerId,
           methodId: args.methodId,
           ...(args.initialDims ?? {}),
+          ...(args.claudeAccountId !== undefined ? { claudeAccountId: args.claudeAccountId } : {}),
         },
         { signal: scope.signal }
       );
@@ -145,16 +158,28 @@ function createAuthStatusHandle(
 ): AuthStatusHandle {
   const scope = parentScope.child(`auth-status:${providerId}`);
   let current: AgentConfigList = {};
+  const listeners = new Set<(state: AuthStatusModelState) => void>();
+  const read = (): AuthStatusModelState =>
+    current[providerId]?.auth ?? { status: { kind: 'unknown' }, login: null };
   observe(
     agents,
     (snapshot) => {
       current = snapshot.value ?? {};
+      const state = read();
+      for (const listener of Array.from(listeners)) listener(state);
     },
     { scope }
   );
+  scope.add(() => listeners.clear());
   return {
     ready: whenReady(agents, { scope }).then(() => undefined),
-    current: () => current[providerId]?.auth ?? { status: { kind: 'unknown' }, login: null },
+    current: read,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
     dispose: () => scope.dispose(),
   };
 }

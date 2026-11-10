@@ -796,6 +796,7 @@ export class SessionManager {
             providerId: record.input.providerId,
             cwd: record.input.cwd,
             env: record.input.env,
+            unsetEnv: record.input.unsetEnv,
           });
           return connection?.generation === record.processGeneration;
         },

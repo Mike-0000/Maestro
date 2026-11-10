@@ -147,4 +147,24 @@ describe('conversation-config v1 schema', () => {
       expect(result.data.model).toBe('claude-sonnet-5');
     }
   });
+
+  it('keeps the Claude account on both variants without a new version', () => {
+    for (const type of ['pty', 'acp'] as const) {
+      const value = conversationConfig.schema.parse({
+        version: '1',
+        type,
+        claudeAccountId: 'account-1',
+      });
+      expect(conversationConfig.parseJson(conversationConfig.serialize(value))).toEqual({
+        version: '1',
+        type,
+        claudeAccountId: 'account-1',
+      });
+    }
+    // Conversations written before accounts existed still parse, with no account.
+    expect(conversationConfig.safeParse({ version: '1', type: 'pty' })).toEqual({
+      status: 'ok',
+      data: { version: '1', type: 'pty' },
+    });
+  });
 });

@@ -147,6 +147,24 @@ describe('createAcpConnectionSource', () => {
     });
   });
 
+  it('forwards unset variables to spawn resolution and keeps such sessions apart', async () => {
+    const host = new FakeAcpProcessHost();
+    const deps = sourceDeps(host);
+    const buildAcpSpawn = vi.spyOn(deps.agentHost, 'buildAcpSpawn');
+    const source = createAcpConnectionSource(deps);
+    const unsetEnv = ['ANTHROPIC_API_KEY'];
+
+    await acquireResourceAsResult(source, connectionKey(), isAcpConnectionError);
+    await acquireResourceAsResult(source, { ...connectionKey(), unsetEnv }, isAcpConnectionError);
+
+    expect(buildAcpSpawn).toHaveBeenLastCalledWith('claude', {
+      cwd: '/tmp/workspace',
+      env: undefined,
+      unsetEnv,
+    });
+    expect(host.allHandles).toHaveLength(2);
+  });
+
   it('forwards process close and invalidates closed entries', async () => {
     const agent = new FakeAcpAgent();
     const host = new FakeAcpProcessHost();

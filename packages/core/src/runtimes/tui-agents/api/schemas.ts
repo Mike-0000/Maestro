@@ -22,6 +22,12 @@ export const tuiAgentStartInputSchema = z.object({
   extraArgs: z.array(z.string()).optional(),
   providerVars: z.record(z.string(), z.string()).optional(),
   /**
+   * Variables removed from this session's environment after every layer is merged, so an
+   * inherited value cannot reach the agent (for example an API key that would outrank the
+   * sign-in this session is meant to use).
+   */
+  unsetEnv: z.array(z.string()).optional(),
+  /**
    * Per-session git credential behavior, resolved desktop-side from project
    * settings (spec: github-git-settings §4). Absent = native behavior.
    */
@@ -39,6 +45,18 @@ export const tuiAgentStartInputSchema = z.object({
   wsl: z
     .object({
       configRoot: z.object({ env: z.string().min(1), directory: z.string().min(1) }).optional(),
+      /**
+       * What replaces `providerVars` and `unsetEnv` when the session ends up starting natively
+       * after all (no distro has the CLI). For variables that only make sense on this
+       * computer, such as a Windows configuration directory, which the caller cannot apply
+       * itself because only the runtime knows where the session really runs.
+       */
+      native: z
+        .object({
+          providerVars: z.record(z.string(), z.string()).optional(),
+          unsetEnv: z.array(z.string()).optional(),
+        })
+        .optional(),
     })
     .optional(),
   /**

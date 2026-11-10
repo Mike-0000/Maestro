@@ -1,6 +1,7 @@
 import { Dialog } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
 import { useMemo } from 'react';
+import { useClaudeAccountPicker } from '@core/features/claude-accounts/contributions/browser/claude-account-picker';
 import { useConnectedIssueProviders } from '@core/features/integrations/api/browser/use-connected-issue-providers';
 import {
   firstAvailableProjectId,
@@ -100,12 +101,16 @@ export const CreateTaskModal = observer(function CreateTaskModal({
     undefined,
     autoApproveByDefault
   );
+  const claudeAccount = useClaudeAccountPicker(initialConversation.provider, {
+    remote: Boolean(initialConversation.connectionId),
+  });
   const { navigate } = useNavigate();
 
   const { handleCreateTask, canCreate } = useCreateTaskCallback({
     selectedProjectId,
     state,
     initialConversation,
+    claudeAccountId: claudeAccount.claudeAccountId,
     navigate,
     onCreated: complete,
   });
@@ -152,7 +157,7 @@ export const CreateTaskModal = observer(function CreateTaskModal({
                 {
                   value: 'conversation',
                   label: 'Initial Conversation',
-                  content: <ConversationField />,
+                  content: <ConversationField claudeAccount={claudeAccount} />,
                 },
                 {
                   value: 'workspace',

@@ -203,6 +203,28 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     keywords: ['claude', 'codex', 'copilot', 'cursor', 'gemini', 'cli'],
   },
   {
+    id: 'claude-accounts',
+    label: 'Claude accounts',
+    tab: 'claude-accounts',
+    description: 'Sign in to more than one Claude subscription and pick the one new agents use.',
+    keywords: [
+      'subscription',
+      'login',
+      'sign in',
+      'default account',
+      'switch account',
+      'max',
+      'pro',
+    ],
+  },
+  {
+    id: 'claude-usage',
+    label: 'Claude usage',
+    tab: 'claude-accounts',
+    description: 'Weekly and 5-hour usage for each Claude account.',
+    keywords: ['limits', 'quota', 'weekly', 'reset', 'opus', 'sonnet'],
+  },
+  {
     id: 'mcp',
     label: 'MCP',
     tab: 'mcp',

@@ -1,3 +1,5 @@
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import {
   hostRef,
   isLocalHostRef,
@@ -19,6 +21,11 @@ import { ProviderTokenDispatcher } from '@core/features/account/node/services/pr
 import { getPluginMetadata } from '@core/features/agents/api/node/plugin-registry';
 import { AutomationsService } from '@core/features/automations/api/node/automations-service';
 import { buildAutomationDeployment } from '@core/features/automations/node/deployment-builder';
+import {
+  createClaudeAccountsService,
+  type ClaudeAccountsService,
+} from '@core/features/claude-accounts/node/claude-accounts-service';
+import { createClaudeCliRunner } from '@core/features/claude-accounts/node/claude-cli';
 import { conversationEvents } from '@core/features/conversations/api/node/conversation-events';
 import { installMaestroHostAdoption } from '@core/features/conversations/node/maestro-host-adoption';
 import { createConversationDeletionSweepKind } from '@core/features/conversations/node/sweep/conversation-deletion-sweep';
@@ -168,6 +175,7 @@ import type { InfrastructureBundle } from './infrastructure';
 
 export type ServicesBundle = {
   readonly account: ReturnType<typeof createEmdashAccountService>;
+  readonly claudeAccounts: ClaudeAccountsService;
   readonly automations: AutomationsService;
   readonly github: {
     cliImport: GitHubCliAccountImportService;
@@ -258,6 +266,27 @@ export async function bootServices(
     appSettingsService.off('app-settings:changed', handleFileSearchSettingsChanged);
   });
   const providerOverrideSettings = createProviderOverrideSettings(db);
+  // Extra Claude account folders live under the app's data directory; the registry is an app
+  // setting, and the CLI is the one already resolved for Claude Code on this computer.
+  const claudeAccounts = createClaudeAccountsService({
+    settings: {
+      get: () => appSettingsService.get('claudeAccounts'),
+      update: (value) => appSettingsService.update('claudeAccounts', value),
+    },
+    accountsRoot: join(app.getPath('userData'), 'claude-accounts'),
+    homeDir: homedir(),
+    platform: process.platform,
+    logger: log,
+    runCli: createClaudeCliRunner({
+      resolveCli: async () => {
+        const resolved = await clients.hostDependencies.resolver.resolve({ id: 'claude' });
+        return resolved.success ? resolved.data.path : null;
+      },
+      processEnv: process.env,
+      providerEnv: async () => (await providerOverrideSettings.getItem('claude'))?.env ?? {},
+      homeDir: homedir(),
+    }),
+  });
   const workspacePlacement = new WorkspacePlacementResolver({
     broker: runtimes,
     getSettings: () => appSettingsService,
@@ -291,6 +320,7 @@ export async function bootServices(
     resolveSessionGitCredentials: (params: { projectId: string; host: HostRef }) =>
       gitCredentials.resolveSessionSpec(params),
     resolveSessionMcp: resolveAgentSessionMcp,
+    claudeAccounts,
     ...createWslAutoApprove(db),
   };
   const projectAttachmentAdapter = createProjectAttachmentAdapter({
@@ -410,6 +440,7 @@ export async function bootServices(
     createConversationProvider,
     workspaceIdentity,
     creations: workspaceCreations,
+    resolveClaudeAccountId: (explicit) => claudeAccounts.resolveAccountId(explicit),
     // Plain task deletion (spec §3): no kernel submit; the host-artifact half rides
     // the workspace removal verbs and the reconcile-sweep tombstones.
     deletion: {
@@ -879,6 +910,7 @@ export async function bootServices(
   return {
     account: accountService,
     automations: automationsService,
+    claudeAccounts,
     github: githubServices,
     gitCredentials,
     hostIsReachable,

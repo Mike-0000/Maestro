@@ -75,6 +75,7 @@ export class SessionMaterializer {
       providerId: input.providerId,
       cwd: input.cwd,
       env: input.env,
+      unsetEnv: input.unsetEnv,
     };
     const acquire = await acquireResourceAsResult(
       this.connections,

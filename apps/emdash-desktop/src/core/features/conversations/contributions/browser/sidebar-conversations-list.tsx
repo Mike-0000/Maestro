@@ -19,6 +19,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
+import { getConversationClaudeAccountLabel } from '@core/features/claude-accounts/contributions/browser/conversation-account';
 import type {
   ConversationManagerStore,
   ConversationStore,
@@ -117,6 +118,8 @@ const ConversationRow = observer(function ConversationRow({
     conversation.data.title
   );
   const rawTitle = conversation.data.title ?? '';
+  // Only set when there is more than one Claude account to tell apart.
+  const claudeAccountLabel = getConversationClaudeAccountLabel(conversation.data);
   const commitRename = (value: string) => {
     if (committedRef.current) return;
     committedRef.current = true;
@@ -188,6 +191,7 @@ const ConversationRow = observer(function ConversationRow({
         <div
           role="button"
           tabIndex={0}
+          title={claudeAccountLabel ? `Claude account: ${claudeAccountLabel}` : undefined}
           onClick={() => openConversation({ conversationId }, { preview: true })}
           onDoubleClick={handleDoubleClick}
           onKeyDown={(e) => {

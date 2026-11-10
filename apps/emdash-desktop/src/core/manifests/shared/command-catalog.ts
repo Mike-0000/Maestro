@@ -1,4 +1,5 @@
 import { CANVAS_COMMAND_DEFS } from '@core/features/canvas/contributions/commands';
+import { CLAUDE_ACCOUNTS_COMMAND_DEFS } from '@core/features/claude-accounts/contributions/commands';
 import { DEV_PERF_COMMAND_DEFS } from '@core/features/dev-perf/contributions/commands';
 import { EDITOR_FILE_TREE_COMMAND_DEFS } from '@core/features/editor/contributions/commands';
 import { SETTINGS_COMMAND_DEFS } from '@core/features/settings/contributions/commands';
@@ -19,6 +20,7 @@ export const COMMAND_CATALOG = defineCommandCatalog([
   ...TASK_LIST_COMMAND_DEFS,
   ...CANVAS_COMMAND_DEFS,
   ...VOICE_COMMAND_DEFS,
+  ...CLAUDE_ACCOUNTS_COMMAND_DEFS,
 ] as const);
 
 export type CommandId = (typeof COMMAND_CATALOG.defs)[number]['id'];

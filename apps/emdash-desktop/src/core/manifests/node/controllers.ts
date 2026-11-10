@@ -21,6 +21,9 @@ import {
   type BrowserOperations,
 } from '@core/features/browser/node/wire-controller';
 import { createCatalogWireController } from '@core/features/catalog/node/wire-controller';
+import type { ClaudeAccountsService } from '@core/features/claude-accounts/node/claude-accounts-service';
+import { createClaudeUsageService } from '@core/features/claude-accounts/node/usage-service';
+import { createClaudeAccountsWireController } from '@core/features/claude-accounts/node/wire-controller';
 import { createConductorWireController } from '@core/features/conductor/node/wire-controller';
 import type { CompensationRunner } from '@core/features/conversations/node/createConversation';
 import {
@@ -136,6 +139,7 @@ export type DesktopControllerContext = {
   readonly appSettings: AppSettingsService;
   readonly automations: AutomationsService;
   readonly chorus: ChorusHostServices;
+  readonly claudeAccounts: ClaudeAccountsService;
   readonly browserOperations: BrowserOperations;
   /** Chorus browser-control MCP servers for local ACP sessions (resolved in main). */
   readonly sessionMcpServers?: SessionMcpServersResolver;
@@ -205,13 +209,14 @@ export const desktopNodeControllers = {
       createAccountWireController(accountService, { logger, telemetry }),
   },
   agents: {
-    create: ({ agentDependencies, providerSettings, runtimes }) =>
+    create: ({ agentDependencies, claudeAccounts, providerSettings, runtimes }) =>
       createAgentsWireController({
         operations: createAgentOperations({
           ...agentDependencies,
           providerOverrideSettings: providerSettings,
         }),
         runtimes,
+        resolveClaudeAccountLogin: (accountId) => claudeAccounts.loginEnv(accountId),
       }),
   },
   appSettings: {
@@ -298,6 +303,16 @@ export const desktopNodeControllers = {
   },
   agentAddons: {
     create: ({ runtimes }) => createAgentAddonsWireController({ runtimes }),
+  },
+  claudeAccounts: {
+    create: ({ claudeAccounts, scope }) => {
+      const { controller, dispose } = createClaudeAccountsWireController(
+        claudeAccounts,
+        createClaudeUsageService(() => claudeAccounts.signInFolders())
+      );
+      scope.add(dispose);
+      return controller;
+    },
   },
   terminals: {
     create: ({
@@ -417,6 +432,7 @@ export const desktopNodeControllers = {
   conversations: {
     create: ({
       sessionMcpServers,
+      claudeAccounts,
       compensation,
       db,
       terminalFileSources,
@@ -438,6 +454,11 @@ export const desktopNodeControllers = {
         projects,
         getProviderEnv: async (providerId) => (await providerSettings.getItem(providerId))?.env,
         getSessionMcpServers: sessionMcpServers,
+        claudeAccounts: {
+          resolve: (accountId) => claudeAccounts.resolve(accountId),
+          prepare: (launch) => claudeAccounts.prepare(launch),
+          resolveAccountId: (explicit) => claudeAccounts.resolveAccountId(explicit),
+        },
         sessionLaunchContexts,
         runtimes,
         taskSessions,

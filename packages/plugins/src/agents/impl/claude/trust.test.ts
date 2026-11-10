@@ -79,4 +79,14 @@ describe('Claude trust behavior', () => {
 
     expect(fs.writes).toHaveLength(0);
   });
+
+  it('keeps the record in the configuration directory when one is set, else in the home', () => {
+    const resolve = provider.behavior.trust!.resolveConfigRoot!;
+    const context = { homeDir: '/home/ada', platform: 'linux' as const };
+
+    expect(resolve({ ...context, env: {} })).toBe('/home/ada');
+    expect(resolve({ ...context, env: { CLAUDE_CONFIG_DIR: '/accounts/second' } })).toBe(
+      '/accounts/second'
+    );
+  });
 });

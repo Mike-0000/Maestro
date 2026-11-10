@@ -6,6 +6,7 @@ import {
   withWslEnv,
   wslHomeShare,
   wslProbeLine,
+  inputForLaunch,
 } from './wsl-launch';
 
 describe('toWslPath', () => {
@@ -121,5 +122,36 @@ describe('the probe', () => {
     expect(
       wslHomeShare({ cli: '/usr/bin/claude', distro: 'Ubuntu', home: '/home/me' }, '.claude')
     ).toBe('\\\\wsl.localhost\\Ubuntu\\home\\me\\.claude');
+  });
+});
+
+describe('inputForLaunch', () => {
+  const input = {
+    providerVars: { ANTHROPIC_API_KEY: 'sk-user', CLAUDE_CONFIG_DIR: 'C:\\user\\config' },
+    wsl: {
+      native: {
+        providerVars: { CLAUDE_CONFIG_DIR: 'C:\\accounts\\second' },
+        unsetEnv: ['ANTHROPIC_API_KEY'],
+      },
+    },
+  };
+
+  it('keeps the input as it came for a session that runs inside WSL', () => {
+    expect(inputForLaunch(input, true)).toBe(input);
+  });
+
+  it('takes the native variables when the session falls back to a native start', () => {
+    expect(inputForLaunch(input, false)).toMatchObject({
+      providerVars: { CLAUDE_CONFIG_DIR: 'C:\\accounts\\second' },
+      unsetEnv: ['ANTHROPIC_API_KEY'],
+    });
+  });
+
+  it('changes nothing for a session with no native variables set aside', () => {
+    const plain = { providerVars: { A: '1' }, unsetEnv: ['B'], wsl: {} };
+    expect(inputForLaunch(plain, false)).toBe(plain);
+    expect(inputForLaunch({ providerVars: { A: '1' } }, false)).toEqual({
+      providerVars: { A: '1' },
+    });
   });
 });

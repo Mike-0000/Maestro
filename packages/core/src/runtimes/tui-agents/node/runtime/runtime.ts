@@ -4,7 +4,11 @@ import { systemClock, type Clock } from '@emdash/shared/scheduling';
 import { LiveLogSource } from '@emdash/wire/live';
 import { type LiveSource } from '@emdash/wire/rpc';
 import { peek } from '@emdash/wire/state';
-import { currentAgentEnvPlatform, mergeAgentEnvLayers } from '#primitives/agent-env/api';
+import {
+  currentAgentEnvPlatform,
+  mergeAgentEnvLayers,
+  omitAgentEnvKeys,
+} from '#primitives/agent-env/api';
 import { applyGitCredentialsToEnv } from '#primitives/git-credentials/api';
 import type {
   PersistedTuiAgentStartInput,
@@ -71,6 +75,7 @@ import {
   wslHomeShare,
   wslProbeLine,
   type WslTarget,
+  inputForLaunch,
 } from './wsl-launch';
 
 const RESUME_FALLBACK_WINDOW_MS = 3_000;
@@ -564,34 +569,42 @@ export class TuiAgentsRuntime {
     // starts natively, exactly as it would with the setting off.
     const wsl = config.input.wsl ? await this.wslTarget(config.input, command) : null;
     // The trust record is the host's; inside WSL the agent keeps its own and asks for itself.
+    // Only now is it known where the session runs, and so which variables it gets.
+    const launchInput = inputForLaunch(config.input, wsl !== null);
     if (config.input.trustWorkspace === true && !wsl) {
       await this.workspaceTrust.ensureTrusted({
         providerId: config.input.providerId,
         workspacePath: config.input.cwd,
+        env: launchInput.providerVars,
       });
     }
-    const hookEnv = await this.prepareHookEnv(config.input, provider, wsl);
+    const hookEnv = await this.prepareHookEnv(launchInput, provider, wsl);
     if (!this.isCurrentGeneration(config.input.conversationId, generation)) {
       return this.cancelledSpawn(config.input.conversationId);
     }
 
     // Git-credential behavior is applied last through the blessed construction (spec:
     // github-git-settings §4) so a "none" scrub wins over provider and hook env.
+    const envPlatform = currentAgentEnvPlatform(this.deps.platform);
     const env = applyGitCredentialsToEnv(
-      mergeAgentEnvLayers(
-        currentAgentEnvPlatform(this.deps.platform),
-        {
-          TERM: 'xterm-256color',
-          COLORTERM: 'truecolor',
-          TERM_PROGRAM: 'emdash',
-        },
-        command.env,
-        config.input.providerVars ?? {},
-        hookEnv
+      omitAgentEnvKeys(
+        envPlatform,
+        mergeAgentEnvLayers(
+          envPlatform,
+          {
+            TERM: 'xterm-256color',
+            COLORTERM: 'truecolor',
+            TERM_PROGRAM: 'emdash',
+          },
+          command.env,
+          launchInput.providerVars ?? {},
+          hookEnv
+        ),
+        launchInput.unsetEnv
       ),
       config.input.gitCredentials
     );
-    const spawnSpec = await this.spawnSpec(command, config.input, env, wsl);
+    const spawnSpec = await this.spawnSpec(command, launchInput, env, wsl);
     if (!this.isCurrentGeneration(config.input.conversationId, generation)) {
       return this.cancelledSpawn(config.input.conversationId);
     }

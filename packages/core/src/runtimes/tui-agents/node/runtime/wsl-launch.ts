@@ -143,3 +143,24 @@ export function parseWslProbe(stdout: string): WslTarget | null {
   if (!/^[\w.-]+$/.test(distro)) return null;
   return { cli, distro, home };
 }
+
+/**
+ * The start input as the session will really use it. Asked to run inside WSL2 but starting
+ * natively (no distro has the CLI), the session takes the variables the caller set aside for
+ * that case; in every other case the input is used as it came.
+ */
+export function inputForLaunch<
+  T extends {
+    providerVars?: Record<string, string>;
+    unsetEnv?: string[];
+    wsl?: { native?: { providerVars?: Record<string, string>; unsetEnv?: string[] } };
+  },
+>(input: T, inWsl: boolean): T {
+  const native = input.wsl?.native;
+  if (inWsl || !native) return input;
+  return {
+    ...input,
+    providerVars: native.providerVars ?? input.providerVars,
+    unsetEnv: native.unsetEnv ?? input.unsetEnv,
+  };
+}

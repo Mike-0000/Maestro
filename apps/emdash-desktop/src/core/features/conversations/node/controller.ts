@@ -4,6 +4,7 @@ import type { TaskSessionManager } from '@core/features/tasks/api/node/task-sess
 import type { TelemetryService } from '@core/primitives/telemetry/api/telemetry';
 import type { AppDb } from '@core/services/app-db/node/db';
 import type {
+  ClaudeAccountIdResolver,
   CompensationRunner,
   ConversationWorkspaceIdentityResolver,
 } from './createConversation';
@@ -30,6 +31,7 @@ export function createConversationOperations(dependencies: {
   hostIsReachable: (hostRef: SerializedHostRef) => boolean;
   workspaceIdentity: ConversationWorkspaceIdentityResolver;
   recordWorkStarted?: RecordWorkStarted;
+  resolveClaudeAccountId?: ClaudeAccountIdResolver;
 }) {
   const { db, telemetry, withCompensation } = dependencies;
   return {
@@ -44,6 +46,7 @@ export function createConversationOperations(dependencies: {
         hostIsReachable: dependencies.hostIsReachable,
         workspaceIdentity: dependencies.workspaceIdentity,
         recordWorkStarted: dependencies.recordWorkStarted,
+        resolveClaudeAccountId: dependencies.resolveClaudeAccountId,
       }),
     deleteConversation: (projectId: string, taskId: string, conversationId: string) =>
       deleteConversation(db, dependencies.runtimes, projectId, taskId, conversationId, telemetry),

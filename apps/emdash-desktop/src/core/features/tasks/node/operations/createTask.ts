@@ -265,6 +265,7 @@ export async function prepareCreateTask(
             ...(ic.autoApprove !== undefined && { autoApprove: ic.autoApprove }),
             ...(initialQueue?.length && { initialQueue }),
             ...(ic.model && { model: ic.model }),
+            ...(ic.claudeAccountId && { claudeAccountId: ic.claudeAccountId }),
           }
         : {
             version: '1',
@@ -272,6 +273,7 @@ export async function prepareCreateTask(
             ...(ic.autoApprove !== undefined && { autoApprove: ic.autoApprove }),
             ...(ic.initialPrompt?.trim() && { initialPrompt: ic.initialPrompt.trim() }),
             ...(ic.model && { model: ic.model }),
+            ...(ic.claudeAccountId && { claudeAccountId: ic.claudeAccountId }),
           };
     if (conversationWorkspacePath === null) {
       return err({

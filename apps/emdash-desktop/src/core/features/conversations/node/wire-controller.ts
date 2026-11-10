@@ -11,9 +11,18 @@ import type { Logger } from '@emdash/shared/logger';
 import type { LiveSource } from '@emdash/wire/rpc';
 import { createController, type CallMeta, type Controller } from '@emdash/wire/rpc';
 import { and, eq } from 'drizzle-orm';
+import {
+  applyClaudeAccountEnv,
+  CLAUDE_ACCOUNTS_PROVIDER_ID,
+  type ClaudeAccountLaunch,
+  type ClaudeAccountLaunchResolver,
+} from '@core/features/claude-accounts/api/node/launch';
 import { conversationRegistryTable as conversations } from '@core/features/conversations/api/node/registry';
 import { createConversationOperations } from '@core/features/conversations/node/controller';
-import type { CompensationRunner } from '@core/features/conversations/node/createConversation';
+import type {
+  ClaudeAccountIdResolver,
+  CompensationRunner,
+} from '@core/features/conversations/node/createConversation';
 import {
   setConversationAcpConfigOption,
   type AcpPersistedConfigKey,
@@ -61,6 +70,8 @@ type ConversationRuntimeTarget = Readonly<{
   workspacePath?: string;
   host: HostRef;
   acpInput?: ConversationsAcpStartInput;
+  /** The extra Claude account the ACP session runs under; its folder is prepared on attach. */
+  claudeAccount?: ClaudeAccountLaunch;
 }>;
 
 type WorkspaceIdentityResolver = Readonly<{
@@ -97,6 +108,11 @@ export type CreateConversationsWireControllerOptions = Readonly<{
    * main per conversation; the renderer cannot add servers.
    */
   getSessionMcpServers?: SessionMcpServersResolver;
+  /**
+   * Claude accounts: which account a Claude Code session runs under, and the id a new
+   * conversation is recorded with. Without it every session uses the primary sign-in.
+   */
+  claudeAccounts?: ClaudeAccountLaunchResolver & { resolveAccountId: ClaudeAccountIdResolver };
   sessionLaunchContexts: Pick<TaskSessionLaunchContextResolver, 'resolve'>;
   logger: Logger;
   projects: Pick<ProjectAttachmentManager, 'requireAttached'>;
@@ -122,9 +138,11 @@ export function createConversationsWireController(
         options.db,
         options.getProviderEnv,
         options.sessionLaunchContexts,
-        options.getSessionMcpServers
+        options.getSessionMcpServers,
+        options.claudeAccounts
       ));
   const hooks = options.hooks ?? createDefaultRuntimeHooks(options);
+  const claudeAccounts = options.claudeAccounts;
   const conversationOperations = createConversationOperations({
     db: options.db,
     taskSessions: options.taskSessions,
@@ -134,6 +152,9 @@ export function createConversationsWireController(
     hostIsReachable: options.hostIsReachable,
     workspaceIdentity: options.workspaceIdentity,
     recordWorkStarted: options.localUpdates?.recordWorkStarted,
+    resolveClaudeAccountId: claudeAccounts
+      ? (explicit) => claudeAccounts.resolveAccountId(explicit)
+      : undefined,
   });
   const target = (conversationId: string) => resolveTarget(conversationId);
   // Input arrives in order but takes different paths; Enter must not be overtaken by later keys.
@@ -248,6 +269,10 @@ export function createConversationsWireController(
         const runtimeTarget = await target(conversationId);
         const input = runtimeTarget.acpInput;
         if (!input) throw missingAcpInputError(runtimeTarget);
+        // The agent process may start here, so the account's folder is brought up to date first.
+        if (runtimeTarget.claudeAccount) {
+          await options.claudeAccounts?.prepare(runtimeTarget.claudeAccount);
+        }
         // The first attach of a new session sends its initial prompt queue to the agent.
         const releaseDispatch = input.initialQueue?.length
           ? await options.localUpdates?.recordWorkStarted(
@@ -492,7 +517,8 @@ async function resolveConversationRuntimeTarget(
   db: AppDb,
   getProviderEnv: ((providerId: string) => Promise<Record<string, string> | undefined>) | undefined,
   sessionLaunchContexts: Pick<TaskSessionLaunchContextResolver, 'resolve'>,
-  getSessionMcpServers?: SessionMcpServersResolver
+  getSessionMcpServers?: SessionMcpServersResolver,
+  claudeAccounts?: Pick<ClaudeAccountLaunchResolver, 'resolve'>
 ): Promise<ConversationRuntimeTarget> {
   const [row] = await db
     .select({
@@ -544,10 +570,22 @@ async function resolveConversationRuntimeTarget(
   if (launchContext && !launchContext.success) {
     throw new Error(`Could not resolve task session launch context: ${launchContext.error.type}`);
   }
-  const processEnv = {
+  // An extra Claude account's folder is on this computer, so only local sessions can use one.
+  const claudeAccount =
+    row.type === 'acp' &&
+    row.providerId === CLAUDE_ACCOUNTS_PROVIDER_ID &&
+    claudeAccounts &&
+    identity &&
+    isLocalHostRef(identity.host)
+      ? ((await claudeAccounts.resolve(acpConfig?.claudeAccountId)) ?? undefined)
+      : undefined;
+  const sessionEnv = {
     ...(providerEnv ?? {}),
     ...(launchContext?.success ? launchContext.data.env : {}),
   };
+  // Primary account: the environment is left exactly as it was.
+  const accountEnv = claudeAccount ? applyClaudeAccountEnv(sessionEnv, claudeAccount) : undefined;
+  const processEnv = accountEnv?.env ?? sessionEnv;
   // Loopback servers only reach agents on this machine.
   const extraMcpServers =
     row.type === 'acp' &&
@@ -577,6 +615,7 @@ async function resolveConversationRuntimeTarget(
           collaborationMode: acpConfig?.collaborationMode ?? null,
           ...(initialQueue && { initialQueue }),
           ...(Object.keys(processEnv).length > 0 ? { env: processEnv } : {}),
+          ...(accountEnv ? { unsetEnv: accountEnv.unsetEnv } : {}),
           ...(extraMcpServers.length > 0 ? { extraMcpServers } : {}),
         }
       : undefined;
@@ -595,6 +634,7 @@ async function resolveConversationRuntimeTarget(
     workspacePath,
     host: identity?.host ?? LOCAL_HOST_REF,
     acpInput,
+    ...(claudeAccount ? { claudeAccount } : {}),
   };
 }
 

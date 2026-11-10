@@ -39,6 +39,15 @@ describe('buildInitialConversation', () => {
     );
   });
 
+  it('records the Claude account picked in the form, and nothing when none was offered', () => {
+    const state = makeInitialConversationState(agent('claude'), false);
+
+    expect(buildInitialConversation(state, 'work')).toEqual(
+      expect.objectContaining({ provider: 'claude', claudeAccountId: 'work' })
+    );
+    expect(buildInitialConversation(state)).not.toHaveProperty('claudeAccountId');
+  });
+
   it('preserves a capability-gated false auto-approve value', () => {
     expect(buildInitialConversation(makeInitialConversationState(agent('jules'), false))).toEqual(
       expect.objectContaining({ provider: 'jules', autoApprove: false })

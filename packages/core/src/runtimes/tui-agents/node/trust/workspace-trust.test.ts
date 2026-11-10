@@ -1,3 +1,5 @@
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createStubLogger, deferred } from '@emdash/shared/testing';
 import { describe, expect, it, vi } from 'vitest';
@@ -53,6 +55,66 @@ describe('TuiWorkspaceTrust', () => {
     });
   });
 
+  describe('where the trust record is written', () => {
+    const behavior = (): ITrustBehavior => ({
+      trustWorkspace: async (fs, context) => fs.write('trust.json', context.workspacePath),
+      resolveConfigRoot: ({ env, homeDir }) => env.TEST_CONFIG_DIR ?? homeDir,
+    });
+    const withDirs = async (run: (home: string, account: string) => Promise<void>) => {
+      const root = await mkdtemp(path.join(tmpdir(), 'workspace-trust-'));
+      try {
+        await run(path.join(root, 'home'), path.join(root, 'account'));
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    };
+    const written = (dir: string) =>
+      readFile(path.join(dir, 'trust.json'), 'utf8').catch(() => null);
+
+    it("follows the session's configuration directory", async () => {
+      await withDirs(async (homeDir, account) => {
+        const { trust } = createTrust(behavior(), { homeDir });
+
+        await trust.ensureTrusted({
+          providerId: 'test',
+          workspacePath: '/workspace',
+          env: { TEST_CONFIG_DIR: account },
+        });
+
+        expect(await written(account)).toBe('/workspace');
+        expect(await written(homeDir)).toBeNull();
+      });
+    });
+
+    it('is the home directory for a session without one', async () => {
+      await withDirs(async (homeDir, account) => {
+        const { trust } = createTrust(behavior(), { homeDir });
+
+        await trust.ensureTrusted({ providerId: 'test', workspacePath: '/workspace' });
+
+        expect(await written(homeDir)).toBe('/workspace');
+        expect(await written(account)).toBeNull();
+      });
+    });
+
+    it('is the home directory for a provider that does not resolve one', async () => {
+      await withDirs(async (homeDir, account) => {
+        const { trust } = createTrust(
+          { trustWorkspace: async (fs, context) => fs.write('trust.json', context.workspacePath) },
+          { homeDir }
+        );
+
+        await trust.ensureTrusted({
+          providerId: 'test',
+          workspacePath: '/workspace',
+          env: { TEST_CONFIG_DIR: account },
+        });
+
+        expect(await written(homeDir)).toBe('/workspace');
+      });
+    });
+  });
+
   it('serializes writes to the shared home configuration', async () => {
     const firstStarted = deferred<void>();
     const releaseFirst = deferred<void>();
@@ -79,10 +141,15 @@ describe('TuiWorkspaceTrust', () => {
   });
 });
 
-function createTrust(behavior?: ITrustBehavior) {
+function createTrust(
+  behavior?: ITrustBehavior,
+  host: { homeDir?: string; env?: Record<string, string> } = {}
+) {
   const { logger, calls: logs } = createStubLogger();
+  const homeDir = host.homeDir ?? '/home/test-user';
   const agentHost = {
-    homeDir: '/home/test-user',
+    homeDir,
+    configRootContext: async () => ({ env: host.env ?? {}, homeDir, platform: 'linux' }),
     get: vi.fn(() => ({ behavior: behavior ? { trust: behavior } : {} })),
   } as unknown as AgentPluginHost;
   return {

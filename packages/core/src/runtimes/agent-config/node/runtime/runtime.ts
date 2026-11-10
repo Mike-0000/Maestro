@@ -29,7 +29,7 @@ import type { AgentAuthStatus } from '#services/agent-plugins/api/plugins';
 import { createLocalPluginFs } from '#services/agent-plugins/api/plugins/helpers';
 import { AgentHookInstaller } from '#services/agent-plugins/node';
 import { AgentAddonsManager, resolveProviderConfigRoot } from './addons';
-import { AgentAuthManager, type LoginDimensions } from './auth';
+import { AgentAuthManager, type LoginDimensions, type LoginEnvOverrides } from './auth';
 import { AgentInstallManager } from './install';
 import { AgentMcpConfigManager } from './mcp';
 import { AgentSkillsManager } from './skills';
@@ -109,9 +109,10 @@ export class AgentConfigRuntime {
   startLogin(
     providerId: string,
     methodId: string,
-    dimensions?: LoginDimensions
+    dimensions?: LoginDimensions,
+    overrides?: LoginEnvOverrides
   ): Promise<Result<void, AgentConfigAuthError>> {
-    return this.auth.startLogin(providerId, methodId, dimensions);
+    return this.auth.startLogin(providerId, methodId, dimensions, overrides);
   }
 
   cancelLogin(providerId: string): Promise<Result<void, AgentConfigAuthError>> {

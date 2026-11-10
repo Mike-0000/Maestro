@@ -38,6 +38,8 @@ export type Conversation = {
   collaborationMode?: string;
   /** Initial queued prompts to deliver on first ACP spawn. Only present before sessionId is set. */
   initialQueue?: InitialQueuePrompt[];
+  /** Claude Code only: the Claude account this conversation was created under. */
+  claudeAccountId?: string;
   isInitialConversation: boolean | null;
   agentStatus?: AgentStatus | null;
   agentStatusSeen?: boolean;
@@ -145,6 +147,11 @@ export type CreateConversationParams = {
   initialSize?: { cols: number; rows: number };
   initialPrompt?: string;
   initialQueue?: InitialQueuePrompt[];
+  /**
+   * Claude Code only: the Claude account to run under. Absent, or naming an account that does
+   * not exist, means the current default account, which is then recorded on the conversation.
+   */
+  claudeAccountId?: string;
   /** Transport type: 'pty' (default) uses the terminal/PTY path; 'acp' uses the Agent Client Protocol. */
   type?: ConversationType;
 };

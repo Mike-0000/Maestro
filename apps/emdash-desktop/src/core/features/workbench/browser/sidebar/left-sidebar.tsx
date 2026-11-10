@@ -3,6 +3,7 @@ import { observer } from 'mobx-react-lite';
 import React from 'react';
 import { automationsViewDef } from '@core/features/automations/contributions/views';
 import { canvasViewDef } from '@core/features/canvas/contributions/views';
+import { ClaudeUsageIndicator } from '@core/features/claude-accounts/contributions/browser/claude-usage-indicator';
 import { settingsViewDef } from '@core/features/settings/contributions/views';
 import { useOpenModal } from '@core/manifests/browser/modal-api';
 import { BoundShortcut } from '@core/primitives/keybindings/browser/shortcut';
@@ -94,6 +95,9 @@ export const LeftSidebar: React.FC = observer(function LeftSidebar() {
                 <span className="truncate">Automations</span>
               </span>
             </SidebarMenuButton>
+            <ClaudeUsageIndicator
+              trigger={<SidebarMenuButton className="w-full justify-between" />}
+            />
             <SidebarMenuButton
               isActive={isCurrentView(currentView, 'settings')}
               onClick={() => navigate(settingsViewDef())}

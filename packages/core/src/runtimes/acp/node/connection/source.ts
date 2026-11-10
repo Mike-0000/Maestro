@@ -53,6 +53,7 @@ export interface AcpConnectionKey {
   providerId: string;
   cwd: string;
   env?: Record<string, string>;
+  unsetEnv?: string[];
 }
 
 export type AcpConnectionSource = ResourceCache<AcpConnectionKey, PooledAcpProcess>;
@@ -101,6 +102,8 @@ export function acpConnectionCacheKey(key: AcpConnectionKey): string {
         Object.entries(key.env ?? {}).sort(([left], [right]) => left.localeCompare(right))
       )
     )
+    // Appended only when set, so sessions without it keep the fingerprint they always had.
+    .update(key.unsetEnv?.length ? `\0unset:${JSON.stringify([...key.unsetEnv].sort())}` : '')
     .digest('hex');
   return `${makeAcpConnectionKey(key.providerId, key.cwd)}:env:${envFingerprint}`;
 }
@@ -129,6 +132,7 @@ async function provisionAcpConnection(
   const spawn = await deps.agentHost.buildAcpSpawn(key.providerId, {
     cwd: key.cwd,
     env: key.env,
+    ...(key.unsetEnv?.length ? { unsetEnv: key.unsetEnv } : {}),
   });
   if (!spawn.success) {
     throw acpErr.spawnFailed(toSerializedError(new Error(agentHostErrorMessage(spawn.error))))

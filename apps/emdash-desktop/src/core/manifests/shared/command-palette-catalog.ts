@@ -1,4 +1,5 @@
 import { CANVAS_COMMAND_PALETTE_ITEMS } from '@core/features/canvas/contributions/palette';
+import { CLAUDE_ACCOUNTS_COMMAND_PALETTE_ITEMS } from '@core/features/claude-accounts/contributions/palette';
 import { DEV_PERF_COMMAND_PALETTE_ITEMS } from '@core/features/dev-perf/contributions/palette';
 import { TASK_COMMAND_PALETTE_ITEMS } from '@core/features/tasks/contributions/palette';
 import { VOICE_COMMAND_PALETTE_ITEMS } from '@core/features/voice/contributions/palette';
@@ -11,6 +12,7 @@ export const COMMAND_PALETTE_CATALOG = defineCommandPaletteCatalog(COMMAND_CATAL
   ...TASK_COMMAND_PALETTE_ITEMS,
   ...CANVAS_COMMAND_PALETTE_ITEMS,
   ...VOICE_COMMAND_PALETTE_ITEMS,
+  ...CLAUDE_ACCOUNTS_COMMAND_PALETTE_ITEMS,
   ...DEV_PERF_COMMAND_PALETTE_ITEMS,
 ] as const);
 

@@ -1,4 +1,5 @@
 import { CANVAS_COMMAND_DEFS } from '@core/features/canvas/contributions/commands';
+import { CLAUDE_ACCOUNTS_COMMAND_DEFS } from '@core/features/claude-accounts/contributions/commands';
 import { DEV_PERF_COMMAND_DEFS } from '@core/features/dev-perf/contributions/commands';
 import { fileTreeScope } from '@core/features/editor/contributions/scopes';
 import { settingsScope } from '@core/features/settings/contributions/scopes';
@@ -18,6 +19,7 @@ export const windowScope = defineWindowScope([
   ...DEV_PERF_COMMAND_DEFS,
   ...CANVAS_COMMAND_DEFS,
   ...VOICE_COMMAND_DEFS,
+  ...CLAUDE_ACCOUNTS_COMMAND_DEFS,
 ]);
 
 export const SCOPE_CATALOG = [

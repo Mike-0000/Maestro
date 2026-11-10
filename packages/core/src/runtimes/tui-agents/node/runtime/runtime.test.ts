@@ -341,6 +341,24 @@ describe('TuiAgentsRuntime', () => {
     ).toEqual(['PATH']);
   });
 
+  it('removes unset variables from the session environment wherever they came from', async () => {
+    const { runtime, spawner } = createRuntime({
+      commandEnv: { PATH: '/bin', ANTHROPIC_API_KEY: 'shell-key' },
+    });
+
+    await runtime.startSession(
+      startInput({
+        providerVars: { CLAUDE_CONFIG_DIR: '/accounts/second', ANTHROPIC_AUTH_TOKEN: 'token' },
+        unsetEnv: ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'],
+      })
+    );
+
+    const env = spawner.specs[0]?.env ?? {};
+    expect(env).toMatchObject({ PATH: '/bin', CLAUDE_CONFIG_DIR: '/accounts/second' });
+    expect(env).not.toHaveProperty('ANTHROPIC_API_KEY');
+    expect(env).not.toHaveProperty('ANTHROPIC_AUTH_TOKEN');
+  });
+
   it('launches Windows cmd providers through an explicit cmd wrapper', async () => {
     const command = 'C:\\Program Files\\npm\\provider.cmd';
     const { runtime, spawner } = createRuntime({

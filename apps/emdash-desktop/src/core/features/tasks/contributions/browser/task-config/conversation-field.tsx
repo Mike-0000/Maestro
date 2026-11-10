@@ -1,3 +1,4 @@
+import type { ClaudeAccountPicker } from '@core/features/claude-accounts/contributions/browser/claude-account-picker';
 import { InitialConversationField } from '@core/features/tasks/contributions/browser/task-config/initial-conversation-section';
 import { useTaskState } from '@core/features/tasks/contributions/browser/task-config/task-state-context';
 
@@ -7,6 +8,7 @@ interface ConversationFieldProps {
   onPromptBlur?: () => void;
   showAutoApproveToggle?: boolean;
   requirePromptDelivery?: boolean;
+  claudeAccount?: ClaudeAccountPicker;
 }
 
 export function ConversationField({
@@ -15,6 +17,7 @@ export function ConversationField({
   onPromptBlur,
   requirePromptDelivery,
   showAutoApproveToggle,
+  claudeAccount,
 }: ConversationFieldProps) {
   const { initialConversation, linkedIssue, includeIssueContextByDefault } = useTaskState();
 
@@ -28,6 +31,7 @@ export function ConversationField({
       onPromptBlur={onPromptBlur}
       requirePromptDelivery={requirePromptDelivery}
       showAutoApproveToggle={showAutoApproveToggle}
+      claudeAccount={claudeAccount}
     />
   );
 }

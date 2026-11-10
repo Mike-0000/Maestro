@@ -1,4 +1,7 @@
-import { buildJsonConfigTrustBehavior } from '@emdash/core/services/agent-plugins/api/plugins/helpers';
+import {
+  buildJsonConfigTrustBehavior,
+  envConfigRoot,
+} from '@emdash/core/services/agent-plugins/api/plugins/helpers';
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -33,5 +36,8 @@ export function buildClaudeTrustBehavior() {
   return buildJsonConfigTrustBehavior({
     configName: '.claude.json',
     withTrustedPath: withClaudeTrustedProject,
+    // Claude Code keeps `.claude.json` in its configuration directory when one is set, and in
+    // the home directory otherwise.
+    resolveConfigRoot: envConfigRoot('CLAUDE_CONFIG_DIR', '.'),
   });
 }

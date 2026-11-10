@@ -328,6 +328,34 @@ describe('AgentConfigRuntime', () => {
     await runtime.dispose();
   });
 
+  it('runs an overridden login with its own variables and leaves the provider status alone', async () => {
+    const ptySpawner = makePtySpawner();
+    const authCheckStatus = vi.fn(async () => ({ kind: 'authenticated' as const }));
+    const { runtime } = makeRuntime({
+      authCheckStatus,
+      ptySpawner,
+      sourceEnv: { PATH: '/bin', HOME: '/home/ada', ANTHROPIC_API_KEY: 'shell-key' },
+    });
+
+    const started = await runtime.startLogin('claude', 'login', undefined, {
+      env: { CLAUDE_CONFIG_DIR: '/accounts/second' },
+      unsetEnv: ['ANTHROPIC_API_KEY'],
+    });
+
+    expect(started).toEqual(ok(undefined));
+    const env = ptySpawner.specs[0]?.env ?? {};
+    expect(env).toMatchObject({ PATH: '/bin', CLAUDE_CONFIG_DIR: '/accounts/second' });
+    expect(env).not.toHaveProperty('ANTHROPIC_API_KEY');
+
+    ptySpawner.processes[0]?.emitExit({ exitCode: 0, signal: null });
+    await vi.waitFor(() => {
+      expect(runtime.sendLoginInput('claude', 'code\n').success).toBe(false);
+    });
+    // It signed in somewhere else: the provider's own status is not asked for again.
+    expect(authCheckStatus).not.toHaveBeenCalled();
+    await runtime.dispose();
+  });
+
   it('deduplicates concurrent auth status refreshes', async () => {
     let resolveProbe!: () => void;
     const probeGate = new Promise<void>((resolve) => {
