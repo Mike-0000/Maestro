@@ -6,6 +6,7 @@ import type {
 } from '@core/features/canvas/api/browser/stores/canvas-store';
 import { GATHER_LABELS } from '@core/features/canvas/api/canvas-desks';
 import { spokenProviderLabel } from '@core/features/canvas/api/provider-names';
+import { getClaudeAccountContextLines } from '@core/features/claude-accounts/contributions/browser/conductor-accounts';
 import { VOICE_NAME_HINTS } from '@core/features/voice/api/name-fixups';
 import { subAgentCount } from '@core/primitives/agents/api';
 import type { CompletionReport } from '@core/primitives/agents/api/completion-report';
@@ -600,6 +601,7 @@ export function buildContext(
         : 'unknown'
     }`
   );
+  lines.push(...getClaudeAccountContextLines(now));
   lines.push(...canvasLines(canvas, onCanvas));
   lines.push(...extra);
   return lines.join('\n');

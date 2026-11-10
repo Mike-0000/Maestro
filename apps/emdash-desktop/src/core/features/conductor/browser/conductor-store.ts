@@ -15,6 +15,7 @@ import type { LayoutOp, LayoutPlan } from '@core/features/canvas/api/canvas-layo
 import { isRegionId, isWithin } from '@core/features/canvas/api/canvas-regions';
 import { spokenProviderLabel } from '@core/features/canvas/api/provider-names';
 import { getCanvasBrowserHost } from '@core/features/canvas/contributions/browser/app-stores';
+import { resolveClaudeAccountChoice } from '@core/features/claude-accounts/contributions/browser/conductor-accounts';
 import { getConversationsClient } from '@core/features/conversations/api/browser/client';
 import type { LocalUpdateStatus } from '@core/features/local-updates/api';
 import { getLocalUpdatesClient } from '@core/features/local-updates/api/browser/client';
@@ -4524,7 +4525,20 @@ export class ConductorStore {
           return { content: destination.error, isError: true };
         }
         const regionName = destination?.name ?? null;
-        const where = `${projectName ? ` in ${projectName}` : ''}${worktree ? ' in a new worktree' : ''}${regionName ? ` on ${regionName}` : ''}`;
+        // The account the conductor picked; without one the app's default account is used.
+        let claudeAccount: { id: string; label: string } | null = null;
+        if (spawn.claude_account) {
+          if (providerId !== 'claude') {
+            return {
+              content: 'claude_account only applies to provider "claude". Leave it out.',
+              isError: true,
+            };
+          }
+          const choice = resolveClaudeAccountChoice(spawn.claude_account);
+          if (!choice.ok) return { content: choice.message, isError: true };
+          claudeAccount = choice.account;
+        }
+        const where = `${projectName ? ` in ${projectName}` : ''}${worktree ? ' in a new worktree' : ''}${regionName ? ` on ${regionName}` : ''}${claudeAccount ? ` using the ${claudeAccount.label} account` : ''}`;
         const label = `Start ${spokenProviderLabel(providerId)}${where} on “${truncate(spawn.task_name, 60)}” · ${describePrompt(prompt)}`;
         const kind = this.codeCheckWaived('spawn_agent', projectId, prompt) ? null : confirmKind;
         if (!(await this.requestPending(label, kind, { detail: prompt }))) {
@@ -4543,6 +4557,7 @@ export class ConductorStore {
           conversationId,
           title: name,
           worktree,
+          ...(claudeAccount ? { claudeAccountId: claudeAccount.id } : {}),
           peers: spawnPeers(
             this.canvas,
             (id) => projectData(getProjectStore(id))?.repositoryWorkspaceId
@@ -4619,7 +4634,7 @@ export class ConductorStore {
           });
         const notes = result.notes.length > 0 ? ` ${result.notes.join(' ')}` : '';
         return {
-          content: `Created task "${result.taskName}"${projectName ? ` in project "${projectName}"` : ''} ${worktree ? 'in a new worktree' : 'in the project directory'} with ${prompt.trim() ? `a prompt of ${deliveryNote(spawn.prompt, prompt)}` : 'no prompt, so it waits for its first instruction'}; the agent is starting. It will appear on the canvas as ${name}${regionName ? ` on ${regionName}` : ''}.${notes}`,
+          content: `Created task "${result.taskName}"${projectName ? ` in project "${projectName}"` : ''} ${worktree ? 'in a new worktree' : 'in the project directory'} with ${prompt.trim() ? `a prompt of ${deliveryNote(spawn.prompt, prompt)}` : 'no prompt, so it waits for its first instruction'}; the agent is starting. It will appear on the canvas as ${name}${regionName ? ` on ${regionName}` : ''}.${claudeAccount ? ` It runs on the ${claudeAccount.label} Claude account.` : ''}${notes}`,
           subject: { conversationId: result.conversationId },
         };
       }

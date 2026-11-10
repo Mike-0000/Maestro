@@ -56,6 +56,14 @@ export const conductorToolSchemas = {
       .describe('Provider id in lowercase, such as "claude" or "codex"; not its display name.'),
     task_name: z.string().min(1).max(80),
     prompt: z.string(),
+    claude_account: z
+      .string()
+      .min(1)
+      .max(60)
+      .optional()
+      .describe(
+        'Only for provider "claude", and only when the context lists Claude accounts: the name of the account (subscription) the agent runs on. Pass the one the developer named. When they named none, omit it to use the default, unless the default is at or near a limit (about 90% or more of its 5-hour or weekly usage) or they left the choice to you: then pass the signed-in account with the most room left, weighing the 5-hour figure first and the weekly one second, and say which account you used.'
+      ),
     worktree: z
       .boolean()
       .optional()

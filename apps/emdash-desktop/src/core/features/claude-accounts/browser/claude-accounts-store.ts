@@ -198,6 +198,16 @@ export class ClaudeAccountsStore {
   }
 
   /**
+   * Fetches usage in the background when the figures held are older than a minute. For readers
+   * that are not on screen (the conductor), so it works while the window is hidden.
+   */
+  refreshUsageIfStale(): void {
+    const checkedAt = this.usageCheckedAt;
+    if (checkedAt !== null && this.deps.now() - checkedAt < USAGE_REUSE_MS) return;
+    void this.refreshUsage();
+  }
+
+  /**
    * Call while a surface showing usage is mounted. Polls every five minutes for as long as at
    * least one surface watches and the window is visible. Returns the stop function.
    */
