@@ -7,6 +7,7 @@ import type { ChorusHostServices } from '@core/primitives/chorus-host/api/host-s
 import { setQuietCompletionsPolicy } from '@core/primitives/notifications/api/quiet-completions';
 import { conductorContract } from '../api/contract';
 import { agentRequestEvents, agentRequestHub } from './agent-request-hub';
+import { ChatConductorThreads } from './chat-conductor-threads';
 import { ConductorService } from './conductor-service';
 import { checkWorktreeConflicts } from './conflicts';
 import {
@@ -48,8 +49,14 @@ export function createConductorWireController(options: {
   });
   service.attachInvestigator((settings) => investigations.investigatorStatus(settings));
   options.scope.add(() => investigations.dispose());
+  const chatThreads = new ChatConductorThreads(options.host.dataDir, options.logger);
   return createController(conductorContract, {
     runTurn: ({ mode, messages }) => service.runTurn(mode, messages),
+    runChatTurn: ({ messages }) => service.runChatTurn(messages),
+    readChatThread: ({ conversationId }) => chatThreads.read(conversationId),
+    saveChatThread: (thread) => chatThreads.save(thread),
+    deleteChatThread: ({ conversationId }) => chatThreads.delete(conversationId),
+    listChatThreads: () => chatThreads.list(),
     decide: ({ state, questions }) => service.decide(state, questions),
     getStatus: () => service.status(),
     updateSettings: (patch) => {

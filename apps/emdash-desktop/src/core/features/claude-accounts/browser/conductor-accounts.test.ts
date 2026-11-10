@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { ClaudeAccountsState, ClaudeAccountUsage } from '../api/types';
-import { claudeAccountContextLines, matchClaudeAccount } from './conductor-accounts';
+import {
+  claudeAccountContextLines,
+  claudeAccountListLines,
+  matchClaudeAccount,
+} from './conductor-accounts';
 
 const NOW = Date.parse('2026-11-10T12:00:00Z');
 
@@ -83,5 +87,36 @@ describe('matchClaudeAccount', () => {
     };
     expect(matchClaudeAccount(twins, 'work')?.id).toBe('a1');
     expect(matchClaudeAccount(twins, 'wor')).toBeNull();
+  });
+});
+
+describe('claudeAccountListLines', () => {
+  it("lists every account with its usage and marks the chat's own and the default", () => {
+    const lines = claudeAccountListLines(
+      state,
+      usage([
+        { accountId: 'primary', status: 'fresh', snapshot },
+        { accountId: 'a1', status: 'fresh', snapshot: { ...snapshot, fiveHour: null } },
+        { accountId: 'a2', status: 'unavailable', snapshot: null, reason: 'not-logged-in' },
+      ]),
+      NOW,
+      'a1'
+    );
+    expect(lines).toHaveLength(4);
+    expect(lines[1]).toContain('- Primary (default for new agents, Pro plan): 5-hour 12% used');
+    expect(lines[2]).toContain("- Work (this chat's agent runs on it");
+    expect(lines[2]).toContain('weekly 91% used');
+    expect(lines[3]).toBe('- Side Project: not signed in, cannot be used');
+  });
+
+  it('lists a single account too, and says when the agent runs on none', () => {
+    const single = { ...state, accounts: state.accounts.slice(0, 1) };
+    const lines = claudeAccountListLines(single, usage([]), NOW, null);
+    expect(lines).toHaveLength(3);
+    expect(lines[1]).toContain('- Primary (default for new agents');
+    expect(lines[2]).toContain('not Claude Code');
+    expect(claudeAccountListLines(null, usage([]), NOW, null)).toEqual([
+      'Claude accounts are not available.',
+    ]);
   });
 });

@@ -1,4 +1,5 @@
 import { canvasBoardMemento } from '@core/features/canvas/contributions/mementos';
+import { chatViewChoiceMemento } from '@core/features/conductor/contributions/mementos';
 import {
   acpDraftMemento,
   providerPreferencesMemento,
@@ -46,6 +47,7 @@ export const mementoCatalog: readonly MementoCatalogEntry[] = [
   workbenchSidebarMemento,
   workbenchHistoryMemento,
   canvasBoardMemento,
+  chatViewChoiceMemento,
 ];
 
 export const mementoSweepPolicies = mementoCatalog.flatMap((definition) =>

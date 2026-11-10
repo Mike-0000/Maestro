@@ -1,10 +1,12 @@
 import { AgentStatus } from '@emdash/ui/react/components';
 import { observer } from 'mobx-react-lite';
+import { ChatConductorLayer } from '@core/features/conductor/contributions/browser/chat-conductor-layer';
 import { formatConversationTitleForDisplay } from '@core/features/conversations/api/browser/conversation-title-utils';
 import { conversationRegistry } from '@core/features/conversations/api/browser/stores/conversation-registry';
 import type { TaskTabContext } from '@core/features/workbench/api/browser/tabs/task-tab-context';
 import { MAX_CONVERSATION_TITLE_LENGTH } from '@core/primitives/conversations/api';
 import type {
+  TabContentProps,
   TabEntry,
   TabHandle,
   TabProvider,
@@ -13,6 +15,7 @@ import type {
   ResolvedTab,
 } from '@core/primitives/workbench-shell/browser/tabs/core/tab-provider';
 import { createTabProvider } from '@core/primitives/workbench-shell/browser/tabs/core/tab-provider-registry';
+import { usePaneContext } from '@core/primitives/workbench-shell/browser/tabs/pane-context';
 import {
   GenericTabDragPreview,
   GenericTabItem,
@@ -96,8 +99,22 @@ export const AcpChatTabBarItemDragPreview = observer(function AcpChatTabBarItemD
   );
 });
 
-const AcpChatTabContent = observer(function AcpChatTabContent() {
-  return <AcpChatPanel />;
+const AcpChatTabContent = observer(function AcpChatTabContent({ ctx }: TabContentProps) {
+  const { pane } = usePaneContext();
+  const activeTab = pane.resolvedTabs.find((tab) => tab.isActive && tab.kind === 'acp-chat');
+  const conversationId = activeTab
+    ? (activeTab.resource as AcpChatTabResource).store.conversationId
+    : undefined;
+  // The chat's conductor sits in front; AcpChatPanel stays mounted under it as the raw view.
+  return (
+    <ChatConductorLayer
+      kind="acp-chat"
+      conversationId={conversationId}
+      taskId={(ctx as TaskTabContext).taskId}
+    >
+      <AcpChatPanel />
+    </ChatConductorLayer>
+  );
 });
 
 export const acpChatTabProvider: TabProvider<

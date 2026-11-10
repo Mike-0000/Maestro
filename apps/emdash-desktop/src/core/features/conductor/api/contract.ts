@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { agentRequestAckSchema, agentRequestSchema } from './agent-requests';
 import { completionAnnouncementModes } from './announcements';
 import { callModes, DEFAULT_CALL_WINDOW_SEC } from './calls';
+import { chatConductorThreadSchema } from './chat-conductor/thread';
 import { jevAnswerSchema, type JevQuestions } from './jev';
 import { instructionChangeSchema, standingInstructionSchema } from './standing-instructions';
 
@@ -108,6 +109,15 @@ export const conductorSettingsSchema = z.object({
    * leaves out one it refuses (a drive root, the home folder, a hidden folder).
    */
   investigationFolders: z.array(z.string()),
+  /**
+   * Chat conductors: each chat gets its own conductor that reads the agent for the developer and
+   * can direct it. Off: no chat conductor runs a model turn.
+   */
+  chatConductors: z.boolean(),
+  /** Effort for a chat conductor's turns. */
+  chatConductorEffort: conductorEffortSchema,
+  /** Whether a new chat's conductor starts out allowed to act on its own; each chat keeps its own. */
+  chatConductorAutonomy: z.boolean(),
 });
 export type ConductorSettings = z.infer<typeof conductorSettingsSchema>;
 
@@ -140,6 +150,9 @@ export const DEFAULT_CONDUCTOR_SETTINGS: ConductorSettings = {
   investigationDailyUsd: 2,
   investigationOfferShown: false,
   investigationFolders: [],
+  chatConductors: true,
+  chatConductorEffort: 'medium',
+  chatConductorAutonomy: true,
 };
 
 /**
@@ -182,6 +195,11 @@ export const conductorStatusSchema = z.object({
    * fixtures build a partial status, so read it as `status?.instructions ?? []`.
    */
   instructions: z.array(standingInstructionSchema),
+  /**
+   * Chat conductors can run a turn: the setting is on and the provider's key is present. Test
+   * fixtures build a partial status, so read it as `status?.chatConductorReady ?? false`.
+   */
+  chatConductorReady: z.boolean(),
 });
 export type ConductorStatus = z.infer<typeof conductorStatusSchema>;
 
@@ -496,6 +514,27 @@ export const conductorContract = defineContract({
     data: conductorTurnResultSchema,
     error: conductorErrorSchema,
   }),
+  /**
+   * One model call for a chat's own conductor: its prompt and tools, no standing instructions.
+   * The renderer runs the tool loop, as it does for `runTurn`.
+   */
+  runChatTurn: fallible({
+    input: z.object({ messages: z.custom<Anthropic.Beta.BetaMessageParam[]>() }),
+    data: conductorTurnResultSchema,
+    error: conductorErrorSchema,
+  }),
+  /** A chat conductor's saved thread, or null when the chat has none (or it cannot be read). */
+  readChatThread: procedure({
+    input: z.object({ conversationId: z.string().min(1) }),
+    output: chatConductorThreadSchema.nullable(),
+  }),
+  saveChatThread: procedure({ input: chatConductorThreadSchema, output: z.void() }),
+  deleteChatThread: procedure({
+    input: z.object({ conversationId: z.string().min(1) }),
+    output: z.void(),
+  }),
+  /** The ids of the conversations that have a saved thread. */
+  listChatThreads: procedure({ input: z.void(), output: z.array(z.string()) }),
   getStatus: procedure({ input: z.void(), output: conductorStatusSchema }),
   updateSettings: procedure({
     input: conductorSettingsSchema.partial(),

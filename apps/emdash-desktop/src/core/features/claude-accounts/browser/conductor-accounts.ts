@@ -69,6 +69,40 @@ export function claudeAccountContextLines(
   return lines;
 }
 
+/**
+ * The accounts as a chat's conductor reads them: each with its usage and sign-in state, the
+ * default for new agents, and the one the chat's own agent runs on (`currentAccountId`, null when
+ * the chat's agent is not Claude Code and so runs on none).
+ */
+export function claudeAccountListLines(
+  state: ClaudeAccountsState | null,
+  usage: UsageLookup,
+  now: number,
+  currentAccountId: string | null
+): string[] {
+  if (!state || state.accounts.length === 0) return ['Claude accounts are not available.'];
+  const lines = state.accounts.map((account) => {
+    const accountUsage = usage.get(account.id);
+    const plan = usagePlanLabel(accountUsage, account);
+    const tags = [
+      account.id === currentAccountId ? "this chat's agent runs on it" : null,
+      account.id === state.defaultAccountId ? 'default for new agents' : null,
+      plan ? `${plan} plan` : null,
+    ].filter((tag): tag is string => tag !== null);
+    const detail = isAccountSignedIn(account, accountUsage)
+      ? usagePhrase(accountUsage, now)
+      : 'not signed in, cannot be used';
+    return `- ${account.label}${tags.length > 0 ? ` (${tags.join(', ')})` : ''}: ${detail}`;
+  });
+  return [
+    'Claude accounts (subscriptions a Claude Code agent can run on):',
+    ...lines,
+    ...(currentAccountId === null
+      ? ["This chat's agent is not Claude Code, so it runs on none of them."]
+      : []),
+  ];
+}
+
 function normalize(text: string): string {
   return text
     .toLowerCase()
