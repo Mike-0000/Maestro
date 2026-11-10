@@ -1,5 +1,5 @@
 import { sshConnectionIdOf, type HostRef } from '@emdash/core/primitives/host/api';
-import { Button, Dialog } from '@emdash/ui/react/primitives';
+import { Button, Dialog, toast } from '@emdash/ui/react/primitives';
 import { useQuery } from '@tanstack/react-query';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal } from '@xterm/xterm';
@@ -7,6 +7,7 @@ import { Loader2 } from 'lucide-react';
 import { reaction } from 'mobx';
 import { useEffect, useRef, useState } from 'react';
 import { AcpAuthLoginBinding } from '@core/features/agents/api/browser/auth-login-binding';
+import { checkClaudeAccountSignIn } from '@core/features/claude-accounts/contributions/browser/sign-in-check';
 import { getMachinesClient } from '@core/features/machines/api/browser/client';
 import { isPrimaryMouseButton } from '@core/features/terminals/api/browser/pty/file-link-provider';
 import {
@@ -29,7 +30,20 @@ export type AgentSignInModalArgs = {
   providerName: string;
   /** Host the sign-in runs on; remote hosts show the machine's name in the title. */
   host: HostRef;
+  /**
+   * Sign in to this Claude account instead of the provider's own sign-in. The dialog then
+   * finishes when the sign-in command exits, not when the provider reports signed in: that is
+   * already true while the primary account is signed in.
+   */
+  claudeAccount?: { id: string; label: string };
 };
+
+/** Where an account sign-in stands once its terminal is up. */
+type AccountSignInPhase =
+  | { kind: 'terminal' }
+  | { kind: 'checking' }
+  | { kind: 'not-signed-in' }
+  | { kind: 'failed'; message: string };
 
 /** Resolves the display name of the machine behind a remote host ref (null for local). */
 function useMachineName(host: HostRef): string | null {
@@ -49,11 +63,17 @@ export function AgentSignInModal({
   methodId,
   providerName,
   host,
+  claudeAccount,
 }: AgentSignInModalArgs) {
   const modal = useModalController('agentSignInModal');
   const machineName = useMachineName(host);
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const claudeAccountId = claudeAccount?.id;
+  const claudeAccountLabel = claudeAccount?.label;
+  const [accountPhase, setAccountPhase] = useState<AccountSignInPhase>({ kind: 'terminal' });
+  // Bumped by "Try again" to start a fresh terminal and login.
+  const [attempt, setAttempt] = useState(0);
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
   const bindingRef = useRef<AcpAuthLoginBinding | null>(null);
   const handledUrlsRef = useRef(new Set<string>());
@@ -124,6 +144,7 @@ export function AgentSignInModal({
       methodId,
       terminal,
       initialDims: measuredDims ?? undefined,
+      claudeAccountId,
     }).then(
       (binding) => {
         if (disposed) {
@@ -151,11 +172,46 @@ export function AgentSignInModal({
       bindingRef.current = null;
       terminal.dispose();
     };
-  }, [host, methodId, providerId]);
+  }, [host, methodId, providerId, claudeAccountId, attempt]);
 
   useEffect(() => {
     const binding = bindingRef.current;
     if (!binding || !ready) return;
+
+    if (claudeAccountId !== undefined) {
+      // An account sign-in is over when its command exits. Then ask Claude Code who is signed
+      // in, and close on success or say what happened.
+      let stopped = false;
+      const finish = async () => {
+        setAccountPhase({ kind: 'checking' });
+        // Also clears the published exit, so the next login starts clean.
+        void binding.dispose();
+        if (bindingRef.current === binding) bindingRef.current = null;
+        const check = await checkClaudeAccountSignIn(claudeAccountId);
+        if (stopped) return;
+        if (check.kind === 'signed-in') {
+          toast.success(`${claudeAccountLabel ?? 'Claude account'} is signed in`, {
+            description: check.email,
+          });
+          completeRef.current();
+          return;
+        }
+        setAccountPhase(check);
+      };
+      let exited = false;
+      const onState = (state: ReturnType<typeof binding.status.current>) => {
+        if (exited || !state.login?.exit) return;
+        exited = true;
+        void finish();
+      };
+      const unsubscribe = binding.status.subscribe(onState);
+      onState(binding.status.current());
+      return () => {
+        stopped = true;
+        unsubscribe();
+      };
+    }
+
     return reaction(
       () => binding.status.current(),
       (state) => {
@@ -174,13 +230,23 @@ export function AgentSignInModal({
       },
       { fireImmediately: true }
     );
-  }, [ready]);
+  }, [ready, claudeAccountId, claudeAccountLabel]);
+
+  const retryAccountSignIn = () => {
+    setReady(false);
+    setError(null);
+    setAccountPhase({ kind: 'terminal' });
+    setAttempt((current) => current + 1);
+  };
 
   return (
     <>
       <Dialog.Header>
         <Dialog.Title>Sign in to {providerName}</Dialog.Title>
         {machineName && <Dialog.Description>on {machineName}</Dialog.Description>}
+        {claudeAccountLabel && (
+          <Dialog.Description>Account: {claudeAccountLabel}</Dialog.Description>
+        )}
       </Dialog.Header>
       <Dialog.Body height={520} className="p-0">
         <div className="relative h-full">
@@ -197,6 +263,34 @@ export function AgentSignInModal({
           {error && (
             <div className="text-destructive absolute inset-0 bg-background p-4 text-sm">
               {error}
+            </div>
+          )}
+          {!error && accountPhase.kind === 'checking' && (
+            <div className="absolute inset-0 flex items-center justify-center gap-2 bg-background/60 text-sm text-foreground-muted">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Checking sign-in...
+            </div>
+          )}
+          {!error && (accountPhase.kind === 'not-signed-in' || accountPhase.kind === 'failed') && (
+            <div
+              role="status"
+              className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/80 p-6 text-center text-sm"
+            >
+              <div className="flex max-w-sm flex-col gap-1">
+                <p className="font-medium text-foreground">
+                  {accountPhase.kind === 'not-signed-in'
+                    ? `${claudeAccountLabel ?? 'This account'} isn't signed in yet`
+                    : "Couldn't check the sign-in"}
+                </p>
+                <p className="text-foreground-muted">
+                  {accountPhase.kind === 'not-signed-in'
+                    ? 'The sign-in ended before it finished.'
+                    : accountPhase.message}
+                </p>
+              </div>
+              <Button variant="secondary" size="sm" onClick={retryAccountSignIn}>
+                Try again
+              </Button>
             </div>
           )}
         </div>

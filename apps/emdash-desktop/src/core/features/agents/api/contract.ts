@@ -134,7 +134,18 @@ export const agentsContract = defineContract({
     error: runtimeResolveErrorSchema,
   }),
   startLogin: fallible({
-    input: agentConfigContract.startLogin.input.extend(hostInputSchema.shape),
+    // The renderer names an account, never variables: main resolves the environment itself.
+    input: agentConfigContract.startLogin.input
+      .omit({ env: true, unsetEnv: true })
+      .extend(hostInputSchema.shape)
+      .extend({
+        /**
+         * Claude Code on this computer only: sign in to this extra Claude account instead of
+         * the primary one. The login then reports through `login.exit` in the `auth` model
+         * rather than through the provider's status; see `claudeAccounts.refreshIdentity`.
+         */
+        claudeAccountId: z.string().min(1).optional(),
+      }),
     data: z.void(),
     error: agentsAuthErrorSchema,
   }),

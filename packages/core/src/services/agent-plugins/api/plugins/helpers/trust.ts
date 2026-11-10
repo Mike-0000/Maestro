@@ -1,5 +1,6 @@
 import type { PluginFs } from '#primitives/plugin-fs/api';
 import type { ITrustBehavior } from '#services/agent-plugins/api/plugins/capabilities/trust';
+import type { ConfigRootResolver } from './config-root';
 
 export type JsonConfigTrustBehaviorOptions = {
   configName: string;
@@ -7,13 +8,17 @@ export type JsonConfigTrustBehaviorOptions = {
     config: Record<string, unknown>,
     workspacePath: string
   ) => Record<string, unknown> | null;
+  /** Where `configName` lives for a session's environment. Absent means the home directory. */
+  resolveConfigRoot?: ConfigRootResolver;
 };
 
 export function buildJsonConfigTrustBehavior({
   configName,
   withTrustedPath,
+  resolveConfigRoot,
 }: JsonConfigTrustBehaviorOptions): ITrustBehavior {
   return {
+    ...(resolveConfigRoot ? { resolveConfigRoot } : {}),
     async trustWorkspace(fs: PluginFs, ctx): Promise<void> {
       const config = parseConfig(await fs.read(configName), configName);
 

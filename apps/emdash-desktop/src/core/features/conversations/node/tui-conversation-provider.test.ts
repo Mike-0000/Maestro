@@ -79,6 +79,191 @@ describe('TuiConversationProvider', () => {
     });
   });
 
+  describe('Claude accounts', () => {
+    const extra = { accountId: 'account-1', configDir: '/data/claude-accounts/account-1' };
+    const accounts = (launch: typeof extra | null) => ({
+      resolve: vi.fn(async (_accountId: string | undefined) => launch),
+      prepare: vi.fn(async () => {}),
+    });
+    const sessionEnv = {
+      getProviderConfig: async () => ({
+        env: {
+          ANTHROPIC_API_KEY: 'sk-settings',
+          CLAUDE_CODE_OAUTH_TOKEN: 'oauth-settings',
+          CLAUDE_CONFIG_DIR: '/user/config',
+          ANTHROPIC_BASE_URL: 'https://proxy',
+        },
+      }),
+      launchEnv: { ANTHROPIC_AUTH_TOKEN: 'project-token', PROJECT_ONLY: 'project' },
+    };
+    const startedWith = async (
+      overrides: Parameters<typeof createProvider>[0],
+      conversationOverrides: Partial<Conversation> = {}
+    ) => {
+      await createProvider(overrides).ensureSession({
+        conversation: conversation({ providerId: 'claude', ...conversationOverrides }),
+        mode: 'start',
+      });
+      return start.mock.calls[0]?.[0];
+    };
+
+    it('runs an extra account from its prepared folder, without credentials that outrank it', async () => {
+      const claudeAccounts = accounts(extra);
+
+      const input = await startedWith(
+        { ...sessionEnv, claudeAccounts },
+        { claudeAccountId: 'account-1' }
+      );
+
+      expect(claudeAccounts.resolve).toHaveBeenCalledWith('account-1');
+      expect(claudeAccounts.prepare).toHaveBeenCalledWith(extra);
+      expect(input.providerVars).toEqual({
+        ANTHROPIC_BASE_URL: 'https://proxy',
+        PROJECT_ONLY: 'project',
+        CLAUDE_CONFIG_DIR: '/data/claude-accounts/account-1',
+      });
+      // Also removed from what the session would inherit from the user's shell.
+      expect(input.unsetEnv).toEqual([
+        'ANTHROPIC_API_KEY',
+        'ANTHROPIC_AUTH_TOKEN',
+        'CLAUDE_CODE_OAUTH_TOKEN',
+      ]);
+    });
+
+    it('changes nothing for the primary account', async () => {
+      const claudeAccounts = accounts(null);
+      const withAccounts = await startedWith(
+        { ...sessionEnv, claudeAccounts },
+        { claudeAccountId: 'primary' }
+      );
+      start.mockClear();
+      const withoutAccounts = await startedWith(sessionEnv);
+
+      expect(withAccounts).toEqual(withoutAccounts);
+      expect(withAccounts.providerVars).toMatchObject({
+        ANTHROPIC_API_KEY: 'sk-settings',
+        CLAUDE_CONFIG_DIR: '/user/config',
+      });
+      expect(withAccounts).not.toHaveProperty('unsetEnv');
+      expect(claudeAccounts.prepare).not.toHaveBeenCalled();
+    });
+
+    it('uses whatever the account resolves to when its own account was removed', async () => {
+      // The resolver answers with the default account for an id it no longer knows.
+      const fallback = { accountId: 'account-2', configDir: '/data/claude-accounts/account-2' };
+      const claudeAccounts = accounts(fallback);
+
+      const input = await startedWith({ claudeAccounts }, { claudeAccountId: 'removed' });
+
+      expect(claudeAccounts.resolve).toHaveBeenCalledWith('removed');
+      expect(claudeAccounts.prepare).toHaveBeenCalledWith(fallback);
+      expect(input.providerVars.CLAUDE_CONFIG_DIR).toBe('/data/claude-accounts/account-2');
+    });
+
+    it('passes on a conversation with no recorded account, which stays on primary', async () => {
+      const claudeAccounts = accounts(null);
+
+      const input = await startedWith({ ...sessionEnv, claudeAccounts });
+
+      expect(claudeAccounts.resolve).toHaveBeenCalledWith(undefined);
+      expect(input.providerVars.CLAUDE_CONFIG_DIR).toBe('/user/config');
+      expect(input).not.toHaveProperty('unsetEnv');
+    });
+
+    it('brings the account folder up to date before the session starts', async () => {
+      // The runtime writes workspace trust into the account's .claude.json when it starts the
+      // session, so the folder (and that file) must exist by then.
+      const order: string[] = [];
+      start.mockImplementation(async () => {
+        order.push('start');
+        return ok({ outcome: 'started' });
+      });
+      const claudeAccounts = {
+        resolve: async () => extra,
+        prepare: async () => {
+          order.push('prepare');
+        },
+      };
+
+      const input = await startedWith({ claudeAccounts, autoTrustWorktrees: true });
+
+      expect(order).toEqual(['prepare', 'start']);
+      expect(input.trustWorkspace).toBe(true);
+      expect(input.providerVars.CLAUDE_CONFIG_DIR).toBe(extra.configDir);
+    });
+
+    it('does not start the session when the account folder cannot be prepared', async () => {
+      const claudeAccounts = {
+        resolve: async () => extra,
+        prepare: async () => {
+          throw new Error('Could not prepare the Claude account folder: disk full');
+        },
+      };
+
+      await expect(
+        createProvider({ claudeAccounts }).ensureSession({
+          conversation: conversation({ providerId: 'claude' }),
+          mode: 'start',
+        })
+      ).rejects.toThrow(/disk full/);
+      expect(start).not.toHaveBeenCalled();
+    });
+
+    it('hands a session asked to run in WSL the account for a native fallback only', async () => {
+      const claudeAccounts = accounts(extra);
+
+      const input = await startedWith(
+        {
+          claudeAccounts,
+          launchEnv: sessionEnv.launchEnv,
+          getProviderConfig: async () => ({ ...(await sessionEnv.getProviderConfig()), wsl: true }),
+        },
+        { claudeAccountId: 'account-1' }
+      );
+
+      // Inside WSL the session is exactly what it would be without accounts.
+      expect(input.providerVars).toMatchObject({
+        ANTHROPIC_API_KEY: 'sk-settings',
+        CLAUDE_CONFIG_DIR: '/user/config',
+      });
+      expect(input).not.toHaveProperty('unsetEnv');
+      // If no distro has the CLI the runtime starts it natively, under the account.
+      expect(input.wsl.native).toEqual({
+        providerVars: {
+          ANTHROPIC_BASE_URL: 'https://proxy',
+          PROJECT_ONLY: 'project',
+          CLAUDE_CONFIG_DIR: '/data/claude-accounts/account-1',
+        },
+        unsetEnv: ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN'],
+      });
+      expect(claudeAccounts.prepare).toHaveBeenCalledWith(extra);
+    });
+
+    it('sets nothing aside for a WSL session on the primary account', async () => {
+      const input = await startedWith({
+        claudeAccounts: accounts(null),
+        getProviderConfig: async () => ({ wsl: true }),
+      });
+
+      expect(input.wsl).toBeDefined();
+      expect(input.wsl).not.toHaveProperty('native');
+    });
+
+    it('leaves other providers and other hosts alone', async () => {
+      const claudeAccounts = accounts(extra);
+
+      const codex = await startedWith({ claudeAccounts }, { providerId: 'codex' as never });
+      start.mockClear();
+      const remote = await startedWith({ claudeAccounts, host: { type: 'remote', id: 'ssh-1' } });
+
+      for (const input of [codex, remote]) {
+        expect(input.providerVars).not.toHaveProperty('CLAUDE_CONFIG_DIR');
+        expect(input).not.toHaveProperty('unsetEnv');
+      }
+      expect(claudeAccounts.resolve).not.toHaveBeenCalled();
+    });
+  });
+
   describe('sessions inside WSL2', () => {
     const wslMachine = { type: 'remote' as const, id: 'wsl-1' };
     const startedWith = async (overrides: Parameters<typeof createProvider>[0]) => {
@@ -348,6 +533,8 @@ function createProvider(
     getProviderConfig?: TuiConversationProviderDependencies['getProviderConfig'];
     isWslHost?: TuiConversationProviderDependencies['isWslHost'];
     localAutoApprove?: TuiConversationProviderDependencies['localAutoApprove'];
+    claudeAccounts?: TuiConversationProviderDependencies['claudeAccounts'];
+    launchEnv?: Record<string, string>;
   } = {}
 ): TuiConversationProvider {
   return new TuiConversationProvider(
@@ -368,7 +555,7 @@ function createProvider(
               path: '/workspace',
             },
             tmux: false,
-            env: {},
+            env: overrides.launchEnv ?? {},
           }),
       },
     },
@@ -383,6 +570,7 @@ function createProvider(
       ...(overrides.resolveSessionMcp ? { resolveSessionMcp: overrides.resolveSessionMcp } : {}),
       ...(overrides.isWslHost ? { isWslHost: overrides.isWslHost } : {}),
       ...(overrides.localAutoApprove ? { localAutoApprove: overrides.localAutoApprove } : {}),
+      ...(overrides.claudeAccounts ? { claudeAccounts: overrides.claudeAccounts } : {}),
     }
   );
 }

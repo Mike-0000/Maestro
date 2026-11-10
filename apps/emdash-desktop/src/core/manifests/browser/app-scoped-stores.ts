@@ -1,4 +1,5 @@
 import { canvasAppStoreContributions } from '@core/features/canvas/contributions/browser/app-stores';
+import { claudeAccountsAppStoreContributions } from '@core/features/claude-accounts/contributions/browser/app-stores';
 import { conductorAppStoreContributions } from '@core/features/conductor/contributions/browser/app-stores';
 import { machinesAppStoreContributions } from '@core/features/machines/contributions/app-stores';
 import { markdownViewerAppStoreContributions } from '@core/features/markdown-viewer/contributions/browser/app-stores';
@@ -30,4 +31,5 @@ export const appStoreContributions: readonly AppScopedStoreContribution[] = [
   // The talk line resolves the voice and conductor stores at create time.
   ...talkAppStoreContributions,
   ...updateAppStoreContributions,
+  ...claudeAccountsAppStoreContributions,
 ];

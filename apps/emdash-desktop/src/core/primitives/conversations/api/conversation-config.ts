@@ -15,6 +15,15 @@ const initialQueuePromptSchema = z.object({
   hiddenContext: z.string().optional(),
 });
 
+/**
+ * Which Claude account a Claude Code conversation runs under: `'primary'` or an extra
+ * account's id, stamped at creation. Absent on conversations of other providers and on ones
+ * created before accounts existed; those stay on the primary account. Added to version 1
+ * without a new version: it is optional, older builds ignore it, and a version bump would
+ * make them refuse these conversations as written by a future version.
+ */
+const claudeAccountIdSchema = z.string().optional();
+
 const ptyConfigV1 = z.object({
   version: z.literal('1'),
   type: z.literal('pty'),
@@ -23,6 +32,7 @@ const ptyConfigV1 = z.object({
   initialPrompt: z.string().optional(),
   /** Model to pass to the agent CLI. Empty string or absent = CLI default. */
   model: z.string().optional(),
+  claudeAccountId: claudeAccountIdSchema,
 });
 
 const acpConfigV1 = z.object({
@@ -41,6 +51,7 @@ const acpConfigV1 = z.object({
   effort: z.string().optional(),
   /** Last user-selected provider collaboration mode, such as Codex Default or Plan. */
   collaborationMode: z.string().optional(),
+  claudeAccountId: claudeAccountIdSchema,
 });
 
 export const conversationConfig = defineVersionedSchema()

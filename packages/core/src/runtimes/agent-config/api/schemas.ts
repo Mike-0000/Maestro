@@ -147,6 +147,16 @@ export const startLoginCommandSchema = z.object({
   // starts. Optional for back-compat; the runtime falls back to its defaults.
   cols: z.number().int().positive().optional(),
   rows: z.number().int().positive().optional(),
+  /**
+   * Runs the login against a credential store other than the provider's own, such as a second
+   * configuration directory: `env` is layered over the agent environment, then the `unsetEnv`
+   * names are removed. Such a login says nothing about the provider's own sign-in, so its exit
+   * does not refresh the provider's auth status and, while it runs, a signed-in status does
+   * not end it. `login.exit` stays published until the login is cancelled or replaced, or the
+   * provider's status is next refreshed.
+   */
+  env: z.record(z.string(), z.string()).optional(),
+  unsetEnv: z.array(z.string()).optional(),
 });
 
 export const providerCommandSchema = z.object({ providerId: z.string() });

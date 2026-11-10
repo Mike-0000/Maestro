@@ -4,6 +4,7 @@ import { agentsContract, agentsDomain } from '@core/features/agents/api';
 import { automationsContract, automationsDomain } from '@core/features/automations/api';
 import { browserContract, browserDomain } from '@core/features/browser/api';
 import { catalogDomain, catalogWireContract } from '@core/features/catalog/api';
+import { claudeAccountsContract, claudeAccountsDomain } from '@core/features/claude-accounts/api';
 import { conductorContract, conductorDomain } from '@core/features/conductor/api';
 import { conversationsContract, conversationsDomain } from '@core/features/conversations/api';
 import { devPerfContract, devPerfDomain } from '@core/features/dev-perf/api';
@@ -77,6 +78,7 @@ export const desktopDomainContracts = {
   [mcpDomain]: mcpContract,
   [skillsDomain]: skillsContract,
   [agentAddonsDomain]: agentAddonsContract,
+  [claudeAccountsDomain]: claudeAccountsContract,
   [terminalsDomain]: terminalsContract,
   [mementosDomain]: mementosWireContract,
   [notificationsDomain]: notificationsContract,

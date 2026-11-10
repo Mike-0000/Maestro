@@ -21,6 +21,11 @@ const v1Schema = z.object({
       initialPrompt: z.string().optional(),
       initialQueue: z.array(initialQueuePromptSchema).optional(),
       model: z.string().optional(),
+      /**
+       * Claude Code only: the Claude account to run under. Absent means the default account
+       * at creation, which the task service fills in. Optional, so no new version.
+       */
+      claudeAccountId: z.string().optional(),
       type: z.enum(['pty', 'acp']).optional(),
     })
     .optional(),

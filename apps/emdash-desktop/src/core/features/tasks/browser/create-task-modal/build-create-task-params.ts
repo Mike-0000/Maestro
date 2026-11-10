@@ -32,7 +32,9 @@ function buildInitialQueue(state: InitialConversationState) {
 }
 
 export function buildInitialConversation(
-  state: InitialConversationState
+  state: InitialConversationState,
+  /** The Claude account picked in the form; absent leaves the choice to the default account. */
+  claudeAccountId?: string
 ): NonNullable<TaskConfig['initialConversation']> | undefined {
   const { provider } = state;
   if (!provider) return undefined;
@@ -49,6 +51,7 @@ export function buildInitialConversation(
         : {}),
     autoApprove: state.autoApprove,
     model: state.model ?? undefined,
+    ...(claudeAccountId && { claudeAccountId }),
     type,
   };
 }

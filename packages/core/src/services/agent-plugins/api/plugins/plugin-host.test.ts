@@ -197,6 +197,40 @@ describe('AgentPluginHost', () => {
     });
   });
 
+  it('removes unset variables from the ACP spawn wherever they came from', async () => {
+    const buildSpawn = vi.fn(({ cwd, cli }: { cwd: string; cli: string }) => ({
+      command: cli,
+      args: [],
+      cwd,
+      env: { CLAUDE_CODE_OAUTH_TOKEN: 'plugin-default' },
+    }));
+    const host = createHost(
+      [
+        plugin({
+          acp: { kind: 'supported' },
+          behavior: { acp: { buildSpawn } as unknown as IAcpBehavior },
+        }),
+      ],
+      // The user's shell exports a key the allowlist passes on.
+      async () => ({ HOME: '/home/test', PATH: '/bin', ANTHROPIC_API_KEY: 'shell-key' })
+    );
+
+    const inherited = await host.buildAcpSpawn('test', { cwd: '/work' });
+    const result = await host.buildAcpSpawn('test', {
+      cwd: '/work',
+      env: { CLAUDE_CONFIG_DIR: '/accounts/second', ANTHROPIC_AUTH_TOKEN: 'caller-token' },
+      unsetEnv: ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN'],
+    });
+
+    // Without the request the allowlist is unchanged.
+    expect(inherited).toMatchObject({ data: { env: { ANTHROPIC_API_KEY: 'shell-key' } } });
+    if (!result.success) throw new Error('Expected ACP spawn to resolve');
+    expect(result.data.env).toMatchObject({ PATH: '/bin', CLAUDE_CONFIG_DIR: '/accounts/second' });
+    expect(Object.keys(result.data.env)).not.toEqual(expect.arrayContaining(['ANTHROPIC_API_KEY']));
+    expect(result.data.env).not.toHaveProperty('ANTHROPIC_AUTH_TOKEN');
+    expect(result.data.env).not.toHaveProperty('CLAUDE_CODE_OAUTH_TOKEN');
+  });
+
   it('merges Windows ACP environment layers case-insensitively', async () => {
     const buildSpawn = vi.fn(({ cwd, cli }: { cwd: string; cli: string }) => ({
       command: cli,

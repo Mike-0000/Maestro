@@ -290,6 +290,25 @@ export function mergeAgentEnvLayers(
   return merged;
 }
 
+/**
+ * Drop variables from an assembled agent environment, with Windows' case-insensitive key
+ * semantics. For a session that must not see a variable the allowlist would otherwise pass on;
+ * the allowlist itself is unchanged for every other session.
+ */
+export function omitAgentEnvKeys(
+  platform: AgentEnvPlatform,
+  env: Readonly<Record<string, string>>,
+  keys: readonly string[] | undefined
+): Record<string, string> {
+  if (!keys || keys.length === 0) return { ...env };
+  const dropped = new Set(platform === 'windows' ? keys.map((key) => key.toLowerCase()) : keys);
+  return Object.fromEntries(
+    Object.entries(env).filter(
+      ([key]) => !dropped.has(platform === 'windows' ? key.toLowerCase() : key)
+    )
+  );
+}
+
 function getAllowlistedEnv(
   sourceEnv: EnvRecord,
   keys: readonly string[],

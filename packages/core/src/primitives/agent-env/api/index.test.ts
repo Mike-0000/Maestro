@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildAllowlistedAgentEnv, getWindowsEnvKey, mergeAgentEnvLayers } from './index';
+import {
+  buildAllowlistedAgentEnv,
+  getWindowsEnvKey,
+  mergeAgentEnvLayers,
+  omitAgentEnvKeys,
+} from './index';
 
 describe('buildAllowlistedAgentEnv', () => {
   it('reads the full allowlist case-insensitively and emits canonical Windows names', () => {
@@ -195,5 +200,30 @@ describe('mergeAgentEnvLayers', () => {
       PATH: '/bin',
       Path: '/other',
     });
+  });
+});
+
+describe('omitAgentEnvKeys', () => {
+  it('removes the named variables and leaves the rest', () => {
+    expect(
+      omitAgentEnvKeys('posix', { PATH: '/bin', ANTHROPIC_API_KEY: 'key', Path: '/other' }, [
+        'ANTHROPIC_API_KEY',
+        'path',
+      ])
+    ).toEqual({ PATH: '/bin', Path: '/other' });
+  });
+
+  it('matches names case-insensitively on Windows', () => {
+    expect(
+      omitAgentEnvKeys('windows', { PATH: 'C:\\bin', Anthropic_Api_Key: 'key' }, [
+        'ANTHROPIC_API_KEY',
+      ])
+    ).toEqual({ PATH: 'C:\\bin' });
+  });
+
+  it('returns a copy when nothing is named', () => {
+    const env = { PATH: '/bin' };
+    expect(omitAgentEnvKeys('posix', env, undefined)).toEqual(env);
+    expect(omitAgentEnvKeys('posix', env, [])).not.toBe(env);
   });
 });

@@ -8,6 +8,7 @@ import { TaskSessionManager } from './task-session-manager';
 const operationMocks = vi.hoisted(() => ({
   archiveTask: vi.fn(),
   buildTaskFromWorkspace: vi.fn(),
+  createTask: vi.fn(),
   createWorkspaceRegistry: vi.fn(),
   deleteTask: vi.fn(),
   tryAcquireWorkspaceRuntime: vi.fn(),
@@ -15,6 +16,11 @@ const operationMocks = vi.hoisted(() => ({
 
 vi.mock('../../node/operations/archiveTask', () => ({
   archiveTask: operationMocks.archiveTask,
+}));
+
+vi.mock('../../node/operations/createTask', () => ({
+  createTask: operationMocks.createTask,
+  resolveProjectPreservePatterns: vi.fn(),
 }));
 
 vi.mock('../../node/operations/deleteTask', () => ({
@@ -427,5 +433,47 @@ describe('TaskService cleanup and activation ordering', () => {
       cleanup.resolve();
     }
     expect((await teardown).success).toBe(true);
+  });
+});
+
+describe('TaskService Claude accounts', () => {
+  const params = (initialConversation: Record<string, unknown>) =>
+    ({
+      id: 'task-1',
+      projectId: 'project-1',
+      taskConfig: { version: '1', name: 'Task', initialConversation },
+      workspaceConfig: {},
+    }) as never;
+  const createdWith = () =>
+    operationMocks.createTask.mock.calls[0]?.[5].taskConfig.initialConversation;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    operationMocks.createTask.mockResolvedValue(err({ type: 'project-not-found' }));
+  });
+
+  it("records the default account on a new task's Claude conversation", async () => {
+    const resolveClaudeAccountId = vi.fn(async (explicit?: string) => explicit ?? 'account-1');
+    const service = new TaskService({ resolveClaudeAccountId } as never);
+
+    await service.createTask(params({ id: 'conversation-1', provider: 'claude' }));
+
+    expect(resolveClaudeAccountId).toHaveBeenCalledWith(undefined);
+    expect(createdWith()).toMatchObject({ provider: 'claude', claudeAccountId: 'account-1' });
+  });
+
+  it('keeps an explicit choice and leaves other providers alone', async () => {
+    const resolveClaudeAccountId = vi.fn(async (explicit?: string) => explicit ?? 'account-1');
+    const service = new TaskService({ resolveClaudeAccountId } as never);
+
+    await service.createTask(
+      params({ id: 'conversation-1', provider: 'claude', claudeAccountId: 'account-2' })
+    );
+    expect(createdWith()).toMatchObject({ claudeAccountId: 'account-2' });
+
+    operationMocks.createTask.mockClear();
+    await service.createTask(params({ id: 'conversation-1', provider: 'codex' }));
+    expect(createdWith()).not.toHaveProperty('claudeAccountId');
+    expect(resolveClaudeAccountId).toHaveBeenCalledTimes(1);
   });
 });

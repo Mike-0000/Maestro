@@ -16,6 +16,10 @@ import { hostRefFromConnectionId } from '@core/features/agents/api/browser/clien
 import type { AgentDisableReason } from '@core/features/agents/api/browser/components/agent-selector/agent-selector-options';
 import { useAgents } from '@core/features/agents/api/browser/use-agents';
 import { AgentSelector } from '@core/features/agents/contributions/browser/agent-selector';
+import {
+  ClaudeAccountSelect,
+  type ClaudeAccountPicker,
+} from '@core/features/claude-accounts/contributions/browser/claude-account-picker';
 import { useEffectiveProvider } from '@core/features/conversations/api/browser/use-effective-provider';
 import { IntegrationIcon } from '@core/features/integrations/contributions/browser/integration-icon';
 import { usePromptLibrary } from '@core/features/library/api/browser/prompts/use-prompt-library';
@@ -191,6 +195,8 @@ interface InitialConversationFieldProps {
   textareaClassName?: string;
   showAutoApproveToggle?: boolean;
   requirePromptDelivery?: boolean;
+  /** Offers a Claude account choice when the form supports one and there is one to make. */
+  claudeAccount?: ClaudeAccountPicker;
 }
 
 export function InitialConversationField({
@@ -202,7 +208,9 @@ export function InitialConversationField({
   textareaClassName,
   showAutoApproveToggle = true,
   requirePromptDelivery = false,
+  claudeAccount,
 }: InitialConversationFieldProps) {
+  const claudeAccountSelectId = useId();
   const autoApproveSwitchId = useId();
   const chatUiSwitchId = useId();
   const editorApiRef = useRef<PromptEditorRef | null>(null);
@@ -343,6 +351,17 @@ export function InitialConversationField({
             contentClassName="w-64"
           />
         </div>
+
+        {claudeAccount?.visible ? (
+          <div className="flex items-center gap-2">
+            <Field.Label htmlFor={claudeAccountSelectId}>Claude account</Field.Label>
+            <ClaudeAccountSelect
+              id={claudeAccountSelectId}
+              picker={claudeAccount}
+              variant="inline"
+            />
+          </div>
+        ) : null}
 
         {showAutoApproveToggle && canToggleAutoApprove ? (
           <div className="flex items-center gap-2">

@@ -22,12 +22,16 @@ export function createAgentConfigProcedures(runtime: AgentConfigRuntime) {
       methodId: string;
       cols?: number;
       rows?: number;
+      env?: Record<string, string>;
+      unsetEnv?: string[];
     }): Promise<Result<void, AgentConfigAuthError>> {
       const dimensions =
         input.cols !== undefined && input.rows !== undefined
           ? { cols: input.cols, rows: input.rows }
           : undefined;
-      return runtime.startLogin(input.providerId, input.methodId, dimensions);
+      const overrides =
+        input.env || input.unsetEnv ? { env: input.env, unsetEnv: input.unsetEnv } : undefined;
+      return runtime.startLogin(input.providerId, input.methodId, dimensions, overrides);
     },
     cancelLogin(input: { providerId: string }): Promise<Result<void, AgentConfigAuthError>> {
       return runtime.cancelLogin(input.providerId);

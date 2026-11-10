@@ -6,6 +6,7 @@ import {
 } from '@emdash/core/primitives/host/api';
 import { log } from '@emdash/shared/logger';
 import { eq } from 'drizzle-orm';
+import { CLAUDE_ACCOUNTS_PROVIDER_ID } from '@core/features/claude-accounts/api/node/launch';
 import { conversationWireEvents } from '@core/features/conversations/api/node';
 import { conversationEvents } from '@core/features/conversations/api/node/conversation-events';
 import {
@@ -40,6 +41,12 @@ export type CompensationRunner = <T>(options: {
   onCompensationError?: (error: unknown) => void;
 }) => Promise<T>;
 
+/**
+ * The Claude account a new Claude Code conversation is recorded with: the explicit choice when
+ * that account exists, otherwise the current default.
+ */
+export type ClaudeAccountIdResolver = (explicit?: string) => Promise<string>;
+
 export type ConversationWorkspaceIdentityResolver = Readonly<{
   resolve(workspaceId: string): Promise<{ host: HostRef; path: string } | null>;
 }>;
@@ -55,6 +62,7 @@ export async function createConversation(
     hostIsReachable: (hostRef: SerializedHostRef) => boolean;
     workspaceIdentity: ConversationWorkspaceIdentityResolver;
     recordWorkStarted?: RecordWorkStarted;
+    resolveClaudeAccountId?: ClaudeAccountIdResolver;
   }
 ): Promise<Conversation> {
   const { db: database, telemetry, withCompensation, runtimes } = dependencies;
@@ -91,6 +99,11 @@ export async function createConversation(
   const conversationType = params.type ?? 'pty';
 
   const initialQueue = params.initialQueue?.filter((prompt) => prompt.text.trim());
+  // Recorded now, so a later change of the default account only affects new conversations.
+  const claudeAccountId =
+    params.provider === CLAUDE_ACCOUNTS_PROVIDER_ID
+      ? await dependencies.resolveClaudeAccountId?.(params.claudeAccountId)
+      : undefined;
   const configObj: ConversationConfig =
     conversationType === 'acp'
       ? {
@@ -102,6 +115,7 @@ export async function createConversation(
           ...(params.effort && { effort: params.effort }),
           ...(params.collaborationMode && { collaborationMode: params.collaborationMode }),
           ...(initialQueue?.length && { initialQueue }),
+          ...(claudeAccountId && { claudeAccountId }),
         }
       : {
           version: '1',
@@ -109,6 +123,7 @@ export async function createConversation(
           ...(params.autoApprove !== undefined && { autoApprove: params.autoApprove }),
           ...(params.model && { model: params.model }),
           ...(params.initialPrompt && { initialPrompt: params.initialPrompt }),
+          ...(claudeAccountId && { claudeAccountId }),
         };
   const config = configObj;
 

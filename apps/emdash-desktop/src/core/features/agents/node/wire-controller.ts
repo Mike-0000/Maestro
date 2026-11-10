@@ -1,9 +1,10 @@
-import { sshConnectionIdOf, type HostRef } from '@emdash/core/primitives/host/api';
+import { isLocalHostRef, sshConnectionIdOf, type HostRef } from '@emdash/core/primitives/host/api';
 import type { AgentProviderId } from '@emdash/plugins/agents/types';
 import { err, ok, type Result } from '@emdash/shared';
 import type { LiveModelProvider, LiveSource } from '@emdash/wire/rpc';
 import { createController, type CallMeta, type Controller } from '@emdash/wire/rpc';
 import type { AgentOperations } from '@core/features/agents/node/controller';
+import { PRIMARY_CLAUDE_ACCOUNT_ID } from '@core/features/claude-accounts/api/types';
 import { forwardLiveModel } from '@core/services/runtime-clients/node/forward-live-model';
 import { agentsContract } from '../api';
 import {
@@ -14,9 +15,18 @@ import {
   type AgentsRuntimeResolveError as RuntimeResolveError,
 } from '../api/runtime-adapter';
 
+/** Variables for a sign-in that targets an extra account instead of the provider's own. */
+export type AccountLoginEnv = { env: Record<string, string>; unsetEnv: string[] };
+
 export type CreateAgentsWireControllerOptions = Readonly<{
   operations: AgentOperations;
   runtimes: AgentsRuntimeBroker;
+  /**
+   * Resolves the login environment of a Claude account on this computer, preparing its
+   * folder. Null means the primary account: the login runs as it always has. Throws when the
+   * account does not exist.
+   */
+  resolveClaudeAccountLogin?: (accountId: string) => Promise<AccountLoginEnv | null>;
 }>;
 
 export function createAgentsWireController(options: CreateAgentsWireControllerOptions): Controller {
@@ -110,10 +120,17 @@ export function createAgentsWireController(options: CreateAgentsWireControllerOp
       withHostRuntime(options.runtimes, host, (runtime) =>
         runtime.agentConfig.hooksStatus({ providerId }, callOptions(meta))
       ),
-    startLogin: (input, meta) =>
-      withAgentConfigResult(options.runtimes, input.host, (client) =>
-        client.startLogin(withoutHost(input), callOptions(meta))
-      ),
+    startLogin: async ({ claudeAccountId, ...input }, meta) => {
+      let account: AccountLoginEnv | null = null;
+      if (claudeAccountId !== undefined) {
+        const resolved = await resolveAccountLogin(options, input, claudeAccountId);
+        if (!resolved.success) return resolved;
+        account = resolved.data;
+      }
+      return withAgentConfigResult(options.runtimes, input.host, (client) =>
+        client.startLogin({ ...withoutHost(input), ...account }, callOptions(meta))
+      );
+    },
     cancelLogin: (input, meta) =>
       withAgentConfigResult(options.runtimes, input.host, (client) =>
         client.cancelLogin(withoutHost(input), callOptions(meta))
@@ -189,6 +206,30 @@ async function resolveRuntimeSource(
   const runtime = await runtimes.client(host);
   if (!runtime.success) throwAgentsRuntimeResolveError(runtime.error);
   return source(runtime.data);
+}
+
+async function resolveAccountLogin(
+  options: CreateAgentsWireControllerOptions,
+  input: { host: HostRef; providerId: string },
+  accountId: string
+): Promise<Result<AccountLoginEnv | null, { type: 'invalid-state'; message: string }>> {
+  // The primary account is the provider's ordinary sign-in, on whatever host and provider.
+  if (accountId === PRIMARY_CLAUDE_ACCOUNT_ID) return ok(null);
+  const resolve = options.resolveClaudeAccountLogin;
+  if (!resolve || input.providerId !== 'claude' || !isLocalHostRef(input.host)) {
+    return err({
+      type: 'invalid-state',
+      message: 'Claude accounts can only be signed in to with Claude Code on this computer',
+    });
+  }
+  try {
+    return ok(await resolve(accountId));
+  } catch (error) {
+    return err({
+      type: 'invalid-state',
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 function withoutHost<T extends { host: HostRef }>(input: T): Omit<T, 'host'> {

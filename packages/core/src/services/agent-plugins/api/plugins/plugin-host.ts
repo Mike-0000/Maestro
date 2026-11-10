@@ -5,6 +5,7 @@ import { compose, deduplicate } from '@emdash/shared/requests';
 import {
   buildAllowlistedAgentEnv,
   mergeAgentEnvLayers,
+  omitAgentEnvKeys,
   type AgentEnvPlatform,
 } from '#primitives/agent-env/api';
 import type { EnvSource, IExecutionContext } from '#primitives/exec/api';
@@ -199,16 +200,26 @@ export class AgentPluginHost {
     return this.checkAuthStatusOnce(providerId);
   }
 
+  /**
+   * `overrides` runs the login against a different credential store than the provider's own
+   * (for example another configuration directory): its `env` is layered over the agent
+   * environment and its `unsetEnv` names are then removed.
+   */
   async buildLoginCommand(
     providerId: string,
-    methodId: string
+    methodId: string,
+    overrides?: { env?: Record<string, string>; unsetEnv?: readonly string[] }
   ): Promise<Result<AgentHostLoginCommand, AgentHostError>> {
     const provider = this.resolveAuthProvider(providerId);
     if (!provider) return err({ type: 'unknown-provider', providerId });
 
     const spawnContext = await this.resolveSpawnContext(providerId);
     if (!spawnContext.success) return err(spawnContext.error);
-    const env = { ...spawnContext.data.agentEnv };
+    const env = omitAgentEnvKeys(
+      this.agentEnvPlatform,
+      mergeAgentEnvLayers(this.agentEnvPlatform, spawnContext.data.agentEnv, overrides?.env ?? {}),
+      overrides?.unsetEnv
+    );
 
     if (provider.auth.kind === 'none') {
       if (methodId !== 'cli-login') {
@@ -302,7 +313,7 @@ export class AgentPluginHost {
 
   async buildAcpSpawn(
     providerId: string,
-    ctx: { cwd: string; env?: Record<string, string> }
+    ctx: { cwd: string; env?: Record<string, string>; unsetEnv?: readonly string[] }
   ): Promise<Result<AgentHostAcpSpawn, AgentHostError>> {
     const provider = this.resolveAcp(providerId);
     if (!provider) return err({ type: 'capability-unsupported', providerId, capability: 'acp' });
@@ -317,11 +328,15 @@ export class AgentPluginHost {
       ...spawn,
       // User-configured provider env (from Settings) wins over the allowlisted
       // agent env and any plugin defaults, mirroring the PTY path's providerVars.
-      env: mergeAgentEnvLayers(
+      env: omitAgentEnvKeys(
         this.agentEnvPlatform,
-        spawnContext.data.agentEnv,
-        spawn.env ?? {},
-        ctx.env ?? {}
+        mergeAgentEnvLayers(
+          this.agentEnvPlatform,
+          spawnContext.data.agentEnv,
+          spawn.env ?? {},
+          ctx.env ?? {}
+        ),
+        ctx.unsetEnv
       ),
       cwd: ctx.cwd,
     });

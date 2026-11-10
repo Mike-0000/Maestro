@@ -7,6 +7,11 @@ import {
   getCanvasStore,
 } from '@core/features/canvas/contributions/browser/app-stores';
 import { canvasViewDef } from '@core/features/canvas/contributions/views';
+import {
+  canSwitchClaudeAccount,
+  showClaudeUsage,
+  switchClaudeAccount,
+} from '@core/features/claude-accounts/contributions/browser/command-actions';
 import { captureDevPerfTrace } from '@core/features/dev-perf/api/browser/capture-trace';
 import { projectViewDef } from '@core/features/projects/contributions/views';
 import { toggleAppTheme } from '@core/features/settings/api/browser/theme-toggle';
@@ -321,6 +326,13 @@ export function WindowScope({ children }: { readonly children: ReactNode }) {
         if (!canvas.proMode) toast('Desks are part of Canvas Pro');
         else if (!canvas.stepDesk(-1)) toast('There is no other desk');
       },
+    }),
+    'claudeAccounts.showUsage': () => ({
+      execute: () => showClaudeUsage(),
+    }),
+    'claudeAccounts.switchDefault': () => ({
+      availability: () => (canSwitchClaudeAccount() ? enabled : hidden),
+      execute: (input) => void switchClaudeAccount(input?.accountId),
     }),
     'voice.toggleListening': () => ({
       execute: () => void getVoiceStore().toggle(),

@@ -4,6 +4,7 @@ import {
   browserSettingsContribution,
 } from '@core/features/browser/contributions/settings';
 import { canvasBrowserSettingsContribution } from '@core/features/canvas/contributions/settings';
+import { claudeAccountsSettingsContribution } from '@core/features/claude-accounts/contributions/settings';
 import { filesSettingsContribution } from '@core/features/editor/contributions/settings';
 import {
   localProjectSettingsSchemaContribution,
@@ -44,6 +45,7 @@ export const appSettingsSchemaContributions = {
   browserPreview: browserPreviewSettingsContribution,
   browser: browserSettingsContribution,
   canvasBrowser: canvasBrowserSettingsContribution,
+  claudeAccounts: claudeAccountsSettingsContribution,
   changesViewMode: changesViewModeSettingsContribution,
   remoteMachine: hostSettingsSchemaContribution,
 } as const;

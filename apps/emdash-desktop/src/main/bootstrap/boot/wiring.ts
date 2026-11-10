@@ -76,6 +76,7 @@ export function createDesktopWireOptions(
     appSettings: database.appSettings,
     automations: services.automations,
     chorus,
+    claudeAccounts: services.claudeAccounts,
     localUpdates,
     browserOperations,
     sessionMcpServers: resolveAgentSessionMcpServers,

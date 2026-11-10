@@ -11,6 +11,8 @@ interface UseCreateTaskCallbackParams {
   selectedProjectId: string | undefined;
   state: CreateTaskState;
   initialConversation: InitialConversationState;
+  /** The Claude account picked for the first conversation, when the form offered a choice. */
+  claudeAccountId?: string;
   navigate: NavigateFnTyped;
   onCreated: () => void;
 }
@@ -19,6 +21,7 @@ export function useCreateTaskCallback({
   selectedProjectId,
   state,
   initialConversation,
+  claudeAccountId,
   navigate,
   onCreated,
 }: UseCreateTaskCallbackParams): { handleCreateTask: () => void; canCreate: boolean } {
@@ -39,7 +42,7 @@ export function useCreateTaskCallback({
           name: state.taskName.effectiveTaskName,
           linkedIssue: state.linkedType === 'issue' ? (state.linkedIssue ?? undefined) : undefined,
           initialStatus: deriveInitialStatus(state.linkedType, state.linkedPR),
-          initialConversation: buildInitialConversation(initialConversation),
+          initialConversation: buildInitialConversation(initialConversation, claudeAccountId),
         },
         workspaceConfig: state.workspaceConfig.resolvedConfig,
       })
@@ -47,7 +50,7 @@ export function useCreateTaskCallback({
 
     navigate(taskViewDef({ projectId: selectedProjectId, taskId: id }));
     onCreated();
-  }, [selectedProjectId, state, initialConversation, navigate, onCreated]);
+  }, [selectedProjectId, state, initialConversation, claudeAccountId, navigate, onCreated]);
 
   return { handleCreateTask, canCreate };
 }

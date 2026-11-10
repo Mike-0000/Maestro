@@ -5,6 +5,10 @@ import { useCallback, useState } from 'react';
 import { hostRefFromConnectionId } from '@core/features/agents/api/browser/client';
 import { useAgents } from '@core/features/agents/api/browser/use-agents';
 import { AgentSelector } from '@core/features/agents/contributions/browser/agent-selector';
+import {
+  ClaudeAccountSelect,
+  useClaudeAccountPicker,
+} from '@core/features/claude-accounts/contributions/browser/claude-account-picker';
 import { nextDefaultConversationTitle } from '@core/features/conversations/api/browser/conversation-title-utils';
 import { conversationRegistry } from '@core/features/conversations/api/browser/stores/conversation-registry';
 import { useEffectiveProvider } from '@core/features/conversations/api/browser/use-effective-provider';
@@ -50,6 +54,7 @@ export const CreateConversationModal = observer(function CreateConversationModal
   const [providerPreferences, setProviderPreferences] = useMemento(providerPreferencesMemento);
   const [modelOverrides, setModelOverrides] = useState<Record<string, string | null>>({});
   const liveActionDisabledReason = projectAvailabilityUi.getLiveActionDisabledReason(projectId);
+  const claudeAccount = useClaudeAccountPicker(providerId, { remote: Boolean(connectionId) });
   useCloseGuard(isSubmitting);
 
   const { data: agents } = useAgents(hostRefFromConnectionId(connectionId));
@@ -126,6 +131,7 @@ export const CreateConversationModal = observer(function CreateConversationModal
         effort: conversationType === 'acp' ? savedPreference?.effort : undefined,
         collaborationMode:
           conversationType === 'acp' ? savedPreference?.collaborationMode : undefined,
+        claudeAccountId: claudeAccount.claudeAccountId,
         type: conversationType,
       });
       try {
@@ -161,6 +167,7 @@ export const CreateConversationModal = observer(function CreateConversationModal
     savedPreference?.modeId,
     savedPreference?.collaborationMode,
     setProviderPreferences,
+    claudeAccount.claudeAccountId,
   ]);
 
   return (
@@ -179,6 +186,12 @@ export const CreateConversationModal = observer(function CreateConversationModal
               connectionId={connectionId}
             />
           </Field.Root>
+          {claudeAccount.visible ? (
+            <Field.Root>
+              <Field.Label>Claude account</Field.Label>
+              <ClaudeAccountSelect picker={claudeAccount} variant="field" />
+            </Field.Root>
+          ) : null}
           {modelOptions ? (
             <Field.Root>
               <Field.Label>Model</Field.Label>

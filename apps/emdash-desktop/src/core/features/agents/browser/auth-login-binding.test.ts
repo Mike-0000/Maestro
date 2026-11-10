@@ -12,6 +12,16 @@ vi.mock('@core/features/agents/api/browser/client', () => ({
   getAgentsClient: () => Promise.resolve(runtimeClient.current),
 }));
 
+const authModel = vi.hoisted(() => {
+  const observers = new Set<(snapshot: unknown) => void>();
+  return {
+    observers,
+    publish(snapshot: unknown) {
+      for (const observer of Array.from(observers)) observer(snapshot);
+    },
+  };
+});
+
 vi.mock('@emdash/wire/state', async (importOriginal) => {
   const actual = await importOriginal<typeof WireStateModule>();
   return {
@@ -20,6 +30,7 @@ vi.mock('@emdash/wire/state', async (importOriginal) => {
       const list = {
         __stateNode: {
           observe(listener: (snapshot: unknown) => void) {
+            authModel.observers.add(listener);
             listener({
               status: 'ready',
               value: {
@@ -52,6 +63,7 @@ vi.mock('@emdash/wire/live', async (importOriginal) => {
 describe('AcpAuthLoginBinding', () => {
   beforeEach(() => {
     runtimeClient.current = createClient();
+    authModel.observers.clear();
   });
 
   it('routes login calls through the explicit host', async () => {
@@ -90,6 +102,49 @@ describe('AcpAuthLoginBinding', () => {
       },
       expect.anything()
     );
+    await binding.dispose();
+  });
+
+  it('names the Claude account to sign in to, and only when one is given', async () => {
+    const client = runtimeClient.current as ReturnType<typeof createClient>;
+    const binding = await AcpAuthLoginBinding.create({ ...createArgs(), claudeAccountId: 'work' });
+
+    expect(client.startLogin).toHaveBeenCalledWith(
+      {
+        host: LOCAL_HOST_REF,
+        providerId: 'provider',
+        methodId: 'browser',
+        claudeAccountId: 'work',
+      },
+      expect.anything()
+    );
+    await binding.dispose();
+  });
+
+  it('tells subscribers each auth state the model publishes, until they unsubscribe', async () => {
+    const binding = await AcpAuthLoginBinding.create(createArgs());
+    const seen: unknown[] = [];
+    const unsubscribe = binding.status.subscribe((state) => seen.push(state));
+    const exited = {
+      status: { kind: 'unknown' },
+      login: {
+        methodId: 'browser',
+        startedAt: 1,
+        pendingUrl: null,
+        exit: { exitCode: 0, signal: null },
+      },
+    };
+
+    authModel.publish({ status: 'ready', value: { provider: { auth: exited } } });
+
+    expect(seen).toEqual([exited]);
+    expect(binding.status.current()).toEqual(exited);
+
+    unsubscribe();
+    authModel.publish({ status: 'ready', value: {} });
+
+    expect(seen).toHaveLength(1);
+    expect(binding.status.current()).toEqual({ status: { kind: 'unknown' }, login: null });
     await binding.dispose();
   });
 

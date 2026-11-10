@@ -117,6 +117,108 @@ describe('createAgentsWireController', () => {
     );
   });
 
+  describe('signing in to an extra Claude account', () => {
+    const accountLogin = {
+      env: { CLAUDE_CONFIG_DIR: '/data/claude-accounts/account-1' },
+      unsetEnv: ['ANTHROPIC_API_KEY'],
+    };
+    const setup = (resolve: (accountId: string) => Promise<typeof accountLogin | null>) => {
+      const startLogin = vi.fn(async () => ok(undefined));
+      const resolveClaudeAccountLogin = vi.fn(resolve);
+      const controller = createAgentsWireController({
+        operations: legacyOperations as never,
+        runtimes: { client: async () => ok({ agentConfig: { startLogin } }) } as never,
+        resolveClaudeAccountLogin,
+      });
+      return { controller, startLogin, resolveClaudeAccountLogin };
+    };
+    const login = { host: LOCAL_HOST_REF, providerId: 'claude', methodId: 'claude-login' };
+
+    it('starts the login with the environment main resolved for the account', async () => {
+      const { controller, startLogin, resolveClaudeAccountLogin } = setup(async () => accountLogin);
+
+      await expect(
+        controller.call('startLogin', { ...login, claudeAccountId: 'account-1' })
+      ).resolves.toEqual(ok(undefined));
+
+      expect(resolveClaudeAccountLogin).toHaveBeenCalledWith('account-1');
+      expect(startLogin).toHaveBeenCalledWith(
+        { providerId: 'claude', methodId: 'claude-login', ...accountLogin },
+        {}
+      );
+    });
+
+    it('is the ordinary login for the primary account', async () => {
+      const { controller, startLogin } = setup(async () => null);
+
+      await controller.call('startLogin', { ...login, claudeAccountId: 'primary' });
+
+      expect(startLogin).toHaveBeenCalledWith(
+        { providerId: 'claude', methodId: 'claude-login' },
+        {}
+      );
+    });
+
+    it("is the ordinary login for 'primary' on another host or provider too", async () => {
+      const { controller, startLogin, resolveClaudeAccountLogin } = setup(async () => accountLogin);
+
+      for (const input of [
+        { ...login, host: remoteHost, claudeAccountId: 'primary' },
+        { ...login, providerId: 'codex', methodId: 'login', claudeAccountId: 'primary' },
+      ]) {
+        await expect(controller.call('startLogin', input)).resolves.toEqual(ok(undefined));
+      }
+
+      expect(resolveClaudeAccountLogin).not.toHaveBeenCalled();
+      expect(startLogin).toHaveBeenNthCalledWith(
+        1,
+        { providerId: 'claude', methodId: 'claude-login' },
+        {}
+      );
+      expect(startLogin).toHaveBeenNthCalledWith(2, { providerId: 'codex', methodId: 'login' }, {});
+    });
+
+    it('does not let the renderer pass variables of its own', async () => {
+      const { controller, startLogin } = setup(async () => null);
+
+      await controller.call('startLogin', {
+        ...login,
+        env: { CLAUDE_CONFIG_DIR: '/somewhere/else' },
+        unsetEnv: ['PATH'],
+      } as never);
+
+      expect(startLogin).toHaveBeenCalledWith(
+        { providerId: 'claude', methodId: 'claude-login' },
+        {}
+      );
+    });
+
+    it('refuses an account that is gone, another provider, or another host', async () => {
+      const gone = setup(async () => {
+        throw new Error('That Claude account no longer exists');
+      });
+      await expect(
+        gone.controller.call('startLogin', { ...login, claudeAccountId: 'removed' })
+      ).resolves.toEqual(
+        err({ type: 'invalid-state', message: 'That Claude account no longer exists' })
+      );
+
+      const other = setup(async () => accountLogin);
+      for (const input of [
+        { ...login, providerId: 'codex', claudeAccountId: 'account-1' },
+        { ...login, host: remoteHost, claudeAccountId: 'account-1' },
+      ]) {
+        await expect(other.controller.call('startLogin', input)).resolves.toMatchObject({
+          success: false,
+          error: { type: 'invalid-state' },
+        });
+      }
+      expect(other.resolveClaudeAccountLogin).not.toHaveBeenCalled();
+      expect(gone.startLogin).not.toHaveBeenCalled();
+      expect(other.startLogin).not.toHaveBeenCalled();
+    });
+  });
+
   it('returns RuntimeResolveError from fallible login procedures', async () => {
     const resolveError = {
       type: 'host-unavailable' as const,

@@ -131,6 +131,171 @@ describe('createConversationsWireController', () => {
     });
   });
 
+  describe('Claude accounts on ACP sessions', () => {
+    const extra = { accountId: 'account-1', configDir: '/data/claude-accounts/account-1' };
+    type AcpAttachInput = { env?: Record<string, string>; unsetEnv?: string[] };
+
+    function attachWith(options: {
+      launch: typeof extra | null;
+      config?: Record<string, unknown> | null;
+      providerId?: string;
+      host?: HostRef;
+      prepare?: () => Promise<void>;
+    }) {
+      const attach = vi.fn(async (_input: AcpAttachInput) => ok(undefined));
+      const host = options.host ?? LOCAL_HOST_REF;
+      const claudeAccounts = {
+        resolve: vi.fn(async (_accountId: string | undefined) => options.launch),
+        prepare: vi.fn(options.prepare ?? (async () => {})),
+        resolveAccountId: vi.fn(async () => 'primary'),
+      };
+      const db = {
+        select: vi.fn(() => ({
+          from: () => ({
+            leftJoin: () => ({
+              where: () => ({
+                limit: async () => [
+                  {
+                    projectId: target.projectId,
+                    taskId: target.taskId,
+                    providerId: options.providerId ?? 'claude',
+                    sessionId: null,
+                    config: options.config ?? null,
+                    type: 'acp',
+                    workspaceId: 'workspace-1',
+                  },
+                ],
+              }),
+            }),
+          }),
+        })),
+      };
+      const controller = createConversationsWireController({
+        terminalFileSources: { prepare: vi.fn() },
+        db: db as never,
+        logger: { warn: vi.fn() } as never,
+        runtimes: { client: async () => ok({ acp: { attach } }) } as never,
+        workspaceIdentity: { resolve: vi.fn(async () => ({ host, path: target.workspacePath })) },
+        getProviderEnv: async () => ({
+          ANTHROPIC_API_KEY: 'sk-settings',
+          CLAUDE_CONFIG_DIR: '/user/config',
+          ANTHROPIC_BASE_URL: 'https://proxy',
+        }),
+        claudeAccounts,
+        sessionLaunchContexts: {
+          resolve: async () =>
+            ok({
+              workspace: {
+                workspaceId: 'workspace-1',
+                projectId: target.projectId,
+                host,
+                path: target.workspacePath,
+              },
+              tmux: false,
+              env: { ANTHROPIC_AUTH_TOKEN: 'project-token', PROJECT_ONLY: 'project' },
+            }),
+        },
+        telemetry: { capture: vi.fn() } as never,
+        projects: { requireAttached: vi.fn(() => ok({} as never)) },
+        taskSessions: { getTask: vi.fn() },
+        withCompensation: async ({ action }) => action(),
+        hostIsReachable: () => true,
+      });
+      const attached = controller.call('acp.attach', { conversationId: target.conversationId });
+      const attachedWith = () => {
+        const input = attach.mock.calls[0]?.[0];
+        if (!input) throw new Error('Expected the session to attach');
+        return input;
+      };
+      return { attach, attached, attachedWith, claudeAccounts };
+    }
+
+    it('runs an extra account from its prepared folder, without credentials that outrank it', async () => {
+      const { attached, attachedWith, claudeAccounts } = attachWith({
+        launch: extra,
+        config: { version: '1', type: 'acp', claudeAccountId: 'account-1' },
+      });
+      await attached;
+
+      expect(claudeAccounts.resolve).toHaveBeenCalledWith('account-1');
+      expect(claudeAccounts.prepare).toHaveBeenCalledWith(extra);
+      const input = attachedWith();
+      expect(input.env).toEqual({
+        ANTHROPIC_BASE_URL: 'https://proxy',
+        PROJECT_ONLY: 'project',
+        CLAUDE_CONFIG_DIR: '/data/claude-accounts/account-1',
+      });
+      expect(input.unsetEnv).toEqual([
+        'ANTHROPIC_API_KEY',
+        'ANTHROPIC_AUTH_TOKEN',
+        'CLAUDE_CODE_OAUTH_TOKEN',
+      ]);
+    });
+
+    it('changes nothing for the primary account', async () => {
+      const { attached, attachedWith, claudeAccounts } = attachWith({
+        launch: null,
+        config: { version: '1', type: 'acp', claudeAccountId: 'primary' },
+      });
+      await attached;
+
+      const input = attachedWith();
+      expect(input.env).toEqual({
+        ANTHROPIC_API_KEY: 'sk-settings',
+        CLAUDE_CONFIG_DIR: '/user/config',
+        ANTHROPIC_BASE_URL: 'https://proxy',
+        ANTHROPIC_AUTH_TOKEN: 'project-token',
+        PROJECT_ONLY: 'project',
+      });
+      expect(input).not.toHaveProperty('unsetEnv');
+      expect(claudeAccounts.prepare).not.toHaveBeenCalled();
+    });
+
+    it('passes on what the conversation recorded, whether nothing or a removed account', async () => {
+      // The resolver keeps an unrecorded conversation on primary and sends a removed account
+      // to the current default; here it answers primary for the first and an extra for the
+      // second.
+      const unstamped = attachWith({ launch: null, config: null });
+      await unstamped.attached;
+      const removed = attachWith({
+        launch: extra,
+        config: { version: '1', type: 'acp', claudeAccountId: 'removed' },
+      });
+      await removed.attached;
+
+      expect(unstamped.claudeAccounts.resolve).toHaveBeenCalledWith(undefined);
+      expect(unstamped.attachedWith().env?.CLAUDE_CONFIG_DIR).toBe('/user/config');
+      expect(unstamped.claudeAccounts.prepare).not.toHaveBeenCalled();
+      expect(removed.claudeAccounts.resolve).toHaveBeenCalledWith('removed');
+      expect(removed.attachedWith().env?.CLAUDE_CONFIG_DIR).toBe(extra.configDir);
+    });
+
+    it('does not attach when the account folder cannot be prepared', async () => {
+      const { attach, attached } = attachWith({
+        launch: extra,
+        prepare: async () => {
+          throw new Error('Could not prepare the Claude account folder: disk full');
+        },
+      });
+
+      await expect(attached).rejects.toThrow(/disk full/);
+      expect(attach).not.toHaveBeenCalled();
+    });
+
+    it('leaves other providers and other hosts alone', async () => {
+      const codex = attachWith({ launch: extra, providerId: 'codex' });
+      await codex.attached;
+      const remote = attachWith({ launch: extra, host: hostRef('remote', 'ssh-1') });
+      await remote.attached;
+
+      for (const { attachedWith, claudeAccounts } of [codex, remote]) {
+        expect(claudeAccounts.resolve).not.toHaveBeenCalled();
+        expect(attachedWith().env?.CLAUDE_CONFIG_DIR).toBe('/user/config');
+        expect(attachedWith()).not.toHaveProperty('unsetEnv');
+      }
+    });
+  });
+
   it('attaches with the trusted descriptor and activates while loading history', async () => {
     const attach = vi.fn(async () => ok(undefined));
     const loadHistory = vi.fn(async () => ok({ turns: [], nextCursor: null }));

@@ -1,5 +1,6 @@
 import { automationsBrowserContributions } from '@core/features/automations/contributions/browser';
 import { canvasBrowserContributions } from '@core/features/canvas/contributions/browser';
+import { claudeAccountsBrowserContributions } from '@core/features/claude-accounts/contributions/browser';
 import { conversationsBrowserContributions } from '@core/features/conversations/contributions/browser';
 import { devPerfBrowserContributions } from '@core/features/dev-perf/contributions/browser';
 import { editorBrowserContributions } from '@core/features/editor/contributions/browser';
@@ -23,6 +24,7 @@ export const featureViewRuntimes = [
 ] as const;
 
 export const featureModalDefs = [
+  ...claudeAccountsBrowserContributions.modalDefs,
   ...conversationsBrowserContributions.modalDefs,
   ...devPerfBrowserContributions.modalDefs,
   ...editorBrowserContributions.modalDefs,

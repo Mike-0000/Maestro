@@ -18,6 +18,7 @@ import { hostRefFromConnectionId } from '@core/features/agents/api/browser/clien
 import { useAgentMetadata } from '@core/features/agents/api/browser/use-agent-metadata';
 import { useAgents } from '@core/features/agents/api/browser/use-agents';
 import { AgentIcon } from '@core/features/agents/contributions/browser/agent-icon';
+import { getConversationSignInAccount } from '@core/features/claude-accounts/contributions/browser/conversation-account';
 import { ChatTranscript } from '@core/features/conversations/api/browser/chat/chat-transcript';
 import type {
   ChatCommands,
@@ -731,17 +732,22 @@ export const AcpChatPanel = observer(function AcpChatPanel() {
 
   const openSignInModal = useCallback(() => {
     if (!providerId || !cliAuthMethod || !store) return;
+    // A conversation on an extra Claude account signs in to that account, not the primary one.
+    const claudeAccount = conversationStore
+      ? getConversationSignInAccount(conversationStore.data, { remote: Boolean(connectionId) })
+      : undefined;
     void openModal('agentSignInModal', {
       providerId,
       methodId: cliAuthMethod.id,
       providerName: agent?.name ?? providerId,
       host,
+      ...(claudeAccount && { claudeAccount }),
     }).then((outcome) => {
       if (outcome.success) {
         if (store.loadError?.kind === 'auth_required') store.retry();
       }
     });
-  }, [agent?.name, cliAuthMethod, host, providerId, store]);
+  }, [agent?.name, cliAuthMethod, connectionId, conversationStore, host, providerId, store]);
 
   useEffect(() => {
     if (conversationStore && !conversationStore.seen) {

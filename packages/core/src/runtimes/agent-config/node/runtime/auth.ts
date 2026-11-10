@@ -29,11 +29,21 @@ export type LoginDimensions = {
   rows: number;
 };
 
+/**
+ * A login against a credential store other than the provider's own (see
+ * `startLoginCommandSchema`). The provider's auth status does not describe such a login.
+ */
+export type LoginEnvOverrides = {
+  env?: Record<string, string>;
+  unsetEnv?: string[];
+};
+
 type LoginKey = {
   providerId: string;
   methodId: string;
   generation: string;
   dimensions?: LoginDimensions;
+  overrides?: LoginEnvOverrides;
 };
 
 type LoginSession = {
@@ -120,12 +130,13 @@ export class AgentAuthManager {
   async startLogin(
     providerId: string,
     methodId: string,
-    dimensions?: LoginDimensions
+    dimensions?: LoginDimensions,
+    overrides?: LoginEnvOverrides
   ): Promise<Result<void, AgentConfigAuthError>> {
     if (!this.hasProvider(providerId)) return err({ type: 'unknown-provider', providerId });
     await this.releaseLogin(providerId, undefined, { force: true });
     const generation = randomUUID();
-    const key = { providerId, methodId, generation, dimensions };
+    const key: LoginKey = { providerId, methodId, generation, dimensions, overrides };
     const lease = this.loginSource.acquire(key);
     this.loginLeases.set(providerId, { generation, key, lease });
     try {
@@ -188,8 +199,12 @@ export class AgentAuthManager {
   }
 
   private async createLoginSession(key: LoginKey, scope: Scope): Promise<LoginSession> {
-    const { providerId, methodId, generation, dimensions } = key;
-    const loginCommand = await this.deps.agentHost.buildLoginCommand(providerId, methodId);
+    const { providerId, methodId, generation, dimensions, overrides } = key;
+    const loginCommand = await this.deps.agentHost.buildLoginCommand(
+      providerId,
+      methodId,
+      overrides
+    );
     if (!loginCommand.success) throw new Error(agentConfigAuthErrorMessage(loginCommand.error));
     const { command, args, env } = loginCommand.data;
     if (!this.isCurrentLogin(providerId, generation)) {
@@ -246,8 +261,11 @@ export class AgentAuthManager {
     info: PtyExitInfo
   ): Promise<void> {
     if (!this.isCurrentLogin(providerId, generation)) return;
+    const overridden = this.loginLeases.get(providerId)?.key.overrides !== undefined;
     this.publishLoginExit(providerId, generation, info);
     await this.releaseLogin(providerId, generation);
+    // It signed in somewhere else; the provider's own status has not changed.
+    if (overridden) return;
     if (this.scope.disposed) return;
     await this.getStatus(providerId, { refresh: true }).catch((error) => {
       this.deps.logger.warn('AgentAuthManager: failed to refresh auth after login exit', {
@@ -347,9 +365,11 @@ export class AgentAuthManager {
   }
 
   private publishStatus(providerId: string, status: AgentAuthStatus): void {
+    // An overridden login is not about this status, so being signed in does not end it.
+    const keepLogin = this.loginLeases.get(providerId)?.key.overrides !== undefined;
     this.publish(providerId, (current) => ({
       status,
-      login: status.kind === 'authenticated' ? null : current.login,
+      login: status.kind === 'authenticated' && !keepLogin ? null : current.login,
     }));
   }
 

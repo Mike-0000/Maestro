@@ -8,6 +8,7 @@ import type { HostRuntimesClient, RuntimeBroker } from '@emdash/core/services/ru
 import { err, ok, type Result } from '@emdash/shared';
 import { log } from '@emdash/shared/logger';
 import { and, eq, isNull, sql } from 'drizzle-orm';
+import { CLAUDE_ACCOUNTS_PROVIDER_ID } from '@core/features/claude-accounts/api/node/launch';
 import type { ConversationProvider } from '@core/features/conversations/api/node/types';
 import {
   PROJECT_LIVE_ACCESS_REQUIRED_MESSAGE,
@@ -107,6 +108,11 @@ export class TaskService implements Hookable<TaskLifecycleHooks> {
       workspaceIdentity: WorkspaceIdentityService;
       creations: WorkspaceCreations;
       deletion: TaskDeletionDependencies;
+      /**
+       * The Claude account a new Claude Code conversation is recorded with: the explicit
+       * choice when that account exists, otherwise the current default.
+       */
+      resolveClaudeAccountId?(explicit?: string): Promise<string>;
     }
   ) {}
 
@@ -114,7 +120,10 @@ export class TaskService implements Hookable<TaskLifecycleHooks> {
     return this._hooks.on(name, handler);
   }
 
-  async createTask(params: CreateTaskParams): Promise<Result<CreateTaskSuccess, CreateTaskError>> {
+  async createTask(
+    requested: CreateTaskParams
+  ): Promise<Result<CreateTaskSuccess, CreateTaskError>> {
+    const params = await this.withClaudeAccount(requested);
     const result = await createTask(
       this.dependencies.db,
       this.dependencies.projects,
@@ -127,6 +136,24 @@ export class TaskService implements Hookable<TaskLifecycleHooks> {
       this.notifyTaskCreated(result.data.task, params);
     }
     return result;
+  }
+
+  /**
+   * Records the Claude account on a task's first conversation now, so a later change of the
+   * default account only affects new tasks.
+   */
+  private async withClaudeAccount(params: CreateTaskParams): Promise<CreateTaskParams> {
+    const conversation = params.taskConfig.initialConversation;
+    const resolve = this.dependencies.resolveClaudeAccountId;
+    if (!resolve || conversation?.provider !== CLAUDE_ACCOUNTS_PROVIDER_ID) return params;
+    const claudeAccountId = await resolve(conversation.claudeAccountId);
+    return {
+      ...params,
+      taskConfig: {
+        ...params.taskConfig,
+        initialConversation: { ...conversation, claudeAccountId },
+      },
+    };
   }
 
   /** Fires the task:created hook. Call this after committing a task insert
