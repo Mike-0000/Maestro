@@ -285,6 +285,45 @@ describe('claude hooks', () => {
     });
   });
 
+  it('reports a turn ended by an API error, with the error text Claude showed', () => {
+    expect(
+      parse('error', {
+        session_id: RESUMED_SESSION_ID,
+        hook_event_name: 'StopFailure',
+        error: 'rate_limit',
+        error_details: '429 Too Many Requests',
+        last_assistant_message: "You've hit your 5-hour limit · resets 6:30pm (America/Denver)",
+      })
+    ).toEqual({
+      kind: 'status',
+      type: 'error',
+      providerSessionId: RESUMED_SESSION_ID,
+      message: 'rate_limit: 429 Too Many Requests',
+      lastAssistantMessage: "You've hit your 5-hour limit · resets 6:30pm (America/Denver)",
+      title: undefined,
+    });
+  });
+
+  it('reads the resume after a usage limit as a turn starting again', () => {
+    expect(
+      parse('notification', {
+        hook_event_name: 'Notification',
+        notification_type: 'quota_auto_resume_fired',
+        message: 'Continuing your task',
+      })
+    ).toEqual({ kind: 'status', type: 'start', initiator: 'background' });
+  });
+
+  it('installs a StopFailure hook, the only signal of a turn cut off by a usage limit', async () => {
+    const files = new Map<string, string>();
+    await provider.behavior.hooks!.writeHooks(createMemoryFs(files), []);
+
+    const settings = JSON.parse(files.get(CLAUDE_SETTINGS_PATH)!);
+    expect(settings.hooks.StopFailure).toEqual([
+      { hooks: [{ type: 'command', command: makeStdinHookCommand('error') }] },
+    ]);
+  });
+
   it('installs a SessionStart hook that reports the Claude session id', async () => {
     const files = new Map<string, string>();
     const fs = createMemoryFs(files);

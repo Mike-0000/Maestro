@@ -166,6 +166,21 @@ describe('ClaudeLimitSwitchService', () => {
       expect(harness.move).toHaveBeenCalledTimes(1);
     });
 
+    it('moves a terminal conversation on the failed-turn event Claude Code sends at a limit', async () => {
+      const harness = setup();
+
+      // Claude Code sends neither a stop nor the idle reminder while it waits for a reset.
+      harness.send('c1', 'start');
+      harness.send('c1', 'error', {
+        message: 'rate_limit',
+        lastAssistantMessage: "You've hit your 5-hour limit · resets 6:30pm (America/Denver)",
+      });
+      await harness.service.idle();
+
+      expect(harness.terminalTail).not.toHaveBeenCalled();
+      expect(harness.move).toHaveBeenCalledTimes(1);
+    });
+
     it('moves a chat conversation whose failed turn ended with the limit message', async () => {
       const harness = setup({
         conversations: [

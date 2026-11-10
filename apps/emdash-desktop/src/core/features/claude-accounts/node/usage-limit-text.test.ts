@@ -45,9 +45,15 @@ describe('usageLimitLineInTerminal', () => {
 
   it('only looks at the end of the output', () => {
     const old = "You've hit your limit · resets 3am\r\n";
-    const later = Array.from({ length: 60 }, (_, index) => `line ${index}\r\n`).join('');
+    const later = Array.from({ length: 200 }, (_, index) => `line ${index}\r\n`).join('');
     expect(usageLimitLineInTerminal(old + later)).toBeNull();
     expect(usageLimitLineInTerminal('● All tests pass.\r\n> ')).toBeNull();
     expect(usageLimitLineInTerminal(null)).toBeNull();
+  });
+
+  it('reads a message whose words are spaced with cursor moves', () => {
+    const raw =
+      "\u001b[2K\u001b[GYou've\u001b[1Chit\u001b[1Cyour\u001b[1C5-hour\u001b[1Climit · resets 6:30pm";
+    expect(usageLimitLineInTerminal(raw)).toBe("You've hit your 5-hour limit · resets 6:30pm");
   });
 });

@@ -26,8 +26,11 @@ export const CLAUDE_USAGE_LIMIT_PREFIXES: readonly string[] = [
 
 /** How much of a terminal's retained output is read: the end of it, where the turn ended. */
 const TERMINAL_TAIL_CHARS = 16_000;
-/** Lines of that tail searched: the limit message sits above the input box and status line. */
-const TERMINAL_TAIL_LINES = 40;
+/**
+ * Lines of that tail searched. The limit message sits above the input box and status line, and
+ * Claude Code redraws those while it waits for the limit to reset, so the count is generous.
+ */
+const TERMINAL_TAIL_LINES = 120;
 /** Lines at the end of a reply searched: the message can be followed by an upgrade hint. */
 const REPLY_TAIL_LINES = 3;
 
@@ -53,6 +56,7 @@ function findLimitLine(lines: string[]): string | null {
     // Box-drawing, bullets and other decoration come before the words.
     const line = normalizeApostrophes(lines[index]!)
       .replace(/^[^\p{L}]+/u, '')
+      .replace(/\s+/g, ' ')
       .trim();
     if (CLAUDE_USAGE_LIMIT_PREFIXES.some((prefix) => line.startsWith(prefix))) return line;
   }
@@ -72,7 +76,9 @@ function normalizeApostrophes(text: string): string {
 }
 
 /** Cursor movement and erasing: CSI sequences ending in one of these act as a line break. */
-const CURSOR_MOVES = 'ABCDEFGHJKdf';
+const CURSOR_MOVES = 'ABDEFGHJKdf';
+/** Cursor forward: a terminal UI writes it in place of the spaces between words. */
+const CURSOR_FORWARD = 'C';
 
 function stripTerminalControls(text: string): string {
   return (
@@ -81,7 +87,7 @@ function stripTerminalControls(text: string): string {
       .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g, '')
       // CSI: ESC [ params final
       .replace(/\u001b\[[0-?]*[ -/]*([@-~])/g, (_match, final: string) =>
-        CURSOR_MOVES.includes(final) ? '\n' : ''
+        final === CURSOR_FORWARD ? ' ' : CURSOR_MOVES.includes(final) ? '\n' : ''
       )
       // Other two-character escapes.
       .replace(/\u001b[@-Z\\-_]/g, '')

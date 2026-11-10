@@ -27,6 +27,10 @@ export const CLAUDE_SETTINGS_PATH = 'settings.json';
  * - `UserPromptSubmit` also fires for those machine-injected wake-ups.
  * - `Notification` carries `notification_type`; older builds omit it, so the message text is
  *   the fallback.
+ * - `StopFailure` fires instead of `Stop` when an API error ends the turn (a usage limit, an
+ *   overload, a sign-in problem). It is the only signal of a usage limit: Claude sends no idle
+ *   reminder while it waits for a limit to reset. `error` names the kind and
+ *   `last_assistant_message` holds the error text shown in the conversation.
  */
 function parseClaudeHookEvent(
   eventType: string,
@@ -49,10 +53,21 @@ function parseClaudeStatusEvent(
     const backgroundWork = claudeBackgroundWork(body);
     return backgroundWork.length > 0 ? { ...event, backgroundWork } : event;
   }
+  if (event.type === 'error') {
+    const message = event.message ?? claudeErrorKind(body);
+    return message ? { ...event, message } : event;
+  }
   if (event.type === 'start' && isBackgroundWakeUp(body)) {
     return { ...event, initiator: 'background' };
   }
   return event;
+}
+
+/** The `StopFailure` error kind with its details, such as "rate_limit: 429 Too Many Requests". */
+function claudeErrorKind(body: Record<string, unknown>): string | undefined {
+  if (typeof body.error !== 'string' || !body.error) return undefined;
+  const details = typeof body.error_details === 'string' ? body.error_details.trim() : '';
+  return details ? `${body.error}: ${details}` : body.error;
 }
 
 /**
@@ -144,7 +159,6 @@ const CLAUDE_INFORMATIONAL_NOTIFICATIONS = new Set([
   'push_notification',
   'computer_use_enter',
   'computer_use_exit',
-  'quota_auto_resume_fired',
   'quota_auto_resume_stale',
   'quota_auto_resume_disabled',
   'model_refusal_fallback',
@@ -159,6 +173,10 @@ const CLAUDE_INFORMATIONAL_NOTIFICATIONS = new Set([
 function parseClaudeNotification(body: Record<string, unknown>): CanonicalHookEvent {
   const message = typeof body.message === 'string' ? body.message : '';
   const claudeType = typeof body.notification_type === 'string' ? body.notification_type : '';
+  // Claude continues the task it paused at a usage limit: a turn is running again.
+  if (claudeType === 'quota_auto_resume_fired') {
+    return { kind: 'status', type: 'start', initiator: 'background' };
+  }
   if (CLAUDE_INFORMATIONAL_NOTIFICATIONS.has(claudeType)) return { kind: 'ignore' };
   const notificationType =
     CLAUDE_ATTENTION_NOTIFICATIONS.get(claudeType) ??
@@ -181,6 +199,7 @@ export function buildClaudeHookConfig() {
       { hookKey: 'UserPromptSubmit', command: makeStdinHookCommand('start') },
       { hookKey: 'Notification', command: makeStdinHookCommand('notification') },
       { hookKey: 'Stop', command: makeStdinHookCommand('stop') },
+      { hookKey: 'StopFailure', command: makeStdinHookCommand('error') },
     ]),
     resolveConfigRoots: configRoots(envConfigRoot('CLAUDE_CONFIG_DIR', '.claude')),
     parseHookEvent: parseClaudeHookEvent,
