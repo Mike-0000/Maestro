@@ -9,6 +9,7 @@ import {
   type ClaudeAccountUsage,
 } from '../api/types';
 import { isAccountSignedIn } from './account-model';
+import { LimitNoticeCoalescer, type LimitNotice, type LimitNoticeEvent } from './limit-notices';
 
 /** How often usage is fetched again while something that shows it is on screen. */
 export const USAGE_POLL_MS = 5 * 60_000;
@@ -21,6 +22,10 @@ export type ClaudeAccountsStoreDeps = {
   isWindowVisible: () => boolean;
   /** Calls the listener whenever the window is shown or hidden. Returns the unsubscribe. */
   onWindowVisibilityChange: (listener: () => void) => () => void;
+  /** Shows a toast about a conversation that hit its usage limit; same `id` updates it. */
+  notify: (notice: LimitNotice) => void;
+  /** The title of the conversation an account event is about, or null when not known here. */
+  conversationTitle: (event: LimitNoticeEvent) => string | null;
 };
 
 const browserDeps: ClaudeAccountsStoreDeps = {
@@ -31,6 +36,8 @@ const browserDeps: ClaudeAccountsStoreDeps = {
     document.addEventListener('visibilitychange', listener);
     return () => document.removeEventListener('visibilitychange', listener);
   },
+  notify: () => undefined,
+  conversationTitle: () => null,
 };
 
 /**
@@ -53,9 +60,11 @@ export class ClaudeAccountsStore {
   private usageRequest: Promise<void> | null = null;
   private readonly identityReconciled = new Set<string>();
   private disposed = false;
+  private readonly limitNotices: LimitNoticeCoalescer;
 
   constructor(deps: Partial<ClaudeAccountsStoreDeps> = {}) {
     this.deps = { ...browserDeps, ...deps };
+    this.limitNotices = new LimitNoticeCoalescer(() => this.deps.now());
     makeObservable(this, {
       state: observable.ref,
       usageLoading: observable,
@@ -65,6 +74,7 @@ export class ClaudeAccountsStore {
       defaultAccount: computed,
       hasMultipleAccounts: computed,
       hasAnySignIn: computed,
+      autoSwitchOnLimit: computed,
       applyState: action,
     });
   }
@@ -87,6 +97,11 @@ export class ClaudeAccountsStore {
 
   get hasAnySignIn(): boolean {
     return this.accounts.some((account) => this.isSignedIn(account));
+  }
+
+  /** Whether conversations that hit a usage limit move by themselves. Older payloads: on. */
+  get autoSwitchOnLimit(): boolean {
+    return this.state?.autoSwitchOnLimit ?? true;
   }
 
   account(accountId: string): ClaudeAccount | undefined {
@@ -150,6 +165,7 @@ export class ClaudeAccountsStore {
     if (result.success && this.state) {
       // What the backend does: a removed default falls back to the primary account.
       this.applyState({
+        ...this.state,
         accounts: this.state.accounts.filter((account) => account.id !== accountId),
         defaultAccountId:
           this.state.defaultAccountId === accountId
@@ -167,6 +183,26 @@ export class ClaudeAccountsStore {
       this.applyState({ ...this.state, defaultAccountId: accountId });
     }
     return result;
+  }
+
+  /**
+   * Turns the automatic move at a usage limit on or off. Shows the new value at once and puts
+   * the old one back when the change does not go through.
+   */
+  async setAutoSwitchOnLimit(enabled: boolean): Promise<boolean> {
+    const previous = this.state;
+    if (previous) this.applyState({ ...previous, autoSwitchOnLimit: enabled });
+    try {
+      const client = await this.deps.getClient();
+      await client.setAutoSwitchOnLimit({ enabled });
+      return true;
+    } catch {
+      // Only undo our own change: an event may have brought a newer state meanwhile.
+      if (previous && this.state?.autoSwitchOnLimit === enabled) {
+        this.applyState({ ...this.state, autoSwitchOnLimit: previous.autoSwitchOnLimit });
+      }
+      return false;
+    }
   }
 
   /** Asks Claude Code who the account is signed in as. */
@@ -229,7 +265,10 @@ export class ClaudeAccountsStore {
       const client = await this.deps.getClient();
       const unsubscribe = await client.events.subscribe(undefined, {
         onEvent: (event) => {
-          if (event.type !== 'changed') return;
+          if (event.type !== 'changed') {
+            this.handleLimitEvent(event);
+            return;
+          }
           this.applyState(event.state);
           // A new account has no usage entry yet.
           if (event.state.accounts.some((account) => !this.usage.has(account.id))) {
@@ -248,6 +287,16 @@ export class ClaudeAccountsStore {
     }
     await this.reload();
     await this.refreshUsage();
+  }
+
+  private handleLimitEvent(event: LimitNoticeEvent): void {
+    // A move means a session now draws on another account; let the figures catch up.
+    if (event.type === 'conversation-moved') void this.refreshUsage();
+    const notice = this.limitNotices.add(event, {
+      accountLabel: (accountId) => this.account(accountId)?.label ?? 'another account',
+      conversationTitle: (target) => this.deps.conversationTitle(target),
+    });
+    if (notice) this.deps.notify(notice);
   }
 
   private async fetchUsage(force: boolean): Promise<void> {

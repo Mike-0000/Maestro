@@ -63,6 +63,7 @@ export type ConversationEvent =
           | 'modeId'
           | 'effort'
           | 'collaborationMode'
+          | 'claudeAccountId'
         >
       >;
     }

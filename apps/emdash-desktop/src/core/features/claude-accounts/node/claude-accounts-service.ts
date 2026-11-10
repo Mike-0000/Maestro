@@ -141,6 +141,15 @@ export class ClaudeAccountsService implements ClaudeAccountLaunchResolver {
     }
   }
 
+  /** Whether a conversation that stops on a usage limit moves to another account by itself. */
+  async autoSwitchOnLimit(): Promise<boolean> {
+    return (await this.deps.settings.get()).autoSwitchOnLimit !== false;
+  }
+
+  async setAutoSwitchOnLimit(enabled: boolean): Promise<void> {
+    await this.mutate((current) => ({ ...current, autoSwitchOnLimit: enabled }));
+  }
+
   async setDefault(id: string): Promise<Result<void, ClaudeAccountsError>> {
     const settings = await this.deps.settings.get();
     if (!isKnown(settings, id)) return err({ type: 'not-found', accountId: id });
@@ -324,6 +333,7 @@ export class ClaudeAccountsService implements ClaudeAccountLaunchResolver {
     return {
       accounts: [primary, ...settings.accounts.map((account) => this.toAccount(account))],
       defaultAccountId: effectiveDefault(settings),
+      autoSwitchOnLimit: settings.autoSwitchOnLimit !== false,
     };
   }
 

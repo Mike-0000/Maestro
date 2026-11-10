@@ -22,9 +22,10 @@ import {
 } from '@core/features/browser/node/wire-controller';
 import { createCatalogWireController } from '@core/features/catalog/node/wire-controller';
 import type { ClaudeAccountsService } from '@core/features/claude-accounts/node/claude-accounts-service';
-import { createClaudeUsageService } from '@core/features/claude-accounts/node/usage-service';
+import type { ClaudeUsageService } from '@core/features/claude-accounts/node/usage-service';
 import { createClaudeAccountsWireController } from '@core/features/claude-accounts/node/wire-controller';
 import { createConductorWireController } from '@core/features/conductor/node/wire-controller';
+import type { ClaudeAccountMover } from '@core/features/conversations/node/claude-account-move';
 import type { CompensationRunner } from '@core/features/conversations/node/createConversation';
 import {
   createConversationsWireController,
@@ -140,6 +141,9 @@ export type DesktopControllerContext = {
   readonly automations: AutomationsService;
   readonly chorus: ChorusHostServices;
   readonly claudeAccounts: ClaudeAccountsService;
+  readonly claudeUsage: ClaudeUsageService;
+  /** Moves Claude conversations between accounts; shared with the automatic switch. */
+  readonly claudeAccountMoves: Pick<ClaudeAccountMover, 'move'>;
   readonly browserOperations: BrowserOperations;
   /** Chorus browser-control MCP servers for local ACP sessions (resolved in main). */
   readonly sessionMcpServers?: SessionMcpServersResolver;
@@ -305,10 +309,10 @@ export const desktopNodeControllers = {
     create: ({ runtimes }) => createAgentAddonsWireController({ runtimes }),
   },
   claudeAccounts: {
-    create: ({ claudeAccounts, scope }) => {
+    create: ({ claudeAccounts, claudeUsage, scope }) => {
       const { controller, dispose } = createClaudeAccountsWireController(
         claudeAccounts,
-        createClaudeUsageService(() => claudeAccounts.signInFolders())
+        claudeUsage
       );
       scope.add(dispose);
       return controller;
@@ -433,6 +437,7 @@ export const desktopNodeControllers = {
     create: ({
       sessionMcpServers,
       claudeAccounts,
+      claudeAccountMoves,
       compensation,
       db,
       terminalFileSources,
@@ -459,6 +464,7 @@ export const desktopNodeControllers = {
           prepare: (launch) => claudeAccounts.prepare(launch),
           resolveAccountId: (explicit) => claudeAccounts.resolveAccountId(explicit),
         },
+        claudeAccountMoves,
         sessionLaunchContexts,
         runtimes,
         taskSessions,

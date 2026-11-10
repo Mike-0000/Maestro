@@ -7,6 +7,7 @@ import type {
   ClaudeAccountUsage,
 } from '../api/types';
 import { ClaudeAccountsStore, USAGE_POLL_MS } from './claude-accounts-store';
+import type { LimitNotice } from './limit-notices';
 
 const primary: ClaudeAccount = { id: 'primary', label: 'Primary', kind: 'primary', loggedIn: true };
 const work: ClaudeAccount = { id: 'work', label: 'Work', kind: 'extra', loggedIn: true };
@@ -67,6 +68,7 @@ function createHarness(
       },
     })),
     usage: vi.fn(async (_input: { force?: boolean }) => usage),
+    setAutoSwitchOnLimit: vi.fn(async (_input: { enabled: boolean }) => undefined),
     events: {
       subscribe: vi.fn(
         async (_key: undefined, options: { onEvent: (event: ClaudeAccountsEvent) => void }) => {
@@ -77,7 +79,10 @@ function createHarness(
     },
   };
 
+  const notify = vi.fn<(notice: LimitNotice) => void>();
   const store = new ClaudeAccountsStore({
+    notify,
+    conversationTitle: (event) => (event.conversationId === 'c1' ? 'Fix login' : null),
     getClient: async () => client as unknown as ClaudeAccountsRpcClient,
     now: () => Date.now(),
     isWindowVisible: () => visible,
@@ -90,7 +95,11 @@ function createHarness(
   return {
     store,
     client,
+    notify,
     unsubscribe,
+    emitEvent(event: ClaudeAccountsEvent) {
+      onEvent?.(event);
+    },
     setServerState(next: ClaudeAccountsState) {
       state = next;
     },
@@ -336,5 +345,106 @@ describe('ClaudeAccountsStore', () => {
     expect(unsubscribe).toHaveBeenCalledTimes(1);
     expect(client.usage).not.toHaveBeenCalled();
     stop();
+  });
+  it('treats a missing auto-switch flag as on', async () => {
+    const { store } = createHarness();
+    expect(store.autoSwitchOnLimit).toBe(true);
+    store.start();
+    await settle();
+    expect(store.autoSwitchOnLimit).toBe(true);
+  });
+
+  it('turns the auto-switch off at once and puts it back when the change fails', async () => {
+    const { store, client } = createHarness({
+      accounts: [primary, work],
+      defaultAccountId: 'primary',
+      autoSwitchOnLimit: true,
+    });
+    store.start();
+    await settle();
+
+    const pending = store.setAutoSwitchOnLimit(false);
+    expect(store.autoSwitchOnLimit).toBe(false);
+    await expect(pending).resolves.toBe(true);
+    expect(client.setAutoSwitchOnLimit).toHaveBeenCalledWith({ enabled: false });
+
+    client.setAutoSwitchOnLimit.mockRejectedValueOnce(new Error('offline'));
+    await expect(store.setAutoSwitchOnLimit(true)).resolves.toBe(false);
+    expect(store.autoSwitchOnLimit).toBe(false);
+  });
+
+  it('keeps the auto-switch setting when an account is removed', async () => {
+    const { store } = createHarness({
+      accounts: [primary, work],
+      defaultAccountId: 'primary',
+      autoSwitchOnLimit: false,
+    });
+    store.start();
+    await settle();
+
+    await store.remove('work');
+
+    expect(store.autoSwitchOnLimit).toBe(false);
+  });
+
+  it('refreshes usage and raises one coalesced toast for moves at a limit', async () => {
+    const { store, client, notify, emitEvent } = createHarness();
+    store.start();
+    await settle();
+    client.usage.mockClear();
+
+    const moved = (conversationId: string, reason: 'manual' | 'limit') =>
+      emitEvent({
+        type: 'conversation-moved',
+        conversationId,
+        projectId: 'p',
+        taskId: 't',
+        fromAccountId: 'work',
+        toAccountId: 'primary',
+        reason,
+      });
+
+    moved('c0', 'manual');
+    await settle();
+    expect(client.usage).toHaveBeenCalledWith({});
+    expect(notify).not.toHaveBeenCalled();
+
+    moved('c1', 'limit');
+    await vi.advanceTimersByTimeAsync(500);
+    moved('c2', 'limit');
+
+    expect(notify).toHaveBeenCalledTimes(2);
+    const [first, second] = notify.mock.calls.map(([notice]) => notice);
+    expect(first?.title).toBe('Fix login hit its usage limit on Work and continued on Primary.');
+    expect(second?.id).toBe(first?.id);
+    expect(second?.title).toBe(
+      '2 conversations hit their usage limit on Work and continued on Primary.'
+    );
+  });
+
+  it('reports a limit that stayed put, except during a cooldown', async () => {
+    const { store, notify, emitEvent } = createHarness();
+    store.start();
+    await settle();
+
+    const unhandled = (reason: 'no-eligible-account' | 'cooldown') =>
+      emitEvent({
+        type: 'limit-unhandled',
+        conversationId: 'c9',
+        projectId: 'p',
+        taskId: 't',
+        accountId: 'work',
+        reason,
+      });
+
+    unhandled('cooldown');
+    expect(notify).not.toHaveBeenCalled();
+    unhandled('no-eligible-account');
+    expect(notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tone: 'warning',
+        title: 'A conversation hit its usage limit on Work. No other account has usage left.',
+      })
+    );
   });
 });

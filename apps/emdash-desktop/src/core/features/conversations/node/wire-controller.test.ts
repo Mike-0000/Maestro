@@ -892,3 +892,56 @@ function fakeWireFile(): WireFile {
     cancel: () => {},
   };
 }
+
+describe('moveClaudeAccount', () => {
+  function controllerWith(claudeAccountMoves?: { move: ReturnType<typeof vi.fn> }) {
+    return createConversationsWireController({
+      terminalFileSources: { prepare: vi.fn() },
+      db: {} as never,
+      logger: { warn: vi.fn() } as never,
+      runtimes: { client: vi.fn() } as never,
+      workspaceIdentity: {} as never,
+      sessionLaunchContexts: {} as never,
+      telemetry: { capture: vi.fn() } as never,
+      projects: { requireAttached: vi.fn(() => ok({} as never)) },
+      taskSessions: { getTask: vi.fn() },
+      withCompensation: async ({ action }) => action(),
+      hostIsReachable: () => true,
+      ...(claudeAccountMoves ? { claudeAccountMoves: claudeAccountMoves as never } : {}),
+    });
+  }
+
+  it('hands the move to the shared mover as a manual move', async () => {
+    const moved = ok({
+      conversationId: 'conversation-1',
+      fromAccountId: 'primary',
+      toAccountId: 'account-1',
+      restarted: true,
+      followUpSent: false,
+    });
+    const move = vi.fn(async () => moved);
+
+    await expect(
+      controllerWith({ move }).call('moveClaudeAccount', {
+        conversationId: 'conversation-1',
+        accountId: 'account-1',
+      })
+    ).resolves.toEqual(moved);
+    expect(move).toHaveBeenCalledWith({
+      conversationId: 'conversation-1',
+      accountId: 'account-1',
+      reason: 'manual',
+    });
+  });
+
+  it('refuses where accounts are not wired', async () => {
+    await expect(
+      controllerWith().call('moveClaudeAccount', {
+        conversationId: 'conversation-1',
+        accountId: 'account-1',
+      })
+    ).resolves.toEqual(
+      err({ type: 'unsupported', message: 'Claude accounts are not available here' })
+    );
+  });
+});

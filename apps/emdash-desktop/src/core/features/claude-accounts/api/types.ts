@@ -24,6 +24,11 @@ export type ClaudeAccountsState = {
   accounts: ClaudeAccount[];
   /** The account new Claude conversations use unless one is chosen explicitly. */
   defaultAccountId: string;
+  /**
+   * Whether a conversation that stops on a usage limit moves to another signed-in account by
+   * itself. Always sent by the main process (default on); optional only for older payloads.
+   */
+  autoSwitchOnLimit?: boolean;
 };
 
 export type ClaudeAccountsError =
@@ -80,6 +85,49 @@ export type ClaudeAccountUsage = {
   reason?: ClaudeUsageErrorType;
 };
 
-export type ClaudeAccountsEvent = { type: 'changed'; state: ClaudeAccountsState };
+/** Why a conversation changed account: the user asked, or its account hit a usage limit. */
+export type ClaudeAccountMoveReason = 'manual' | 'limit';
+
+/**
+ * Why a conversation that hit a usage limit stayed where it was:
+ * - `no-eligible-account`: no other signed-in account has known usage below 90% on both windows;
+ * - `burst-cap`: the eligible accounts already took the most conversations allowed in a short
+ *   time (`AUTO_SWITCH_BURST_LIMIT` per `AUTO_SWITCH_BURST_WINDOW_MS`);
+ * - `cooldown`: the conversation was already moved automatically within the last 15 minutes;
+ * - `move-failed`: the move was tried and failed; `message` says why.
+ */
+export type ClaudeLimitUnhandledReason =
+  | 'no-eligible-account'
+  | 'burst-cap'
+  | 'cooldown'
+  | 'move-failed';
+
+export type ClaudeAccountsEvent =
+  | { type: 'changed'; state: ClaudeAccountsState }
+  /** A conversation now runs on another account (its session was restarted there if running). */
+  | {
+      type: 'conversation-moved';
+      conversationId: string;
+      projectId: string;
+      taskId: string;
+      fromAccountId: string;
+      toAccountId: string;
+      reason: ClaudeAccountMoveReason;
+    }
+  /** A conversation stopped on a usage limit and was not moved. */
+  | {
+      type: 'limit-unhandled';
+      conversationId: string;
+      projectId: string;
+      taskId: string;
+      /** The account that hit its limit. */
+      accountId: string;
+      reason: ClaudeLimitUnhandledReason;
+      message?: string;
+    };
+
+/** Most conversations moved onto one account by the automatic switch within the burst window. */
+export const AUTO_SWITCH_BURST_LIMIT = 3;
+export const AUTO_SWITCH_BURST_WINDOW_MS = 10 * 60_000;
 
 export const MAX_CLAUDE_ACCOUNT_LABEL_LENGTH = 60;

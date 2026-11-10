@@ -1,10 +1,19 @@
 import { providerTokenRegistry } from '@core/features/account/api/node/provider-token-registry';
 import type { EmdashAccountService } from '@core/features/account/node/services/emdash-account-service';
+import { claudeAccountsEvents } from '@core/features/claude-accounts/node/event-host';
+import { createClaudeLimitSwitchService } from '@core/features/claude-accounts/node/limit-switch-service';
+import type { ClaudeAccountMover } from '@core/features/conversations/node/claude-account-move';
+import {
+  createClaudeAccountMoveRuntime,
+  createClaudeConversationSignals,
+} from '@core/features/conversations/node/claude-account-move-runtime';
+import { createConversationRuntimeTargetResolver } from '@core/features/conversations/node/wire-controller';
 import { GitHubAuthServerAdapter } from '@core/features/github/node/accounts/github-auth-server-adapter';
 import { getIntegrationConnectionService } from '@core/features/integrations/node/integration-connection-service';
 import { createLocalUpdateService } from '@core/features/local-updates/node/local-update-service';
 import { provisionWorkspaceErrorToWorkspaceError } from '@core/features/workspaces/node/wire-controller';
 import type { DesktopControllerContext } from '@core/manifests/node/controllers';
+import { agentStatusService } from '@main/core/agent-status/agent-status-service';
 import { appOperations } from '@main/core/app/controller';
 import { terminalFileSources } from '@main/core/app/persist-terminal-attachment';
 import {
@@ -29,6 +38,7 @@ import { updateOperations } from '@main/host/updates/controller-operations';
 import { applyNativeTheme } from '@main/host/window';
 import { log } from '@main/lib/logger';
 import { telemetryService } from '@main/lib/telemetry';
+import { appScope } from '../core/app-scope';
 import type { DatabaseBundle } from './phases/database';
 import type { ServicesBundle } from './phases/services';
 
@@ -66,6 +76,12 @@ export function createDesktopWireOptions(
       getActiveSessionSummary(runtimes.broker, services.hostAttachments.attachedHosts()),
   });
   const getDependencyManager = createDependencyManagerResolver(runtimes.clients.hostDependencies);
+  const claudeAccountMoves = createClaudeAccountSwitching(
+    database,
+    services,
+    runtimes,
+    localUpdates
+  );
   return {
     terminalFileSources,
     accountService: services.account,
@@ -77,6 +93,8 @@ export function createDesktopWireOptions(
     automations: services.automations,
     chorus,
     claudeAccounts: services.claudeAccounts,
+    claudeUsage: services.claudeUsage,
+    claudeAccountMoves,
     localUpdates,
     browserOperations,
     sessionMcpServers: resolveAgentSessionMcpServers,
@@ -170,4 +188,72 @@ export function createDesktopWireOptions(
         taskService.reprovisionWorkspace(workspaceId, options),
     },
   };
+}
+
+/**
+ * Moving Claude conversations between accounts: the mover behind `conversations.moveClaudeAccount`
+ * and the service that moves a conversation by itself when its account hits a usage limit. Both
+ * share one mover, so moves of one conversation never overlap.
+ */
+function createClaudeAccountSwitching(
+  database: DatabaseBundle,
+  services: ServicesBundle,
+  runtimes: DesktopRuntimes,
+  localUpdates: ReturnType<typeof createLocalUpdateService>
+): ClaudeAccountMover {
+  const { claudeAccounts, providerSettings } = services;
+  const accounts = {
+    list: () => claudeAccounts.list(),
+    resolveAccountId: (explicit?: string) => claudeAccounts.resolveAccountId(explicit),
+    // Cached answers (a minute) are enough here: the switch has just forced a refresh.
+    hasFreshUsage: async (accountId: string) =>
+      (await services.claudeUsage.usage({ accountId }))[0]?.status === 'fresh',
+    resolve: (accountId: string | undefined) => claudeAccounts.resolve(accountId),
+    prepare: (launch: Parameters<typeof claudeAccounts.prepare>[0]) =>
+      claudeAccounts.prepare(launch),
+  };
+  const mover = createClaudeAccountMoveRuntime({
+    db: database.db,
+    runtimes: runtimes.broker,
+    hostIsReachable: services.hostIsReachable,
+    projects: services.projects,
+    taskSessions: services.taskSessions,
+    // The same launch the conversations controller builds, so a moved session starts as any other.
+    resolveTarget: createConversationRuntimeTargetResolver({
+      db: database.db,
+      workspaceIdentity: database.workspaceIdentity,
+      getProviderEnv: async (providerId) => (await providerSettings.getItem(providerId))?.env,
+      sessionLaunchContexts: services.sessionLaunchContexts,
+      getSessionMcpServers: resolveAgentSessionMcpServers,
+      claudeAccounts: accounts,
+    }),
+    claudeAccounts: accounts,
+    getProviderConfig: (providerId) => providerSettings.getItem(providerId),
+    recordWorkStarted: localUpdates.recordWorkStarted,
+    recordInputSubmitted: localUpdates.recordInputSubmitted,
+    onMoved: (moved) =>
+      claudeAccountsEvents.emit(undefined, { type: 'conversation-moved', ...moved }),
+    logger: log,
+  });
+  const signals = createClaudeConversationSignals(runtimes.broker);
+  const limitSwitch = createClaudeLimitSwitchService({
+    enabled: () => claudeAccounts.autoSwitchOnLimit(),
+    accounts: () => claudeAccounts.list(),
+    usage: (input) => services.claudeUsage.usage(input),
+    describe: (conversationId) => mover.describe(conversationId),
+    terminalTail: (conversationId) => signals.terminalTail(conversationId).catch(() => null),
+    lastChatReply: (conversationId) => signals.lastChatReply(conversationId).catch(() => null),
+    move: (input) => mover.move(input),
+    emit: (event) => claudeAccountsEvents.emit(undefined, event),
+    logger: log,
+    now: () => Date.now(),
+  });
+  const unsubscribe = agentStatusService.on('agent:event', (event) =>
+    limitSwitch.handleAgentEvent(event)
+  );
+  appScope.add(() => {
+    unsubscribe();
+    limitSwitch.dispose();
+  });
+  return mover;
 }

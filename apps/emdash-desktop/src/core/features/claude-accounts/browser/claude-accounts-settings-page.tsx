@@ -1,5 +1,5 @@
 import { PageLayout, SettingsRow, SettingsSection } from '@emdash/ui/react/patterns';
-import { Badge, Button, DropdownMenu, Spinner, toast } from '@emdash/ui/react/primitives';
+import { Badge, Button, DropdownMenu, Spinner, Switch, toast } from '@emdash/ui/react/primitives';
 import { Ellipsis, LogIn, Pencil, Trash2, UserRoundCheck } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useEffect, useState } from 'react';
@@ -186,6 +186,29 @@ export const ClaudeAccountsSettingsPage = observer(function ClaudeAccountsSettin
             {store.accounts.map((account) => (
               <ClaudeAccountRow key={account.id} account={account} />
             ))}
+            <SettingsRow
+              label="Switch accounts at a usage limit"
+              description={
+                store.hasMultipleAccounts
+                  ? 'When a conversation hits its limit, continue it on the account with the most usage left.'
+                  : 'When a conversation hits its limit, continue it on the account with the most usage left. Add another account to use this.'
+              }
+              control={
+                <Switch
+                  checked={store.autoSwitchOnLimit}
+                  disabled={!store.hasMultipleAccounts}
+                  onCheckedChange={(enabled) => {
+                    void store.setAutoSwitchOnLimit(enabled).then((done) => {
+                      if (!done) {
+                        toast.error("Couldn't change the setting", {
+                          description: 'Something went wrong. Try again.',
+                        });
+                      }
+                    });
+                  }}
+                />
+              }
+            />
             <SettingsRow
               label="Add an account"
               description="Sign in to another Claude subscription. Your other accounts stay signed in."

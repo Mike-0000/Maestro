@@ -19,6 +19,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from 'react';
+import { ClaudeAccountMoveSubmenu } from '@core/features/claude-accounts/contributions/browser/claude-account-move-menu';
 import { getConversationClaudeAccountLabel } from '@core/features/claude-accounts/contributions/browser/conversation-account';
 import type {
   ConversationManagerStore,
@@ -30,6 +31,7 @@ import { getAcpChatResourceManager } from '@core/features/conversations/browser/
 import { ConversationAgentIcon } from '@core/features/conversations/browser/conversation-agent-icon';
 import { ConversationSelectionControl } from '@core/features/conversations/browser/conversation-selection-control';
 import { deleteConversationBatch } from '@core/features/conversations/browser/delete-conversation-batch';
+import { getProjectSshConnectionId } from '@core/features/projects/api/browser/stores/project-selectors';
 // TODO(conversations-extraction): Pass task scope into the sidebar instead of importing task hooks.
 import { useTaskViewContext } from '@core/features/tasks/contributions/browser/task-view-context';
 import {
@@ -275,6 +277,11 @@ const ConversationRow = observer(function ConversationRow({
             </ContextMenu.Item>
           </>
         )}
+        <ClaudeAccountMoveSubmenu
+          conversation={conversation.data}
+          remote={Boolean(getProjectSshConnectionId(projectId))}
+          working={conversation.status === 'working'}
+        />
         {isSessionActive && (
           <>
             <ContextMenu.Separator />
