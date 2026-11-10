@@ -6,5 +6,12 @@ the task splits into several independent parts in one project, is a feature that
 files, or mixes mechanical work with judgment calls that need a reviewer checking each result.
 For those tasks, prefer vibe mode over spawning ad-hoc sub-agents yourself. Skip it for small or
 single-file changes, quick questions, investigations, steps that must happen in order, or when I
-say not to. Vibe workers take their model and effort from their tier (`vibe-fast`, `vibe-good`),
-which overrides any other sub-agent model or effort rules.
+say not to.
+
+Vibe workers are tiered, and each tier is pinned to a model and effort level: `vibe-architect`
+(Fable, high) for high-level and intense planning, `vibe-planner` (Opus, medium) for light
+planning, `vibe-builder` (Opus, medium) for light implementation and anything unclassified,
+`vibe-engineer` (Opus, high) for heavy implementation and review, `vibe-designer` (Fable, high)
+for any new front-end design, CSS, or styles, and `vibe-runner` (Sonnet, low) for running checks.
+When spawning a vibe worker, pass its tier's `model` and `effort` exactly; that overrides any
+other sub-agent model or effort rule.

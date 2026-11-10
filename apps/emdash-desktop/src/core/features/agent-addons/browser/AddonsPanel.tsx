@@ -146,6 +146,16 @@ function AddonSection({
                 Repair
               </Button>
             )}
+            {status.kind === 'installed' && !status.incomplete && (
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={busy}
+                onClick={() => install.mutate()}
+              >
+                Reinstall
+              </Button>
+            )}
           </div>
         }
       />

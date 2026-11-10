@@ -104,7 +104,15 @@ describe('createAgentAddonsWireController', () => {
     const vibe = catalog.find((entry) => entry.id === 'vibe');
     expect(vibe?.targets[0]).toMatchObject({
       providerName: 'Claude Code',
-      files: ['skills/vibe/SKILL.md', 'agents/vibe-fast.md', 'agents/vibe-good.md'],
+      files: [
+        'skills/vibe/SKILL.md',
+        'agents/vibe-architect.md',
+        'agents/vibe-planner.md',
+        'agents/vibe-builder.md',
+        'agents/vibe-engineer.md',
+        'agents/vibe-designer.md',
+        'agents/vibe-runner.md',
+      ],
       instructions: { path: 'CLAUDE.md' },
     });
   });

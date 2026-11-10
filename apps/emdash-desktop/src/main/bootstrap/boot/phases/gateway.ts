@@ -1,6 +1,8 @@
 import { hostname } from 'node:os';
 import { join } from 'node:path';
+import { formatHostRef } from '@emdash/core/primitives/host/api';
 import { app } from 'electron';
+import { updateInstalledAddons } from '@core/features/agent-addons/node/auto-update';
 import { conversationEvents } from '@core/features/conversations/api/node/conversation-events';
 import { emitConversationWireEvent } from '@core/features/conversations/node/event-host';
 import { loadActiveAgentStatusConversationIds } from '@core/features/conversations/node/load-active-agent-status-conversation-ids';
@@ -79,6 +81,26 @@ export function installGateway(
       label: 'tui-agent-status',
       attach: (host) => tuiAgentStatusBridge.attachHost(host),
       detach: (host) => tuiAgentStatusBridge.detachHost(host),
+    })
+  );
+
+  // Maestro updates bring new add-on versions (such as the vibe skill); bring each host's
+  // installed copies up to date when it attaches. Fire-and-forget so a slow host never blocks
+  // the per-host attachment chain; edited files are left alone and reported as conflicts.
+  appScope.add(
+    services.hostAttachments.register({
+      label: 'agent-addons-auto-update',
+      attach: (host) => {
+        runInBackground('agent-addons-auto-update', async () => {
+          const outcomes = await updateInstalledAddons({ runtimes: runtimes.broker, host });
+          for (const outcome of outcomes) {
+            const message = `Add-on ${outcome.addonId} for ${outcome.providerId} on ${formatHostRef(host)}: v${outcome.from} -> v${outcome.to} ${outcome.result}`;
+            if (outcome.result === 'updated') log.info(message);
+            else log.warn(message, { detail: outcome.detail });
+          }
+        });
+      },
+      detach: () => {},
     })
   );
 
