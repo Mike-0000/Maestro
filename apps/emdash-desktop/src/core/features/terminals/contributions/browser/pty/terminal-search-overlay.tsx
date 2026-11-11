@@ -40,18 +40,23 @@ export function TerminalSearchOverlay({
 
   if (!isOpen) return null;
 
+  // A floating find bar: the elevated surface with one hairline (no shadow in dark), the field
+  // bare inside it, the match count as a caption, and quiet icon buttons. The bar itself draws
+  // the accent focus edge while its field has focus.
   return (
     <div
       ref={attachRef}
       className={cn(
-        'absolute top-3 z-20 flex items-center gap-1 rounded-md border border-border bg-background/95 p-1.5 shadow-lg backdrop-blur',
-        fullWidth ? 'left-3 right-3 w-auto max-w-none' : 'right-3 w-[min(28rem,calc(100%-1.5rem))]'
+        'surface-elevated absolute top-3 z-20 flex h-9 items-center gap-1 rounded-lg border border-border-subtle bg-(--em-surface) pr-1 transition-colors focus-within:border-ring',
+        fullWidth ? 'right-3 left-3 w-auto max-w-none' : 'right-3 w-[min(28rem,calc(100%-1.5rem))]'
       )}
     >
       <div className="relative min-w-0 flex-1">
-        <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-foreground-muted" />
+        <Search className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-foreground-passive" />
         <Input
           ref={searchInputRef}
+          bare
+          size="sm"
           value={searchQuery}
           onChange={(event) => onQueryChange(event.target.value)}
           onKeyDown={(event) => {
@@ -61,51 +66,49 @@ export function TerminalSearchOverlay({
               return;
             }
           }}
-          placeholder="Find in terminal..."
-          className="h-8 min-w-0 border-0 bg-transparent pr-2 pl-8 text-xs shadow-none focus-visible:ring-0"
+          placeholder="Find in terminal"
+          className="pr-2 pl-8 text-sm"
           aria-label="Find in terminal"
         />
       </div>
-      <div className="ml-auto flex shrink-0 items-center gap-0.5">
-        <span className="min-w-10 shrink-0 px-1 text-center text-[11px] text-foreground-muted">
-          {searchQuery ? `${searchStatus.currentIndex}/${searchStatus.total}` : '0/0'}
-        </span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="xs"
-          icon
-          onClick={() => onStep('prev')}
-          disabled={!searchQuery || searchStatus.total === 0}
-          className="shrink-0 text-foreground-muted"
-          aria-label="Previous terminal match"
-        >
-          <ChevronUp className="size-3.5" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="xs"
-          icon
-          onClick={() => onStep('next')}
-          disabled={!searchQuery || searchStatus.total === 0}
-          className="shrink-0 text-foreground-muted"
-          aria-label="Next terminal match"
-        >
-          <ChevronDown className="size-3.5" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="xs"
-          icon
-          onClick={onClose}
-          className="shrink-0 text-foreground-muted"
-          aria-label="Close terminal search"
-        >
-          <X className="size-3.5" />
-        </Button>
-      </div>
+      <span className="min-w-10 shrink-0 px-1 text-center text-tiny text-foreground-passive tabular-nums">
+        {searchQuery ? `${searchStatus.currentIndex}/${searchStatus.total}` : '0/0'}
+      </span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="xs"
+        icon
+        onClick={() => onStep('prev')}
+        disabled={!searchQuery || searchStatus.total === 0}
+        className="shrink-0"
+        aria-label="Previous terminal match"
+      >
+        <ChevronUp className="size-3.5" />
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="xs"
+        icon
+        onClick={() => onStep('next')}
+        disabled={!searchQuery || searchStatus.total === 0}
+        className="shrink-0"
+        aria-label="Next terminal match"
+      >
+        <ChevronDown className="size-3.5" />
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="xs"
+        icon
+        onClick={onClose}
+        className="shrink-0"
+        aria-label="Close terminal search"
+      >
+        <X className="size-3.5" />
+      </Button>
     </div>
   );
 }

@@ -87,12 +87,17 @@ export const TerminalDrawerTabBar = observer(function TerminalDrawerTabBar({
 }: TerminalDrawerTabBarProps) {
   const scripts = lifecycleScriptsMgr?.tabs ?? [];
 
+  // The drawer's strip is chrome, like the main tab strip: the sunken surface with no rule, the
+  // active tab cut from the terminal's paper so it opens into it, the rest plain text.
   return (
     <div
-      className={cn('flex h-9 shrink-0 items-center gap-1 overflow-hidden pr-2 text-sm', className)}
+      className={cn(
+        'surface-sunken flex h-9 shrink-0 items-end gap-2 overflow-hidden bg-(--em-surface) pr-2 text-sm',
+        className
+      )}
     >
       <div
-        className="flex h-full min-w-0 flex-1 items-center overflow-x-auto"
+        className="flex h-full min-w-0 flex-1 items-end gap-0.5 overflow-x-auto overflow-y-hidden pl-1.5"
         role="tablist"
         aria-label={mode === 'terminals' ? 'Terminals' : 'Scripts'}
       >
@@ -102,7 +107,7 @@ export const TerminalDrawerTabBar = observer(function TerminalDrawerTabBar({
               <DrawerItemTab
                 key={terminal.data.id}
                 id={`terminal-drawer-${terminal.data.id}`}
-                icon={<Terminal className="size-3" />}
+                icon={<Terminal className="size-3.5" />}
                 label={terminal.data.name}
                 isActive={activeTerminalId === terminal.data.id}
                 isFocused={isFocused}
@@ -121,7 +126,7 @@ export const TerminalDrawerTabBar = observer(function TerminalDrawerTabBar({
                         <button
                           type="button"
                           aria-label={`Close ${terminal.data.name}`}
-                          className="mr-1 flex size-4 shrink-0 items-center justify-center rounded text-foreground-muted opacity-0 group-hover:opacity-100 hover:bg-background hover:text-foreground focus-visible:opacity-100"
+                          className="mr-1.5 flex size-5 shrink-0 items-center justify-center rounded-sm text-foreground-passive opacity-0 transition-opacity group-hover:opacity-100 hover:bg-foreground/8 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none"
                           onPointerDown={(event) => event.stopPropagation()}
                           onClick={(event) => {
                             event.stopPropagation();
@@ -130,7 +135,7 @@ export const TerminalDrawerTabBar = observer(function TerminalDrawerTabBar({
                         />
                       }
                     >
-                      <X className="size-3" />
+                      <X className="size-3.5" />
                     </Tooltip.Trigger>
                     <Tooltip.Content>Close terminal</Tooltip.Content>
                   </Tooltip.Root>
@@ -152,7 +157,7 @@ export const TerminalDrawerTabBar = observer(function TerminalDrawerTabBar({
             <DrawerItemTab
               key={script.data.id}
               id={`script-drawer-${script.data.id}`}
-              icon={<ScriptStatus status={SCRIPT_STATUS_MAP[script.status]} size={12} />}
+              icon={<ScriptStatus status={SCRIPT_STATUS_MAP[script.status]} size={14} />}
               label={script.data.label}
               isActive={activeScriptId === script.data.id}
               isFocused={isFocused}
@@ -168,7 +173,7 @@ export const TerminalDrawerTabBar = observer(function TerminalDrawerTabBar({
                             ? `Stop ${script.data.label} script`
                             : `Run ${script.data.label} script`
                         }
-                        className="flex size-3 items-center justify-center text-foreground-muted hover:text-foreground"
+                        className="flex size-3.5 items-center justify-center rounded-xs text-foreground-passive hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none"
                         onClick={(event) => {
                           event.stopPropagation();
                           if (script.isRunning) {
@@ -180,7 +185,11 @@ export const TerminalDrawerTabBar = observer(function TerminalDrawerTabBar({
                       />
                     }
                   >
-                    {script.isRunning ? <Pause className="size-3" /> : <Play className="size-3" />}
+                    {script.isRunning ? (
+                      <Pause className="size-3.5" />
+                    ) : (
+                      <Play className="size-3.5" />
+                    )}
                   </Tooltip.Trigger>
                   <Tooltip.Content>{script.isRunning ? 'Stop' : 'Run'}</Tooltip.Content>
                 </Tooltip.Root>
@@ -189,11 +198,18 @@ export const TerminalDrawerTabBar = observer(function TerminalDrawerTabBar({
           ))
         )}
       </div>
-      <div className="mx-1 h-4 w-px shrink-0 bg-border" aria-hidden="true" />
-      <Tabs.Root value={mode} onValueChange={(value) => onModeChange(value as typeof mode)}>
-        <Tabs.List>
-          <Tabs.Tab value="terminals">Terminals</Tabs.Tab>
-          <Tabs.Tab value="scripts">Scripts</Tabs.Tab>
+      <Tabs.Root
+        className="self-center"
+        value={mode}
+        onValueChange={(value) => onModeChange(value as typeof mode)}
+      >
+        <Tabs.List variant="underline" aria-label="Drawer contents">
+          <Tabs.Tab value="terminals" size="sm">
+            Terminals
+          </Tabs.Tab>
+          <Tabs.Tab value="scripts" size="sm">
+            Scripts
+          </Tabs.Tab>
         </Tabs.List>
       </Tabs.Root>
     </div>
@@ -214,7 +230,7 @@ export function NewTerminalButton({
   onAddTerminal: (shell?: TerminalShellId) => void;
 }) {
   return (
-    <div className="flex shrink-0 items-center">
+    <div className="flex shrink-0 items-center self-center pl-1">
       <Tooltip.Root>
         <Tooltip.Trigger
           render={
@@ -223,13 +239,13 @@ export function NewTerminalButton({
               variant="ghost"
               size="xs"
               icon
-              className="size-6 rounded-r-none px-0"
+              className="rounded-r-none"
               aria-label="New terminal"
               onClick={() => onAddTerminal()}
             />
           }
         >
-          <Plus className="size-3" />
+          <Plus className="size-3.5" />
         </Tooltip.Trigger>
         <Tooltip.Content>
           New terminal <BoundShortcut command="task.newTerminal" variant="keycaps" />
@@ -243,14 +259,14 @@ export function NewTerminalButton({
               variant="ghost"
               size="xs"
               icon
-              className="size-6 rounded-l-none px-0"
+              className="w-4 rounded-l-none"
               aria-label="New terminal with shell"
             />
           }
         >
           <ChevronDown className="size-3" />
         </DropdownMenu.Trigger>
-        <DropdownMenu.Content align="end" className="w-48">
+        <DropdownMenu.Content align="end" width="content">
           {shellMenuState.kind === 'loading' ? (
             <DropdownMenu.Item disabled>
               <LoaderCircle className="animate-spin" />
@@ -324,21 +340,17 @@ function DrawerItemTab({
     <div
       ref={setDragRef}
       className={cn(
-        'group relative flex h-full max-w-48 shrink-0 items-center text-xs transition-colors',
-        isActive ? 'text-foreground' : 'text-foreground-muted hover:text-foreground',
+        'group relative flex h-[30px] max-w-48 shrink-0 items-center rounded-t-md transition-colors',
+        // Like the main tab strip: the active tab is the terminal's paper; in a drawer without
+        // focus its text steps down. The others are text on the chrome.
+        isActive
+          ? cn('bg-(--em-surface-paper)', isFocused ? 'text-foreground' : 'text-foreground-muted')
+          : 'text-foreground-passive hover:text-foreground-muted',
         isDragging && 'opacity-50'
       )}
     >
-      {isActive && (
-        <div
-          className={cn(
-            'absolute inset-x-0 bottom-0 h-0.5',
-            isFocused ? 'bg-(--primary-button-background)' : 'bg-border-1'
-          )}
-        />
-      )}
       {isEditing && onRename ? (
-        <div className="flex min-w-0 flex-1 items-center gap-1.5 px-3">
+        <div className="flex min-w-0 flex-1 items-center gap-2 px-3">
           <span className="shrink-0">{icon}</span>
           <InlineRenameInput
             initialValue={label}
@@ -357,7 +369,7 @@ function DrawerItemTab({
           role="tab"
           aria-selected={isActive}
           className={cn(
-            'flex h-full min-w-0 flex-1 items-center gap-1.5 px-3 outline-none',
+            'flex h-full min-w-0 flex-1 items-center gap-2 rounded-t-md px-3 outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset',
             dragData && 'cursor-grab active:cursor-grabbing'
           )}
           onClick={onSelect}
@@ -370,7 +382,8 @@ function DrawerItemTab({
         >
           <span
             className={cn(
-              'shrink-0 transition-opacity',
+              'flex shrink-0 items-center transition-opacity',
+              !isActive && 'opacity-60 group-hover:opacity-100',
               iconAction && 'group-hover:opacity-0 group-focus-within:opacity-0'
             )}
           >
@@ -380,7 +393,7 @@ function DrawerItemTab({
         </button>
       )}
       {!isEditing && iconAction && (
-        <span className="absolute top-1/2 left-3 z-10 flex size-3 -translate-y-1/2 items-center justify-center opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+        <span className="absolute top-1/2 left-3 z-10 flex size-3.5 -translate-y-1/2 items-center justify-center opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
           {iconAction}
         </span>
       )}
@@ -409,7 +422,7 @@ function InlineRenameInput({
   return (
     <input
       ref={ref}
-      className="min-w-0 flex-1 rounded border border-border bg-transparent px-1 py-0.5 text-xs text-foreground outline-none"
+      className="h-6 min-w-0 flex-1 rounded-sm bg-(--em-surface-sunken) px-1.5 text-sm text-foreground ring-1 ring-border-1 outline-none focus:ring-ring"
       value={value}
       onChange={(event) => setValue(event.target.value)}
       onBlur={() => onConfirm(value)}

@@ -37,7 +37,7 @@ export const FileTabBarItem = observer(function FileTabBarItem({
 }: TabBarItemProps<FileTabResource>) {
   const resource = tab.resource;
   const taskView = useTaskComposition();
-  const fileName = resource.path.split('/').pop() ?? 'Untitled';
+  const fileName = resource.path.split(/[\\/]/).pop() ?? 'Untitled';
 
   const status = resource.contentStatus;
   const showSpinner = useDelayedBoolean(status.kind === 'loading', 200);
@@ -53,11 +53,11 @@ export const FileTabBarItem = observer(function FileTabBarItem({
       label={fileName}
       tooltip={tooltip}
       preSlot={
-        <span className="shrink-0 [&>svg]:h-3 [&>svg]:w-3">
+        <span className="flex size-3.5 shrink-0 items-center justify-center">
           {showSpinner ? (
-            <Loader2 className="h-3 w-3 animate-spin" />
+            <Loader2 className="size-3.5 animate-spin text-foreground-passive" />
           ) : (
-            <FileIcon filename={fileName} />
+            <FileIcon filename={fileName} size={14} />
           )}
         </span>
       }
@@ -90,12 +90,12 @@ export const FileTabBarItem = observer(function FileTabBarItem({
 });
 
 export function FileTabBarItemDragPreview({ tab }: { tab: ResolvedTab<FileTabResource> }) {
-  const fileName = tab.resource.path.split('/').pop() ?? 'Untitled';
+  const fileName = tab.resource.path.split(/[\\/]/).pop() ?? 'Untitled';
   return (
     <GenericTabDragPreview
       preSlot={
-        <span className="shrink-0 [&>svg]:h-3 [&>svg]:w-3">
-          <FileIcon filename={fileName} />
+        <span className="flex size-3.5 shrink-0 items-center justify-center">
+          <FileIcon filename={fileName} size={14} />
         </span>
       }
       label={fileName}

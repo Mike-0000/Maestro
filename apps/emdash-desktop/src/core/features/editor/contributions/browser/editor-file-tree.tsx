@@ -799,6 +799,7 @@ export const EditorFileTree = observer(function EditorFileTree() {
   const content =
     files?.observation.kind === 'unavailable' ? (
       <EmptyState
+        bare
         label="Files unavailable"
         description={liveActionDisabledReason ?? 'The file tree has not been observed yet.'}
       />
@@ -944,7 +945,7 @@ export const EditorFileTree = observer(function EditorFileTree() {
       />
       {files?.observation.kind === 'stale' && liveActionDisabledReason && (
         <div
-          className="border-b bg-background-secondary px-2 py-1 text-xs text-foreground-muted"
+          className="shrink-0 px-3 py-1.5 text-xs text-foreground-muted focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset"
           tabIndex={0}
           role="note"
         >
@@ -1040,7 +1041,7 @@ function HeaderAction({
       type="button"
       aria-label={label}
       title={label}
-      className="text-muted-foreground flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-background-1 hover:text-foreground"
+      className="flex size-6 shrink-0 items-center justify-center rounded-sm text-foreground-passive transition-colors hover:bg-surface-hover hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
       disabled={disabled}
       onClick={onClick}
     >

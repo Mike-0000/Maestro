@@ -62,7 +62,7 @@ function fontFromComputed(el: HTMLElement): string {
   return `${style} ${weight} ${size} ${family}`;
 }
 
-export function CompactedPathLabel({ path }: { path: string }) {
+export function CompactedPathLabel({ path, title }: { path: string; title?: string }) {
   const ref = useRef<HTMLSpanElement>(null);
   const segments = useMemo(() => path.split('/'), [path]);
   const [display, setDisplay] = useState(path);
@@ -96,7 +96,7 @@ export function CompactedPathLabel({ path }: { path: string }) {
   }, [segments]);
 
   return (
-    <span ref={ref} className="block overflow-hidden whitespace-nowrap" title={path}>
+    <span ref={ref} className="block overflow-hidden whitespace-nowrap" title={title ?? path}>
       {display}
     </span>
   );

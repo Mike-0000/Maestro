@@ -1,4 +1,4 @@
-import { Button, Dialog } from '@emdash/ui/react/primitives';
+import { Button, Dialog, ModalLayout } from '@emdash/ui/react/primitives';
 import { useEffect } from 'react';
 import { useModalController } from '@core/manifests/browser/modal-api';
 import { defineModal } from '@core/primitives/modals/react';
@@ -16,24 +16,32 @@ export function ConflictDialog({ filePath }: ConflictDialogArgs) {
     return () => setCloseGuard(false);
   }, [setCloseGuard]);
 
+  // `complete(true)` takes the version on disk, `complete(false)` keeps the open edits.
   return (
-    <>
-      <Dialog.Header showCloseButton={false}>
-        <Dialog.Title>File Modified Externally</Dialog.Title>
+    <ModalLayout
+      title="File changed on disk"
+      showCloseButton={false}
+      actions={
+        <>
+          <Button variant="ghost" onClick={() => complete(false)}>
+            Keep my edits
+          </Button>
+          <Button variant="primary" onClick={() => complete(true)}>
+            Load from disk
+          </Button>
+        </>
+      }
+    >
+      <Dialog.Body>
         <Dialog.Description>
-          <code className="bg-muted rounded px-1 py-0.5 text-xs">{shortPath}</code> was changed
-          outside the editor while you have unsaved edits. What would you like to do?
+          <code className="rounded-xs bg-surface-emphasis px-1 font-mono text-xs text-foreground">
+            {shortPath}
+          </code>{' '}
+          changed outside the editor while you have unsaved edits. Keep your edits, or load the
+          version on disk?
         </Dialog.Description>
-      </Dialog.Header>
-      <Dialog.Footer className="gap-2">
-        <Button variant="secondary" onClick={() => complete(false)}>
-          Keep Mine
-        </Button>
-        <Button variant="primary" onClick={() => complete(true)}>
-          Accept Incoming
-        </Button>
-      </Dialog.Footer>
-    </>
+      </Dialog.Body>
+    </ModalLayout>
   );
 }
 

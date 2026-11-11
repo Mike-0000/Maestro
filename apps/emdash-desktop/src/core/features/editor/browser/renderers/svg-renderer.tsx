@@ -1,4 +1,4 @@
-import { ExpandableImage } from '@emdash/ui/react/components';
+import { EmptyState, ExpandableImage } from '@emdash/ui/react/components';
 import { observer } from 'mobx-react-lite';
 import { useMemo } from 'react';
 import type { FileTabResource } from '@core/features/editor/api/browser/task-editor/stores/file-tab-resource';
@@ -32,7 +32,7 @@ export const SvgRenderer = observer(function SvgRenderer({ tab }: SvgRendererPro
           className="max-h-full max-w-full"
         />
       ) : (
-        <div className="text-xs text-foreground-passive">Empty file</div>
+        <EmptyState bare label="Empty file" />
       )}
     </div>
   );

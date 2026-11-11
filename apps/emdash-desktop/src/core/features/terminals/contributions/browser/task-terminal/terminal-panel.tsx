@@ -181,20 +181,20 @@ export const TerminalsPanel = observer(function TerminalsPanel() {
     <EmptyState
       bare
       label="No terminals yet"
-      description="Add a terminal to run shell commands in this task's working directory."
+      description="A terminal runs shell commands in this task's working copy."
       action={
-        <projectAvailabilityUi.LiveActionGuard projectId={projectId}>
-          <Button
-            disabled={liveActionsDisabled}
-            size="sm"
-            variant="secondary"
-            onClick={() => void handleCreate()}
-            className="flex items-center gap-2"
-          >
-            New terminal
-            <BoundShortcut command="task.newTerminal" variant="keycaps" />
-          </Button>
-        </projectAvailabilityUi.LiveActionGuard>
+        <span className="flex items-center gap-2">
+          <projectAvailabilityUi.LiveActionGuard projectId={projectId}>
+            <Button
+              disabled={liveActionsDisabled}
+              variant="text"
+              onClick={() => void handleCreate()}
+            >
+              New terminal
+            </Button>
+          </projectAvailabilityUi.LiveActionGuard>
+          <BoundShortcut command="task.newTerminal" variant="keycaps" />
+        </span>
       }
     />
   );
@@ -202,8 +202,8 @@ export const TerminalsPanel = observer(function TerminalsPanel() {
   const scriptsEmptyState = (
     <EmptyState
       bare
-      label="No scripts configured"
-      description="Add setup, run, or teardown scripts to your project configuration."
+      label="No scripts yet"
+      description="Setup, run and teardown scripts from the project settings show up here."
     />
   );
 

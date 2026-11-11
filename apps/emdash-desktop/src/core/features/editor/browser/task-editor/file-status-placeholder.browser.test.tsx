@@ -102,7 +102,7 @@ describe('FileStatusPlaceholder rendering states', () => {
     expect(host.textContent).toContain('File not found');
 
     const before = fake.acquireCount;
-    const retry = [...host.querySelectorAll('button')].find((b) => b.textContent === 'Retry');
+    const retry = [...host.querySelectorAll('button')].find((b) => b.textContent === 'Try again');
     expect(retry).toBeDefined();
     await act(async () => retry!.click());
     expect(fake.acquireCount).toBe(before + 2);

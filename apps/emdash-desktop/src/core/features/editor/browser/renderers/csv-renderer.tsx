@@ -1,3 +1,4 @@
+import { EmptyState } from '@emdash/ui/react/components';
 import { observer } from 'mobx-react-lite';
 import { useMemo } from 'react';
 import type { FileTabResource } from '@core/features/editor/api/browser/task-editor/stores/file-tab-resource';
@@ -24,17 +25,19 @@ export const CsvRenderer = observer(function CsvRenderer({ tab }: CsvRendererPro
     ...(parsed.rows.length ? parsed.rows.map((row) => row.length) : [1])
   );
 
+  // A dense table on the editor's paper: a sticky muted header, hairline row rules
+  // (dense tables are the one place rules are allowed), no column rules or zebra fills.
   return (
-    <div className="h-full w-full overflow-hidden bg-(--em-surface)">
+    <div className="h-full w-full overflow-hidden">
       {parsed.rows.length ? (
         <div className="h-full overflow-auto">
-          <table className="min-w-full border-separate border-spacing-0 cursor-text text-left text-xs">
+          <table className="min-w-full border-separate border-spacing-0 cursor-text text-left text-xs tabular-nums">
             <thead>
               <tr>
                 {normalizeRow(header ?? [], columnCount).map((cell, index) => (
                   <th
                     key={index}
-                    className="text-foreground-primary sticky top-0 z-[1] max-w-80 border-r border-b border-border bg-background-secondary-2 px-3 py-2 font-medium last:pr-28"
+                    className="sticky top-0 z-[1] h-8 max-w-80 border-b border-border-subtle bg-(--em-surface) px-3 font-medium text-foreground-muted"
                   >
                     <span className="block truncate">{cell || `Column ${index + 1}`}</span>
                   </th>
@@ -43,11 +46,11 @@ export const CsvRenderer = observer(function CsvRenderer({ tab }: CsvRendererPro
             </thead>
             <tbody>
               {bodyRows.map((row, rowIndex) => (
-                <tr key={rowIndex} className="odd:bg-(--em-surface) even:bg-background-secondary-2">
+                <tr key={rowIndex} className="hover:bg-surface-hover">
                   {normalizeRow(row, columnCount).map((cell, cellIndex) => (
                     <td
                       key={cellIndex}
-                      className="max-w-80 border-r border-b border-border px-3 py-1.5 align-top whitespace-pre-wrap text-foreground-secondary"
+                      className="max-w-80 border-b border-border-subtle px-3 py-1.5 align-top whitespace-pre-wrap text-foreground"
                     >
                       {cell}
                     </td>
@@ -57,7 +60,7 @@ export const CsvRenderer = observer(function CsvRenderer({ tab }: CsvRendererPro
             </tbody>
           </table>
           {parsed.truncatedRows > 0 || parsed.truncatedColumns > 0 ? (
-            <div className="sticky bottom-0 border-t border-border bg-(--em-surface) px-3 py-2 text-xs text-foreground-passive">
+            <div className="sticky bottom-0 bg-(--em-surface) px-3 py-2 text-tiny text-foreground-passive">
               Preview capped at{' '}
               {parsed.truncatedRows > 0 ? `${MAX_PREVIEW_ROWS.toLocaleString()} rows` : null}
               {parsed.truncatedRows > 0 && parsed.truncatedColumns > 0 ? ' and ' : null}
@@ -69,9 +72,7 @@ export const CsvRenderer = observer(function CsvRenderer({ tab }: CsvRendererPro
           ) : null}
         </div>
       ) : (
-        <div className="flex h-full items-center justify-center text-xs text-foreground-passive">
-          Empty file
-        </div>
+        <EmptyState bare label="Empty file" description="This file has no rows yet." />
       )}
     </div>
   );

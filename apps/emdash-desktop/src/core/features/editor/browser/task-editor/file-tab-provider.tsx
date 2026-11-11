@@ -77,7 +77,7 @@ const FileContent = observer(function FileContent({ host, ctx }: TabContentProps
       {activeFile && <FileContentToolbar tab={activeFile} canToggle={canToggle} />}
       {activeFile && liveActionDisabledReason && !blocked && (
         <div
-          className="border-b bg-background-secondary px-2 py-1 text-xs text-foreground-muted"
+          className="shrink-0 px-3 pb-2 text-xs text-foreground-muted focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset"
           tabIndex={0}
           role="note"
         >
@@ -90,7 +90,7 @@ const FileContent = observer(function FileContent({ host, ctx }: TabContentProps
         </div>
         {activeFile && blocked && liveActionDisabledReason ? (
           <div className="absolute inset-0">
-            <EmptyState label="File unavailable" description={liveActionDisabledReason} />
+            <EmptyState bare label="File unavailable" description={liveActionDisabledReason} />
           </div>
         ) : activeFile && blocked ? (
           <div className="absolute inset-0">

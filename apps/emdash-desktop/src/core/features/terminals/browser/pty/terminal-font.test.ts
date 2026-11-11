@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildTerminalFontFamily } from '@core/features/terminals/api/browser/pty/terminal-font';
+import {
+  buildTerminalFontFamily,
+  defaultTerminalFontName,
+} from '@core/features/terminals/api/browser/pty/terminal-font';
 
 describe('buildTerminalFontFamily', () => {
   it('quotes font family names that contain spaces', () => {
@@ -32,5 +35,13 @@ describe('buildTerminalFontFamily', () => {
 
   it('uses terminal-safe fallbacks when no custom font is set', () => {
     expect(buildTerminalFontFamily()).toBe('"Menlo", "Monaco", "Consolas", monospace');
+  });
+});
+
+describe('defaultTerminalFontName', () => {
+  it('names the font the default chain resolves to on each platform', () => {
+    expect(defaultTerminalFontName('mac')).toBe('Menlo');
+    expect(defaultTerminalFontName('windows')).toBe('Consolas');
+    expect(defaultTerminalFontName('linux')).toBe('System monospace');
   });
 });

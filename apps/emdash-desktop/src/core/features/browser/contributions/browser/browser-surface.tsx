@@ -1,3 +1,4 @@
+import { EmptyState } from '@emdash/ui/react/components';
 import { Button } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -24,6 +25,7 @@ import {
 } from '@core/features/browser/browser/browser-webview-types';
 import { normalizeBrowserUrl, normalizeBrowserZoomFactor } from '@core/primitives/browser/api';
 import { getHostClient } from '@core/primitives/desktop-host/browser/host-client';
+import { cn } from '@core/primitives/styling/browser/cn';
 
 const WEBVIEW_ALLOW_POPUPS_ATTRIBUTE = 'true' as unknown as boolean;
 
@@ -288,16 +290,22 @@ export const BrowserSurface = observer(function BrowserSurface({
     });
   }, [adapter, sessionBrowserId]);
 
+  const showsWebview = !loadError && !showStartPage && webviewProps !== null && isRegistered;
+
   if (!session) {
     return (
-      <div className="flex h-full min-h-0 items-center justify-center bg-background text-sm text-foreground-muted">
-        Browser session unavailable
+      <div className="surface-paper h-full min-h-0 bg-(--em-surface)">
+        <EmptyState
+          bare
+          label="Browser session unavailable"
+          description="Close this tab and open a new browser."
+        />
       </div>
     );
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background">
+    <div className="surface-paper flex h-full min-h-0 flex-col bg-(--em-surface)">
       <BrowserToolbar
         session={session}
         adapter={adapter}
@@ -313,7 +321,18 @@ export const BrowserSurface = observer(function BrowserSurface({
         }}
         profileLocked={profileLocked}
       />
-      <div className="emlight min-h-0 flex-1 bg-background">
+      {/*
+       * The page area. While a page is up it is a framed white canvas (forced light, as web pages
+       * expect) inset on the paper; the start page, errors and the wait sit on the app's own
+       * surface. The element itself never changes, so the webview is never re-parented.
+       */}
+      <div
+        className={cn(
+          'min-h-0 flex-1',
+          showsWebview &&
+            'emlight mx-2 mb-2 overflow-hidden rounded-lg bg-background ring-1 ring-border-subtle'
+        )}
+      >
         {loadError && loadErrorPresentation ? (
           <BrowserLoadErrorView
             url={loadErrorUrl}
@@ -333,9 +352,7 @@ export const BrowserSurface = observer(function BrowserSurface({
             className="h-full w-full bg-background"
           />
         ) : (
-          <div className="flex h-full items-center justify-center text-sm text-foreground-muted">
-            Preparing browser session
-          </div>
+          <EmptyState bare tone="loading" label="Preparing browser session…" />
         )}
       </div>
     </div>
@@ -358,28 +375,22 @@ function BrowserLoadErrorView({
   onOpenExternal: () => void;
 }) {
   return (
-    <div className="flex h-full min-h-0 items-center justify-center overflow-auto p-8">
-      <div className="flex max-w-sm flex-col items-center gap-2 text-center">
-        <h1 className="text-base font-medium text-foreground">{presentation.heading}</h1>
-        <p className="text-sm text-foreground-muted" title={url}>
-          {presentation.detail}
-          {code && <span className="text-foreground-tertiary-muted"> ({code})</span>}
-        </p>
-        <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
-          <Button type="button" variant="secondary" size="sm" onClick={onReload}>
+    <EmptyState
+      bare
+      tone="error"
+      label={presentation.heading}
+      description={<span title={url}>{presentation.detail}</span>}
+      details={code ?? undefined}
+      action={
+        <span className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
+          <Button type="button" variant="text" onClick={onReload}>
             Reload
           </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            disabled={!canOpenExternal}
-            onClick={onOpenExternal}
-          >
+          <Button type="button" variant="text" disabled={!canOpenExternal} onClick={onOpenExternal}>
             Open externally
           </Button>
-        </div>
-      </div>
-    </div>
+        </span>
+      }
+    />
   );
 }

@@ -11,7 +11,7 @@
  * as FileStatusPlaceholder above this map.
  */
 
-import { Spinner } from '@emdash/ui/react/primitives';
+import { EmptyState } from '@emdash/ui/react/components';
 import { observer } from 'mobx-react-lite';
 import { useEffect, useState, type ComponentType } from 'react';
 import type { FileTabResource } from '@core/features/editor/api/browser/task-editor/stores/file-tab-resource';
@@ -84,17 +84,16 @@ const ImagePreview = observer(function ImagePreview({ tab }: { tab: FileTabResou
   }, [ref]);
 
   if (state.kind === 'loading') {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <Spinner size="sm" />
-      </div>
-    );
+    return <EmptyState bare tone="loading" label="Loading image…" />;
   }
   if (state.kind === 'error') {
     return (
-      <div className="flex h-full items-center justify-center text-xs text-foreground-passive">
-        Could not load image
-      </div>
+      <EmptyState
+        bare
+        tone="error"
+        label="Could not load image"
+        description={tab.path.split('/').pop() ?? tab.path}
+      />
     );
   }
   return <ImageRenderer file={{ path: tab.path, content: state.dataUrl }} />;

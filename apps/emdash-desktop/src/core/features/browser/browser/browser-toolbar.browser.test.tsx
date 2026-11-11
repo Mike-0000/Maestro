@@ -29,6 +29,13 @@ beforeAll(() => {
   (
     globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }
   ).IS_REACT_ACT_ENVIRONMENT = true;
+  // The browser test project has no Tailwind pass, so stand in for the one app utility this
+  // test depends on, in the same `utilities` layer the app's Tailwind emits into. It only wins
+  // if the kit Input keeps its padding in `@layer recipes` (an unlayered kit padding would beat
+  // it, as it beat the app's classes before), so this also guards that layering.
+  const utilities = document.createElement('style');
+  utilities.textContent = '@layer utilities { .pl-7 { padding-left: 1.75rem; } }';
+  document.head.appendChild(utilities);
 });
 
 const FAVICON_DATA_URL =
