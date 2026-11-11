@@ -1,5 +1,5 @@
 import type { AgentProviderId } from '@emdash/plugins/agents/types';
-import type { AgentStatus } from '@core/primitives/agents/api';
+import type { AgentStatus, RunningSubAgent } from '@core/primitives/agents/api';
 import type { CompletionReport } from '@core/primitives/agents/api/completion-report';
 
 export const MAX_CONVERSATION_TITLE_LENGTH = 100;
@@ -91,6 +91,12 @@ export type ConversationEvent =
       completionReport?: CompletionReport | null;
       /** With 'working': how many subagents the agent is waiting on. Absent for none. */
       backgroundAgents?: number;
+      /**
+       * With 'working' or 'awaiting-input': the sub-agents running inside the agent's session,
+       * oldest first, foreground and background alike. Absent for none, and from hosts whose
+       * runtime does not report them; a reader then has `backgroundAgents` alone.
+       */
+      subAgents?: readonly RunningSubAgent[];
     };
 
 export type RenameConversationParams = {

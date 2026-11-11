@@ -2,7 +2,13 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { describe, expect, it, vi } from 'vitest';
 import { CHAT_NOTHING_NEW } from '../../api/chat-conductor/prompt';
 import type { ChatConductorThread } from '../../api/chat-conductor/thread';
-import { CHAT_EVENT_MARK, MAX_UNATTENDED_ACTIONS } from '../../api/chat-conductor/turns';
+import {
+  CHAT_CONDUCTOR_MARK,
+  CHAT_EVENT_MARK,
+  markedForAgent,
+  MAX_UNATTENDED_ACTIONS,
+  type SubmittedPrompt,
+} from '../../api/chat-conductor/turns';
 import type { AgentSnapshot } from './agent-event';
 import {
   CATCH_UP_REQUEST,
@@ -45,6 +51,8 @@ function harness(options: { thread?: ChatConductorThread | null; autonomy?: bool
   let snapshot: AgentSnapshot | null = { status: 'idle', report: null, notification: null };
   let onChange: ((value: AgentSnapshot | null) => void) | null = null;
   let id = 0;
+  const received: SubmittedPrompt[] = [];
+  let cursor = 0;
   const agent = {
     snapshot: () => snapshot,
     watch: (listener: (value: AgentSnapshot | null) => void) => {
@@ -73,6 +81,11 @@ function harness(options: { thread?: ChatConductorThread | null; autonomy?: bool
     ),
     stop: vi.fn(async () => 'Stopped the session.'),
     listAccounts: vi.fn(() => 'Claude accounts:\n- Primary\n- Work'),
+    /** What the agent received since the cursor; tests push prompts into `received`. */
+    receivedPrompts: vi.fn(async (_cursor: number | null) => ({
+      prompts: received.splice(0),
+      cursor: ++cursor,
+    })),
   };
   const ports: ChatConductorPorts = {
     runTurn: async (messages) => {
@@ -103,6 +116,7 @@ function harness(options: { thread?: ChatConductorThread | null; autonomy?: bool
     replies,
     calls,
     saved,
+    received,
     setReady: (value: boolean) => (ready = value),
     agentIs: (value: AgentSnapshot | null) => {
       snapshot = value;
@@ -326,7 +340,12 @@ describe('ChatConductorSession', () => {
 
     expect(h.calls).toHaveLength(4);
     expect(h.agent.readOutput).toHaveBeenCalledWith(400);
-    expect(h.agent.send).toHaveBeenCalledWith('Run the tests.', expect.any(Function));
+    // Typed into the agent under the conductor's mark; the thread shows it as the model wrote it.
+    expect(h.agent.send).toHaveBeenCalledWith(
+      markedForAgent('Run the tests.'),
+      expect.any(Function)
+    );
+    expect(markedForAgent('Run the tests.')).toBe(`${CHAT_CONDUCTOR_MARK}\nRun the tests.`);
     expect(h.session.notes).toBe('Goal: green tests.');
     expect(h.session.status).toEqual({ state: 'working', headline: 'Running the tests' });
     expect(h.session.entries).toMatchObject([
@@ -384,7 +403,7 @@ describe('ChatConductorSession', () => {
 
     expect(h.agent.listAccounts).toHaveBeenCalledTimes(1);
     expect(h.agent.restart).toHaveBeenCalledWith(
-      { claudeAccount: 'Work', prompt: 'Carry on with the tests.' },
+      { claudeAccount: 'Work', prompt: markedForAgent('Carry on with the tests.') },
       expect.any(Function)
     );
     expect(h.agent.stop).toHaveBeenCalledTimes(1);
@@ -777,5 +796,92 @@ describe('ChatConductorSession', () => {
     await h.idle();
     expect(h.kinds()).toEqual(['developer', 'conductor', 'developer', 'conductor']);
     expect(h.calls[0]).toHaveLength(3);
+  });
+});
+
+describe("the developer's own words to the agent, and the conductor's", () => {
+  it('shows an event turn what the developer typed into the agent since the last one', async () => {
+    const h = await following();
+    h.received.push({ text: 'Publish this, go with your recommendations', by: 'developer' });
+    h.replies.push(says(text(CHAT_NOTHING_NEW)));
+    h.agentIs(working);
+    h.agentIs(finished('Publishing batch 2 of 3.'));
+    await h.idle();
+
+    const turn = lastUserText(h.calls[0]!);
+    expect(turn).toContain('<prompts-to-agent>');
+    expect(turn).toContain(
+      'typed by the developer into the agent themselves:\n  Publish this, go with your recommendations'
+    );
+    // Read once: the next event does not show it again.
+    h.replies.push(says(text(CHAT_NOTHING_NEW)));
+    h.agentIs(working);
+    h.agentIs(finished('Batch 3 of 3 published.'));
+    await h.idle();
+    expect(lastUserText(h.calls[1]!)).not.toContain('<prompts-to-agent>');
+    expect(h.agent.receivedPrompts).toHaveBeenCalledTimes(3);
+    // Each read starts where the last one left off, and the cursor is saved with the thread.
+    expect(h.agent.receivedPrompts.mock.calls.at(-1)?.[0]).toBe(2);
+    expect(h.saved.at(-1)?.promptCursor).toBe(3);
+  });
+
+  it('marks what it types and remembers it, so it never reads its own prompt as the developer', async () => {
+    const h = await following();
+    h.replies.push(
+      says(tool('send_to_agent', { message: 'Run the release checks first.' })),
+      says(text('Asked it to run the checks.'))
+    );
+    h.session.send('Have it run the release checks.');
+    await h.idle();
+
+    expect(h.agent.send).toHaveBeenCalledWith(
+      markedForAgent('Run the release checks first.'),
+      expect.any(Function)
+    );
+    // The thread shows the message as the conductor wrote it, without the mark.
+    const action = h.session.entries.find((entry) => entry.kind === 'action');
+    expect(action).toMatchObject({ detail: 'Run the release checks first.' });
+    expect(JSON.stringify(h.session.entries)).not.toContain(CHAT_CONDUCTOR_MARK);
+    expect(h.saved.at(-1)?.sentToAgent).toEqual(['Run the release checks first.']);
+
+    // A chat agent's transcript holds the conductor's prompt as received, mark and all.
+    h.received.push(
+      { text: markedForAgent('Run the release checks first.'), by: 'relayed' },
+      { text: 'Run the release checks first.', by: 'relayed' },
+      { text: 'Skip the changelog', by: 'relayed' }
+    );
+    h.replies.push(says(text(CHAT_NOTHING_NEW)));
+    h.agentIs(working);
+    h.agentIs(finished('Checks pass.'));
+    await h.idle();
+    const turn = lastUserText(h.calls.at(-1)!);
+    expect(turn).toContain('Skip the changelog');
+    expect(turn).not.toContain('Run the release checks first.');
+  });
+
+  it('marks the brief of an agent it starts', async () => {
+    const h = await following();
+    h.replies.push(
+      says(tool('start_agent', { task_name: 'Docs', prompt: 'Write the release notes.' })),
+      says(text('Started a docs agent.'))
+    );
+    h.session.send('Start an agent for the release notes.');
+    await h.idle();
+    expect(h.agent.startAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: markedForAgent('Write the release notes.') }),
+      expect.any(Function)
+    );
+    // A new agent's brief is not one of this chat's prompts.
+    expect(h.saved.at(-1)?.sentToAgent ?? []).toEqual([]);
+  });
+
+  it('says so when what the agent received could not be read', async () => {
+    const h = await following();
+    h.agent.receivedPrompts.mockRejectedValueOnce(new Error('This chat is not loaded.'));
+    h.replies.push(says(text(CHAT_NOTHING_NEW)));
+    h.agentIs(working);
+    h.agentIs(finished('Done.'));
+    await h.idle();
+    expect(lastUserText(h.calls.at(-1)!)).toContain('could not be read (This chat is not loaded.)');
   });
 });

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  developerSubmissionsSince,
   developerTypedSince,
   developerTyping,
   forgetDeveloperTyping,
@@ -178,5 +179,40 @@ describe('developer typing record', () => {
     noteDeveloperInput(SESSION, 'abc', 1);
     forgetDeveloperTyping('conv');
     expect(developerTyping('conv')).toBeNull();
+  });
+});
+
+describe('what the developer submitted', () => {
+  it('keeps each prompt they sent with their own Enter, with its text when the keys show it', () => {
+    noteDeveloperInput(SESSION, 'Publish this, go with your recommendations', 1_000);
+    noteDeveloperInput(SESSION, '\r', 1_100);
+    // A bare Enter (a menu, an empty input) submits nothing of theirs.
+    noteDeveloperInput(SESSION, '\r', 1_200);
+    // A paste with a newline in it, then Enter.
+    noteDeveloperInput(SESSION, '\x1b[200~line one\rline two\x1b[201~', 1_300);
+    noteDeveloperInput(SESSION, '\r', 1_400);
+    // History recall: the keys cannot tell what was sent.
+    noteDeveloperInput(SESSION, '\x1b[A', 1_500);
+    noteDeveloperInput(SESSION, '\r', 1_600);
+
+    expect(developerSubmissionsSince('conv', 0)).toEqual([
+      { at: 1_100, text: 'Publish this, go with your recommendations' },
+      { at: 1_400, text: 'line one\nline two' },
+      { at: 1_600, text: null },
+    ]);
+    expect(developerSubmissionsSince('conv', 1_400)).toEqual([{ at: 1_600, text: null }]);
+    expect(developerSubmissionsSince('other', 0)).toEqual([]);
+  });
+
+  it('counts dictated words sent with their Enter, without their text', () => {
+    noteDictatedText('conv');
+    noteDeveloperInput(SESSION, '\r', 2_000);
+    expect(developerSubmissionsSince('conv', 0)).toEqual([{ at: 2_000, text: null }]);
+  });
+
+  it('never records what the conductor submits', () => {
+    noteDeveloperInput(SESSION, 'half typed', 3_000);
+    noteConductorSubmit('conv');
+    expect(developerSubmissionsSince('conv', 0)).toEqual([]);
   });
 });

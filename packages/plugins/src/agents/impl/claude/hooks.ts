@@ -3,6 +3,7 @@ import type {
   BackgroundWorkKind,
   CanonicalHookEvent,
   NotificationType,
+  ReportedSubAgent,
 } from '@emdash/core/services/agent-plugins/api/plugins';
 import {
   buildNestedJsonHookConfig,
@@ -31,11 +32,16 @@ export const CLAUDE_SETTINGS_PATH = 'settings.json';
  *   overload, a sign-in problem). It is the only signal of a usage limit: Claude sends no idle
  *   reminder while it waits for a limit to reset. `error` names the kind and
  *   `last_assistant_message` holds the error text shown in the conversation.
+ * - `SubagentStart` / `SubagentStop` report each sub-agent the session runs (see
+ *   `parseClaudeSubagentEvent`).
  */
 function parseClaudeHookEvent(
   eventType: string,
   body: Record<string, unknown>
 ): CanonicalHookEvent {
+  if (eventType === 'subagent-start' || eventType === 'subagent-stop') {
+    return parseClaudeSubagentEvent(eventType, body);
+  }
   const event = parseClaudeStatusEvent(eventType, body);
   if (event.kind !== 'status') return event;
   const providerSessionId = extractProviderSessionId(body);
@@ -51,7 +57,12 @@ function parseClaudeStatusEvent(
   if (event.kind !== 'status') return event;
   if (event.type === 'stop') {
     const backgroundWork = claudeBackgroundWork(body);
-    return backgroundWork.length > 0 ? { ...event, backgroundWork } : event;
+    const subAgents = claudeRunningSubAgents(body);
+    return {
+      ...event,
+      ...(backgroundWork.length > 0 ? { backgroundWork } : {}),
+      ...(subAgents.length > 0 ? { subAgents } : {}),
+    };
   }
   if (event.type === 'error') {
     const message = event.message ?? claudeErrorKind(body);
@@ -118,6 +129,56 @@ function claudeBackgroundWork(body: Record<string, unknown>): BackgroundWork[] {
     work.push({ id: `cron:${cron.id}`, kind: 'wakeup' });
   }
   return work;
+}
+
+/**
+ * `SubagentStart` and `SubagentStop` (Claude Code 2.1.322): both carry `agent_id` and
+ * `agent_type`, for foreground sub-agents that run within a turn as for background ones. A start
+ * says nothing about the task; the stop lists the session's `background_tasks` like `Stop` does,
+ * where a sub-agent's task id is its agent id and the description is what it was asked to do.
+ * The stop also carries the sub-agent's own final reply in `last_assistant_message`: it is not
+ * the agent's reply and is dropped here.
+ */
+function parseClaudeSubagentEvent(
+  eventType: 'subagent-start' | 'subagent-stop',
+  body: Record<string, unknown>
+): CanonicalHookEvent {
+  const agentId = nonEmptyString(body.agent_id);
+  if (!agentId) return { kind: 'ignore' };
+  const agentType = nonEmptyString(body.agent_type);
+  const subAgent = agentType ? { agentId, agentType } : { agentId };
+  if (eventType === 'subagent-start') return { kind: 'subagent', type: 'start', subAgent };
+  const running = claudeRunningSubAgents(body).filter((other) => other.agentId !== agentId);
+  return {
+    kind: 'subagent',
+    type: 'stop',
+    subAgent,
+    ...(running.length > 0 ? { running } : {}),
+  };
+}
+
+/** The sub-agents `background_tasks` lists as still in flight, with what each was asked to do. */
+function claudeRunningSubAgents(body: Record<string, unknown>): ReportedSubAgent[] {
+  const subAgents: ReportedSubAgent[] = [];
+  for (const task of recordList(body.background_tasks)) {
+    const agentId = nonEmptyString(task.id);
+    if (!agentId || task.type !== 'subagent') continue;
+    if (typeof task.status === 'string' && !CLAUDE_IN_FLIGHT_TASK_STATUSES.has(task.status)) {
+      continue;
+    }
+    const agentType = nonEmptyString(task.agent_type);
+    const description = nonEmptyString(task.description);
+    subAgents.push({
+      agentId,
+      ...(agentType ? { agentType } : {}),
+      ...(description ? { description } : {}),
+    });
+  }
+  return subAgents;
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
 function recordList(value: unknown): Record<string, unknown>[] {
@@ -200,6 +261,10 @@ export function buildClaudeHookConfig() {
       { hookKey: 'Notification', command: makeStdinHookCommand('notification') },
       { hookKey: 'Stop', command: makeStdinHookCommand('stop') },
       { hookKey: 'StopFailure', command: makeStdinHookCommand('error') },
+      // Which sub-agents run inside the session, for the conductor's strip. A session started
+      // before these were installed has none: Claude reads its hooks when it starts.
+      { hookKey: 'SubagentStart', command: makeStdinHookCommand('subagent-start') },
+      { hookKey: 'SubagentStop', command: makeStdinHookCommand('subagent-stop') },
     ]),
     resolveConfigRoots: configRoots(envConfigRoot('CLAUDE_CONFIG_DIR', '.claude')),
     parseHookEvent: parseClaudeHookEvent,

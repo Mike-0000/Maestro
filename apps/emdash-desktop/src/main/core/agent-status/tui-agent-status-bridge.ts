@@ -19,6 +19,7 @@ import { agentStatusService } from './agent-status-service';
 import {
   eventFromTuiAgentState,
   isBackgroundAgentsOnlyChange,
+  isSubAgentsOnlyChange,
   shouldApplyAgentStateTransition,
 } from './tui-agent-status-transition';
 
@@ -191,6 +192,10 @@ export class TuiAgentStatusBridge {
         if (event) await agentStatusService.updateBackgroundAgents(event);
       } else if (shouldApplyAgentStateTransition(previous, state)) {
         await this.applyAgentStateTransition(state);
+      } else if (isSubAgentsOnlyChange(previous, state)) {
+        // A sub-agent started or stopped: the same turn going on, republished like the count.
+        const event = eventFromTuiAgentState(state);
+        if (event) await agentStatusService.updateBackgroundAgents(event);
       }
       attachment.agentStates.set(state.conversationId, state);
     }

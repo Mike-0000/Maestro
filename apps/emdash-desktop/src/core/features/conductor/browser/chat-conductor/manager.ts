@@ -5,7 +5,17 @@ import { getConductorClient } from '../../api/browser/client';
 import type { ConductorStatus } from '../../api/contract';
 import { DEFAULT_CONDUCTOR_SETTINGS } from '../../api/contract';
 import { createChatAgentPort } from './agent-port';
+import type { FrontConductor, FrontConductorSource } from './front';
 import { ChatConductorSession, type ChatConductorPorts } from './session';
+
+/** A Conductor view that is on screen: the chat it shows, and whether its pane has focus. */
+export type ChatConductorScreen = {
+  readonly conversationId: string;
+  readonly focusedPane: boolean;
+};
+
+/** The chat conductor in front, as the HUD addresses it. */
+export type FrontChatConductor = FrontConductor & { readonly session: ChatConductorSession };
 
 /** What the manager reads of Maestro's conductor: its status, kept current by that store. */
 export interface ChatConductorStatusSource {
@@ -19,12 +29,22 @@ export interface ChatConductorStatusSource {
  * it attach and follow the chat. Chats that had a thread when the app closed are followed again
  * as soon as their conversation is loaded; no agent is started to do so.
  */
-export class ChatConductorManager {
+export class ChatConductorManager implements FrontConductorSource {
   private readonly sessions = observable.map<string, ChatConductorSession>([], { deep: false });
   private readonly disposers: (() => void)[] = [];
   /** Conversations with a saved thread that are not followed yet. */
   private readonly waiting = observable.set<string>();
   private disposed = false;
+  /**
+   * The Conductor views on screen right now, by the place that shows them (a pane), with when
+   * each was last shown anew or touched: of two, the one in the focused pane, then the later one,
+   * is in front.
+   */
+  private readonly screens = observable.map<string, ChatConductorScreen & { readonly at: number }>(
+    [],
+    { deep: false }
+  );
+  private screenClock = 0;
 
   constructor(
     private readonly canvas: CanvasStore,
@@ -41,6 +61,55 @@ export class ChatConductorManager {
     return (
       this.conductor.status?.settings?.chatConductors ?? DEFAULT_CONDUCTOR_SETTINGS.chatConductors
     );
+  }
+
+  /**
+   * The chat conductor the developer is looking at, whose thread the HUD's typed box, voice
+   * commands and dictation reach. Null when no Conductor view is on screen (the canvas, a Raw
+   * view, another task, settings) or chat conductors cannot run.
+   */
+  get front(): FrontChatConductor | null {
+    if (!this.ready) return null;
+    let best: (ChatConductorScreen & { readonly at: number }) | null = null;
+    for (const screen of this.screens.values()) {
+      if (
+        !best ||
+        (screen.focusedPane !== best.focusedPane ? screen.focusedPane : screen.at > best.at)
+      ) {
+        best = screen;
+      }
+    }
+    const session = best ? this.sessions.get(best.conversationId) : undefined;
+    if (!best || !session) return null;
+    return { session, name: this.canvas.spokenName(best.conversationId) };
+  }
+
+  /**
+   * A place that can show a Conductor view (a pane) says what it shows now: `null` when its
+   * Conductor view is not on screen, or the place is gone.
+   */
+  showOnScreen(screenId: string, screen: ChatConductorScreen | null): void {
+    const current = this.screens.get(screenId);
+    runInAction(() => {
+      if (!screen) {
+        this.screens.delete(screenId);
+        return;
+      }
+      if (
+        current?.conversationId === screen.conversationId &&
+        current.focusedPane === screen.focusedPane
+      ) {
+        return;
+      }
+      this.screens.set(screenId, { ...screen, at: ++this.screenClock });
+    });
+  }
+
+  /** The developer worked in that place's Conductor view: of two on screen, it is in front. */
+  touchScreen(screenId: string): void {
+    const current = this.screens.get(screenId);
+    if (!current || current.at === this.screenClock) return;
+    runInAction(() => this.screens.set(screenId, { ...current, at: ++this.screenClock }));
   }
 
   /** The conductor of a chat, created on first use. It does nothing until attached. */
@@ -66,7 +135,10 @@ export class ChatConductorManager {
     this.disposed = true;
     for (const dispose of this.disposers.splice(0)) dispose();
     for (const session of this.sessions.values()) session.dispose();
-    this.sessions.clear();
+    runInAction(() => {
+      this.sessions.clear();
+      this.screens.clear();
+    });
   }
 
   private async followSavedThreads(): Promise<void> {

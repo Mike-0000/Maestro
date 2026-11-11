@@ -66,6 +66,16 @@ export const chatConductorThreadSchema = z.object({
    * restarts).
    */
   lastEventKey: z.string().nullable(),
+  /**
+   * The starts of the last messages the conductor typed into the agent (without their mark), so
+   * it can tell its own prompts from the developer's in what the agent received.
+   */
+  sentToAgent: z.array(z.string()).optional(),
+  /**
+   * Where reading the prompts the agent received left off: a time for a terminal agent, a turn
+   * number for a chat agent. Null before the first read.
+   */
+  promptCursor: z.number().nullable().optional(),
   updatedAt: z.string(),
 });
 export type ChatConductorThread = z.infer<typeof chatConductorThreadSchema>;

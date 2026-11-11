@@ -13,10 +13,20 @@ import type {
   ResolvedTuiProvider,
 } from '#services/agent-plugins/api/plugins';
 import { defaultHookEventParser } from '#services/agent-plugins/api/plugins/helpers';
+import { sameSubAgents, SubAgentSet } from './sub-agents';
 
 const LATE_START_MS = 1_000;
 /** Past this, Enter answered a menu and this start belongs to some later prompt. */
 const LATE_START_UNRELATED_MS = 5 * 60_000;
+
+/**
+ * How long a change to the running sub-agents waits before it is published, so a burst (several
+ * started in parallel) goes out as one update. A status change publishes the latest at once.
+ */
+export const SUB_AGENT_PUBLISH_DELAY_MS = 100;
+
+/** Esc or Ctrl+C on its own: the agent's turn is cut short. */
+const INTERRUPT_INPUT = /^(?:\x1b+|\x03+)$/;
 
 const ATTENTION_NOTIFICATION_TYPES = new Set([
   'permission_prompt',
@@ -52,6 +62,12 @@ export class TuiAgentStates {
   /** When Enter last went to each agent that will report the prompt through a hook. */
   private readonly submittedAt = new Map<string, number>();
 
+  /** The sub-agents running inside each session, for agents whose hooks report them. */
+  private readonly subAgents = new Map<string, SubAgentSet>();
+
+  /** Sub-agent changes waiting to be published, per conversation. */
+  private readonly subAgentPublishes = new Map<string, ReturnType<typeof setTimeout>>();
+
   constructor(
     private readonly sessions: TuiSessionsListModel,
     private readonly agentStates: TuiAgentStatesListModel,
@@ -82,6 +98,15 @@ export class TuiAgentStates {
       this.setProviderSessionId(conversationId, event.providerSessionId);
       return;
     }
+    if (event.kind === 'subagent') {
+      const set = this.subAgentSet(conversationId);
+      const changed =
+        event.type === 'start'
+          ? set.started(event.subAgent, this.now())
+          : set.stopped(event.subAgent.agentId, event.running);
+      if (changed) this.scheduleSubAgentsPublish(conversationId);
+      return;
+    }
 
     if (event.providerSessionId) {
       this.setProviderSessionId(conversationId, event.providerSessionId);
@@ -108,6 +133,9 @@ export class TuiAgentStates {
       // provider wakes the session when that work settles and reports a further stop.
       const reported = event.backgroundWork ?? [];
       const awaited = this.recordBackgroundWork(conversationId, reported);
+      if (this.subAgents.has(conversationId) || event.subAgents?.length) {
+        this.subAgentSet(conversationId).turnEnded(event.subAgents ?? [], this.now());
+      }
       const awaiting = awaited.length > 0;
       const status = awaiting ? 'working' : 'completed';
       // Warn on purpose: the app's file log drops info by default, and this line is a temporary
@@ -135,6 +163,8 @@ export class TuiAgentStates {
     }
 
     if (event.type === 'error') {
+      // An API error ended the turn, and the sub-agents it ran in the foreground with it.
+      this.subAgents.get(conversationId)?.interrupted();
       this.setStatus(conversationId, {
         providerId,
         source: 'hook',
@@ -172,6 +202,9 @@ export class TuiAgentStates {
     provider: Pick<ResolvedTuiProvider, 'hooks'> | null,
     data: string
   ): void {
+    if (INTERRUPT_INPUT.test(data) && this.subAgents.get(conversationId)?.interrupted()) {
+      this.scheduleSubAgentsPublish(conversationId);
+    }
     if (!data.includes('\r')) return;
     if (provider?.hooks.kind !== 'none' && provider?.hooks.supportedEvents.includes('start')) {
       this.submittedAt.set(conversationId, this.now());
@@ -222,11 +255,13 @@ export class TuiAgentStates {
 
   resetToIdle(conversationId: string): void {
     this.backgroundWork.delete(conversationId);
+    this.dropSubAgents(conversationId);
     this.setStatus(conversationId, { status: 'idle' });
   }
 
   clear(conversationId: string): void {
     this.backgroundWork.delete(conversationId);
+    this.dropSubAgents(conversationId);
     produceCell(this.agentStates.states.list, (draft) => {
       delete draft[conversationId];
     });
@@ -236,9 +271,74 @@ export class TuiAgentStates {
     return peek(this.agentStates.states.list)[conversationId];
   }
 
+  /** A state saved before a restart; the sub-agents it lists are not known to still run. */
   restore(state: TuiAgentState): void {
+    const { subAgents: _stale, ...restored } = state;
     produceCell(this.agentStates.states.list, (draft) => {
-      draft[state.conversationId] = state;
+      draft[state.conversationId] = restored;
+    });
+  }
+
+  private subAgentSet(conversationId: string): SubAgentSet {
+    let set = this.subAgents.get(conversationId);
+    if (!set) {
+      set = new SubAgentSet();
+      this.subAgents.set(conversationId, set);
+    }
+    return set;
+  }
+
+  private subAgentList(conversationId: string): TuiAgentState['subAgents'] {
+    const set = this.subAgents.get(conversationId);
+    const list = set?.list();
+    if (set && !list) this.subAgents.delete(conversationId);
+    return list;
+  }
+
+  private dropSubAgents(conversationId: string): void {
+    this.subAgents.delete(conversationId);
+    this.cancelSubAgentsPublish(conversationId);
+  }
+
+  private scheduleSubAgentsPublish(conversationId: string): void {
+    if (this.subAgentPublishes.has(conversationId)) return;
+    const timer = setTimeout(() => {
+      this.subAgentPublishes.delete(conversationId);
+      this.publishSubAgents(conversationId);
+    }, SUB_AGENT_PUBLISH_DELAY_MS);
+    timer.unref?.();
+    this.subAgentPublishes.set(conversationId, timer);
+  }
+
+  private cancelSubAgentsPublish(conversationId: string): void {
+    const timer = this.subAgentPublishes.get(conversationId);
+    if (timer === undefined) return;
+    clearTimeout(timer);
+    this.subAgentPublishes.delete(conversationId);
+  }
+
+  /**
+   * Publishes the running sub-agents alone: the agent's status, its message and `updatedAt` stay
+   * as they were. Nothing is persisted for it: a restored state drops its sub-agents anyway.
+   */
+  private publishSubAgents(conversationId: string): void {
+    const subAgents = this.subAgentList(conversationId);
+    produceCell(this.agentStates.states.list, (draft) => {
+      const previous = draft[conversationId];
+      if (sameSubAgents(previous?.subAgents, subAgents)) return;
+      if (!previous) {
+        // A sub-agent runs, so the agent is working, though no prompt was reported yet.
+        draft[conversationId] = {
+          conversationId,
+          status: 'working',
+          source: 'hook',
+          subAgents,
+          updatedAt: this.now(),
+        };
+        return;
+      }
+      const { subAgents: _previous, ...rest } = previous;
+      draft[conversationId] = subAgents ? { ...rest, subAgents } : rest;
     });
   }
 
@@ -306,6 +406,9 @@ export class TuiAgentStates {
     conversationId: string,
     patch: Omit<Partial<TuiAgentState>, 'conversationId' | 'updatedAt'>
   ): void {
+    // The state carries the latest sub-agents from here on: nothing is left to publish later.
+    this.cancelSubAgentsPublish(conversationId);
+    const subAgents = this.subAgentList(conversationId);
     let changedState: TuiAgentState | undefined;
     produceCell(this.agentStates.states.list, (draft) => {
       const previous = draft[conversationId];
@@ -320,8 +423,10 @@ export class TuiAgentStates {
         lastAssistantMessage: patch.lastAssistantMessage,
         awaitingBackgroundWork: patch.awaitingBackgroundWork,
         backgroundAgents: patch.backgroundAgents,
+        subAgents,
         updatedAt: this.now(),
       };
+      if (!subAgents) delete next.subAgents;
 
       if (
         previous &&
@@ -333,7 +438,8 @@ export class TuiAgentStates {
         previous.message === next.message &&
         previous.lastAssistantMessage === next.lastAssistantMessage &&
         previous.awaitingBackgroundWork === next.awaitingBackgroundWork &&
-        previous.backgroundAgents === next.backgroundAgents
+        previous.backgroundAgents === next.backgroundAgents &&
+        sameSubAgents(previous.subAgents, next.subAgents)
       ) {
         return;
       }

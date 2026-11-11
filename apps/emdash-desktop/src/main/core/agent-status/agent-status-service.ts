@@ -126,8 +126,11 @@ export class AgentStatusService implements Hookable<AgentStatusServiceHooks> {
   }
 
   /**
-   * Republishes a working conversation whose count of awaited subagents changed. It is the same
-   * turn going on: no sequence step, no verdict retired, no seen flag or agent event touched.
+   * Republishes a working conversation whose count of awaited subagents, or whose running
+   * sub-agents, changed. It is the same turn going on: no sequence step, no verdict retired, no
+   * seen flag or agent event touched. A conversation not shown as working is left as it is: an
+   * 'awaiting-input' republish would drop the turn's completion report, so its sub-agents wait
+   * for the next status change.
    */
   updateBackgroundAgents(signal: AgentStatusSignal): Promise<void> {
     return this.enqueue(signal.conversationId, () => this.updateBackgroundAgentsQueued(signal));
@@ -230,6 +233,11 @@ export class AgentStatusService implements Hookable<AgentStatusServiceHooks> {
         ...(status === 'working' && signal.payload.backgroundAgents
           ? { backgroundAgents: signal.payload.backgroundAgents }
           : {}),
+        // Bounded and redacted by the bridge; a sub-agent can still run while the agent asks.
+        ...((status === 'working' || status === 'awaiting-input') &&
+        signal.payload.subAgents?.length
+          ? { subAgents: signal.payload.subAgents }
+          : {}),
         // The final reply leaves the main process only redacted and bounded; reasoning and the
         // rest of the transcript never do.
         // A turn that ended needing the developer still reports what the agent said.
@@ -325,7 +333,7 @@ export class AgentStatusService implements Hookable<AgentStatusServiceHooks> {
     // Only a conversation still shown as working has a count to refresh.
     if (!row || row.agentStatus !== 'working') return;
     if (row.projectId === null || row.taskId === null) return;
-    const { backgroundAgents } = signal.payload;
+    const { backgroundAgents, subAgents } = signal.payload;
     publishConversationEvent({
       type: 'agent-status-changed',
       conversationId: signal.conversationId,
@@ -334,6 +342,7 @@ export class AgentStatusService implements Hookable<AgentStatusServiceHooks> {
       status: 'working',
       seen: (row.agentStatusSeen ?? 1) === 1,
       ...(backgroundAgents ? { backgroundAgents } : {}),
+      ...(subAgents?.length ? { subAgents } : {}),
     });
   }
 

@@ -8,6 +8,9 @@ import { CHAT_THREAD_LIMITS, chatConductorStateSchema } from './thread';
  * conductor's own chat unless it says otherwise, so none takes an agent name. Order is fixed so
  * the tool prefix stays byte-identical for prompt caching.
  */
+/** A restart's follow-up prompt, as the model may write it; the mark line is added to it. */
+export const RESTART_PROMPT_CHARS = 3_750;
+
 export const chatConductorToolSchemas = {
   read_chat: z.object({
     lines: z
@@ -77,7 +80,9 @@ export const chatConductorToolSchemas = {
     prompt: z
       .string()
       .min(1)
-      .max(4_000)
+      // The follow-up of an account move takes 4,000 characters; the conductor's mark line goes
+      // first (see `markedForAgent`), so the model gets what is left.
+      .max(RESTART_PROMPT_CHARS)
       .optional()
       .describe(
         'Sent to the agent once it is back, for instance to pick up what the restart interrupted. Omit it and the agent waits for its next prompt.'

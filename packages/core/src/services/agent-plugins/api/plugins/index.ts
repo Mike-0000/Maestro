@@ -89,6 +89,7 @@ export type {
   HookEvent,
   HookRegistration,
   NotificationType,
+  ReportedSubAgent,
 } from '#services/agent-plugins/api/plugins/capabilities/hooks-types';
 export type { PluginFs } from '#primitives/plugin-fs/api';
 // Capability behavior interfaces — needed for dts portability
