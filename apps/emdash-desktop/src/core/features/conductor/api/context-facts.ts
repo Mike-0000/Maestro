@@ -1,4 +1,6 @@
 import { formatAgo } from './activity-ledger';
+import type { CompletionAnnouncementMode } from './announcements';
+import type { CallMode } from './calls';
 import { nameBase, normalizeSpoken } from './resolver';
 
 /**
@@ -141,6 +143,41 @@ export function desksLine(desks: readonly DeskFact[], max = CONTEXT_MAX_DESKS): 
   const more = rest.length > 0 ? `, and ${rest.length} more` : '';
   const hidden = inView ? `, including ${describe(inView)}` : '';
   return `${shown.map(describe).join(', ')}${more}${hidden}`;
+}
+
+/**
+ * What Maestro announces on its own, which bounds what the conductor may promise to report back:
+ * every finished agent and every agent that needs the developer (all), only those that need the
+ * developer (attention_only), or nothing spoken (off).
+ */
+export type AnnouncementsMode = 'all' | 'attention_only' | 'off';
+
+/**
+ * The effective mode from the conductor's settings. Only agents that need the developer are
+ * announced while attention verdicts run to tell them apart (`announceCompletions` has no effect
+ * otherwise); quiet calls are shown and never spoken, so nothing is announced.
+ */
+export function announcementsMode(settings: {
+  readonly announceCompletions: CompletionAnnouncementMode;
+  readonly attentionVerdicts: boolean;
+  readonly calls: CallMode;
+}): AnnouncementsMode {
+  if (settings.calls === 'quiet') return 'off';
+  return settings.announceCompletions === 'attention_only' && settings.attentionVerdicts
+    ? 'attention_only'
+    : 'all';
+}
+
+/** The context line the conductor's report-back promise depends on (see the system prompt). */
+export function announcementsLine(mode: AnnouncementsMode): string {
+  switch (mode) {
+    case 'all':
+      return 'Announcements: all finished agents, and agents that need the developer.';
+    case 'attention_only':
+      return 'Announcements: only agents that need the developer; a finished agent with nothing for them is shown, not spoken.';
+    case 'off':
+      return 'Announcements: off; nothing is spoken when an agent finishes or needs the developer.';
+  }
 }
 
 /** "Thursday, October 8, 2026, 5:42 PM": the developer's local date and time. */

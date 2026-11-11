@@ -1,5 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
+import { postDigestInputSchema } from './digest';
 import { CHAT_THREAD_LIMITS, chatConductorStateSchema } from './thread';
 
 /**
@@ -126,6 +127,7 @@ export const chatConductorToolSchemas = {
   close_browser: z.object({
     id: z.string().min(1).max(200).describe('The browser, by its id from list_browsers.'),
   }),
+  post_digest: postDigestInputSchema,
 } as const;
 
 export type ChatConductorToolName = keyof typeof chatConductorToolSchemas;
@@ -164,6 +166,8 @@ const descriptions: Record<ChatConductorToolName, string> = {
     "Close one of the task's browser tabs, by its id from list_browsers. Close only a tab you opened, or one the developer asked you to close.",
   list_accounts:
     "List the Claude accounts connected to Maestro: each one's name, whether it is signed in, how much of its 5-hour and weekly usage is spent, which one the chat's agent runs on, and which one new agents get.",
+  post_digest:
+    'Post a report to the thread in a fixed shape, for the moments a short line cannot carry: the work is finished, blocked, or needs the developer. It is shown as a card. It does not set the status: call set_status as well. After it, end the turn with one short line.',
 };
 
 function toolDefinition(name: ChatConductorToolName): Anthropic.Beta.BetaTool {

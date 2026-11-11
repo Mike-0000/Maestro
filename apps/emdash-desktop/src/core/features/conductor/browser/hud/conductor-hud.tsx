@@ -3,7 +3,6 @@ import {
   AudioLines,
   GitMerge,
   History,
-  Loader2,
   Mic,
   MicOff,
   PlusCircle,
@@ -50,6 +49,10 @@ import { VoiceSetupPanel } from './voice-setup';
 
 /** How long a conductor reply stays on screen. */
 const REPLY_VISIBLE_MS = 10_000;
+
+/** The round mic buttons at rest: one surface step above the bar, lifting one more on hover. */
+const HUD_ROUND_REST =
+  'bg-(--em-surface-hover) text-foreground-muted hover:bg-(--em-surface-selected) hover:text-foreground';
 
 /**
  * The always-available conductor surface: mic state and level, what was heard, what the
@@ -123,9 +126,10 @@ export const ConductorHud = observer(function ConductorHud() {
       <PlanPanel />
       {showLocalUpdate && <LocalUpdateCard onHide={() => setShowLocalUpdate(false)} />}
       {setupOpen && <VoiceSetupPanel onClose={() => setSetupOpen(false)} />}
+      {/* A floating layer: one surface step above the content and a hairline, not a shadow. */}
       <div
         className={cn(
-          'pointer-events-auto flex w-full max-w-[880px] flex-col gap-2 rounded-2xl border border-border bg-background/95 shadow-xl backdrop-blur',
+          'surface-elevated pointer-events-auto flex w-full max-w-[880px] flex-col gap-2 rounded-xl border border-border bg-(--em-surface)/95 shadow-lg backdrop-blur',
           expanded ? 'p-3' : 'p-1.5'
         )}
       >
@@ -156,7 +160,7 @@ export const ConductorHud = observer(function ConductorHud() {
             <button
               type="button"
               onClick={() => setSetupOpen(true)}
-              className="shrink-0 rounded-md bg-blue-500/10 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-500/20 dark:text-blue-300"
+              className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-link hover:bg-(--em-surface-hover)"
             >
               Set up voice
             </button>
@@ -204,7 +208,7 @@ export const ConductorHud = observer(function ConductorHud() {
         {conductor.pending && <PendingActionCard />}
 
         {replyVisible && conductor.reply && !conductor.busy && (
-          <p className="px-1 text-sm text-foreground">{conductor.reply}</p>
+          <p className="px-1 text-base text-foreground">{conductor.reply}</p>
         )}
 
         <LayoutUndoChip />
@@ -238,8 +242,8 @@ const MicButton = observer(function MicButton() {
         listening
           ? 'bg-red-500 text-white'
           : voice.phase === 'error'
-            ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300'
-            : 'bg-background-secondary text-foreground hover:bg-background-tertiary'
+            ? 'bg-background-warning text-foreground-warning'
+            : HUD_ROUND_REST
       )}
     >
       {listening && (
@@ -277,7 +281,7 @@ const DictationButton = observer(function DictationButton() {
           ? 'bg-blue-600 text-white'
           : dictation.active
             ? 'bg-blue-500/20 text-blue-700 dark:text-blue-300'
-            : 'bg-background-secondary text-foreground hover:bg-background-tertiary'
+            : HUD_ROUND_REST
       )}
     >
       {listening && (
@@ -366,8 +370,8 @@ const MaestroButton = observer(function MaestroButton({
         listening
           ? 'bg-red-500 text-white'
           : armed
-            ? 'bg-background-tertiary text-foreground ring-1 ring-foreground/60 ring-inset'
-            : 'bg-background-secondary text-foreground ring-1 ring-foreground/15 ring-inset hover:bg-background-tertiary'
+            ? 'bg-(--em-surface-selected) text-foreground ring-1 ring-foreground/60 ring-inset'
+            : `${HUD_ROUND_REST} ring-1 ring-foreground/15 ring-inset`
       )}
     >
       {listening && (
@@ -394,16 +398,22 @@ const LineIndicator = observer(function LineIndicator() {
     const label = talk.overBudget
       ? "Voice conductor: today's limit is spent, so the text conductor answers. Raise the daily limit in Settings, or it opens again tomorrow"
       : 'Voice conductor: closed after a quiet spell, to save cost; pressing the talk key opens it again';
+    // At rest: a ring, the same mark a finished task wears; red when the day's limit shut it.
     return (
       <span
         role="status"
         aria-label={label}
         title={label}
-        className={cn(
-          'size-2.5 shrink-0 rounded-full border',
-          talk.overBudget ? 'border-red-500/70' : 'border-emerald-500/70'
-        )}
-      />
+        className="inline-flex size-3 shrink-0 items-center justify-center"
+      >
+        <span
+          aria-hidden
+          className={cn(
+            'size-2 rounded-full border-[1.5px]',
+            talk.overBudget ? 'border-foreground-error' : 'border-foreground-passive'
+          )}
+        />
+      </span>
     );
   }
   const hears = talk.holding || talk.micOpen;
@@ -417,22 +427,30 @@ const LineIndicator = observer(function LineIndicator() {
       : talk.line === 'connecting'
         ? 'Voice conductor: connecting'
         : `Voice conductor: not connected${talk.error ? ` (${talk.error})` : ''}; the text conductor answers`;
+  // The glyph set of the sidebar and the conductor strip: an accent dot while the line is live
+  // (haloed while it hears the developer), the small pulsing dot while it connects, and the
+  // filled error dot when it is down.
   return (
     <span
       role="status"
       aria-label={label}
       title={label}
-      className={cn(
-        'size-2.5 shrink-0 rounded-full',
-        talk.line === 'open'
-          ? hears
-            ? 'bg-emerald-500 ring-2 ring-emerald-500/40'
-            : 'bg-emerald-500/70'
-          : talk.line === 'connecting'
-            ? 'animate-pulse bg-amber-500'
-            : 'bg-red-500/70'
-      )}
-    />
+      className="inline-flex size-3 shrink-0 items-center justify-center"
+    >
+      <span
+        aria-hidden
+        className={cn(
+          'rounded-full',
+          talk.line === 'open'
+            ? hears
+              ? 'size-2 bg-accent ring-2 ring-accent/35'
+              : 'size-2 bg-accent'
+            : talk.line === 'connecting'
+              ? 'size-1.5 bg-accent motion-safe:animate-pulse'
+              : 'size-2 bg-foreground-error'
+        )}
+      />
+    </span>
   );
 });
 
@@ -450,7 +468,7 @@ const ManualListenControls = observer(function ManualListenControls() {
       <button
         type="button"
         onClick={() => void voice.stopListening()}
-        className="flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-foreground px-3 text-xs font-medium text-background hover:opacity-90"
+        className="flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-(--primary-button-background) px-3 text-xs font-medium text-primary-button-foreground hover:bg-(--primary-button-background-hover)"
       >
         <SendHorizontal className="size-3.5" />
         Send
@@ -498,7 +516,7 @@ const StatusLine = observer(function StatusLine() {
   if (voice.phase === 'transcribing') {
     return (
       <span className="flex items-center gap-2 text-foreground-muted">
-        <Loader2 className="size-3.5 animate-spin" />
+        <WorkingGlyph />
         Transcribing…
       </span>
     );
@@ -509,7 +527,7 @@ const StatusLine = observer(function StatusLine() {
   if (conductor.busy) {
     return (
       <span className="flex items-center gap-2 text-foreground-muted">
-        <Loader2 className="size-3.5 shrink-0 animate-spin" />
+        <WorkingGlyph />
         <span className="min-w-0 truncate">{conductor.activity || 'Working…'}</span>
       </span>
     );
@@ -541,6 +559,15 @@ const StatusLine = observer(function StatusLine() {
   );
 });
 
+/** The working mark of the shared glyph set: a small accent dot that pulses (still if reduced). */
+function WorkingGlyph() {
+  return (
+    <span aria-hidden className="inline-flex size-3 shrink-0 items-center justify-center">
+      <span className="size-1.5 rounded-full bg-accent motion-safe:animate-pulse" />
+    </span>
+  );
+}
+
 function LevelMeter({ level }: { level: number }) {
   const bars = [0.55, 0.8, 1, 0.8, 0.55];
   return (
@@ -564,14 +591,14 @@ const ErrorCard = observer(function ErrorCard() {
   if (!error) return null;
   const needsKey = error.kind === 'not-configured';
   return (
-    <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-2 text-xs text-foreground">
-      <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+    <div className="flex items-start gap-2 rounded-lg border border-border bg-(--em-surface-hover) px-3 py-2 text-xs text-foreground">
+      <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-foreground-warning" />
       <div className="min-w-0 flex-1 space-y-1.5">
         <p>{error.message}</p>
         {error.kind === 'mic-permission' && (
           <button
             type="button"
-            className="font-medium text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
+            className="font-medium text-link underline-offset-2 hover:underline"
             onClick={() => void voice.openMicrophoneSettings()}
           >
             Open Windows microphone privacy settings
@@ -580,7 +607,7 @@ const ErrorCard = observer(function ErrorCard() {
         {needsKey && (
           <button
             type="button"
-            className="font-medium text-blue-600 underline-offset-2 hover:underline dark:text-blue-400"
+            className="font-medium text-link underline-offset-2 hover:underline"
             onClick={() => getNavigation().navigate(settingsViewDef({ tab: 'chorus' }))}
           >
             Open Voice & Conductor settings
@@ -699,7 +726,7 @@ const CommandBox = observer(function CommandBox({
           id="conductor-agent-suggestions"
           role="listbox"
           aria-label="Open an agent"
-          className="absolute inset-x-0 bottom-full mb-2 overflow-hidden rounded-xl border border-border bg-background py-1 shadow-xl"
+          className="surface-elevated absolute inset-x-0 bottom-full mb-2 overflow-hidden rounded-lg border border-border bg-(--em-surface) py-1 shadow-lg"
         >
           {suggestions.map((suggestion, index) => (
             <li
@@ -713,7 +740,7 @@ const CommandBox = observer(function CommandBox({
               onClick={() => pick(suggestion)}
               className={cn(
                 'flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm text-foreground',
-                index === active && 'bg-background-secondary'
+                index === active && 'bg-(--em-surface-hover)'
               )}
             >
               <PlusCircle className="size-3.5 shrink-0 text-foreground-muted" />
@@ -736,7 +763,7 @@ const CommandBox = observer(function CommandBox({
         }
         placeholder={placeholder}
         title={chat ? `Goes to ${conductorLabel(chat)}` : toMaestro ? 'Goes to Maestro' : undefined}
-        className="h-8 w-full rounded-md border border-border bg-background px-2.5 text-sm text-foreground outline-none placeholder:text-foreground-muted focus:border-blue-500"
+        className="h-8 w-full rounded-md border border-border bg-background px-2.5 text-sm text-foreground transition-colors outline-none placeholder:text-foreground-passive focus:border-ring"
         onChange={(event) => {
           setText(event.target.value);
           setHighlighted(0);
@@ -810,8 +837,8 @@ function HudIconButton({
       title={label}
       onClick={onClick}
       className={cn(
-        'flex size-8 shrink-0 items-center justify-center rounded-lg text-foreground-muted hover:bg-background-secondary hover:text-foreground',
-        active && 'bg-background-secondary text-foreground'
+        'flex size-8 shrink-0 items-center justify-center rounded-md text-foreground-passive transition-colors hover:bg-(--em-surface-hover) hover:text-foreground',
+        active && 'bg-(--em-surface-selected) text-foreground'
       )}
     >
       {children}
@@ -821,7 +848,7 @@ function HudIconButton({
 
 function Key({ children }: { children: React.ReactNode }) {
   return (
-    <kbd className="rounded border border-border bg-background-secondary px-1 py-px font-sans text-[11px] text-foreground">
+    <kbd className="rounded-xs border border-border bg-(--em-surface-hover) px-1 py-px font-sans text-tiny text-foreground-muted">
       {children}
     </kbd>
   );
@@ -878,7 +905,7 @@ const UsageReadout = observer(function UsageReadout() {
     <span
       className={cn(
         'shrink-0 tabular-nums opacity-70',
-        share > 0.8 && 'text-amber-600 opacity-100'
+        share > 0.8 && 'text-foreground-warning opacity-100'
       )}
       title={
         budget > 0

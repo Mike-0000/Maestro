@@ -223,7 +223,7 @@ export const SidebarProjectItem = observer(function SidebarProjectItem({
     <ContextMenu.Root>
       <ContextMenu.Trigger>
         <SidebarMenuRow
-          className={cn('group/row h-8 justify-between flex px-1')}
+          className="group/row justify-between gap-1 px-1"
           data-active={isProjectActive || undefined}
           isActive={isProjectActive}
           onMouseDown={(e) => e.preventDefault()}
@@ -291,7 +291,7 @@ export const SidebarProjectItem = observer(function SidebarProjectItem({
                       : `New conductor for ${projectLabel}`
                   }
                   className={
-                    'opacity-0 transition-opacity duration-150 group-hover/row:opacity-100'
+                    'opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 focus-visible:opacity-100'
                   }
                   onPointerEnter={() => prefetchRepository()}
                   onClick={(e) => {

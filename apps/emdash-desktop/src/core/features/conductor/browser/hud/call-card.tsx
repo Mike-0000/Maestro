@@ -24,13 +24,15 @@ export const CallCard = observer(function CallCard() {
   const { call, state } = current;
   const answering = state === 'picked-up';
   const waiting = conductor.calls.waiting.length;
+  // A card one surface step above the bar with a hairline; the caller's line leads, what they
+  // said follows in reading text, and Answer is the one primary action.
   return (
-    <div className="space-y-1.5 rounded-lg border border-emerald-500/50 bg-emerald-500/5 px-2.5 py-2">
+    <div className="space-y-1.5 rounded-lg border border-border bg-(--em-surface-hover) px-3 py-2.5">
       <div className="flex items-center gap-2 text-sm">
         {answering ? (
-          <PhoneForwarded className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+          <PhoneForwarded className="size-3.5 shrink-0 text-foreground-muted" />
         ) : (
-          <PhoneCall className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+          <PhoneCall className="size-3.5 shrink-0 text-foreground-muted" />
         )}
         <span className="min-w-0 flex-1 truncate text-foreground">
           {answering ? (
@@ -43,14 +45,14 @@ export const CallCard = observer(function CallCard() {
             </>
           )}
           {waiting > 0 && (
-            <span className="ml-2 text-xs text-foreground-muted">{waiting} more waiting</span>
+            <span className="ml-2 text-xs text-foreground-passive">{waiting} more waiting</span>
           )}
         </span>
         {/* Always there: a call that was picked up can still be dropped by hand. */}
         <button
           type="button"
           onClick={() => conductor.skipCall()}
-          className="rounded-md px-2 py-1 text-xs text-foreground-muted hover:bg-background-secondary hover:text-foreground"
+          className="rounded-md px-2 py-1 text-xs text-foreground-muted transition-colors hover:bg-foreground/8 hover:text-foreground"
         >
           Skip
         </button>
@@ -59,21 +61,21 @@ export const CallCard = observer(function CallCard() {
             <button
               type="button"
               onClick={() => conductor.pickUpCall()}
-              className="rounded-md px-2 py-1 text-xs text-foreground-muted hover:bg-background-secondary hover:text-foreground"
+              className="rounded-md px-2 py-1 text-xs text-foreground-muted transition-colors hover:bg-foreground/8 hover:text-foreground"
             >
               Type
             </button>
             <button
               type="button"
               onClick={() => voice.tap()}
-              className="rounded-md bg-foreground px-2 py-1 text-xs font-medium text-background hover:opacity-90"
+              className="rounded-md bg-(--primary-button-background) px-2 py-1 text-xs font-medium text-primary-button-foreground transition-colors hover:bg-(--primary-button-background-hover)"
             >
               Answer <span className="opacity-60">tap Right Ctrl</span>
             </button>
           </>
         )}
       </div>
-      <p className="line-clamp-3 text-xs text-foreground-muted">{call.text}</p>
+      <p className="line-clamp-3 text-sm text-foreground-body">{call.text}</p>
       {answering && (
         <p className="text-xs text-foreground-muted">
           What you say or type next goes to {call.agentName} unless you name another agent.

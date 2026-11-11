@@ -1,15 +1,14 @@
 import { observer } from 'mobx-react-lite';
 import { cn } from '@core/primitives/styling/browser/cn';
-import { usePaneContext } from '../../tabs/pane-context';
 
 export const TabTitle = observer(function TabTitle({
-  isActive,
   isPreview,
   hasError,
   maxWidth = 'max-w-[200px]',
   className,
   children,
 }: {
+  /** Kept for callers; the tab around the title owns the active colour. */
   isActive: boolean;
   isPreview?: boolean;
   hasError?: boolean;
@@ -17,15 +16,14 @@ export const TabTitle = observer(function TabTitle({
   className?: string;
   children: React.ReactNode;
 }) {
-  const { isFocusedPane } = usePaneContext();
-
+  // The tab owns the colour (active, inactive, unfocused pane); the title adds only preview and
+  // error. The weight never changes with the state, so switching tabs does not shift the strip.
   return (
     <span
       className={cn(
-        'truncate p-1 text-sm opacity-85 group-hover:opacity-100 transition-opacity',
+        'truncate p-1 text-sm',
         maxWidth,
         isPreview && 'italic',
-        isActive && isFocusedPane && 'opacity-100',
         hasError && 'text-foreground-destructive',
         className
       )}

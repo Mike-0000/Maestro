@@ -15,8 +15,27 @@
     Cantarell, 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
   --font-mono: Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
 
-  --text-tiny: 11px;
+  /* Type scale, shared with @emdash/ui (packages/ui/src/theme/tokens.css.ts).
+     Body weight 400; headlines 600; nothing bolder. */
+  --text-micro: 10px;
+  --text-micro--line-height: 1.2;
+  --text-tiny: 11px; /* footer facts, ages */
   --text-tiny--line-height: 1.3;
+  --text-xs: 12px; /* labels, subtitles */
+  --text-xs--line-height: 1.5;
+  --text-sm: 13px; /* UI default */
+  --text-sm--line-height: 1.55;
+  --text-base: 14px; /* reading text */
+  --text-base--line-height: 1.6;
+  --text-lg: 16px;
+  --text-lg--line-height: 1.55;
+  --text-xl: 21px; /* the one line that matters most */
+  --text-xl--line-height: 1.4;
+  --text-xl--font-weight: 500;
+  --text-xl--letter-spacing: -0.01em;
+  --text-2xl: 26px; /* empty-state titles */
+  --text-2xl--line-height: 1.3;
+  --text-2xl--letter-spacing: -0.015em;
 
   --color-background: var(--background);
   --color-background-1: var(--background-1);
@@ -24,8 +43,16 @@
   --color-background-3: var(--background-3);
 
   --color-foreground: var(--foreground);
+  --color-foreground-body: var(--foreground-body);
   --color-foreground-muted: var(--foreground-muted);
   --color-foreground-passive: var(--foreground-passive);
+
+  /* The accent is for focus, the primary action, links and the working pulse
+     only: never panels or resting borders. */
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-link: var(--link);
+  --color-ring: var(--focus-ring);
 
   --color-background-secondary: var(--background-secondary);
   --color-background-secondary-1: var(--background-secondary-1);
@@ -57,6 +84,7 @@
   --color-foreground-diff-deleted: var(--foreground-diff-deleted);
 
   --color-border: var(--border);
+  --color-border-subtle: var(--border-subtle);
   --color-border-1: var(--border-1);
   --color-border-2: var(--border-2);
   --color-border-destructive: var(--border-destructive);
@@ -87,9 +115,15 @@
   --color-foreground-conflict: var(--foreground-conflict);
   --color-foreground-merged: var(--foreground-merged);
 
-  --radius-lg: var(--radius);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-sm: calc(var(--radius) - 4px);
+  /* Radius scale: the @emdash/theme density tokens, so `rounded-*` here and the
+     @emdash/ui components agree. md 8px (buttons, inputs, rows), lg 12px (cards,
+     the composer, menus), xl 16px (floating panels). */
+  --radius-xs: var(--em-radius-xs);
+  --radius-sm: var(--em-radius-sm);
+  --radius-md: var(--em-radius-md);
+  --radius-lg: var(--em-radius-lg);
+  --radius-xl: var(--em-radius-xl);
+  --radius-2xl: var(--em-radius-2xl);
 }
 
 ::selection {
@@ -277,8 +311,18 @@
 
     --foreground: var(--neutral-12);
     --foreground-inverse: white;
+    --foreground-body: color-mix(in srgb, var(--neutral-11) 40%, var(--neutral-12));
     --foreground-muted: var(--neutral-11);
-    --foreground-passive: var(--neutral-8);
+    /* Just lighter than muted: 4.7:1 on the sunken chrome surface (sidebar, title bar)
+       and 5.3:1 on paper, so passive labels and ages stay readable (WCAG AA 4.5:1),
+       matching the dark theme's 4.8:1. Step 8 alone measured 1.7:1 there. */
+    --foreground-passive: color-mix(in srgb, var(--neutral-10) 20%, var(--neutral-11));
+
+    /* Accent roles (focus ring, links, working pulse) from the generated palette. */
+    --accent: var(--em-accent-9);
+    --accent-foreground: var(--em-accent-contrast);
+    --link: var(--em-accent-11);
+    --focus-ring: var(--em-accent-8);
 
     --background-secondary: var(--background-1);
     --background-secondary-1: var(--background);
@@ -313,12 +357,11 @@
     --primary-button-border: transparent;
 
     --border: var(--neutral-5);
+    --border-subtle: var(--neutral-4);
     --border-1: var(--neutral-8);
     --border-2: var(--neutral-9);
     --border-destructive: var(--red-8);
     --border-primary: var(--neutral-9);
-
-    --radius: 0.5rem;
 
     --selection: color(display-p3 0.6279 0.7807 0.9926);
     --selection-foreground: color(display-p3 0 0.0948 0.2443);
@@ -419,21 +462,30 @@
   }
 
   .emdark {
-    /* ── Color palette (Radix dark P3) ───────────────────────── */
+    /* ── Neutral ramp: deep slate ─────────────────────────────── */
+    /* Aliases of the generated @emdash/theme ramp, so app chrome and @emdash/ui
+       render one palette. Tune it in packages/theme/src/themes/dark.theme.ts,
+       never here. OKLCH, hue 230:
+         1  0.21  background, reading surface    7  0.45   control border
+         2  0.23  subtle background              8  0.515  strong border
+         3  0.25  component bg, active row       9  0.60   passive text, glyphs
+         4  0.27  hover                         10  0.66   hovered passive text
+         5  0.29  pressed, subtle border        11  0.75   muted text, labels
+         6  0.31  hairline border               12  0.95   text               */
+    --neutral-1: var(--em-neutral-1);
+    --neutral-2: var(--em-neutral-2);
+    --neutral-3: var(--em-neutral-3);
+    --neutral-4: var(--em-neutral-4);
+    --neutral-5: var(--em-neutral-5);
+    --neutral-6: var(--em-neutral-6);
+    --neutral-7: var(--em-neutral-7);
+    --neutral-8: var(--em-neutral-8);
+    --neutral-9: var(--em-neutral-9);
+    --neutral-10: var(--em-neutral-10);
+    --neutral-11: var(--em-neutral-11);
+    --neutral-12: var(--em-neutral-12);
 
-    /* Neutral */
-    --neutral-1: color(display-p3 0.067 0.067 0.067);
-    --neutral-2: color(display-p3 0.098 0.098 0.098);
-    --neutral-3: color(display-p3 0.135 0.135 0.135);
-    --neutral-4: color(display-p3 0.163 0.163 0.163);
-    --neutral-5: color(display-p3 0.192 0.192 0.192);
-    --neutral-6: color(display-p3 0.228 0.228 0.228);
-    --neutral-7: color(display-p3 0.283 0.283 0.283);
-    --neutral-8: color(display-p3 0.375 0.375 0.375);
-    --neutral-9: color(display-p3 0.431 0.431 0.431);
-    --neutral-10: color(display-p3 0.484 0.484 0.484);
-    --neutral-11: color(display-p3 0.706 0.706 0.706);
-    --neutral-12: color(display-p3 0.933 0.933 0.933);
+    /* ── Hue scales (Radix dark P3) ──────────────────────────── */
 
     /* Red */
     --red-1: color(display-p3 0.093 0.068 0.067);
@@ -561,38 +613,32 @@
     --violet-11: color(display-p3 0.72 0.65 1);
     --violet-12: color(display-p3 0.883 0.867 0.986);
 
-    /* Jade */
-    --jade-1: color(display-p3 0.059 0.083 0.071);
-    --jade-2: color(display-p3 0.078 0.11 0.094);
-    --jade-3: color(display-p3 0.091 0.176 0.138);
-    --jade-4: color(display-p3 0.102 0.228 0.177);
-    --jade-5: color(display-p3 0.133 0.279 0.221);
-    --jade-6: color(display-p3 0.174 0.334 0.273);
-    --jade-7: color(display-p3 0.219 0.402 0.335);
-    --jade-8: color(display-p3 0.263 0.488 0.411);
-    --jade-9: color(display-p3 0.319 0.63 0.521);
-    --jade-10: color(display-p3 0.338 0.68 0.555);
-    --jade-11: color(display-p3 0.4 0.835 0.656);
-    --jade-12: color(display-p3 0.734 0.934 0.838);
-
     /* ── Semantic tokens ─────────────────────────────────────── */
-    /* Background/selection/status/success values mirror the generated
-       @emdash/theme palette (packages/theme/src/__generated__/semantic.css)
-       so app chrome and @emdash/ui components render identically. */
-    --background: color(display-p3 0.0671 0.0669 0.067);
-    --background-1: color(display-p3 0.0956 0.0952 0.0953);
-    --background-2: color(display-p3 0.1252 0.1246 0.1248);
-    --background-3: color(display-p3 0.156 0.155 0.1552);
+    /* The same slots as the generated @emdash/theme semantic template
+       (packages/theme/src/core/contract/semantic-template.ts), resolved through
+       the aliased neutral ramp above or the generated --em-* tokens, so app
+       chrome and @emdash/ui components render identically. */
+    --background: var(--neutral-1);
+    --background-1: var(--neutral-2);
+    --background-2: var(--neutral-3);
+    --background-3: var(--neutral-4);
 
     --foreground: var(--neutral-12);
     --foreground-inverse: var(--neutral-1);
+    --foreground-body: color-mix(in srgb, var(--neutral-11) 40%, var(--neutral-12));
     --foreground-muted: var(--neutral-11);
     --foreground-passive: var(--neutral-9);
+
+    /* Accent roles: focus ring, links, the working pulse. Jade-teal, OKLCH H 176. */
+    --accent: var(--em-accent-9);
+    --accent-foreground: var(--em-accent-contrast);
+    --link: var(--em-accent-11);
+    --focus-ring: var(--em-accent-8);
 
     --background-secondary: var(--background-1);
     --background-secondary-1: var(--background);
     --background-secondary-2: var(--background-3);
-    --background-secondary-3: color(display-p3 0.2206 0.2181 0.2188);
+    --background-secondary-3: var(--neutral-6);
 
     --foreground-secondary: var(--foreground);
     --foreground-secondary-muted: var(--foreground-muted);
@@ -600,8 +646,8 @@
 
     --background-tertiary: var(--background-2);
     --background-tertiary-1: var(--background-3);
-    --background-tertiary-2: color(display-p3 0.1878 0.1862 0.1866);
-    --background-tertiary-3: color(display-p3 0.2206 0.2181 0.2188);
+    --background-tertiary-2: var(--neutral-5);
+    --background-tertiary-3: var(--neutral-6);
 
     --foreground-tertiary: var(--foreground);
     --foreground-tertiary-muted: var(--foreground-muted);
@@ -616,35 +662,37 @@
     --foreground-destructive: var(--red-9);
     --foreground-destructive-muted: color(display-p3 0.661 0.263 0.26);
 
-    --primary-button-background: var(--jade-4);
-    --primary-button-background-hover: var(--jade-5);
-    --primary-button-foreground: var(--jade-12);
-    --primary-button-border: var(--jade-7);
+    /* Soft sea-glass solid with dark ink: accent step 9, hover 10, border 7. */
+    --primary-button-background: var(--em-primary-button-background);
+    --primary-button-background-hover: var(--em-primary-button-background-hover);
+    --primary-button-foreground: var(--em-primary-button-foreground);
+    --primary-button-border: var(--em-primary-button-border);
 
+    /* One quiet hairline (6) where a surface step does not already separate
+       things; 7 and up are for controls that must be findable by their edge. */
     --border: var(--neutral-6);
+    --border-subtle: var(--neutral-5);
     --border-1: var(--neutral-7);
     --border-2: var(--neutral-8);
     --border-destructive: var(--red-8);
-    --border-primary: var(--neutral-10);
+    --border-primary: var(--neutral-9);
 
-    --radius: 0.5rem;
+    --selection: var(--em-selection);
+    --selection-foreground: var(--em-selection-foreground);
 
-    --selection: color(display-p3 0.087 0.2177 0.3954);
-    --selection-foreground: color(display-p3 0.8222 0.9187 1);
-
-    --status-in-progress: color(display-p3 0.8581 0.6803 0.314);
-    --status-in-review: color(display-p3 0.3486 0.7012 0.3465);
-    --status-done: color(display-p3 0.5721 0.5663 0.5679);
-    --status-todo: color(display-p3 0.5721 0.5663 0.5679);
-    --status-cancelled: color(display-p3 0.5721 0.5663 0.5679);
+    --status-in-progress: var(--em-status-in-progress);
+    --status-in-review: var(--em-status-in-review);
+    --status-done: var(--em-status-done);
+    --status-todo: var(--em-status-todo);
+    --status-cancelled: var(--em-status-cancelled);
 
     /* Monaco editor */
     --monaco-bg: var(--em-surface-paper);
     --monaco-fg: var(--foreground-muted);
     --monaco-error-fg: color(display-p3 1 0.592 0.49);
 
-    --monaco-line-highlight: var(--neutral-5);
-    --monaco-line-number: color(display-p3 0.227 0.227 0.227);
+    --monaco-line-highlight: var(--neutral-3);
+    --monaco-line-number: var(--neutral-7);
     --monaco-gutter: var(--monaco-bg);
     /* Semi-transparent so the selection layer beneath stays visible (ENG-1248). */
     --monaco-inserted-text-bg: color(display-p3 0.145 0.282 0.176 / 0.45);
@@ -653,9 +701,9 @@
     --monaco-removed-text-bg: color(display-p3 0.38 0.086 0.137 / 0.45);
     --monaco-removed-line-bg: color(display-p3 0.231 0.071 0.098 / 0.55);
     --monaco-removed-text-border: color(display-p3 0.38 0.086 0.137 / 0.65);
-    --monaco-unchanged-region-bg: color(display-p3 0.165 0.165 0.165);
-    --monaco-diff-border: color(display-p3 0.227 0.227 0.227);
-    --monaco-diff-diagonal-fill: color(display-p3 0.165 0.165 0.165);
+    --monaco-unchanged-region-bg: var(--neutral-3);
+    --monaco-diff-border: var(--border);
+    --monaco-diff-diagonal-fill: var(--neutral-4);
     --monaco-selection-bg: color(display-p3 0.3 0.52 0.82 / 0.7);
     --monaco-selection-fg: color(display-p3 0.95 0.96 0.98);
     --monaco-inactive-selection-bg: color(display-p3 0.3 0.52 0.82 / 0.35);
@@ -673,10 +721,10 @@
     --foreground-diff-deleted: var(--red-9);
 
     /* State / indicator tokens */
-    --foreground-success: color(display-p3 0.2745 0.6459 0.278);
-    --background-success: color(display-p3 0.101 0.138 0.099);
-    --background-success-hover: color(display-p3 0.1154 0.176 0.1127);
-    --border-success: color(display-p3 0.1928 0.4218 0.1922);
+    --foreground-success: var(--em-foreground-success);
+    --background-success: var(--em-background-success);
+    --background-success-hover: var(--em-background-success-hover);
+    --border-success: var(--em-border-success);
 
     --foreground-error: var(--red-9);
     --background-error: var(--red-3);
@@ -779,10 +827,10 @@
     -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Fira Sans',
     'Droid Sans', 'Helvetica Neue', sans-serif;
   --chat-font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', Menlo, Monaco, Consolas, monospace;
-  --chat-radius-sm: 0.375rem;
-  --chat-radius-md: 0.5rem;
-  --chat-radius-lg: 0.625rem;
-  --chat-radius-xl: 0.875rem;
+  --chat-radius-sm: var(--em-radius-sm);
+  --chat-radius-md: var(--em-radius-md);
+  --chat-radius-lg: var(--em-radius-lg);
+  --chat-radius-xl: var(--em-radius-xl);
   --chat-radius-full: 9999px;
 }
 
@@ -811,7 +859,7 @@
   --chat-diff-added: var(--foreground-diff-added);
   --chat-diff-deleted: var(--foreground-diff-deleted);
   --chat-diff-modified: var(--foreground-diff-modified);
-  --chat-link: var(--foreground-info);
+  --chat-link: var(--link);
   --chat-bubble-user: var(--background-3);
   --chat-bubble-user-fg: var(--foreground);
   --chat-mention-bg: var(--background-info);
@@ -823,10 +871,10 @@
     -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Fira Sans',
     'Droid Sans', 'Helvetica Neue', sans-serif;
   --chat-font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', Menlo, Monaco, Consolas, monospace;
-  --chat-radius-sm: 0.375rem;
-  --chat-radius-md: 0.5rem;
-  --chat-radius-lg: 0.625rem;
-  --chat-radius-xl: 0.875rem;
+  --chat-radius-sm: var(--em-radius-sm);
+  --chat-radius-md: var(--em-radius-md);
+  --chat-radius-lg: var(--em-radius-lg);
+  --chat-radius-xl: var(--em-radius-xl);
   --chat-radius-full: 9999px;
 }
 
@@ -857,10 +905,11 @@
     color: var(--selection-foreground);
   }
 
-  /* Scrollbar styles for light and dark mode */
+  /* Scrollbar styles for light and dark mode. The thumb sits one step below the
+     hairline border so it stays out of the way until it is looked for. */
   * {
     scrollbar-width: thin;
-    scrollbar-color: var(--border) transparent;
+    scrollbar-color: var(--neutral-5) transparent;
   }
 
   *::-webkit-scrollbar {
@@ -873,7 +922,7 @@
   }
 
   *::-webkit-scrollbar-thumb {
-    background-color: var(--border);
+    background-color: var(--neutral-5);
     border-radius: 4px;
     border: 2px solid transparent;
     background-clip: content-box;

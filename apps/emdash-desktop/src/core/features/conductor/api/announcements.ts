@@ -1,6 +1,6 @@
 import type { AgentStatus, NotificationType } from '@core/primitives/agents/api/agent-events';
 import { spokenAppUrl } from '@core/primitives/agents/api/completion-report';
-import { completionSentence } from '@core/primitives/agents/api/completion-summary';
+import { finishedSentence, waitingSentence, withOffer } from './announcement-wording';
 import type { AnnounceSource } from './calls';
 
 /** One agent in a batch of attention events, already resolved to its spoken name. */
@@ -27,33 +27,48 @@ export type CompletionAnnouncementMode = (typeof completionAnnouncementModes)[nu
 export const MAX_NAMED_ANNOUNCEMENTS = 3;
 
 /**
- * The spoken text for a batch of agents that need the user. Waiting agents share one short
- * sentence ("Atlas needs permission, Bravo needs you."); each finished agent gets its own
- * sentence saying what it finished ("Kilo researched TTS models…").
+ * The spoken text for a batch of agents that need the user, work first (see
+ * `announcement-wording.ts`). One waiting agent is led by its task ("Login fix needs permission,
+ * on Atlas."); several share one short sentence ("Atlas needs permission, Bravo needs you.").
+ * Each finished agent gets its own sentence ("TTS research is finished. Kilo researched…").
+ * `offer` ends a batch where exactly one agent finished with "Want to see it?".
  */
-export function announcementText(agents: readonly AnnouncedAgent[]): string | null {
+export function announcementText(
+  agents: readonly AnnouncedAgent[],
+  options: { readonly offer?: boolean } = {}
+): string | null {
   if (agents.length === 0) return null;
   if (agents.length > MAX_NAMED_ANNOUNCEMENTS) return `${agents.length} agents need you.`;
-  const waiting = agents
+  const waitingAgents = agents
     .filter((agent) => agent.status !== 'completed')
-    .map((agent) => {
-      const suffix =
+    .map((agent) => ({
+      name: agent.name,
+      taskName: agent.taskName,
+      phrase: attentionPhrase(agent),
+      suffix:
         agent.riskLevel === 'high'
           ? ' for something risky'
           : agent.riskLevel === 'low'
             ? ', low risk'
-            : '';
-      return `${agent.name} ${attentionPhrase(agent)}${suffix}`;
-    });
+            : '',
+    }));
+  const waiting =
+    waitingAgents.length === 1
+      ? [waitingSentence(waitingAgents[0]!)]
+      : waitingAgents.length > 1
+        ? [
+            `${waitingAgents.map((agent) => `${agent.name} ${agent.phrase}${agent.suffix}`).join(', ')}.`,
+          ]
+        : [];
   const finished = agents
     .filter((agent) => agent.status === 'completed')
     .map((agent) => {
-      const sentence = completionSentence(agent.name, agent.completionSummary, agent.taskName);
+      const sentence = finishedSentence(agent);
       return agent.appUrl
         ? `${sentence} It reported the app at ${spokenAppUrl(agent.appUrl)}.`
         : sentence;
     });
-  return (waiting.length > 0 ? [`${waiting.join(', ')}.`, ...finished] : finished).join(' ');
+  return withOffer([...waiting, ...finished].join(' '), finished.length, options.offer ?? false);
 }
 
 export function attentionPhrase(entry: {

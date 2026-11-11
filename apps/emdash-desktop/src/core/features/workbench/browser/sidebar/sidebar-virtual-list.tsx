@@ -23,7 +23,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { observer } from 'mobx-react-lite';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { projectViewDef } from '@core/features/projects/contributions/views';
 import { getTaskStore } from '@core/features/tasks/api/browser/task-state/task-selectors';
@@ -41,7 +41,17 @@ import {
 import { SidebarProjectItem } from './project-item';
 import { SidebarTaskItem } from './task-item';
 
+/**
+ * First guesses at row heights, before a row is measured: two-line task rows, one-line project
+ * and conversation rows. Every rendered row is measured and its real height wins, so a row that
+ * is shorter or taller than its guess still lays out without gaps or overlaps.
+ */
+const TASK_ROW_HEIGHT = 46;
 const ROW_HEIGHT = 32;
+
+function estimateRowHeight(row: SidebarRow | undefined): number {
+  return row?.kind === 'task' ? TASK_ROW_HEIGHT : ROW_HEIGHT;
+}
 
 export const SidebarVirtualList = observer(function SidebarVirtualList() {
   const rows = getSidebarStore().sidebarRows;
@@ -70,10 +80,19 @@ export const SidebarVirtualList = observer(function SidebarVirtualList() {
     [rows]
   );
 
+  // Measured heights follow the row, not its index, so a re-sort keeps them.
+  const getItemKey = useCallback(
+    (index: number) => {
+      const row = rows[index];
+      return row ? rowToDndId(row) : index;
+    },
+    [rows]
+  );
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => ROW_HEIGHT,
+    estimateSize: (index) => estimateRowHeight(rows[index]),
+    getItemKey,
     overscan: 8,
   });
 
@@ -219,16 +238,20 @@ export const SidebarVirtualList = observer(function SidebarVirtualList() {
               const row = rows[vItem.index];
               if (!row) return null;
               const dndId = rowToDndId(row);
+              // No fixed height: the row's content sets it and `measureElement` reads it back.
               const vStyle: React.CSSProperties = {
                 position: 'absolute',
                 top: vItem.start,
                 left: 0,
                 width: '100%',
-                height: `${vItem.size}px`,
+              };
+              const measure = {
+                index: vItem.index,
+                measureRef: virtualizer.measureElement,
               };
               if (row.kind === 'project') {
                 return (
-                  <SortableRow key={row.projectId} dndId={dndId} style={vStyle}>
+                  <SortableRow key={row.projectId} dndId={dndId} style={vStyle} {...measure}>
                     <SidebarProjectItem projectId={row.projectId} />
                   </SortableRow>
                 );
@@ -236,7 +259,12 @@ export const SidebarVirtualList = observer(function SidebarVirtualList() {
               if (row.kind === 'host-conversation') {
                 // Not a task yet, so it has no place in the manual order and does not drag.
                 return (
-                  <div key={dndId} style={vStyle}>
+                  <div
+                    key={dndId}
+                    ref={virtualizer.measureElement}
+                    data-index={vItem.index}
+                    style={vStyle}
+                  >
                     <SidebarHostConversationItem
                       projectId={row.projectId}
                       conversationId={row.conversationId}
@@ -245,7 +273,12 @@ export const SidebarVirtualList = observer(function SidebarVirtualList() {
                 );
               }
               return (
-                <SortableRow key={`${row.projectId}:${row.taskId}`} dndId={dndId} style={vStyle}>
+                <SortableRow
+                  key={`${row.projectId}:${row.taskId}`}
+                  dndId={dndId}
+                  style={vStyle}
+                  {...measure}
+                >
                   <SidebarTaskItem projectId={row.projectId} taskId={row.taskId} />
                 </SortableRow>
               );
@@ -379,13 +412,23 @@ function InsertionIndicator({ pointerY }: { pointerY: number | null }) {
 interface SortableRowProps {
   dndId: string;
   style: React.CSSProperties;
+  /** The row's index in the virtual list, read by `measureRef` from `data-index`. */
+  index: number;
+  measureRef: (node: HTMLDivElement | null) => void;
   children: React.ReactNode;
 }
 
-function SortableRow({ dndId, style, children }: SortableRowProps) {
+function SortableRow({ dndId, style, index, measureRef, children }: SortableRowProps) {
   const { setNodeRef, transform, transition, isDragging, listeners } = useSortable({
     id: dndId,
   });
+  const ref = useCallback(
+    (node: HTMLDivElement | null) => {
+      setNodeRef(node);
+      measureRef(node);
+    },
+    [setNodeRef, measureRef]
+  );
 
   const combinedStyle: React.CSSProperties = {
     ...style,
@@ -396,7 +439,7 @@ function SortableRow({ dndId, style, children }: SortableRowProps) {
   };
 
   return (
-    <div ref={setNodeRef} style={combinedStyle} {...listeners}>
+    <div ref={ref} data-index={index} style={combinedStyle} {...listeners}>
       {children}
     </div>
   );

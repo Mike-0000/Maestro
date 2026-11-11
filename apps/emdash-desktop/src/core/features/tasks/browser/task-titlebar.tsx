@@ -3,7 +3,6 @@ import {
   Button,
   MicroLabel,
   Popover,
-  Separator,
   Toggle,
   ToggleGroup,
   Tooltip,
@@ -56,6 +55,10 @@ import { AutomationRunPill } from './components/automation-run-pill';
 import { IssueSelector, ProviderLogo } from './components/issue-selector/issue-selector';
 import { PreviewServerPills } from './components/preview-servers/preview-server-pills';
 
+/** The project crumb: quieter than the task, and a link back to the project. */
+const CRUMB_LINK =
+  'rounded-sm text-foreground-passive transition-colors outline-none hover:text-foreground-muted focus-visible:ring-1 focus-visible:ring-ring';
+
 export const TaskTitlebar = observer(function TaskTitlebar() {
   const { projectId, taskId } = useTaskViewContext();
   const taskStore = getTaskStore(projectId, taskId);
@@ -83,18 +86,18 @@ const PendingTaskTitlebar = observer(function PendingTaskTitlebar({
   return (
     <Titlebar
       leftSlot={
-        <div className="flex items-center gap-1 px-2 text-sm text-foreground-muted">
-          <span className="flex items-center gap-1">
-            <button
-              type="button"
-              className="text-sm text-foreground-passive hover:text-foreground"
-              onClick={() => navigate(projectViewDef({ projectId }))}
-            >
-              {projectName}
-            </button>
-            <span className="text-sm text-foreground-passive">/</span>
-            {name}
+        <div className="flex min-w-0 items-center gap-1.5 px-2 text-xs text-foreground-muted">
+          <button
+            type="button"
+            className={CRUMB_LINK}
+            onClick={() => navigate(projectViewDef({ projectId }))}
+          >
+            {projectName}
+          </button>
+          <span aria-hidden className="text-foreground-passive">
+            /
           </span>
+          <span className="max-w-56 truncate">{name}</span>
         </div>
       }
     />
@@ -144,25 +147,27 @@ const ActiveTaskTitlebar = observer(function ActiveTaskTitlebar({
   return (
     <Titlebar
       leftSlot={
-        <div className="flex items-center gap-1 px-2">
+        <div className="flex min-w-0 items-center gap-1.5 px-2 text-xs">
           <button
             type="button"
-            className="text-sm text-foreground-passive hover:text-foreground"
+            className={CRUMB_LINK}
             onClick={() => navigate(projectViewDef({ projectId }))}
           >
             {projectName}
           </button>
-          <span className="text-sm text-foreground-passive">/</span>
+          <span aria-hidden className="text-foreground-passive">
+            /
+          </span>
           <Popover.Root>
             <Tooltip.Root>
               <Tooltip.Trigger
                 render={
-                  <Popover.Trigger className="flex items-center gap-1 text-sm text-foreground-muted hover:text-foreground">
+                  <Popover.Trigger className="-mx-1 flex h-6 items-center gap-1 rounded-sm px-1 text-foreground-muted transition-colors outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring data-popup-open:text-foreground">
                     <span className="flex min-w-0 items-center gap-1.5">
                       <span className="max-w-56 truncate">{taskDisplayName(taskStore)}</span>
                       <ConnectionStatusDot state={workspace.connectionState} />
                     </span>
-                    <ChevronDown className="size-3.5 shrink-0" />
+                    <ChevronDown className="size-3 shrink-0 text-foreground-passive" />
                   </Popover.Trigger>
                 }
               />
@@ -295,16 +300,16 @@ const ActiveTaskTitlebar = observer(function ActiveTaskTitlebar({
           {taskPayload.linkedIssue ? <LinkedIssueBadge issue={taskPayload.linkedIssue} /> : null}
           {taskPayload.type === 'task' && (
             <button
+              type="button"
+              aria-label="Pin task"
+              aria-pressed={taskPayload.isPinned}
               className={cn(
-                'text-foreground-muted ml-1',
-                taskPayload.isPinned && 'text-muted-foreground'
+                'flex size-6 items-center justify-center rounded-sm transition-colors outline-none hover:bg-foreground/8 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring',
+                taskPayload.isPinned ? 'text-foreground-muted' : 'text-foreground-passive'
               )}
               onClick={() => taskStore.setPinned(!taskPayload.isPinned)}
             >
-              <Pin
-                className={cn('size-3.5', taskPayload.isPinned && 'text-foreground-muted')}
-                fill={taskPayload.isPinned ? 'currentColor' : 'none'}
-              />
+              <Pin className="size-3.5" fill={taskPayload.isPinned ? 'currentColor' : 'none'} />
             </button>
           )}
           {taskPayload.automationRunId && (
@@ -323,7 +328,8 @@ const ActiveTaskTitlebar = observer(function ActiveTaskTitlebar({
             isRemote={isRemoteProject}
             sshConnectionId={workspace.sshConnectionId}
           />
-          <Separator orientation="vertical" className="h-5 self-center!" />
+          {/* Groups are set apart by space, not rules. */}
+          <span aria-hidden className="w-1" />
           <Tooltip.Root>
             <Tooltip.Trigger>
               <Toggle
@@ -340,7 +346,7 @@ const ActiveTaskTitlebar = observer(function ActiveTaskTitlebar({
               <BoundShortcut command="task.toggleTerminalDrawer" variant="keycaps" />
             </Tooltip.Content>
           </Tooltip.Root>
-          <Separator orientation="vertical" className="h-5 self-center!" />
+          <span aria-hidden className="w-1" />
           <ToggleGroup.Root
             value={taskView.isSidebarCollapsed ? [] : [taskView.sidebarTab]}
             onValueChange={([tab]) => {

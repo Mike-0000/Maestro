@@ -7,12 +7,15 @@ import { BoundShortcut } from '@core/primitives/keybindings/browser/shortcut';
 export function SidebarSpace() {
   const { isLeftOpen, toggleLeftSidebar } = useWorkspaceLayoutContext();
   return (
-    <div className="flex h-10 w-full items-center justify-end gap-2 px-2 [-webkit-app-region:drag]">
+    // The window's drag strip above the sidebar, level with the title bar beside it.
+    <div className="flex h-10 w-full shrink-0 items-center justify-end gap-0.5 px-2 [-webkit-app-region:drag]">
       <NavButtons />
       <Tooltip.Root>
         <Tooltip.Trigger>
           <Toggle
-            className="size-7 bg-background-tertiary-3 [-webkit-app-region:no-drag] hover:bg-background-tertiary-3 data-pressed:bg-background-tertiary-2"
+            // Open is the only state this button is seen in, so it shows no pressed fill. The
+            // `!` beats the ghost control recipe's unlayered pressed style.
+            className="size-7 bg-transparent! text-foreground-passive! [-webkit-app-region:no-drag] hover:bg-(--em-surface-hover)! hover:text-foreground!"
             size="sm"
             icon
             pressed={isLeftOpen}

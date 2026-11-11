@@ -103,7 +103,8 @@ globalStyle(':root', {
     [tokenVars.fontWeightMedium]: '500',
     [tokenVars.fontWeightSemibold]: '600',
 
-    // Primitive type size scale
+    // Primitive type size scale. The desktop app's Tailwind `text-*` utilities
+    // (apps/emdash-desktop/src/renderer/index.css) carry the same values.
     [tokenVars.textMicro]: '10px',
     [tokenVars.textMicroLineHeight]: '1.2',
     [tokenVars.textTiny]: '11px',
@@ -111,14 +112,14 @@ globalStyle(':root', {
     [tokenVars.textXs]: '12px',
     [tokenVars.textXsLineHeight]: '1.5',
     [tokenVars.textSm]: '13px',
-    [tokenVars.textSmLineHeight]: '1.5',
+    [tokenVars.textSmLineHeight]: '1.55',
     [tokenVars.textBase]: '14px',
-    [tokenVars.textBaseLineHeight]: '1.5',
-    [tokenVars.textLg]: '17px',
-    [tokenVars.textLgLineHeight]: '1.5',
-    [tokenVars.textXl]: '20px',
+    [tokenVars.textBaseLineHeight]: '1.6',
+    [tokenVars.textLg]: '16px',
+    [tokenVars.textLgLineHeight]: '1.55',
+    [tokenVars.textXl]: '21px',
     [tokenVars.textXlLineHeight]: '1.4',
-    [tokenVars.text2xl]: '24px',
+    [tokenVars.text2xl]: '26px',
     [tokenVars.text2xlLineHeight]: '1.3',
 
     // Named animation shorthands

@@ -4,6 +4,7 @@ import React from 'react';
 import { automationsViewDef } from '@core/features/automations/contributions/views';
 import { canvasViewDef } from '@core/features/canvas/contributions/views';
 import { ClaudeUsageIndicator } from '@core/features/claude-accounts/contributions/browser/claude-usage-indicator';
+import { ConductorOwnershipLine } from '@core/features/conductor/contributions/browser/conductor-ownership-line';
 import { settingsViewDef } from '@core/features/settings/contributions/views';
 import { useOpenModal } from '@core/manifests/browser/modal-api';
 import { BoundShortcut } from '@core/primitives/keybindings/browser/shortcut';
@@ -41,10 +42,10 @@ export const LeftSidebar: React.FC = observer(function LeftSidebar() {
   return (
     <div
       className={cn(
-        // Closed = unmounted (store-driven conditional rendering), so the
-        // border applies unconditionally.
-        'surface-sunken relative flex h-full flex-col border-r border-border bg-(--em-surface) text-foreground-tertiary-muted transition-colors',
-        isDragOver && 'bg-accent/10 ring-2 ring-inset ring-accent/50'
+        // The sunken surface alone sets the sidebar apart from the content: no edge line. The
+        // title bar and tab strip sit on the same surface, so the chrome reads as one piece.
+        'surface-sunken relative flex h-full flex-col bg-(--em-surface) text-foreground-muted transition-colors',
+        isDragOver && 'ring-1 ring-ring ring-inset'
       )}
       onDragOver={onDragOver}
       onDragEnter={onDragEnter}
@@ -52,14 +53,15 @@ export const LeftSidebar: React.FC = observer(function LeftSidebar() {
       onDrop={onDrop}
     >
       {isDragOver && (
-        <div className="pointer-events-none absolute inset-0 z-50 flex flex-col items-center justify-center gap-2 bg-background-tertiary/80 backdrop-blur-sm">
-          <FolderInput className="size-8 text-foreground" />
-          <span className="text-xs font-medium text-foreground">Drop to add project</span>
+        <div className="pointer-events-none absolute inset-0 z-50 flex flex-col items-center justify-center gap-2 bg-(--em-surface)/85 backdrop-blur-sm">
+          <FolderInput className="size-6 text-foreground-muted" />
+          <span className="text-sm text-foreground">Drop to add project</span>
         </div>
       )}
       <SidebarSpace />
-      <SidebarContainer className="min-h-0 w-full flex-1 border-r-0">
+      <SidebarContainer className="min-h-0 w-full flex-1">
         <SidebarContent className="flex flex-col">
+          <ConductorOwnershipLine className="shrink-0 px-5 pt-1 pb-3" />
           <SidebarPinnedTaskList />
           <SidebarGroup className="mb-0 flex min-h-0 flex-1 flex-col">
             <ProjectsGroupLabel />
@@ -113,15 +115,15 @@ export const LeftSidebar: React.FC = observer(function LeftSidebar() {
           </SidebarMenu>
         </SidebarFooter>
         <div
-          className="flex shrink-0 items-center justify-between gap-2 border-t border-border px-3"
+          className="flex shrink-0 items-center justify-between gap-2 px-3"
           style={{ height: WORKBENCH_BOTTOM_BAR_HEIGHT_PX }}
         >
           <button
             type="button"
-            className="flex h-6 w-full min-w-0 cursor-pointer items-center gap-2 rounded-lg px-3 text-sm text-foreground-muted focus:outline-none focus-visible:outline-none"
+            className="flex h-7 min-w-0 cursor-pointer items-center gap-2 rounded-md px-2 text-xs text-foreground-passive transition-colors hover:bg-(--em-surface-hover) hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none"
             onClick={() => void openFeedbackModal({})}
           >
-            <MessageSquareShare className="size-4 shrink-0" />
+            <MessageSquareShare className="size-3.5 shrink-0" />
             <span className="truncate">Give feedback</span>
           </button>
           <UpdateSection />

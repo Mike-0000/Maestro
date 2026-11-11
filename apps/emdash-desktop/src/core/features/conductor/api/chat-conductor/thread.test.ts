@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { CHAT_DIGEST_LIMITS } from './digest';
 import {
   adoptChatThreads,
   boundThread,
@@ -56,12 +57,96 @@ describe('chat conductor thread', () => {
       { ...thread, conversationId: '' },
       { ...thread, messages: undefined },
       { ...thread, messages: 'none' },
-      { ...thread, entries: [{ kind: 'note', id: '1', at, text: 'x' }] },
+      { ...thread, entries: 'none' },
       { ...thread, status: { state: 'busy', headline: 'x' } },
     ];
     for (const value of refused) {
       expect(chatConductorThreadSchema.safeParse(value).success).toBe(false);
     }
+  });
+
+  it('drops an entry it cannot read and keeps the others', () => {
+    const kept: ChatConductorEntry[] = [
+      { kind: 'developer', id: '1', at, text: 'hello' },
+      { kind: 'conductor', id: '3', at, text: 'Hi.' },
+    ];
+    const raw = {
+      ...emptyChatThread('conv-1', true),
+      entries: [kept[0], { kind: 'note', id: '2', at, text: 'from a later build' }, kept[1], 7],
+    };
+    expect(chatConductorThreadSchema.parse(raw).entries).toEqual(kept);
+    const task = {
+      ...emptyTaskThread('task-1', true),
+      entries: [{ kind: 'digest', id: '0', at, digest: { outcome: 'finished' } }, ...kept],
+    };
+    expect(conductorTaskThreadSchema.parse(task).entries).toEqual(kept);
+  });
+
+  it('reads a version 2 thread saved before digests unchanged', () => {
+    const saved = {
+      version: 2,
+      taskId: 'task-1',
+      entries: [
+        { kind: 'developer', id: '1', at, text: 'get the tests green' },
+        { kind: 'conductor', id: '2', at, text: 'On it: **running** `pnpm test`.' },
+        {
+          kind: 'action',
+          id: '3',
+          at,
+          tool: 'send_to_agent',
+          summary: 'Sent a prompt',
+          status: 'done',
+          detail: 'Run the tests.',
+        },
+        { kind: 'event', id: '4', at, text: 'Atlas finished a turn' },
+        { kind: 'error', id: '5', at, text: 'No API key.' },
+      ],
+      messages: [{ role: 'user', content: 'get the tests green' }],
+      notes: 'Goal: tests green.',
+      status: { state: 'working', headline: 'Running tests' },
+      autonomy: true,
+      chats: { 'conv-1': { lastEventKey: 'evt-1', sentToAgent: ['Run.'], promptCursor: 3 } },
+      lastChatId: 'conv-1',
+      adopted: ['conv-1'],
+      updatedAt: at,
+    };
+    const json = JSON.parse(JSON.stringify(saved)) as unknown;
+    expect(conductorTaskThreadSchema.parse(json)).toEqual(saved);
+  });
+
+  it('keeps a digest entry through bounding, with over-long fields cut', () => {
+    const digest: ChatConductorEntry = {
+      kind: 'digest',
+      id: 'dg',
+      at,
+      askedAt: '2026-11-10T09:29:00.000Z',
+      digest: {
+        outcome: 'needs_you',
+        headline: 'h'.repeat(CHAT_DIGEST_LIMITS.headline + 50),
+        did: ['a', 'b', 'c', 'd', 'e'],
+        status: 's'.repeat(CHAT_DIGEST_LIMITS.item + 50),
+        next: 'Say "go".',
+        asked: 'Fix the build.',
+        where: 'w'.repeat(CHAT_DIGEST_LIMITS.row + 50),
+        move: 'Say "go".',
+        appUrl: 'http://localhost:5173',
+      },
+    };
+    const thread = { ...emptyTaskThread('task-1', true), entries: [digest] };
+    const [bounded] = boundThread(thread).entries;
+    expect(bounded?.kind).toBe('digest');
+    if (bounded?.kind !== 'digest') return;
+    expect(bounded.id).toBe('dg');
+    expect(bounded.askedAt).toBe('2026-11-10T09:29:00.000Z');
+    expect(bounded.digest.headline).toHaveLength(CHAT_DIGEST_LIMITS.headline);
+    expect(bounded.digest.did).toEqual(['a', 'b', 'c', 'd']);
+    expect(bounded.digest.status).toHaveLength(CHAT_DIGEST_LIMITS.item);
+    expect(bounded.digest.where).toHaveLength(CHAT_DIGEST_LIMITS.row);
+    expect(bounded.digest.appUrl).toBe('http://localhost:5173');
+    // What bounding leaves is a valid thread again.
+    expect(conductorTaskThreadSchema.parse({ ...thread, entries: [bounded] }).entries).toEqual([
+      bounded,
+    ]);
   });
 
   it('keeps the newest entries and cuts long text, notes and the headline', () => {

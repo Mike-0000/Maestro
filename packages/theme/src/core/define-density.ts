@@ -64,13 +64,18 @@ const BASE_SPACE: Record<SpaceTokenName, number> = {
   'space-12': 48,
 };
 
+/**
+ * Radius scale (comfortable density): xs 4px, sm 6px, md 8px (buttons, inputs,
+ * rows), lg 12px (cards, the composer, menus), xl 16px (floating panels),
+ * 2xl 20px. The desktop app's Tailwind `rounded-*` utilities map to these.
+ */
 const BASE_RADIUS: Record<RadiusTokenName, string> = {
   radius: '0.5rem',
   'radius-xs': '0.25rem',
   'radius-sm': '0.375rem',
   'radius-md': '0.5rem',
-  'radius-lg': '0.625rem',
-  'radius-xl': '0.875rem',
+  'radius-lg': '0.75rem',
+  'radius-xl': '1rem',
   'radius-2xl': '1.25rem',
   'radius-full': '9999px',
 };

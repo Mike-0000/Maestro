@@ -193,17 +193,24 @@ describe('what the line is given', () => {
     const normal = lineInstructions('normal');
     expect(normal.startsWith(CONDUCTOR_SYSTEM_PROMPT)).toBe(true);
     expect(normal).toContain('one or two short sentences, plain words, no lists');
-    expect(normal).toContain('Before a tool that takes a moment you may say a few words');
+    expect(normal).toContain(
+      'say in a few words what you are about to do, in the future tense ("I\'ll start an agent on that.")'
+    );
+    expect(normal).toContain('then say the result once it is in');
   });
 
   it('kept short, confirms in a word or two and says nothing before a tool', () => {
     const brief = lineInstructions('brief');
     // The text conductor's "How to reply" asks for more than the voice should say.
     expect(brief).not.toContain(CONDUCTOR_REPLY_RULES);
-    expect(brief).not.toContain('you may say a few words');
+    expect(brief).not.toContain('say in a few words what you are about to do');
     expect(brief).toContain('confirm it in one to three words');
     expect(brief).toContain('say nothing before or while you call them');
+    expect(brief).toContain(
+      'one short clause of intent in the future tense is allowed before it ("Starting an agent on that.")'
+    );
     expect(brief).toContain('do not offer a next step');
+    expect(brief).toContain('("Cedar is starting on the login fix.")');
   });
 
   it('kept short, still says a failure, a cancel, and a question it needs answered', () => {

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   agentLine,
+  announcementsLine,
+  announcementsMode,
   desksLine,
   epoch,
   newestFirst,
@@ -157,6 +159,43 @@ describe('desks in the context (Canvas Pro)', () => {
     expect(agentLine(fact('Atlas', 'chorus', { desk: 'Review', region: 'Pair' }), NOW)).toContain(
       'in region Pair; on desk Review'
     );
+  });
+});
+
+describe('announcements line', () => {
+  const settings = {
+    announceCompletions: 'all',
+    attentionVerdicts: true,
+    calls: 'off',
+  } as const;
+
+  it('tells the three modes apart', () => {
+    expect(announcementsLine('all')).toBe(
+      'Announcements: all finished agents, and agents that need the developer.'
+    );
+    expect(announcementsLine('attention_only')).toBe(
+      'Announcements: only agents that need the developer; a finished agent with nothing for them is shown, not spoken.'
+    );
+    expect(announcementsLine('off')).toBe(
+      'Announcements: off; nothing is spoken when an agent finishes or needs the developer.'
+    );
+  });
+
+  it('reads the effective mode from the settings', () => {
+    expect(announcementsMode(settings)).toBe('all');
+    expect(announcementsMode({ ...settings, announceCompletions: 'attention_only' })).toBe(
+      'attention_only'
+    );
+    // attention_only takes effect only while attention verdicts tell the two apart.
+    expect(
+      announcementsMode({
+        ...settings,
+        announceCompletions: 'attention_only',
+        attentionVerdicts: false,
+      })
+    ).toBe('all');
+    expect(announcementsMode({ ...settings, calls: 'spoken' })).toBe('all');
+    expect(announcementsMode({ ...settings, calls: 'quiet' })).toBe('off');
   });
 });
 

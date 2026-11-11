@@ -4,6 +4,37 @@ This guide covers the rules and patterns for authoring styles in `packages/ui`.
 The system uses [vanilla-extract](https://vanilla-extract.style/) (VE) with CSS `@layer`
 ordering, shared recipes, and composition over inheritance.
 
+## Palette and type
+
+The default dark theme (id `dark`, class `.emdark`) is one deep, low-chroma slate ground with
+almost no lines: separate things with a surface step before reaching for a border, and let text
+do the work.
+
+- **Source of truth:** `packages/theme/src/themes/dark.theme.ts`. The app's hand-written `.emdark`
+  palette in `apps/emdash-desktop/src/renderer/index.css` aliases the generated `--em-*` values
+  (`--neutral-N: var(--em-neutral-N)`, accent roles, primary button, status), so a change there
+  reaches both kits. Run `pnpm --filter @emdash/theme build:theme` after editing it.
+- **Neutral ramp** (OKLCH, hue 230, chroma 0.004 to 0.016): 1 `0.21` background, 2 `0.23`,
+  3 `0.25` component fill and active row, 4 `0.27` hover, 5 `0.29` subtle border, 6 `0.31`
+  hairline `border`, 7 `0.45` control border, 8 `0.515` strong border, 9 `0.60` passive text
+  (4.5:1), 10 `0.66`, 11 `0.75` muted text, 12 `0.95` text.
+- **Surfaces** (dark): sunken `0.18` (sidebar, title bar, tab strip), base and paper `0.21`
+  (content), base-emphasis `0.23` (cards, composer), elevated `0.255` (menus, popovers),
+  elevated-emphasis `0.29`.
+- **Accent:** one jade-teal, OKLCH `0.718 0.10 176` (step 9), only for the focus ring, the primary
+  button, links and the working pulse; never panels or resting borders. App utilities:
+  `bg-accent`, `text-accent-foreground`, `text-link`, `ring-ring` / `outline-ring`.
+- **Type** (Inter; same values in `packages/ui/src/theme/tokens.css.ts` and the app's Tailwind
+  `text-*`): micro 10, tiny 11, xs 12/1.5, sm 13/1.55 (UI default), base 14/1.6 (reading),
+  lg 16/1.55, xl 21/1.4 weight 500 tracking -0.01em, 2xl 26/1.3. Body 400, headlines 600,
+  nothing bolder. Use `text-foreground-body` for running text a step below `foreground`.
+- **Radii** (`packages/theme/src/core/define-density.ts`; the app's `rounded-*` map to them): xs 4,
+  sm 6, md 8 (buttons, inputs, rows), lg 12 (cards, composer, menus), xl 16 (floating panels),
+  2xl 20, pills full.
+- **Borders and shadows:** one hairline (`border`) where a surface step does not already separate
+  things; `border-1` and up only for controls that must be findable by their edge. Shadows only
+  on floating layers.
+
 ## Core Principle: One Owner Per Property
 
 Every CSS property on an element should have exactly **one authoritative source** of truth.

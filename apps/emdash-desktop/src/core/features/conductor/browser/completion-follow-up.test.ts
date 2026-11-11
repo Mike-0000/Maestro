@@ -457,7 +457,7 @@ describe('completions announced only when they need the developer', () => {
 
     await announce();
 
-    expect(speech.announce).toHaveBeenCalledWith('Zulu needs permission.');
+    expect(speech.announce).toHaveBeenCalledWith('Building a todo app needs permission, on Zulu.');
     // Routing already sounded the attention notification for a waiting agent.
     expect(mocks.playNotificationSound).not.toHaveBeenCalled();
   });

@@ -2,6 +2,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { action, makeObservable, observable, runInAction } from 'mobx';
 import type { CompletionReport } from '@core/primitives/agents/api/completion-report';
 import { decideBrowserUrl } from '../../api/chat-conductor/browser-policy';
+import { digestFromInput } from '../../api/chat-conductor/digest';
 import { CHAT_NOTHING_NEW } from '../../api/chat-conductor/prompt';
 import {
   adoptChatThreads,
@@ -668,6 +669,7 @@ export class ChatConductorSession {
     for (let index = this.entries.length - 1; index >= 0; index--) {
       const entry = this.entries[index];
       if (!entry || entry.kind === 'developer' || entry.kind === 'conductor') return false;
+      if (entry.kind === 'digest') return false;
       if (entry.kind === 'error') return entry.text === text;
     }
     return false;
@@ -1129,7 +1131,7 @@ export class ChatConductorSession {
       this.persist();
     };
     try {
-      const content = await this.execute(name, parsed.data, chat, trigger, lateFailure);
+      const content = await this.execute(name, parsed.data, chat, trigger, lateFailure, show);
       if (acting && epoch === this.epoch) {
         show({
           kind: 'action',
@@ -1161,7 +1163,8 @@ export class ChatConductorSession {
     input: unknown,
     chat: ChatInfo | null,
     trigger: Trigger,
-    lateFailure: (message: string) => void
+    lateFailure: (message: string) => void,
+    show: (entry: NewEntry) => void
   ): Promise<string> {
     const { agent } = this.ports;
     // `chat` is set for every tool in CHAT_TOOLS (see `runTool`).
@@ -1233,6 +1236,13 @@ export class ChatConductorSession {
         runInAction(() => (this.notes = notes));
         this.persist();
         return 'Notes saved.';
+      }
+      case 'post_digest': {
+        const digest = digestFromInput(input as ChatConductorToolInput<'post_digest'>);
+        // ES2022 has no findLast: the newest developer entry, read from the end.
+        const asked = [...this.entries].reverse().find((entry) => entry.kind === 'developer');
+        show({ kind: 'digest', digest, askedAt: asked?.at ?? null });
+        return 'Report posted. End the turn with one short line; do not repeat the report.';
       }
       case 'open_browser': {
         const { url } = input as ChatConductorToolInput<'open_browser'>;

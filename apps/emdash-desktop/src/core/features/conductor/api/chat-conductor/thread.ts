@@ -1,5 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
+import { boundDigest, chatDigestSchema } from './digest';
 
 /**
  * A conductor's thread: what the developer sees in a chat's Conductor view (their messages, the
@@ -46,13 +47,34 @@ export const chatConductorEntrySchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('event'), ...entryBase, text: z.string() }),
   /** A turn that failed: no key, the budget, an API error. */
   z.object({ kind: z.literal('error'), ...entryBase, text: z.string() }),
+  /**
+   * The conductor's report in a fixed shape, shown as a card. `askedAt` is when the developer last
+   * wrote in the thread before it was posted, or null when they never did.
+   */
+  z.object({
+    kind: z.literal('digest'),
+    ...entryBase,
+    digest: chatDigestSchema,
+    askedAt: z.string().nullable(),
+  }),
 ]);
 export type ChatConductorEntry = z.infer<typeof chatConductorEntrySchema>;
+
+/**
+ * A thread's entries, read one by one: an entry that does not parse (a kind from a later build, a
+ * damaged one) is dropped instead of failing the whole thread, which would then read as empty.
+ */
+const threadEntriesSchema = z.array(z.unknown()).transform((items): ChatConductorEntry[] =>
+  items.flatMap((item) => {
+    const parsed = chatConductorEntrySchema.safeParse(item);
+    return parsed.success ? [parsed.data] : [];
+  })
+);
 
 export const chatConductorThreadSchema = z.object({
   version: z.literal(1),
   conversationId: z.string().min(1),
-  entries: z.array(chatConductorEntrySchema),
+  entries: threadEntriesSchema,
   /** Model history. */
   messages: z.custom<Anthropic.Beta.BetaMessageParam[]>((value) => Array.isArray(value)),
   /**
@@ -99,7 +121,7 @@ export type ConductorChatState = z.infer<typeof conductorChatStateSchema>;
 export const conductorTaskThreadSchema = z.object({
   version: z.literal(2),
   taskId: z.string().min(1),
-  entries: z.array(chatConductorEntrySchema),
+  entries: threadEntriesSchema,
   messages: z.custom<Anthropic.Beta.BetaMessageParam[]>((value) => Array.isArray(value)),
   notes: z.string(),
   status: chatConductorStatusSchema.nullable(),
@@ -197,6 +219,7 @@ function cut(text: string, max: number): string {
 
 function boundEntry(entry: ChatConductorEntry): ChatConductorEntry {
   const max = CHAT_THREAD_LIMITS.entryChars;
+  if (entry.kind === 'digest') return { ...entry, digest: boundDigest(entry.digest) };
   if (entry.kind !== 'action') {
     return entry.text.length <= max ? entry : { ...entry, text: cut(entry.text, max) };
   }

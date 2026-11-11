@@ -49,14 +49,30 @@ SidebarGroupContent.displayName = 'SidebarGroupContent';
 
 export const SidebarFooter = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
-    <div
-      ref={ref}
-      className={cn('mt-auto flex flex-col border-t px-3 py-3', className)}
-      {...props}
-    />
+    <div ref={ref} className={cn('mt-auto flex flex-col px-3 py-2', className)} {...props} />
   )
 );
 SidebarFooter.displayName = 'SidebarFooter';
+
+/** A quiet section heading ("Pinned", "Projects"): 11px passive text, sentence case. */
+export function SidebarSectionLabel({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        'cursor-default text-tiny font-normal text-foreground-passive select-none',
+        className
+      )}
+    >
+      {children}
+    </span>
+  );
+}
 
 export const SidebarMenu = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => <div ref={ref} className={cn('', className)} {...props} />
@@ -70,7 +86,8 @@ export const SidebarItemMiniButton = React.forwardRef<
   <button
     ref={ref}
     className={cn(
-      'w-6 h-6 flex items-center justify-center text-foreground-tertiary-muted hover:text-foreground-tertiary rounded-md hover:bg-background-tertiary-2 group-data-[active=true]/row:hover:bg-background-tertiary-3',
+      // A translucent step reads one level up on any row fill: rest, hover or active.
+      'flex size-6 items-center justify-center rounded-sm text-foreground-passive transition-colors hover:bg-foreground/8 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none',
       className
     )}
     onMouseDown={(e) => e.preventDefault()}
@@ -80,8 +97,14 @@ export const SidebarItemMiniButton = React.forwardRef<
 ));
 SidebarItemMiniButton.displayName = 'SidebarItemMiniButton';
 
+/**
+ * One row of the sunken sidebar. Rest is text on the sidebar's own surface; hover lifts it one
+ * surface step and the active row takes the selected step (both resolve through the
+ * `surface-sunken` scope on the sidebar root, so every theme gets its own ladder). No outlines:
+ * keyboard focus on the row's label draws one thin accent ring around the whole row.
+ */
 const sidebarMenuItemClass =
-  'flex w-full font-normal h-8 text-foreground-tertiary-muted rounded-lg items-center hover:bg-background-tertiary-1 hover:text-foreground-tertiary gap-2 px-3 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 data-[active=true]:bg-background-tertiary-2 data-[active=true]:text-foreground-tertiary';
+  'flex h-8 w-full items-center gap-2 rounded-md px-3 text-sm font-normal text-foreground-muted transition-colors hover:bg-(--em-surface-hover) hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none has-[[data-row-action]:focus-visible]:ring-1 has-[[data-row-action]:focus-visible]:ring-ring data-[active=true]:bg-(--em-surface-selected) data-[active=true]:text-foreground';
 
 interface SidebarMenuButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   isActive?: boolean;
@@ -108,8 +131,10 @@ export const SidebarMenuAction = React.forwardRef<
   <button
     ref={ref}
     type="button"
+    // The row draws the focus ring (see `sidebarMenuItemClass`), so it frames the whole row.
+    data-row-action=""
     className={cn(
-      'flex min-w-0 flex-1 items-center self-stretch rounded-md text-left text-inherit outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+      'flex min-w-0 flex-1 items-center self-stretch text-left text-inherit outline-none',
       className
     )}
     onMouseDown={(e) => e.preventDefault()}
