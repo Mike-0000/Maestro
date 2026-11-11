@@ -145,7 +145,10 @@ export const ChatConductorLayer = observer(function ChatConductorLayer({
       <div className="relative min-h-0 flex-1">
         <div
           className="absolute inset-0"
-          style={{ visibility: rawShown ? 'visible' : 'hidden' }}
+          // Never an explicit `visible`: PaneContent hides an inactive tab kind with
+          // `visibility: hidden` on an ancestor, and an explicit value here would override it,
+          // leaving this box painted over the active kind and taking its clicks.
+          style={rawShown ? undefined : { visibility: 'hidden' }}
           inert={rawShown ? undefined : true}
         >
           <PaneDimensionProvider sink={sink}>{children}</PaneDimensionProvider>
