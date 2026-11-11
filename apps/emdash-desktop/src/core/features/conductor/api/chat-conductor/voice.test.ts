@@ -17,6 +17,11 @@ describe('chat conductor voice', () => {
     expect(CHAT_VOICE_FORMS).toContain('open `http://localhost:5173` and try the login');
   });
 
+  it('ties the report to the status that decides what the developer is told', () => {
+    expect(CHAT_VOICE_FORMS).toContain('needs_you when the report waits on them');
+    expect(CHAT_VOICE_FORMS).toContain('not the report, is what tells them');
+  });
+
   it('sits the kinds of direction under the direction section, away from the notes paragraph', () => {
     const prompt = CHAT_CONDUCTOR_SYSTEM_PROMPT;
     const at = prompt.indexOf(CHAT_DIRECTION_KINDS);

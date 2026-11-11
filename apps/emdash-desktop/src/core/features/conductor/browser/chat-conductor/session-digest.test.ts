@@ -68,6 +68,7 @@ function harness(options: { thread?: ConductorTaskThread | null; autonomy?: bool
   let id = 0;
   // Each stamp a minute later, so entries can be told apart by `at`.
   let minute = 0;
+  const resolveDecision = vi.fn<ChatConductorPorts['resolveDecision']>();
   const agent = {
     chats: () => [
       { ...chat, providerLabel: 'Claude', status: snapshot?.status ?? 'not loaded', running: true },
@@ -98,6 +99,7 @@ function harness(options: { thread?: ConductorTaskThread | null; autonomy?: bool
     ),
     stop: vi.fn(async (_chatId: string) => 'Stopped.'),
     listAccounts: vi.fn((_chatId: string) => 'Claude accounts.'),
+    chatDeleted: vi.fn((_chatId: string) => false),
     receivedPrompts: vi.fn(async (_chatId: string, cursor: number | null) => ({
       prompts: [],
       cursor: (cursor ?? 0) + 1,
@@ -133,10 +135,13 @@ function harness(options: { thread?: ConductorTaskThread | null; autonomy?: bool
     newId: () => `id-${++id}`,
     warn: vi.fn(),
     eventGatherMs: 0,
+    resolveDecision,
+    announceCompletions: () => 'attention_only',
   };
   const session = new ChatConductorSession('task-1', ports);
   return {
     session,
+    resolveDecision,
     replies,
     calls,
     saved,
@@ -282,6 +287,41 @@ describe('post_digest in a chat conductor session', () => {
       kind: 'error',
       text: 'The budget is used up.',
     });
+  });
+
+  it('tells the developer of a held event through the status set with the report', async () => {
+    const h = await following();
+    h.replies.push(
+      says(
+        tool('post_digest', REPORT),
+        tool('set_status', { state: 'done', headline: REPORT.headline, notify: true })
+      ),
+      says(text('Login fix is ready to try, not merged yet.'))
+    );
+    const held = {
+      holdId: 'hold-1',
+      conversationId: 'conv-1',
+      kind: 'finished' as const,
+      completionReport: { text: 'All done, tests pass.', truncated: false, appUrls: [] },
+      decideBy: Date.UTC(2027, 0, 1),
+    };
+    expect(h.session.decide(held)).toBe(true);
+    await h.idle();
+
+    expect(digestEntries(h.session.entries)).toHaveLength(1);
+    expect(h.resolveDecision).toHaveBeenCalledTimes(1);
+    expect(h.resolveDecision).toHaveBeenCalledWith('hold-1', 'conv-1', {
+      kind: 'surface',
+      state: 'done',
+      headline: REPORT.headline,
+      notify: true,
+    });
+
+    // A report with no status tells the developer nothing of the event.
+    h.replies.push(says(tool('post_digest', REPORT)), says(text('Ready to try.')));
+    h.session.decide({ ...held, holdId: 'hold-2' });
+    await h.idle();
+    expect(h.resolveDecision).toHaveBeenLastCalledWith('hold-2', 'conv-1', { kind: 'quiet' });
   });
 
   it('keeps the digest through a save and a load', async () => {
