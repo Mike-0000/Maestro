@@ -12,6 +12,7 @@ import { ImportHeader } from './components/import-header';
 import { ImportProgress } from './components/import-progress';
 import { ImportSourceSelector } from './components/import-source-selector';
 import { ProjectConflicts } from './components/project-conflicts';
+import { OnboardingError } from './components/step-heading';
 import {
   availableSources,
   shouldCenterImportContent,
@@ -106,13 +107,10 @@ export function ImportStep({ onComplete }: { onComplete: () => void }) {
 
   const isBusy = importProgress.isImporting || startFreshMutation.isPending;
 
+  // One column: the hero line and what was found, the choices (only when there are any), then
+  // the one move with "Start fresh" as the quiet way out under it.
   return (
-    <div
-      className={cn(
-        'flex h-full min-h-0 w-full max-w-3xl flex-col gap-5 overflow-hidden p-6',
-        centerContent && 'justify-center'
-      )}
-    >
+    <div className={cn('flex w-full flex-col items-center gap-8', centerContent && 'pt-4')}>
       <ImportHeader
         isLoading={previewLoading}
         singleSource={
@@ -143,19 +141,23 @@ export function ImportStep({ onComplete }: { onComplete: () => void }) {
         onChoiceChange={updateConflictChoice}
       />
 
-      {importProgress.isImporting && <ImportProgress progress={importProgress.progress} />}
-
-      {importProgress.error && (
-        <p className="text-destructive text-center text-sm">{importProgress.error}</p>
-      )}
-      {startFreshError && <p className="text-destructive text-center text-sm">{startFreshError}</p>}
-
-      <div className="flex w-full shrink-0 flex-col gap-2">
-        <Button variant="primary" size="lg" onClick={handleImport} disabled={isBusy || !canImport}>
-          {importProgress.isImporting ? 'Importing...' : 'Import data'}
-        </Button>
-        <Button variant="ghost" onClick={handleStartFresh} disabled={isBusy}>
-          Start fresh
+      <div className="flex w-full shrink-0 flex-col items-center gap-4">
+        {importProgress.isImporting ? (
+          <ImportProgress progress={importProgress.progress} />
+        ) : (
+          <Button
+            variant="primary"
+            className="min-w-56"
+            onClick={handleImport}
+            disabled={isBusy || !canImport}
+          >
+            Import
+          </Button>
+        )}
+        {importProgress.error && <OnboardingError>{importProgress.error}</OnboardingError>}
+        {startFreshError && <OnboardingError>{startFreshError}</OnboardingError>}
+        <Button variant="text" className="mt-1" onClick={handleStartFresh} disabled={isBusy}>
+          {startFreshMutation.isPending ? 'Starting fresh…' : 'Start fresh instead'}
         </Button>
       </div>
     </div>

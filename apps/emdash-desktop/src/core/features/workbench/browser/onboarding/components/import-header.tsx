@@ -1,9 +1,9 @@
-import { Import } from 'lucide-react';
 import type {
   LegacyImportSource,
   LegacyPortPreviewSource,
 } from '@core/primitives/legacy-port/api/legacy-port';
-import { formatCount, sourceLabel } from './import-format';
+import { formatCount } from './import-format';
+import { OnboardingStepHeading } from './step-heading';
 
 export type SingleSourceImport = {
   source: LegacyImportSource;
@@ -15,40 +15,19 @@ export type ImportHeaderProps = {
   singleSource?: SingleSourceImport | null;
 };
 
-function singleSourceTitle(source: LegacyImportSource): string {
-  return `Import your Emdash ${sourceLabel(source)} data`;
-}
-
 function singleSourceDescription(preview: LegacyPortPreviewSource): string {
   return `Found ${formatCount(preview.projects, 'project')} and ${formatCount(
     preview.tasks,
     'task'
-  )} from your previous Emdash installation`;
+  )} from an earlier version on this computer.`;
 }
 
 export function ImportHeader({ isLoading, singleSource = null }: ImportHeaderProps) {
-  const title = singleSource
-    ? singleSourceTitle(singleSource.source)
-    : 'Do you want to import projects and tasks from other Emdash versions?';
-  const description = singleSource
-    ? singleSourceDescription(singleSource.preview)
-    : 'Select one or more sources.';
+  const description = isLoading
+    ? 'Looking for data from an earlier version…'
+    : singleSource
+      ? singleSourceDescription(singleSource.preview)
+      : 'Found data from two earlier versions. Choose what to bring over.';
 
-  return (
-    <div className="flex shrink-0 flex-col items-center justify-center gap-4">
-      <div className="flex flex-col items-center justify-center gap-5">
-        <Import className="h-10 w-10" absoluteStrokeWidth strokeWidth={1.5} />
-        <div className="flex flex-col items-center justify-center gap-2">
-          <h1 className="text-center text-xl">{title}</h1>
-          {isLoading ? (
-            <p className="text-md text-center text-foreground-muted">
-              Scanning existing Emdash data...
-            </p>
-          ) : (
-            <p className="text-md text-center text-foreground-muted">{description}</p>
-          )}
-        </div>
-      </div>
-    </div>
-  );
+  return <OnboardingStepHeading title="Bring your projects over" description={description} />;
 }

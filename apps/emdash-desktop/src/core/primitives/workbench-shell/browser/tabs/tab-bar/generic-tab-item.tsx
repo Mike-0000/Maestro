@@ -203,13 +203,14 @@ export const GenericTabItem = observer(function GenericTabItem({
 });
 
 /**
- * Generic drag ghost for any tab kind.
+ * Generic drag ghost for any tab kind: the tab lifted one surface step, with a hairline instead
+ * of a shadow (dark draws none), at the tab's own height.
  */
 export function GenericTabDragPreview({ preSlot, label }: { preSlot?: ReactNode; label: string }) {
   return (
-    <div className="surface-elevated flex cursor-grabbing items-center gap-1.5 rounded-md border border-border bg-(--em-surface) px-2.5 py-1 text-sm text-foreground opacity-90 shadow-lg">
+    <div className="surface-elevated flex h-8 cursor-grabbing items-center gap-1.5 rounded-md bg-surface px-3 text-sm text-foreground ring-1 ring-border-subtle">
       {preSlot}
-      <span className="max-w-[200px] truncate">{label}</span>
+      <span className="max-w-50 truncate">{label}</span>
     </div>
   );
 }

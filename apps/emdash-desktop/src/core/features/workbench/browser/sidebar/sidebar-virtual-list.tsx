@@ -362,8 +362,9 @@ function DragOverlayContent({ dndId }: { dndId: string }) {
   const parsed = parseDndId(dndId);
   if (!parsed) return null;
   return (
+    // The lifted row floats one surface step up with a hairline (no shadow: dark draws none).
     <div className="px-3">
-      <div className="rounded-lg bg-background-tertiary-2 shadow-md">
+      <div className="surface-elevated cursor-grabbing rounded-md bg-surface ring-1 ring-border-subtle">
         {parsed.kind === 'project' ? (
           <SidebarProjectItem projectId={parsed.projectId} />
         ) : (
@@ -392,14 +393,15 @@ function InsertionIndicator({ pointerY }: { pointerY: number | null }) {
   const isAbove = isCursorAbove(pointerY, active.rect.current.translated, overRect);
   const top = isAbove ? overRect.top : overRect.top + overRect.height;
   return createPortal(
+    // The same 2px foreground rule the tab strip uses to show where a drop lands.
     <div
-      className="bg-primary"
+      className="bg-foreground"
       style={{
         position: 'fixed',
         left: overRect.left + 8,
-        top: top - 1.5,
+        top: top - 1,
         width: Math.max(0, overRect.width - 16),
-        height: 3,
+        height: 2,
         borderRadius: 2,
         pointerEvents: 'none',
         zIndex: 9999,

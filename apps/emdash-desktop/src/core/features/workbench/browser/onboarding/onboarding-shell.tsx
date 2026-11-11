@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
+import { ChorusMark } from '@core/primitives/app-identity/browser/chorus-logo';
 import { cn } from '@core/primitives/styling/browser/cn';
 import { ImportStep } from './import-step';
 import { SignInStep } from './sign-in-step';
@@ -19,29 +20,40 @@ const stepConfig: Record<
   },
 };
 
-function StepHeader({
-  label,
-  isActive,
-  isLast,
-}: {
-  label: string;
-  isActive: boolean;
-  isLast: boolean;
-}) {
+/**
+ * Where the setup is: the step names in the caption role joined by short rules, the current one
+ * at full strength and finished ones muted. Shown only when there is more than one step.
+ */
+function StepTrail({ steps, activeIndex }: { steps: OnboardingStep[]; activeIndex: number }) {
   return (
-    <div
-      aria-current={isActive ? 'step' : undefined}
-      className={cn(
-        'text-md border-r px-5 py-3',
-        isActive ? 'bg-background-1 text-primary' : 'text-foreground-muted',
-        isLast && 'border-r-0'
-      )}
-    >
-      {label}
-    </div>
+    <ol aria-label="Setup steps" className="flex items-center gap-3 text-tiny select-none">
+      {steps.map((step, index) => (
+        <Fragment key={step}>
+          {index > 0 && <li aria-hidden className="h-px w-6 bg-border" />}
+          <li
+            aria-current={index === activeIndex ? 'step' : undefined}
+            className={cn(
+              'tabular-nums transition-colors',
+              index === activeIndex
+                ? 'text-foreground'
+                : index < activeIndex
+                  ? 'text-foreground-muted'
+                  : 'text-foreground-passive'
+            )}
+          >
+            {index + 1}&ensp;{stepConfig[step].label}
+          </li>
+        </Fragment>
+      ))}
+    </ol>
   );
 }
 
+/**
+ * First-run setup: one centred column on the plain content surface. The app's mark sits at the
+ * top, the step trail under it, and each step below brings its own hero line, one sentence and
+ * one move. No frame, tabs or boxes: the steps read as one calm page.
+ */
 export function OnboardingShell({
   steps,
   onComplete,
@@ -63,18 +75,17 @@ export function OnboardingShell({
   };
 
   return (
-    <div className="mx-auto flex h-full max-h-[70vh] min-h-0 w-full max-w-5xl flex-col items-start justify-center [-webkit-app-region:no-drag]">
-      <div className="flex flex-row border border-b-0">
-        {steps.map((step, index) => (
-          <StepHeader
-            key={step}
-            label={stepConfig[step].label}
-            isLast={index === steps.length - 1}
-            isActive={step === activeStep}
-          />
-        ))}
-      </div>
-      <div className="flex h-full min-h-0 w-full flex-col items-center justify-center border bg-background-1">
+    <div className="my-auto flex w-full max-w-lg flex-col items-center py-16 [-webkit-app-region:no-drag]">
+      <ChorusMark size={40} animated={false} />
+      {steps.length > 1 && (
+        <div className="mt-6">
+          <StepTrail steps={steps} activeIndex={activeIndex} />
+        </div>
+      )}
+      <div
+        key={activeStep}
+        className="mt-10 flex w-full flex-col items-center motion-safe:animate-in motion-safe:duration-300 motion-safe:fade-in"
+      >
         <StepComponent onComplete={handleStepComplete} />
       </div>
     </div>

@@ -11,9 +11,9 @@ import {
   type PaletteProviderQuery,
   type PaletteProviderRenderProps,
 } from '@core/primitives/palette/api';
+import { PALETTE_ITEM_CLASS } from '@core/primitives/palette/browser/palette-item-styles';
 import type { WorkspaceFileHit, WorkspaceFileSearchQuery } from '@core/primitives/search/api';
 import { openCommandPaletteFile } from '../../browser/command-palette/open-command-palette-file';
-import { PALETTE_ITEM_CLASS } from '../../browser/command-palette/palette-item-styles';
 
 const FILE_SEARCH_LIMIT = 20;
 
@@ -97,10 +97,13 @@ function FilePaletteProviderRow({
       }
       className={PALETTE_ITEM_CLASS}
     >
-      <FileIcon filename={match.title} size={14} />
+      <FileIcon filename={match.title} size={16} />
       <span className="flex min-w-0 flex-1 items-baseline gap-2 overflow-hidden">
-        <span className="shrink-0">{match.title}</span>
-        <span className="truncate text-xs text-foreground/40">{match.subtitle}</span>
+        <span className="max-w-[60%] shrink-0 truncate">{match.title}</span>
+        <span className="min-w-0 truncate text-xs text-foreground-passive" dir="rtl">
+          {/* Long paths keep their tail (the folder nearest the file) in view. */}
+          <bdi>{match.subtitle}</bdi>
+        </span>
       </span>
     </Command.Item>
   );

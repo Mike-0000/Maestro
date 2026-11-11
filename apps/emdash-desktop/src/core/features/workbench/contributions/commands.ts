@@ -22,7 +22,7 @@ export const newProjectCommand = defineCommand({
 
 export const newTaskCommand = defineCommand({
   id: 'app.newTask',
-  title: 'New Conductor',
+  title: 'New conductor',
   description: 'Create a new conductor in this project',
   category: 'App',
   icon: 'square-plus',
@@ -34,7 +34,7 @@ export const newTaskCommand = defineCommand({
 export const giveFeedbackCommand = defineCommand({
   id: 'app.giveFeedback',
   title: 'Give Feedback',
-  description: 'Send feedback to the emdash team',
+  description: 'Send feedback about Maestro',
   category: 'App',
   icon: 'message-square-share',
 });

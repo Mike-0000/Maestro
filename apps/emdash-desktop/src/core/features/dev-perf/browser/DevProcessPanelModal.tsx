@@ -1,4 +1,4 @@
-import { Button, Switch } from '@emdash/ui/react/primitives';
+import { Button, Dialog, Switch } from '@emdash/ui/react/primitives';
 import React, { useEffect, useState } from 'react';
 import { defineModal } from '@core/primitives/modals/react';
 import { captureDevPerfTrace } from '../api/browser/capture-trace';
@@ -62,89 +62,97 @@ export function DevProcessPanelModal() {
     await client.setVerboseSpawnLogging({ enabled });
   };
 
+  // A dev-only tool, in the standard dialog anatomy: the title and one sentence, a toolbar line
+  // (trace capture as a text action, the logging switch), then a dense table. Rows separate with
+  // the hairline dense tables may use; numbers are mono and tabular.
   return (
-    <div className="flex min-h-0 flex-col gap-3 p-4">
-      <h2 className="text-sm font-semibold">Process Panel</h2>
-
-      <div className="flex items-center gap-4">
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          onClick={() => void handleCaptureTrace()}
-          disabled={trace.kind === 'recording'}
-        >
-          {trace.kind === 'recording' ? 'Recording trace (10 s)…' : 'Capture trace (10 s)'}
-        </Button>
-        <label className="flex items-center gap-2 text-xs">
-          <Switch
-            checked={spawnLogging}
-            onCheckedChange={(checked) => void handleSpawnLoggingChange(checked)}
-          />
-          Verbose spawn logging
-        </label>
-      </div>
-
-      {trace.kind === 'done' && (
-        <p className="text-muted-foreground font-mono text-[11px] break-all select-text">
-          Trace written to {trace.path}
-        </p>
-      )}
-      {trace.kind === 'error' && (
-        <p className="text-destructive text-xs">Trace capture failed: {trace.message}</p>
-      )}
-
-      {!supported && (
-        <p className="text-muted-foreground text-xs">
-          Process snapshots are not supported on this platform.
-        </p>
-      )}
-
-      {processes === null ? (
-        <p className="text-muted-foreground text-xs">Loading…</p>
-      ) : (
-        <div className="max-h-[55dvh] overflow-y-auto rounded border">
-          <table className="w-full text-left font-mono text-xs">
-            <thead className="bg-muted/50 sticky top-0">
-              <tr>
-                <th className="px-2 py-1 font-medium">Process</th>
-                <th className="w-16 px-2 py-1 text-right font-medium">PID</th>
-                <th className="w-16 px-2 py-1 text-right font-medium">CPU %</th>
-                <th className="w-24 px-2 py-1 text-right font-medium">Memory</th>
-              </tr>
-            </thead>
-            <tbody>
-              {processes.map((processInfo) => (
-                <tr key={processInfo.pid} className="border-t">
-                  <td
-                    className="max-w-0 truncate px-2 py-0.5"
-                    style={{ paddingLeft: `${8 + processInfo.depth * 16}px` }}
-                    title={processInfo.command}
-                  >
-                    {processInfo.command}
-                  </td>
-                  <td className="px-2 py-0.5 text-right">{processInfo.pid}</td>
-                  <td className="px-2 py-0.5 text-right">{processInfo.cpuPercent.toFixed(1)}</td>
-                  <td className="px-2 py-0.5 text-right">{formatMemory(processInfo.rssBytes)}</td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="bg-muted/50 border-t">
-                <td className="px-2 py-1 font-medium">Total ({processes.length} processes)</td>
-                <td />
-                <td className="px-2 py-1 text-right font-medium">
-                  {totalOf(processes, ({ cpuPercent }) => cpuPercent).toFixed(1)}
-                </td>
-                <td className="px-2 py-1 text-right font-medium">
-                  {formatMemory(totalOf(processes, ({ rssBytes }) => rssBytes))}
-                </td>
-              </tr>
-            </tfoot>
-          </table>
+    <>
+      <Dialog.Header>
+        <Dialog.Title>Processes</Dialog.Title>
+        <Dialog.Description>
+          The app's process tree, refreshed while this panel is open.
+        </Dialog.Description>
+      </Dialog.Header>
+      <Dialog.Body>
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <Button
+            type="button"
+            variant="text"
+            onClick={() => void handleCaptureTrace()}
+            disabled={trace.kind === 'recording'}
+          >
+            {trace.kind === 'recording' ? 'Recording trace (10 s)…' : 'Capture trace (10 s)'}
+          </Button>
+          <label className="flex items-center gap-2 text-sm text-foreground-muted">
+            <Switch
+              checked={spawnLogging}
+              onCheckedChange={(checked) => void handleSpawnLoggingChange(checked)}
+            />
+            Verbose spawn logging
+          </label>
         </div>
-      )}
-    </div>
+
+        {trace.kind === 'done' && (
+          <p className="font-mono text-tiny break-all text-foreground-muted select-text">
+            Trace written to {trace.path}
+          </p>
+        )}
+        {trace.kind === 'error' && (
+          <p className="text-xs text-foreground-error">Trace capture failed: {trace.message}</p>
+        )}
+
+        {!supported && (
+          <p className="text-xs text-foreground-muted">
+            Process snapshots are not supported on this platform.
+          </p>
+        )}
+
+        {processes === null ? (
+          <p className="text-xs text-foreground-muted">Loading…</p>
+        ) : (
+          <div className="max-h-[55dvh] overflow-y-auto">
+            <table className="w-full text-left text-xs tabular-nums">
+              <thead className="sticky top-0 bg-surface">
+                <tr className="text-tiny text-foreground-passive">
+                  <th className="h-8 px-2 font-normal">Process</th>
+                  <th className="h-8 w-16 px-2 text-right font-normal">PID</th>
+                  <th className="h-8 w-16 px-2 text-right font-normal">CPU %</th>
+                  <th className="h-8 w-24 px-2 text-right font-normal">Memory</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border-subtle font-mono text-foreground-muted">
+                {processes.map((processInfo) => (
+                  <tr key={processInfo.pid} className="transition-colors hover:bg-surface-hover">
+                    <td
+                      className="h-7 max-w-0 truncate px-2 text-foreground"
+                      style={{ paddingLeft: `${8 + processInfo.depth * 16}px` }}
+                      title={processInfo.command}
+                    >
+                      {processInfo.command}
+                    </td>
+                    <td className="px-2 text-right">{processInfo.pid}</td>
+                    <td className="px-2 text-right">{processInfo.cpuPercent.toFixed(1)}</td>
+                    <td className="px-2 text-right">{formatMemory(processInfo.rssBytes)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot className="sticky bottom-0 bg-surface">
+                <tr className="text-foreground">
+                  <td className="h-8 px-2 font-medium">Total ({processes.length} processes)</td>
+                  <td />
+                  <td className="px-2 text-right font-mono font-medium">
+                    {totalOf(processes, ({ cpuPercent }) => cpuPercent).toFixed(1)}
+                  </td>
+                  <td className="px-2 text-right font-mono font-medium">
+                    {formatMemory(totalOf(processes, ({ rssBytes }) => rssBytes))}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </Dialog.Body>
+    </>
   );
 }
 

@@ -101,24 +101,29 @@ export const SidebarHostConversationItem = observer(function SidebarHostConversa
     }
   };
 
+  // One line under the project's tasks, indented like them: a passive chat glyph marks it as a
+  // conversation rather than a task, the title stays muted (it is not running here), and
+  // "Resume" shows on hover or focus. While resuming, the row dims and says so.
   return (
     <SidebarMenuRow
-      className={cn(
-        'group/row flex h-8 items-center justify-between gap-1 px-1 py-1.5 pl-8',
-        busy && 'opacity-60'
-      )}
+      className={cn('group/row h-8 gap-2 pr-2 pl-8', busy && 'opacity-60')}
       title={`${title} · ${conversation.workspacePath}`}
       onMouseDown={(e) => e.preventDefault()}
       onClick={() => void resume()}
     >
       <SidebarMenuAction
         aria-label={`Resume conversation ${title}`}
-        className="gap-1.5 overflow-hidden"
+        className="gap-2 overflow-hidden"
       >
-        <MessageSquareIcon className="size-3.5 shrink-0 opacity-70" />
-        <span className="min-w-0 truncate text-left italic">{title}</span>
+        <MessageSquareIcon className="size-3.5 shrink-0 text-foreground-passive" />
+        <span className="min-w-0 truncate text-left">{title}</span>
       </SidebarMenuAction>
-      <span className="ml-2 shrink-0 pr-1 text-xs text-foreground-passive">
+      <span
+        className={cn(
+          'shrink-0 text-tiny text-foreground-passive',
+          !busy && 'hidden group-focus-within/row:inline group-hover/row:inline'
+        )}
+      >
         {busy ? 'Resuming…' : 'Resume'}
       </span>
     </SidebarMenuRow>

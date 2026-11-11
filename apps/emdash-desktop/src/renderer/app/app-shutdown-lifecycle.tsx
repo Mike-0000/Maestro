@@ -146,12 +146,15 @@ function ShutdownOverlay() {
       aria-modal="true"
       aria-label="Shutting down Maestro"
       tabIndex={-1}
-      className="fixed inset-0 z-9999 flex items-center justify-center bg-background/95"
+      // The app's own content surface covers everything while it closes: a passive spinner, one
+      // line of what is happening and one muted line of why it takes a moment.
+      className="fixed inset-0 z-9999 flex items-center justify-center bg-background outline-none motion-safe:animate-in motion-safe:duration-300 motion-safe:fade-in"
     >
-      <div className="flex flex-col items-center gap-3">
-        <Spinner />
-        <p className="text-muted-foreground text-sm">
-          Shutting down — stopping sessions and saving state…
+      <div className="flex flex-col items-center text-center">
+        <Spinner className="text-foreground-passive" />
+        <p className="mt-4 text-sm text-foreground">Shutting down…</p>
+        <p className="mt-1 text-xs text-foreground-muted">
+          Stopping sessions and saving your layout.
         </p>
       </div>
     </div>

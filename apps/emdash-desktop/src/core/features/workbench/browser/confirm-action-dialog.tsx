@@ -15,6 +15,11 @@ export type ConfirmActionDialogArgs = {
 
 export type ConfirmActionDialogResult = { checked: boolean } | undefined;
 
+/**
+ * The generic "are you sure?" dialog (design brief 2.9): the question as the title, what it
+ * means in one muted sentence under it, an optional extra choice, then Cancel and the one move.
+ * A destructive move uses the destructive button, which only appears inside its confirm dialog.
+ */
 export function ConfirmActionDialog({
   title,
   description,
@@ -29,18 +34,23 @@ export function ConfirmActionDialog({
     <>
       <Dialog.Header showCloseButton={false}>
         <Dialog.Title>{title}</Dialog.Title>
+        {typeof description === 'string' ? (
+          <Dialog.Description>{description}</Dialog.Description>
+        ) : (
+          // Rich descriptions may hold block content, which a <p> cannot.
+          <div className="text-sm text-foreground-muted">{description}</div>
+        )}
       </Dialog.Header>
-      <Dialog.Body className="flex flex-col gap-3 pt-0">
-        {typeof description === 'string' ? <p>{description}</p> : description}
-        {checkbox && (
-          <label className="flex cursor-pointer items-center gap-2 text-sm">
+      {checkbox && (
+        <Dialog.Body>
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-foreground">
             <Checkbox checked={checked} onCheckedChange={(value) => setChecked(Boolean(value))} />
             {checkbox.label}
           </label>
-        )}
-      </Dialog.Body>
+        </Dialog.Body>
+      )}
       <Dialog.Footer>
-        <Button variant="secondary" onClick={controller.dismiss}>
+        <Button variant="ghost" onClick={controller.dismiss}>
           Cancel
         </Button>
         <ConfirmButton
@@ -57,5 +67,5 @@ export function ConfirmActionDialog({
 export const confirmActionModal = defineModal<ConfirmActionDialogResult>()({
   id: 'confirmActionModal',
   component: ConfirmActionDialog,
-  size: 'xs',
+  size: 'sm',
 });

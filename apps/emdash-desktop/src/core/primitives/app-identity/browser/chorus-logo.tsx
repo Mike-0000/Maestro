@@ -5,7 +5,9 @@ const BARS = [0.42, 0.72, 1, 0.62, 0.34] as const;
 
 /**
  * The Maestro mark: five rounded bars, a chord of agents and a voice meter at once. Bars breathe
- * gently unless the user prefers reduced motion.
+ * gently unless the user prefers reduced motion. Its colours are the app icon's
+ * (`assets/images/chorus/chorus.png`), so they are literal on purpose: a brand mark, the one
+ * place the redesign keeps hard-coded colour.
  */
 export function ChorusMark({
   size = 32,

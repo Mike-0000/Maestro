@@ -14,15 +14,14 @@ export function UnsavedChangesDialog({ fileName }: UnsavedChangesDialogArgs) {
   return (
     <>
       <Dialog.Header showCloseButton={false}>
-        <Dialog.Title>Unsaved Changes</Dialog.Title>
+        <Dialog.Title>Save your changes?</Dialog.Title>
+        <Dialog.Description>
+          <span className="font-medium break-all text-foreground">{fileName}</span> has changes that
+          are not saved. Discarding them cannot be undone.
+        </Dialog.Description>
       </Dialog.Header>
-      <Dialog.Body className="pt-0">
-        <p>
-          Do you want to save the changes to <strong>{fileName}</strong>?
-        </p>
-      </Dialog.Body>
       <Dialog.Footer>
-        <Button variant="secondary" onClick={() => controller.complete('discard')}>
+        <Button variant="ghost" onClick={() => controller.complete('discard')}>
           Discard
         </Button>
         <Button variant="primary" onClick={() => controller.complete('save')}>
@@ -36,5 +35,5 @@ export function UnsavedChangesDialog({ fileName }: UnsavedChangesDialogArgs) {
 export const unsavedChangesModal = defineModal<UnsavedChangesDialogResult>()({
   id: 'unsavedChangesModal',
   component: UnsavedChangesDialog,
-  size: 'xs',
+  size: 'sm',
 });

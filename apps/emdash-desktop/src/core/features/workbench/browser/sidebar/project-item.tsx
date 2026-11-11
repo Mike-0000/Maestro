@@ -307,7 +307,7 @@ export const SidebarProjectItem = observer(function SidebarProjectItem({
             <Tooltip.Content>
               {createDisabledReason ?? (
                 <>
-                  New Conductor
+                  New conductor
                   <BoundShortcut command="app.newTask" variant="keycaps" />
                 </>
               )}

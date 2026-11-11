@@ -9,8 +9,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Maestro Recovery</title>
     <style>
+      /*
+       * This window loads before (and without) the app's styles, under a strict CSP, so the
+       * palette is copied here as literal values from the generated theme
+       * (packages/theme/src/__generated__/semantic.css): the dark slate ground and jade
+       * primary, mirrored for light. Keep them in step with the theme when it changes.
+       */
       :root {
-        color-scheme: light dark;
+        color-scheme: dark;
+        --bg: color(display-p3 0.0758 0.0995 0.1141);
+        --well: color(display-p3 0.1102 0.1366 0.153);
+        --hover: color(display-p3 0.1272 0.1559 0.1737);
+        --fg: color(display-p3 0.9269 0.9366 0.9426);
+        --muted: color(display-p3 0.6616 0.6866 0.7023);
+        --passive: color(display-p3 0.5171 0.5499 0.5704);
+        --error: color(display-p3 0.871 0.4316 0.4136);
+        --ring: color(display-p3 0.3562 0.5739 0.5124);
+        --primary: color(display-p3 0.4372 0.7152 0.6375);
+        --primary-hover: color(display-p3 0.4983 0.7651 0.6888);
+        --primary-ink: color(display-p3 0.125 0.125 0.125);
         font-family:
           Inter,
           ui-sans-serif,
@@ -19,8 +36,26 @@
           BlinkMacSystemFont,
           'Segoe UI',
           sans-serif;
-        background: Canvas;
-        color: CanvasText;
+        font-size: 13px;
+        line-height: 1.55;
+        background: var(--bg);
+        color: var(--fg);
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          color-scheme: light;
+          --bg: color(display-p3 0.9888 0.9947 0.9984);
+          --well: color(display-p3 0.9596 0.9692 0.9753);
+          --hover: color(display-p3 0.9355 0.9475 0.9551);
+          --fg: color(display-p3 0.0743 0.0944 0.1069);
+          --muted: color(display-p3 0.2692 0.2967 0.3139);
+          --passive: color(display-p3 0.3989 0.4282 0.4464);
+          --error: color(display-p3 0.8394 0.4028 0.3867);
+          --ring: color(display-p3 0.2944 0.5701 0.497);
+          --primary: color(display-p3 0.1887 0.4494 0.3839);
+          --primary-hover: color(display-p3 0.15 0.3953 0.3349);
+          --primary-ink: #ffffff;
+        }
       }
       * {
         box-sizing: border-box;
@@ -30,78 +65,162 @@
         min-height: 100vh;
         display: grid;
         place-items: center;
-        padding: 28px;
+        padding: 32px 24px;
+        -webkit-font-smoothing: antialiased;
       }
       main {
-        width: min(100%, 520px);
+        width: min(100%, 440px);
+      }
+      .dot {
+        display: block;
+        width: 8px;
+        height: 8px;
+        border-radius: 9999px;
+        background: var(--error);
       }
       h1 {
-        margin: 0 0 10px;
-        font-size: 24px;
+        margin: 20px 0 0;
+        font-size: 26px;
+        line-height: 1.3;
+        font-weight: 500;
+        letter-spacing: -0.01em;
+        text-wrap: balance;
       }
       p {
-        margin: 0 0 18px;
-        color: color-mix(in srgb, CanvasText 72%, transparent);
-        line-height: 1.5;
+        margin: 12px 0 0;
+        color: var(--muted);
+        line-height: 1.6;
       }
       #status {
-        min-height: 24px;
-        margin-bottom: 14px;
-        font-size: 13px;
+        min-height: 18px;
+        margin-top: 20px;
+        font-size: 12px;
+        color: var(--passive);
+        font-variant-numeric: tabular-nums;
       }
       progress {
+        display: block;
         width: 100%;
-        margin: 0 0 16px;
+        height: 4px;
+        margin: 10px 0 0;
+        border: 0;
+        border-radius: 9999px;
+        background: var(--well);
+        appearance: none;
+        overflow: hidden;
+      }
+      progress[hidden] {
+        display: none;
+      }
+      progress::-webkit-progress-bar {
+        background: var(--well);
+      }
+      progress::-webkit-progress-value {
+        background: var(--muted);
+        border-radius: 9999px;
       }
       .actions {
         display: flex;
         flex-wrap: wrap;
-        gap: 8px;
-        margin-bottom: 16px;
+        align-items: center;
+        gap: 4px;
+        margin-top: 20px;
       }
       button {
-        border: 1px solid color-mix(in srgb, CanvasText 22%, transparent);
-        border-radius: 7px;
-        padding: 8px 12px;
-        background: color-mix(in srgb, Canvas 92%, CanvasText);
-        color: CanvasText;
-        cursor: pointer;
+        height: 32px;
+        border: 0;
+        border-radius: 8px;
+        padding: 0 12px;
+        background: transparent;
+        color: var(--muted);
+        font: inherit;
+        cursor: default;
+        transition:
+          background-color 150ms,
+          color 150ms;
+      }
+      button:hover {
+        background: var(--hover);
+        color: var(--fg);
       }
       button.primary {
-        background: #2563eb;
-        border-color: #2563eb;
-        color: white;
+        margin-right: 8px;
+        background: var(--primary);
+        color: var(--primary-ink);
+        font-weight: 500;
+      }
+      button.primary:hover {
+        background: var(--primary-hover);
+      }
+      button:focus-visible,
+      summary:focus-visible {
+        outline: 2px solid var(--ring);
+        outline-offset: 1px;
       }
       button:disabled {
-        cursor: default;
         opacity: 0.5;
+        pointer-events: none;
       }
       details {
-        margin-top: 8px;
-        font-size: 12px;
+        margin-top: 36px;
+      }
+      summary {
+        width: fit-content;
+        border-radius: 6px;
+        color: var(--muted);
+        cursor: default;
+        list-style: none;
+      }
+      summary::-webkit-details-marker {
+        display: none;
+      }
+      summary::before {
+        content: '\203A';
+        display: inline-block;
+        width: 14px;
+        color: var(--passive);
+        transition: transform 150ms;
+      }
+      details[open] summary::before {
+        transform: rotate(90deg);
+      }
+      summary:hover {
+        color: var(--fg);
       }
       pre {
-        max-height: 110px;
+        max-height: 140px;
+        margin: 8px 0 0;
         overflow: auto;
         white-space: pre-wrap;
         overflow-wrap: anywhere;
-        padding: 10px;
-        border-radius: 6px;
-        background: color-mix(in srgb, CanvasText 7%, transparent);
+        padding: 10px 12px;
+        border-radius: 8px;
+        background: var(--well);
+        color: var(--muted);
+        font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+        font-size: 12px;
+        user-select: text;
       }
       footer {
-        margin-top: 16px;
+        margin-top: 24px;
         font-size: 11px;
-        color: color-mix(in srgb, CanvasText 55%, transparent);
+        color: var(--passive);
+        font-variant-numeric: tabular-nums;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          transition: none !important;
+        }
       }
     </style>
   </head>
   <body>
     <main>
-      <h1>Something went wrong</h1>
+      <span class="dot" aria-hidden="true"></span>
+      <h1>Maestro couldn’t start</h1>
       <p>
-        Emdash could not finish starting. You can check for an update, restart Emdash, or open the
-        logs for more information.
+        Something stopped the app before it finished opening. Check for an update, restart Maestro,
+        or open the logs to see what happened.
       </p>
       <div id="status" role="status"></div>
       <progress id="progress" max="100" value="0" hidden></progress>

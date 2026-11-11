@@ -106,7 +106,7 @@ function AppContent() {
   };
 
   return (
-    <Tooltip.Provider delay={300}>
+    <Tooltip.Provider delay={400}>
       <WorkspaceLayoutContextProvider>
         <TerminalPoolProvider>
           <IntegrationsProvider>

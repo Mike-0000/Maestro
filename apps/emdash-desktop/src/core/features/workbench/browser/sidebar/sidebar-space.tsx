@@ -11,18 +11,20 @@ export function SidebarSpace() {
     <div className="flex h-10 w-full shrink-0 items-center justify-end gap-0.5 px-2 [-webkit-app-region:drag]">
       <NavButtons />
       <Tooltip.Root>
-        <Tooltip.Trigger>
-          <Toggle
-            // Open is the only state this button is seen in, so it shows no pressed fill. The
-            // `!` beats the ghost control recipe's unlayered pressed style.
-            className="size-7 bg-transparent! text-foreground-passive! [-webkit-app-region:no-drag] hover:bg-(--em-surface-hover)! hover:text-foreground!"
-            size="sm"
-            icon
-            pressed={isLeftOpen}
-            onPressedChange={() => toggleLeftSidebar()}
-          >
-            <PanelLeft className="h-4 w-4" />
-          </Toggle>
+        <Tooltip.Trigger
+          render={
+            <Toggle
+              // Open is the only state this button is seen in, so it shows no pressed fill: it
+              // reads like the nav arrows beside it, a passive glyph that lifts on hover.
+              className="bg-transparent text-foreground-passive [-webkit-app-region:no-drag] hover:bg-surface-hover hover:text-foreground"
+              size="sm"
+              icon
+              pressed={isLeftOpen}
+              onPressedChange={() => toggleLeftSidebar()}
+            />
+          }
+        >
+          <PanelLeft className="size-4" />
         </Tooltip.Trigger>
         <Tooltip.Content>
           Toggle left sidebar

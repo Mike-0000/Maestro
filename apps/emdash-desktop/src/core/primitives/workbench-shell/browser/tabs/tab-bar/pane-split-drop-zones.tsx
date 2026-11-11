@@ -21,6 +21,13 @@ export function PaneSplitDropZones({ paneId }: { paneId: string }) {
   );
 }
 
+/**
+ * Where a dragged tab will land: a quiet panel inset from the pane's edges, one faint step over
+ * the content with a thin accent edge (the sidebar's drop target speaks the same way).
+ */
+export const DROP_PREVIEW_CLASS =
+  'pointer-events-none absolute z-20 rounded-lg bg-foreground/5 ring-1 ring-ring/60 ring-inset motion-safe:animate-in motion-safe:fade-in motion-safe:duration-150';
+
 function SplitZone({
   paneId,
   side,
@@ -46,8 +53,9 @@ function SplitZone({
       {isOver && (
         <div
           className={cn(
-            'pointer-events-none absolute inset-y-0 z-20 w-1/2 bg-foreground/10',
-            side === 'left' ? 'left-0' : 'right-0'
+            DROP_PREVIEW_CLASS,
+            'inset-y-2 w-[calc(50%-0.75rem)]',
+            side === 'left' ? 'left-2' : 'right-2'
           )}
         />
       )}

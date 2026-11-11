@@ -1,5 +1,5 @@
 import { Button, Dialog, Tooltip } from '@emdash/ui/react/primitives';
-import { Check, Copy, ExternalLink, Globe } from 'lucide-react';
+import { Check, Copy } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useModalController } from '@core/manifests/browser/modal-api';
 import { defineModal } from '@core/primitives/modals/react';
@@ -12,6 +12,11 @@ export type ExternalLinkChoiceDialogArgs = {
   onCopy: () => boolean | Promise<boolean>;
 };
 
+/**
+ * Asked before a link leaves the app: the address in a quiet code well (with a copy glyph),
+ * then where to open it. The system browser is the one move; Maestro's own browser is the quiet
+ * alternative beside it.
+ */
 export function ExternalLinkChoiceDialog({
   url,
   canOpenInEmdashBrowser,
@@ -41,63 +46,48 @@ export function ExternalLinkChoiceDialog({
   return (
     <>
       <Dialog.Header showCloseButton={false}>
-        <Dialog.Title>Open link?</Dialog.Title>
+        <Dialog.Title>Open this link?</Dialog.Title>
+        <Dialog.Description>Choose where to open it.</Dialog.Description>
       </Dialog.Header>
-      <Dialog.Body className="space-y-4 pt-0 text-sm leading-relaxed">
-        <p>Choose where to open this link.</p>
-        <div className="bg-muted/50 relative rounded-md border border-border">
-          <div className="max-h-32 overflow-y-auto px-3 py-2.5 pr-10 font-mono text-[13px] leading-relaxed break-all text-foreground">
+      <Dialog.Body>
+        <div className="relative rounded-md bg-surface-emphasis">
+          <div className="max-h-32 overflow-y-auto py-2.5 pr-11 pl-3 font-mono text-xs break-all text-foreground select-text">
             {url}
           </div>
-          <Tooltip.Provider>
-            <Tooltip.Root>
-              <Tooltip.Trigger
-                render={
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    icon
-                    className="absolute top-1.5 right-1.5"
-                    aria-label={copied ? 'Link copied' : 'Copy link'}
-                    onClick={() => void handleCopy()}
-                  />
-                }
-              >
-                {copied ? (
-                  <Check className="size-4 text-foreground-success" />
-                ) : (
-                  <Copy className="size-4" />
-                )}
-              </Tooltip.Trigger>
-              <Tooltip.Content>{copied ? 'Copied' : 'Copy link'}</Tooltip.Content>
-            </Tooltip.Root>
-          </Tooltip.Provider>
+          <Tooltip.Root>
+            <Tooltip.Trigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  icon
+                  className="absolute top-1 right-1"
+                  aria-label={copied ? 'Link copied' : 'Copy link'}
+                  onClick={() => void handleCopy()}
+                />
+              }
+            >
+              {copied ? <Check className="size-4 text-foreground" /> : <Copy className="size-4" />}
+            </Tooltip.Trigger>
+            <Tooltip.Content>{copied ? 'Copied' : 'Copy link'}</Tooltip.Content>
+          </Tooltip.Root>
         </div>
       </Dialog.Body>
       <Dialog.Footer>
-        <div className="flex w-full flex-col-reverse gap-2">
-          <Button className="w-full" variant="secondary" onClick={controller.dismiss}>
-            Cancel
-          </Button>
-          <Button
-            className="w-full"
-            variant="secondary"
-            disabled={!canOpenInEmdashBrowser}
-            onClick={() => controller.complete('emdash-browser')}
-          >
-            <Globe className="size-4" />
-            Open in Emdash
-          </Button>
-          <Button
-            className="w-full"
-            variant="primary"
-            onClick={() => controller.complete('external-browser')}
-          >
-            <ExternalLink className="size-4" />
-            Open in Browser
-          </Button>
-        </div>
+        <Button variant="ghost" className="sm:mr-auto sm:-ml-3" onClick={controller.dismiss}>
+          Cancel
+        </Button>
+        <Button
+          variant="ghost"
+          disabled={!canOpenInEmdashBrowser}
+          onClick={() => controller.complete('emdash-browser')}
+        >
+          Open in Maestro
+        </Button>
+        <Button variant="primary" onClick={() => controller.complete('external-browser')}>
+          Open in browser
+        </Button>
       </Dialog.Footer>
     </>
   );
@@ -106,5 +96,5 @@ export function ExternalLinkChoiceDialog({
 export const confirmExternalLinkModal = defineModal<ExternalLinkChoice>()({
   id: 'confirmExternalLinkModal',
   component: ExternalLinkChoiceDialog,
-  size: 'sm',
+  size: 'md',
 });

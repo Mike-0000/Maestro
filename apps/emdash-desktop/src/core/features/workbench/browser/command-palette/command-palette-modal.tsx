@@ -1,5 +1,5 @@
 import { Command } from 'cmdk';
-import { X } from 'lucide-react';
+import { Search, X } from 'lucide-react';
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useModalController } from '@core/manifests/browser/modal-api';
 import { PALETTE_PROVIDER_CATALOG } from '@core/manifests/browser/palette-provider-catalog';
@@ -31,10 +31,13 @@ interface CommandPaletteViewProps {
   readonly onClose: () => void;
 }
 
+// Section headings in the group-label role: quiet 11px passive text, sentence case, with room
+// above so groups separate by space rather than rules.
 const GROUP_CLASS = cn(
-  '[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5',
-  '[&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium',
-  '[&_[cmdk-group-heading]]:text-foreground/50'
+  '[&:not(:first-child)]:mt-2',
+  '[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:pb-1',
+  '[&_[cmdk-group-heading]]:text-tiny [&_[cmdk-group-heading]]:text-foreground-passive',
+  '[&_[cmdk-group-heading]]:select-none'
 );
 
 function getInputChrome(
@@ -138,17 +141,20 @@ export function CommandPaletteView({
       shouldFilter={false}
       loop
     >
-      <div className="flex items-center gap-1 border-b border-foreground/10 px-2">
+      {/* The search line: a passive glyph, the scope chip when a keyword narrows the search,
+          then the input. No rule under it; the results start a step of space below. */}
+      <div className="flex h-12 shrink-0 items-center gap-2 px-4">
+        <Search className="size-4 shrink-0 text-foreground-passive" aria-hidden />
         {inputChrome.keyword && (
           <button
             type="button"
             aria-label={`Clear ${inputChrome.keyword} mode`}
-            className="flex shrink-0 items-center gap-1 rounded bg-foreground/10 px-2 py-1 text-xs text-foreground/70 hover:bg-foreground/15"
+            className="flex h-6 shrink-0 items-center gap-1 rounded-sm bg-surface-emphasis pr-1 pl-2 text-xs text-foreground-muted transition-colors hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none"
             onMouseDown={(event) => event.preventDefault()}
             onClick={clearMode}
           >
-            {inputChrome.keyword}
-            <X size={12} />
+            {inputChrome.keyword.replace(/^@/, '')}
+            <X className="size-3 text-foreground-passive" aria-hidden />
           </button>
         )}
         <Command.Input
@@ -165,31 +171,37 @@ export function CommandPaletteView({
               clearMode();
             }
           }}
-          placeholder="Search tasks, projects, actions…"
-          className="min-w-0 flex-1 bg-transparent px-2 py-3 text-sm outline-none placeholder:text-foreground/40"
+          placeholder="Search tasks, projects and actions…"
+          className="h-full min-w-0 flex-1 bg-transparent text-base text-foreground outline-none placeholder:text-foreground-passive"
           autoFocus
         />
       </div>
-      <Command.List className="h-96 overflow-y-auto p-1">
+      <Command.List className="h-96 overflow-y-auto px-2 pb-2">
         {snapshot.query && !snapshot.pending && (
-          <Command.Empty className="py-8 text-center text-sm text-foreground/40">
-            No results for &ldquo;{snapshot.query}&rdquo;
+          <Command.Empty className="flex flex-col items-center gap-1 px-6 pt-16 text-center">
+            <span className="text-sm font-medium text-foreground">Nothing matches</span>
+            <span className="max-w-xs text-xs break-words text-foreground-muted">
+              No task, project, file or action for &ldquo;{snapshot.query}&rdquo;.
+            </span>
           </Command.Empty>
         )}
         <PaletteResults results={snapshot.results} onSelect={onClose} />
       </Command.List>
 
-      <div className="flex items-center gap-4 border-t border-foreground/10 px-3 py-2">
-        <span className="flex items-center gap-1 text-xs text-foreground/40">
-          <Shortcut hotkey="ArrowUp" variant="keycaps" />
-          <Shortcut hotkey="ArrowDown" variant="keycaps" />
-          Navigate
+      {/* Key hints in the caption role, on the same surface: no rule above them. */}
+      <div className="flex h-9 shrink-0 items-center gap-5 px-4 text-tiny text-foreground-passive">
+        <span className="flex items-center gap-1.5">
+          <span className="flex items-center gap-0.5">
+            <Shortcut hotkey="ArrowUp" variant="keycaps" />
+            <Shortcut hotkey="ArrowDown" variant="keycaps" />
+          </span>
+          Move
         </span>
-        <span className="flex items-center gap-1 text-xs text-foreground/40">
+        <span className="flex items-center gap-1.5">
           <Shortcut hotkey="Enter" variant="keycaps" />
-          Select
+          Open
         </span>
-        <span className="flex items-center gap-1 text-xs text-foreground/40">
+        <span className="flex items-center gap-1.5">
           <Shortcut hotkey="Escape" variant="keycaps" />
           Close
         </span>
@@ -216,5 +228,8 @@ export function CommandPaletteModal({ projectId, taskId, workspaceId }: CommandP
 export const commandPaletteModal = defineModal<void>()({
   id: 'commandPaletteModal',
   component: CommandPaletteModal,
-  size: 'md',
+  // Wide enough for a file path beside its name; hung from the upper third, where a palette
+  // is expected, so its fixed-height list never makes it jump.
+  size: 'lg',
+  position: 'top',
 });
