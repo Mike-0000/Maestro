@@ -126,7 +126,8 @@ const DETAIL_COLUMNS: CollectionViewColumn<WorkspaceDetailListItem>[] = [
   },
   {
     id: 'name',
-    width: 'minmax(0, 1fr)',
+    // The worktree name keeps a readable width; the fact columns give way first.
+    width: 'minmax(12rem, 1fr)',
     cell: (item) => (
       <CollectionViewCell
         primary={
@@ -149,7 +150,7 @@ const DETAIL_COLUMNS: CollectionViewColumn<WorkspaceDetailListItem>[] = [
   },
   {
     id: 'git',
-    width: '13rem',
+    width: 'minmax(0, 13rem)',
     cell: (item) => (
       <CollectionViewCell
         primary={item.branch ?? 'No branch'}
@@ -159,7 +160,7 @@ const DETAIL_COLUMNS: CollectionViewColumn<WorkspaceDetailListItem>[] = [
   },
   {
     id: 'storage',
-    width: '9rem',
+    width: 'minmax(0, 9rem)',
     cell: (item) => (
       <CollectionViewCell
         primary={
@@ -177,7 +178,7 @@ const DETAIL_COLUMNS: CollectionViewColumn<WorkspaceDetailListItem>[] = [
   },
   {
     id: 'tasks',
-    width: '10rem',
+    width: 'minmax(0, 10rem)',
     cell: (item) => (
       <CollectionViewCell
         primary={formatCount(item.linkedTaskCount, 'linked task')}

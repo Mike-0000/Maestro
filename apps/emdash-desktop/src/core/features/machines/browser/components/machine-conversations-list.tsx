@@ -60,7 +60,8 @@ const CONVERSATION_COLUMNS: CollectionViewColumn<MachineConversationItem>[] = [
   },
   {
     id: 'title',
-    width: 'minmax(0, 1fr)',
+    // The title keeps a readable width; the task chip gives way first in a narrow window.
+    width: 'minmax(9rem, 1fr)',
     cell: (item) => (
       <CollectionViewCell
         className={cn(item.pendingRemoval && 'opacity-60')}
@@ -75,7 +76,7 @@ const CONVERSATION_COLUMNS: CollectionViewColumn<MachineConversationItem>[] = [
   },
   {
     id: 'status',
-    width: 'max-content',
+    width: 'minmax(0, max-content)',
     align: 'center',
     cell: (item) => <ConversationStatusCell item={item} />,
   },
@@ -342,10 +343,15 @@ const ConversationsToolbar = observer(function ConversationsToolbar({
 function ConversationStatusCell({ item }: { item: MachineConversationItem }) {
   const { conversation } = item;
   return (
-    <div className={cn('flex items-center gap-2', item.pendingRemoval && 'opacity-60')}>
+    <div
+      className={cn(
+        'flex max-w-full min-w-0 items-center gap-2',
+        item.pendingRemoval && 'opacity-60'
+      )}
+    >
       {item.linked ? (
         <Badge
-          className="max-w-56"
+          className="max-w-56 min-w-0"
           title={
             conversation.projectName
               ? `${conversation.projectName} / ${conversation.taskName ?? conversation.taskId}`

@@ -70,10 +70,10 @@ function DiagnosticControls({ enabled }: { enabled: boolean }) {
       >
         Copy recent events for agent
       </Button>
+      {/* A quiet text action like its neighbour; the confirm carries the weight (brief 2.7). */}
       <Button
         variant="text"
         size="xs"
-        tone="destructive"
         onClick={() => {
           if (
             !window.confirm(

@@ -106,6 +106,8 @@ export const footer = style({
   selectors: {
     // A header-only dialog (a bare confirm): keep the title off the buttons.
     '[data-slot="dialog-header"] + &': { paddingTop: '1.5rem' },
+    // Under a ModalLayout middle that scrolls: a little air between its fading edge and the buttons.
+    '[data-slot="animated-height"][data-overflowing] + &': { paddingTop: '0.75rem' },
   },
   '@media': {
     '(min-width: 640px)': {

@@ -71,10 +71,10 @@ export function AddMachineModal({ initialConfig, dismissControl = 'back' }: AddM
   );
 }
 
-// lg (680): room for the resolved settings to sit label-beside-value and for the Windows setup
-// commands to read without wrapping.
+// md (520), the default form width: the fields are full width and the resolved settings stay
+// label-beside-value (FactGrid stacks only under 24rem).
 export const addMachineModal = defineModal<{ connectionId: string }>()({
   id: 'addSshConnModal',
   component: AddMachineModal,
-  size: 'lg',
+  size: 'md',
 });

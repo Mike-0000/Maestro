@@ -22,7 +22,7 @@ export function RemoteAccessRow({
         {description != null && <Field.Description>{description}</Field.Description>}
       </Field.Content>
       {actions != null && (
-        <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">
+        <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2 @max-[26rem]:ml-0 @max-[26rem]:justify-start">
           {actions}
         </div>
       )}

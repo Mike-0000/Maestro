@@ -12,7 +12,8 @@ interface ResetToDefaultButtonProps {
 
 /**
  * The quiet reset next to a changed setting: a ghost icon button in the passive tone. When the
- * setting is at its default it keeps its 28px slot empty, so controls in a card stay aligned.
+ * setting is at its default it keeps its 28px slot empty, so controls in a card stay aligned; in a
+ * stacked (narrow) settings row the empty slot collapses so the control starts under the label.
  */
 export const ResetToDefaultButton: React.FC<ResetToDefaultButtonProps> = ({
   defaultLabel,
@@ -21,7 +22,7 @@ export const ResetToDefaultButton: React.FC<ResetToDefaultButtonProps> = ({
   visible = true,
 }) => {
   if (!visible) {
-    return <span aria-hidden="true" className="size-7 shrink-0" />;
+    return <span aria-hidden="true" className="size-7 shrink-0 @max-[26rem]:hidden" />;
   }
 
   return (

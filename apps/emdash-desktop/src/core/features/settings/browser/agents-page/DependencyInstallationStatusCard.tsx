@@ -80,7 +80,9 @@ export const DependencyInstallationStatusCard = observer(function DependencyInst
             <>
               <span className="shrink-0 text-foreground">Installed</span>
               <span className="min-w-0 truncate text-xs text-foreground-muted">
-                {[versionText, `via ${installedVia}`].filter(Boolean).join(' · ')}
+                {[versionText, installedVia === 'Unknown' ? null : `via ${installedVia}`]
+                  .filter(Boolean)
+                  .join(' · ')}
               </span>
             </>
           ) : state === 'not-found' ? (

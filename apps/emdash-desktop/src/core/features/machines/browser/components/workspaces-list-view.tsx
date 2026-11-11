@@ -29,12 +29,13 @@ const WORKSPACE_COLUMNS: CollectionViewColumn<WorkspacesListItem>[] = [
   },
   {
     id: 'name',
-    width: 'minmax(0, 1fr)',
+    // The name keeps a readable width; the two fact columns give way first in a narrow window.
+    width: 'minmax(9rem, 1fr)',
     cell: (item) => <CollectionViewCell primary={item.name} secondary={item.path} />,
   },
   {
     id: 'worktrees',
-    width: '10rem',
+    width: 'minmax(0, 10rem)',
     cell: (item) => (
       <CollectionViewCell
         primary={formatCount(item.worktreeCount, 'worktree')}
@@ -44,7 +45,7 @@ const WORKSPACE_COLUMNS: CollectionViewColumn<WorkspacesListItem>[] = [
   },
   {
     id: 'usage',
-    width: '10rem',
+    width: 'minmax(0, 10rem)',
     cell: (item) => (
       <CollectionViewCell
         primary={item.lastActivityAt ? <RelativeTime value={item.lastActivityAt} /> : 'Never'}

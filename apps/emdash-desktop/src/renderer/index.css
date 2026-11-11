@@ -460,11 +460,11 @@
     --background-success-hover: var(--em-background-success-hover);
     --border-success: var(--em-border-success);
 
-    --foreground-error: var(--red-9);
+    --foreground-error: var(--em-foreground-error);
     --background-error: var(--red-3);
     --background-error-hover: var(--red-4);
 
-    --foreground-warning: var(--amber-11);
+    --foreground-warning: var(--em-foreground-warning);
     --background-warning: var(--amber-3);
     --background-warning-hover: var(--amber-4);
     --border-warning: var(--amber-7);
@@ -746,11 +746,11 @@
     --background-success-hover: var(--em-background-success-hover);
     --border-success: var(--em-border-success);
 
-    --foreground-error: var(--red-9);
+    --foreground-error: var(--em-foreground-error);
     --background-error: var(--red-3);
     --background-error-hover: var(--red-4);
 
-    --foreground-warning: var(--amber-11);
+    --foreground-warning: var(--em-foreground-warning);
     --background-warning: var(--amber-3);
     --background-warning-hover: var(--amber-4);
     --border-warning: var(--amber-7);

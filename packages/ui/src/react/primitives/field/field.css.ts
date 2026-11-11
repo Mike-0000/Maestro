@@ -40,18 +40,25 @@ export type FieldVariants = NonNullable<RecipeVariants<typeof field>>;
 
 /** Row width under which a horizontal field stacks its label over the control. */
 const fieldStackWidth = '26rem';
+const horizontalRow = '[data-slot="field"][data-orientation="horizontal"]';
 
 // Label + description stacked, used in horizontal mode to occupy the left side.
 export const fieldContent = style({
   display: 'flex',
   flexDirection: 'column',
-  // Grows to fill the row; never squeezed below a readable 12rem beside the
-  // control (the control wraps instead).
-  flex: '1 1 12rem',
+  flex: 1,
   gap: '0.25rem',
   minWidth: 0,
+  selectors: {
+    // In a horizontal row: grows to fill it, never squeezed below a readable
+    // 12rem beside the control (the control wraps instead). Scoped to the
+    // horizontal parent: in a vertical field a basis would set the height.
+    [`${horizontalRow} > &`]: { flex: '1 1 12rem' },
+  },
   '@container': {
-    [`(max-width: ${fieldStackWidth})`]: { flexBasis: '100%' },
+    [`(max-width: ${fieldStackWidth})`]: {
+      selectors: { [`${horizontalRow} > &`]: { flexBasis: '100%' } },
+    },
   },
 });
 

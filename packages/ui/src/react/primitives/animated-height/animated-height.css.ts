@@ -39,7 +39,13 @@ export const constrained = style({
   minHeight: 0,
   flexShrink: 1,
   selectors: {
-    '&[data-overflowing]': { overflowY: 'auto', overscrollBehavior: 'contain' },
+    // Scrolls, with the bottom edge fading into the footer below it (the content's own bottom
+    // padding sits inside the fade, so the last line is clear once scrolled to the end).
+    '&[data-overflowing]': {
+      overflowY: 'auto',
+      overscrollBehavior: 'contain',
+      maskImage: 'linear-gradient(to bottom, black calc(100% - 1.5rem), transparent)',
+    },
     '&[data-overflowing][data-animating]': { overflowY: 'hidden' },
   },
 });

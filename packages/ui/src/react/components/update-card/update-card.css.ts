@@ -26,8 +26,13 @@ export const rowBare = style([
     flexWrap: 'wrap',
     columnGap: '1rem',
     rowGap: '0.5rem',
+    // Like a stacked settings row: under 26rem the action starts under the text.
+    containerName: 'update-row',
+    containerType: 'inline-size',
   },
 ]);
+
+const stackedRow = 'update-row (max-width: 26rem)';
 
 export const rowBody = style({
   display: 'flex',
@@ -35,6 +40,7 @@ export const rowBody = style({
   flex: '1 1 16rem',
   flexDirection: 'column',
   gap: '0.25rem',
+  '@container': { [stackedRow]: { flexBasis: '100%' } },
 });
 
 export const rowTitle = style({
@@ -54,6 +60,7 @@ export const rowDescription = style({
 });
 
 export const rowControls = style({
+  '@container': { [stackedRow]: { marginLeft: 0 } },
   marginLeft: 'auto',
   flexShrink: 0,
   display: 'flex',
