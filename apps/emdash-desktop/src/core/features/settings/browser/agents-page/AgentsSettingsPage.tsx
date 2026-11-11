@@ -7,7 +7,11 @@ export function AgentsSettingsPage() {
 
   return (
     <AgentsPanel
-      header={{ title: 'Agents', description: 'Manage agents and model configurations.' }}
+      header={{
+        title: 'Agents',
+        description:
+          'The coding agents Maestro can run on this computer, and how each is installed.',
+      }}
       searchQuery={settingsSearchQuery}
       onSearchQueryChange={setSettingsSearchQuery}
     />

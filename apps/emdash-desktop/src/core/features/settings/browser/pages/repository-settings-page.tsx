@@ -3,15 +3,17 @@ import RepositorySettingsCard from '../components/RepositorySettingsCard';
 
 export function RepositorySettingsPage() {
   return (
-    <div className="space-y-8">
+    <div className="pb-16">
       <PageLayout.Header
         sticky
         title="Repository"
-        description="Configure repository and branch settings."
+        description="How Maestro names and publishes the branches it creates for tasks."
       />
-      <SettingsSection title="Branches" bare>
-        <RepositorySettingsCard />
-      </SettingsSection>
+      <div className="flex flex-col gap-10">
+        <SettingsSection title="Branches">
+          <RepositorySettingsCard />
+        </SettingsSection>
+      </div>
     </div>
   );
 }

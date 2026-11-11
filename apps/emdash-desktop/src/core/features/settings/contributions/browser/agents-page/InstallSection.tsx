@@ -1,9 +1,11 @@
-import { Field, Label, toast } from '@emdash/ui/react/primitives';
-import { ExternalLink } from 'lucide-react';
+import { StateGlyph } from '@emdash/ui/react/components';
+import { toast } from '@emdash/ui/react/primitives';
+import { ArrowUpRight } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useEffect, useMemo, useState } from 'react';
 import { hostRefFromConnectionId } from '@core/features/agents/api/browser/client';
 import { useAgentInstallationStatus } from '@core/features/agents/api/browser/use-agent-installation-statuses';
+import { AgentSheetSection } from '@core/features/settings/browser/agents-page/agent-sheet-section';
 import { DependencyInstallationStatusCard } from '@core/features/settings/browser/agents-page/DependencyInstallationStatusCard';
 import type { InstallationState } from '@core/features/settings/browser/agents-page/DependencyInstallationStatusCard';
 import { DependencyInstallationUpdateCard } from '@core/features/settings/browser/agents-page/DependencyInstallationUpdateCard';
@@ -81,10 +83,10 @@ export const InstallSection = observer(function InstallSection({
       href={installDocs}
       target="_blank"
       rel="noreferrer"
-      className="inline-flex shrink-0 items-center gap-1 text-xs text-foreground-muted hover:text-foreground"
+      className="inline-flex w-fit shrink-0 items-center gap-0.5 rounded-xs text-xs text-foreground-muted underline decoration-foreground-passive/60 underline-offset-4 outline-none hover:text-foreground hover:decoration-foreground-muted focus-visible:ring-2 focus-visible:ring-ring"
     >
       Installation guide
-      <ExternalLink className="size-3" aria-hidden="true" />
+      <ArrowUpRight className="size-3" aria-hidden="true" />
     </a>
   ) : null;
 
@@ -101,7 +103,7 @@ export const InstallSection = observer(function InstallSection({
 
   if (compact) {
     return (
-      <div className="space-y-2">
+      <div className="flex flex-col gap-2">
         {installation}
         {installationGuide}
       </div>
@@ -109,13 +111,9 @@ export const InstallSection = observer(function InstallSection({
   }
 
   return (
-    <Field.Root>
-      <div className="flex items-center justify-between gap-2">
-        <Label>Installation</Label>
-        {installationGuide}
-      </div>
+    <AgentSheetSection title="Installation" action={installationGuide}>
       {installation}
-    </Field.Root>
+    </AgentSheetSection>
   );
 });
 
@@ -198,18 +196,16 @@ const LocalInstallSection = observer(function LocalInstallSection({
       case 'host-unavailable':
       case 'not-configured':
         return (
-          <div
-            role="alert"
-            className="rounded-lg border border-border bg-background-secondary p-3 text-sm text-foreground-muted"
-          >
-            {vm.runtimeError.message}
-          </div>
+          <p role="alert" className="flex items-start gap-2 text-sm text-foreground-muted">
+            <StateGlyph state="error" className="mt-0.5" />
+            <span>{vm.runtimeError.message}</span>
+          </p>
         );
     }
   }
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-3">
       <DependencyInstallationStatusCard
         vm={vm}
         agentPayload={agentPayload}

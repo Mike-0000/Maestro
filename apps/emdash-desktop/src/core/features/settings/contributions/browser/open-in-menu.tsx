@@ -116,40 +116,42 @@ export const OpenInMenu: React.FC<OpenInMenuProps> = ({
   return (
     <div
       className={cn(
-        'border border-border rounded-md h-6 flex items-center text-foreground-muted overflow-hidden',
+        'flex h-6 items-center overflow-hidden rounded-md border border-border-subtle text-foreground-muted',
         borderless && 'border-none',
         className
       )}
     >
       <Tooltip.Provider delay={0}>
         <Tooltip.Root>
-          <Tooltip.Trigger className="flex min-w-0 flex-1">
-            <button
-              type="button"
-              className={cn(
-                'group flex items-center w-full border-r border-border rounded-r-none px-2 text-xs transition-colors hover:bg-background-1 hover:text-foreground min-w-0',
-                borderless && 'border-none  pr-1'
-              )}
-              onClick={() => {
-                if (!buttonAppId) return;
-                void triggerOpenIn(buttonAppId);
-              }}
-              disabled={!buttonAppId || loading}
-              aria-label={buttonAppLabel ? `Open in ${buttonAppLabel}` : 'Open'}
-            >
-              {buttonAppId && icons[buttonAppId] && (
-                <img
-                  src={icons[buttonAppId]}
-                  alt={labels[buttonAppId] || buttonAppId}
-                  className={`size-3.5 rounded ${
-                    getAppById(buttonAppId)?.invertInDark ? 'emdark:invert' : ''
-                  }`}
-                />
-              )}
-            </button>
+          <Tooltip.Trigger
+            render={
+              <button
+                type="button"
+                className={cn(
+                  'group flex h-full min-w-0 flex-1 items-center rounded-l-md border-r border-border-subtle px-2 text-xs transition-colors outline-none hover:bg-surface-hover hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset disabled:opacity-50',
+                  borderless && 'border-none pr-1'
+                )}
+                onClick={() => {
+                  if (!buttonAppId) return;
+                  void triggerOpenIn(buttonAppId);
+                }}
+                disabled={!buttonAppId || loading}
+                aria-label={buttonAppLabel ? `Open in ${buttonAppLabel}` : 'Open'}
+              />
+            }
+          >
+            {buttonAppId && icons[buttonAppId] && (
+              <img
+                src={icons[buttonAppId]}
+                alt=""
+                className={`size-4 rounded-xs ${
+                  getAppById(buttonAppId)?.invertInDark ? 'emdark:invert' : ''
+                }`}
+              />
+            )}
           </Tooltip.Trigger>
           <Tooltip.Content side="bottom">
-            <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2">
               <span>Open in {buttonAppLabel || 'editor'}</span>
               <BoundShortcut command="app.openInEditor" variant="keycaps" />
             </div>
@@ -161,14 +163,14 @@ export const OpenInMenu: React.FC<OpenInMenuProps> = ({
           <Tooltip.Trigger
             render={
               <DropdownMenu.Trigger
-                className="group flex size-6 shrink-0 items-center justify-center border-none bg-transparent transition-colors hover:bg-background-1 hover:text-foreground"
+                className="group flex h-full w-6 shrink-0 items-center justify-center rounded-r-md border-none bg-transparent text-foreground-passive transition-colors outline-none hover:bg-surface-hover hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset data-[popup-open]:bg-surface-selected data-[popup-open]:text-foreground"
                 aria-label="Open in options"
               >
                 <ChevronDown className="size-3.5" />
               </DropdownMenu.Trigger>
             }
           ></Tooltip.Trigger>
-          <Tooltip.Content side="bottom">Select open in app</Tooltip.Content>
+          <Tooltip.Content side="bottom">Choose an app</Tooltip.Content>
         </Tooltip.Root>
         <DropdownMenu.Content align="end" sideOffset={6} width="content">
           <DropdownMenu.RadioGroup
@@ -187,7 +189,7 @@ export const OpenInMenu: React.FC<OpenInMenuProps> = ({
                     <img
                       src={icons[app.id]}
                       alt={labels[app.id] || app.label}
-                      className={`h-4 w-4 rounded ${app.invertInDark ? 'emdark:invert' : ''}`}
+                      className={`size-4 rounded-xs ${app.invertInDark ? 'emdark:invert' : ''}`}
                     />
                   )}
                   {labels[app.id] || app.label}

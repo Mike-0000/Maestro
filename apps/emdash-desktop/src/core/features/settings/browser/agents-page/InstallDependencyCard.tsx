@@ -1,4 +1,3 @@
-import { Loader2 } from 'lucide-react';
 import type { HostDependencyInstallation } from '@core/features/agents/api/browser/use-agent-installation-statuses';
 import type { InstallMethod, InstallOption } from '@core/primitives/agents/api';
 import {
@@ -40,8 +39,10 @@ export function InstallDependencyCard({
   if (installOptions.length === 0) return null;
 
   return (
-    <div className={cn('space-y-2 rounded-lg border p-3', className)}>
-      <div className="text-sm text-foreground-muted">Install</div>
+    <div className={cn('flex flex-col gap-2', className)}>
+      <div className="text-xs text-foreground-muted">
+        {installOptions.length > 1 ? 'Install with one of these commands' : 'Install with'}
+      </div>
       {installOptions.map((opt) => {
         const isInstallingThis =
           isInstalling && (installingMethod === undefined || installingMethod === opt.method);
@@ -51,7 +52,7 @@ export function InstallDependencyCard({
             ? vm.installFailure
             : null;
         return (
-          <div key={opt.method} className="space-y-2">
+          <div key={opt.method} className="flex flex-col gap-2">
             <CommandRow
               command={opt.command}
               action={
@@ -59,7 +60,7 @@ export function InstallDependencyCard({
                   disabled={isInstalling}
                   onClick={() => void install(opt.method)}
                 >
-                  {isInstallingThis ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Install'}
+                  {isInstallingThis ? 'Installing…' : 'Install'}
                 </CommandActionButton>
               }
             />

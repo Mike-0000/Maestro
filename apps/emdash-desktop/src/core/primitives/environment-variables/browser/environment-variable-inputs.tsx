@@ -7,6 +7,11 @@ import {
 
 export type EnvironmentVariableEntry = { key: string; value: string };
 
+/**
+ * Name / value pairs for environment variables: two mono inputs per row, a quiet remove action,
+ * and "Add variable" as a ghost action under the list. Pasting `KEY=value` lines splits them into
+ * rows.
+ */
 export function EnvironmentVariableInputs({
   entries,
   onChange,
@@ -23,60 +28,68 @@ export function EnvironmentVariableInputs({
   };
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col gap-2">
       {entries.map((entry, index) => {
         const validName =
           entry.key.trim() === '' || /^[A-Za-z_][A-Za-z0-9_]*$/.test(entry.key.trim());
         return (
-          <div key={index} className="flex items-center gap-2">
-            <Input
-              value={entry.key}
-              placeholder="KEY"
-              aria-label={`Environment variable ${index + 1} name`}
-              aria-invalid={!validName}
-              className="min-w-0 flex-1 font-mono text-sm"
-              onChange={(event) => updateEntry(index, { key: event.target.value })}
-              onBlur={() => onCommit?.(entries)}
-              onPaste={(event) => {
-                const pasted = parseEnvAssignmentPaste(event.clipboardData.getData('text'));
-                if (pasted.length === 0) return;
-                event.preventDefault();
-                onChange(replaceEnvEntryWithPaste(entries, index, pasted));
-              }}
-            />
-            <Input
-              value={entry.value}
-              placeholder="value"
-              aria-label={`Environment variable ${index + 1} value`}
-              className="min-w-0 flex-1 font-mono text-sm"
-              onChange={(event) => updateEntry(index, { value: event.target.value })}
-              onBlur={() => onCommit?.(entries)}
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              icon
-              className="h-8 w-8 shrink-0"
-              aria-label={`Remove environment variable ${index + 1}`}
-              onClick={() => {
-                const next = entries.filter((_, candidate) => candidate !== index);
-                onChange(next);
-                onCommit?.(next);
-              }}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
+          <div key={index} className="flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <Input
+                value={entry.key}
+                placeholder="KEY"
+                aria-label={`Environment variable ${index + 1} name`}
+                aria-invalid={!validName}
+                className="min-w-0 flex-1 font-mono text-xs"
+                onChange={(event) => updateEntry(index, { key: event.target.value })}
+                onBlur={() => onCommit?.(entries)}
+                onPaste={(event) => {
+                  const pasted = parseEnvAssignmentPaste(event.clipboardData.getData('text'));
+                  if (pasted.length === 0) return;
+                  event.preventDefault();
+                  onChange(replaceEnvEntryWithPaste(entries, index, pasted));
+                }}
+              />
+              <Input
+                value={entry.value}
+                placeholder="value"
+                aria-label={`Environment variable ${index + 1} value`}
+                className="min-w-0 flex-[1.5] font-mono text-xs"
+                onChange={(event) => updateEntry(index, { value: event.target.value })}
+                onBlur={() => onCommit?.(entries)}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                icon
+                className="shrink-0"
+                aria-label={`Remove environment variable ${index + 1}`}
+                onClick={() => {
+                  const next = entries.filter((_, candidate) => candidate !== index);
+                  onChange(next);
+                  onCommit?.(next);
+                }}
+              >
+                <Trash2 className="size-3.5" />
+              </Button>
+            </div>
+            {!validName ? (
+              <p className="text-xs text-foreground-error">
+                Use letters, digits and underscores, not starting with a digit.
+              </p>
+            ) : null}
           </div>
         );
       })}
       <Button
         type="button"
-        variant="secondary"
+        variant="ghost"
         size="sm"
-        className="gap-1.5"
+        className="-ml-2.5 self-start"
         onClick={() => onChange([...entries, { key: '', value: '' }])}
       >
-        <Plus className="h-3.5 w-3.5" />
+        <Plus className="size-3.5" />
         Add variable
       </Button>
     </div>

@@ -4,14 +4,16 @@ import { CanvasBrowserSettingsCard } from '../components/CanvasBrowserSettingsCa
 
 export function BrowserSettingsPage() {
   return (
-    <div className="space-y-8">
+    <div className="pb-16">
       <PageLayout.Header
         sticky
         title="Browser"
-        description="Manage browser profiles and their stored logins."
+        description="The in-app browser: its profiles, stored logins and what agents may do with it."
       />
-      <BrowserSettingsCard />
-      <CanvasBrowserSettingsCard />
+      <div className="flex flex-col gap-10">
+        <BrowserSettingsCard />
+        <CanvasBrowserSettingsCard />
+      </div>
     </div>
   );
 }

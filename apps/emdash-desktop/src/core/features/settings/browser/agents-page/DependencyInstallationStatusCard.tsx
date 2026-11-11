@@ -1,5 +1,5 @@
-import { DropdownMenu, toast } from '@emdash/ui/react/primitives';
-import { Check, Loader2, MoreHorizontal, X } from 'lucide-react';
+import { Button, DropdownMenu, Spinner, toast } from '@emdash/ui/react/primitives';
+import { MoreHorizontal } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import type { HostDependencyInstallation } from '@core/features/agents/api/browser/use-agent-installation-statuses';
 import type { AgentPayload, InstallOption, SelectedSource } from '@core/primitives/agents/api';
@@ -61,55 +61,49 @@ export const DependencyInstallationStatusCard = observer(function DependencyInst
     return selectedRow?.label ?? selectedSource.kind;
   })();
 
+  // Name where the binary came from (npm, Homebrew…) rather than the "Auto" policy row.
+  const installedVia =
+    selectedSource.kind === 'auto' && selectedInstall
+      ? provenanceLabel(selectedInstall.provenance)
+      : selectedLabel;
+
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-center gap-2 rounded-lg border p-3">
-        {state === 'found' && (
-          <div className="flex size-6 items-center justify-center rounded-lg bg-background-success">
-            <Check
-              className="size-3.5 shrink-0 text-foreground-success"
-              absoluteStrokeWidth
-              strokeWidth={3}
-            />
-          </div>
-        )}
-        {state === 'checking' && (
-          <div className="flex size-6 items-center justify-center rounded-lg bg-background-2">
-            <Loader2 className="size-3.5 animate-spin text-foreground-muted" />
-          </div>
-        )}
-        {(state === 'not-found' || state === 'uninstalled') && (
-          <div className="flex size-6 items-center justify-center rounded-lg bg-background-2">
-            <X className="size-3.5 shrink-0 text-foreground-passive" strokeWidth={2.5} />
-          </div>
-        )}
-
-        <div className="min-w-0 flex-1 truncate text-sm">
-          {state === 'found' && (
+    <div className="flex flex-col gap-1">
+      <div className="flex min-h-8 items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2 text-sm">
+          {state === 'checking' ? (
             <>
-              <span>Found</span>
-              {versionText && (
-                <span className="ml-1 rounded-md bg-background-quaternary-2 px-1 py-0.5 font-sans text-xs text-foreground-muted">
-                  {versionText}
-                </span>
-              )}
-              <span className="ml-1">installed using {selectedLabel}</span>
+              <Spinner size="sm" className="shrink-0 text-foreground-passive" />
+              <span className="text-foreground-muted">Checking…</span>
             </>
+          ) : state === 'found' ? (
+            <>
+              <span className="shrink-0 text-foreground">Installed</span>
+              <span className="min-w-0 truncate text-xs text-foreground-muted">
+                {[versionText, `via ${installedVia}`].filter(Boolean).join(' · ')}
+              </span>
+            </>
+          ) : state === 'not-found' ? (
+            <span className="text-foreground-muted">Not installed yet. Install it below.</span>
+          ) : (
+            <span className="text-foreground-muted">Uninstalled</span>
           )}
-          {state === 'checking' && <span className="text-foreground-muted">Checking…</span>}
-          {state === 'not-found' && (
-            <span className="text-foreground-muted">Not found — install below</span>
-          )}
-          {state === 'uninstalled' && <span className="text-foreground-muted">Uninstalled</span>}
         </div>
-
         <DropdownMenu.Root>
           <DropdownMenu.Trigger
             disabled={state === 'checking'}
-            className="shrink-0 rounded p-1 text-foreground-passive hover:bg-background-2 hover:text-foreground"
-            aria-label="Installation options"
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                icon
+                className="shrink-0"
+                aria-label="Installation options"
+              />
+            }
           >
-            <MoreHorizontal className="h-3.5 w-3.5" />
+            <MoreHorizontal className="size-4" />
           </DropdownMenu.Trigger>
           <DropdownMenu.Content align="end">
             <DropdownMenu.Sub>
@@ -123,8 +117,8 @@ export const DependencyInstallationStatusCard = observer(function DependencyInst
                     const isCurrentSource = rowKey === selectedKey;
                     return (
                       <DropdownMenu.Item key={rowKey} onClick={() => onSelectSource(row.ref)}>
-                        <span className="flex items-center gap-1.5 truncate">
-                          <span className="flex flex-col truncate">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span className="flex min-w-0 flex-1 flex-col">
                             <span className="truncate">{row.label}</span>
                             {row.displayPath && (
                               <span className="truncate font-mono text-xs text-foreground-muted">
@@ -135,7 +129,7 @@ export const DependencyInstallationStatusCard = observer(function DependencyInst
                           {row.recommended && <RecommendedBadge />}
                           {/* "Installed" applies to concrete discovered binaries, never to the
                               'auto' policy row. Show it on every found installation, including
-                              the currently-used one (which also gets the "Used" badge). */}
+                              the currently-used one (which also says "In use"). */}
                           {row.status === 'available' && row.ref.kind !== 'auto' && (
                             <InstalledBadge />
                           )}
@@ -154,7 +148,7 @@ export const DependencyInstallationStatusCard = observer(function DependencyInst
             <DropdownMenu.Item
               onClick={() => {
                 void toast.promise(refresh(), {
-                  loading: 'Refreshing installations...',
+                  loading: 'Refreshing installations…',
                   success: 'Installations refreshed',
                   error: 'Failed to refresh installations',
                 });
@@ -165,7 +159,7 @@ export const DependencyInstallationStatusCard = observer(function DependencyInst
             <DropdownMenu.Item
               onClick={() => {
                 void toast.promise(fetchLatestVersion(), {
-                  loading: 'Checking for updates...',
+                  loading: 'Checking for updates…',
                   success: 'Checked for updates',
                   error: 'Failed to check for updates',
                 });
@@ -182,7 +176,7 @@ export const DependencyInstallationStatusCard = observer(function DependencyInst
                   onClick={() => {
                     const name = agentPayload?.name ?? 'Agent';
                     void toast.promise(uninstall(), {
-                      loading: `Uninstalling ${name}...`,
+                      loading: `Uninstalling ${name}…`,
                       success: `${name} successfully uninstalled`,
                       error: `Failed to uninstall ${name}`,
                     });
@@ -196,7 +190,7 @@ export const DependencyInstallationStatusCard = observer(function DependencyInst
         </DropdownMenu.Root>
       </div>
       {showNoAutoUpdateHint && (
-        <p className="px-1 text-xs text-foreground-muted">
+        <p className="text-xs text-foreground-passive">
           Automatic updates are not available for this installation.
         </p>
       )}

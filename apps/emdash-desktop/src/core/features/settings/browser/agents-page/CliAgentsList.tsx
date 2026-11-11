@@ -1,5 +1,5 @@
+import { EmptyState } from '@emdash/ui/react/components';
 import { CollectionView, useQueryListSource } from '@emdash/ui/react/patterns';
-import { BotIcon } from 'lucide-react';
 import React, { useLayoutEffect, useState } from 'react';
 import { hostRefFromConnectionId } from '@core/features/agents/api/browser/client';
 import { useAgents } from '@core/features/agents/api/browser/use-agents';
@@ -60,20 +60,17 @@ export const CliAgentsList: React.FC<CliAgentsListProps> = ({
   );
 };
 
-// Icon-bearing empty state — `EmptyState` has no icon slot, so this stays
-// custom under the rich-states carve-out.
 function AgentsEmptyState({ hasAgents }: { hasAgents: boolean }) {
   return (
-    <div className="flex min-h-48 flex-col items-center justify-center p-8 text-center">
-      <BotIcon className="mb-3 size-8 text-foreground-passive" />
-      <div className="text-sm text-foreground">
-        {hasAgents ? 'No agents match your search' : 'No agents'}
-      </div>
-      <p className="mt-1 max-w-sm text-xs text-foreground-passive">
-        {hasAgents
+    <EmptyState
+      bare
+      className="min-h-48"
+      label={hasAgents ? 'No agents match your search' : 'No agents yet'}
+      description={
+        hasAgents
           ? 'Try a different agent name.'
-          : 'Agents appear here once they can be detected on this machine.'}
-      </p>
-    </div>
+          : 'Agents appear here once they can be detected on this machine.'
+      }
+    />
   );
 }

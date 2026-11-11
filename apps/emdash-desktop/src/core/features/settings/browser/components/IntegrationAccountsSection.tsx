@@ -1,5 +1,5 @@
-import { Badge, Button, Tooltip, useToast } from '@emdash/ui/react/primitives';
-import { Circle, CircleCheck, RefreshCw, X } from 'lucide-react';
+import { Button, DropdownMenu, useToast } from '@emdash/ui/react/primitives';
+import { CircleCheck, Ellipsis, RefreshCw, Trash2 } from 'lucide-react';
 import { IntegrationIcon } from '@core/features/integrations/contributions/browser/integration-icon';
 import { useIntegrationsContext } from '@core/features/integrations/contributions/browser/integrations-provider';
 import { getProjectsWireClient } from '@core/features/projects/api/browser/client';
@@ -12,8 +12,8 @@ import type { IntegrationItem } from './IntegrationsCard';
  * Connected-account rows for one provider — GitHub included: every provider's
  * accounts render and mutate through the provider-generic integrations
  * surface backed by the common provider account service. Rows show the
- * account identity (avatar when the provider has
- * one), the default marker, and set-default / remove affordances.
+ * account identity (avatar when the provider has one), the default marker and its source in words,
+ * and one actions menu: make default, reconnect, remove.
  */
 export function IntegrationAccountRows({
   integration,
@@ -76,124 +76,83 @@ export function IntegrationAccountRows({
     });
   };
 
+  const reconnect = (account: ProviderAccountSummary) => {
+    void openIntegrationSetup({
+      integration: integration.id,
+      accountId: account.accountId,
+      displayName: account.displayName !== account.accountId ? account.displayName : undefined,
+    });
+  };
+
   return (
-    <Tooltip.Provider delay={150}>
-      <div className="space-y-2">
-        {accounts.map((account) => (
-          <div
+    <ul className="flex flex-col gap-0.5" aria-label={`${integration.name} accounts`}>
+      {accounts.map((account) => {
+        const label = accountLabel(account);
+        const facts = [
+          account.isDefault && accounts.length > 1 ? 'Default' : null,
+          account.displayDetail ?? 'Connected',
+          account.credentialSource ? providerCredentialSourceLabel(account.credentialSource) : null,
+        ].filter(Boolean);
+        return (
+          <li
             key={account.accountId}
-            className="flex items-center gap-3 rounded-lg border border-border/60 bg-background/60 p-3"
+            className="group/row -mx-2 flex items-center gap-3 rounded-md px-2 py-2 transition-colors hover:bg-surface-hover"
           >
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center">
+            <span className="flex size-7 shrink-0 items-center justify-center">
               {account.avatarUrl ? (
-                <img
-                  src={account.avatarUrl}
-                  alt={accountLabel(account)}
-                  className="h-9 w-9 rounded-full border border-border/60"
-                />
+                <img src={account.avatarUrl} alt="" className="size-7 rounded-full" />
               ) : (
-                <IntegrationIcon provider={integration.id} size={22} />
+                <IntegrationIcon provider={integration.id} size={20} />
               )}
-            </div>
+            </span>
             <div className="min-w-0 flex-1">
-              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                <p className="truncate text-sm font-medium text-foreground">
-                  {accountLabel(account)}
-                </p>
-                {account.isDefault && accounts.length > 1 ? (
-                  <Tooltip.Root>
-                    <Tooltip.Trigger className="inline-flex h-4.5 items-center leading-none">
-                      <Badge>Default</Badge>
-                    </Tooltip.Trigger>
-                    <Tooltip.Content side="top">
-                      Projects without an explicit account use this one.
-                    </Tooltip.Content>
-                  </Tooltip.Root>
-                ) : null}
-                {account.credentialSource ? (
-                  <Badge variant="outline">
-                    {providerCredentialSourceLabel(account.credentialSource)}
-                  </Badge>
-                ) : null}
-              </div>
-              <p className="text-muted-foreground truncate text-xs">
-                {account.displayDetail ?? 'Connected'}
-              </p>
+              <p className="truncate text-sm text-foreground">{label}</p>
+              <p className="truncate text-xs text-foreground-muted">{facts.join(' · ')}</p>
             </div>
-            {accounts.length > 1 ? (
-              <Tooltip.Root>
-                <Tooltip.Trigger>
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger
+                render={
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
                     icon
+                    className="shrink-0"
                     disabled={mutating}
-                    onClick={account.isDefault ? undefined : () => void setDefault(account)}
-                    aria-label={
-                      account.isDefault
-                        ? `${accountLabel(account)} is the default ${integration.name} account`
-                        : `Set ${accountLabel(account)} as default ${integration.name} account`
-                    }
-                  >
-                    {account.isDefault ? (
-                      <CircleCheck className="text-foreground" />
-                    ) : (
-                      <Circle className="text-foreground-muted" />
-                    )}
-                  </Button>
-                </Tooltip.Trigger>
-                <Tooltip.Content side="top">
-                  {account.isDefault ? 'Default account' : 'Set as default'}
-                </Tooltip.Content>
-              </Tooltip.Root>
-            ) : null}
-            {integration.canReconnect ? (
-              <Tooltip.Root>
-                <Tooltip.Trigger>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    icon
-                    disabled={mutating}
-                    onClick={() => {
-                      void openIntegrationSetup({
-                        integration: integration.id,
-                        accountId: account.accountId,
-                        displayName:
-                          account.displayName !== account.accountId
-                            ? account.displayName
-                            : undefined,
-                      });
-                    }}
-                    aria-label={`Reconnect ${accountLabel(account)}`}
-                  >
-                    <RefreshCw />
-                  </Button>
-                </Tooltip.Trigger>
-                <Tooltip.Content side="top">Reconnect account</Tooltip.Content>
-              </Tooltip.Root>
-            ) : null}
-            <Tooltip.Root>
-              <Tooltip.Trigger>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  icon
-                  disabled={mutating}
+                    aria-label={`${label} actions`}
+                  />
+                }
+              >
+                <Ellipsis className="size-4" />
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Content align="end" className="min-w-48">
+                {accounts.length > 1 && !account.isDefault ? (
+                  <DropdownMenu.Item onClick={() => void setDefault(account)}>
+                    <CircleCheck className="size-4" />
+                    Make default
+                  </DropdownMenu.Item>
+                ) : null}
+                {integration.canReconnect ? (
+                  <DropdownMenu.Item onClick={() => reconnect(account)}>
+                    <RefreshCw className="size-4" />
+                    Reconnect
+                  </DropdownMenu.Item>
+                ) : null}
+                {(accounts.length > 1 && !account.isDefault) || integration.canReconnect ? (
+                  <DropdownMenu.Separator />
+                ) : null}
+                <DropdownMenu.Item
+                  variant="destructive"
                   onClick={() => void confirmRemove(account)}
-                  aria-label={`Remove ${accountLabel(account)}`}
                 >
-                  <X />
-                </Button>
-              </Tooltip.Trigger>
-              <Tooltip.Content side="top">Remove account</Tooltip.Content>
-            </Tooltip.Root>
-          </div>
-        ))}
-      </div>
-    </Tooltip.Provider>
+                  <Trash2 className="size-4" />
+                  Remove account
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Root>
+          </li>
+        );
+      })}
+    </ul>
   );
 }

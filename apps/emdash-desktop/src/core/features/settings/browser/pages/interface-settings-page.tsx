@@ -10,36 +10,45 @@ import { TrayIconSettingsRow } from '../components/TrayIconSettingsRow';
 
 export function InterfaceSettingsPage() {
   return (
-    <div className="space-y-8 pb-4">
+    <div className="pb-16">
       <PageLayout.Header
         sticky
         title="Interface"
-        description="Customize the appearance and behavior of the app."
+        description="How Maestro looks, and what its windows, terminals and menus show."
       />
-      <SettingsSection title="Color mode" bare>
-        <ThemeCard />
-      </SettingsSection>
-      <SettingsSection title="Application icon">
-        <TrayIconSettingsRow />
-      </SettingsSection>
-      <SettingsSection title="Terminal" bare>
-        <TerminalSettingsCard />
-      </SettingsSection>
-      <SettingsSection title="Files" bare>
-        <FilesSettingsCard />
-      </SettingsSection>
-      <SettingsSection title="Sidebar" bare>
-        <SidebarMetadataSettingsCard />
-      </SettingsSection>
-      <SettingsSection bare>
-        <InterfaceSettingsCard />
-      </SettingsSection>
-      <SettingsSection title="Keyboard shortcuts" bare>
-        <KeyboardSettingsCard />
-      </SettingsSection>
-      <SettingsSection title="Tools" bare>
-        <HiddenToolsSettingsCard />
-      </SettingsSection>
+      <div className="flex flex-col gap-10">
+        <SettingsSection title="Color mode" bare>
+          <ThemeCard />
+        </SettingsSection>
+        <SettingsSection title="Window">
+          <TrayIconSettingsRow />
+          <InterfaceSettingsCard />
+        </SettingsSection>
+        <SettingsSection
+          title="Sidebar"
+          description="What each task row shows in the left sidebar."
+        >
+          <SidebarMetadataSettingsCard />
+        </SettingsSection>
+        <SettingsSection title="Terminal">
+          <TerminalSettingsCard />
+        </SettingsSection>
+        <SettingsSection
+          title="Files"
+          description="Glob patterns, one per line. Matching files and folders are skipped."
+        >
+          <FilesSettingsCard />
+        </SettingsSection>
+        <SettingsSection
+          title="Open in"
+          description="The editors and tools listed in the Open in menu of a task."
+        >
+          <HiddenToolsSettingsCard />
+        </SettingsSection>
+        <SettingsSection title="Keyboard shortcuts" bare>
+          <KeyboardSettingsCard />
+        </SettingsSection>
+      </div>
     </div>
   );
 }

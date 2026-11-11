@@ -57,6 +57,8 @@ vi.mock('@emdash/ui/react/primitives', async () => {
     React.createElement('div', {}, children);
   return {
     Dialog: { Header: Container, Title: Container, Body: Container, Footer: Container },
+    Field: { Root: Container, Label: Container, Description: Container },
+    Spinner: () => null,
     Input: (props: React.InputHTMLAttributes<HTMLInputElement>) =>
       React.createElement('input', { ...props, autoFocus: false }),
     Button: ({ children, onClick }: React.ButtonHTMLAttributes<HTMLButtonElement>) =>

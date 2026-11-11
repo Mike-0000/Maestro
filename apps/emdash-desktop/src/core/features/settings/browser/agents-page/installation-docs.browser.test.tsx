@@ -25,7 +25,13 @@ vi.mock('@emdash/ui/react/primitives', async () => {
     Field: { Root: Container },
     Label: Container,
     MicroLabel: Container,
-    Sheet: { Root: Container, Content: Container, Header: Container },
+    Sheet: {
+      Root: Container,
+      Content: Container,
+      Header: Container,
+      Title: Container,
+      Body: Container,
+    },
   };
 });
 

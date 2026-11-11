@@ -98,11 +98,11 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     keywords: ['update', 'upgrade', 'restart', 'release'],
   },
   {
-    id: 'privacy-telemetry',
-    label: 'Privacy & Telemetry',
+    id: 'usage-data',
+    label: 'Usage data',
     tab: 'general',
     description: 'Help improve Maestro by sending anonymous usage data.',
-    keywords: ['analytics', 'posthog', 'usage data', 'tracking'],
+    keywords: ['analytics', 'posthog', 'privacy', 'telemetry', 'tracking'],
   },
   {
     id: 'auto-generate-task-names',
@@ -188,7 +188,7 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   },
   {
     id: 'emdash-account',
-    label: 'Emdash Account',
+    label: 'Emdash account',
     tab: 'general',
     description: 'Create an Emdash account to automatically connect GitHub using OAuth2.',
     keywords: ['sign in', 'sign out', 'login', 'logout', 'oauth'],
@@ -399,21 +399,21 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   },
   {
     id: 'left-sidebar-line-changes',
-    label: 'Left sidebar line changes',
+    label: 'Sidebar line changes',
     tab: 'interface',
     description: 'Show added and removed line counts for tasks in the left sidebar.',
     keywords: ['diff'],
   },
   {
     id: 'left-sidebar-pr-status',
-    label: 'Left sidebar PR status',
+    label: 'Sidebar pull request status',
     tab: 'interface',
-    description: 'Show GitHub PR merge and status icons for tasks in the left sidebar.',
-    keywords: ['pull request'],
+    description: 'Show the merge and check state of task pull requests in the left sidebar.',
+    keywords: ['pull request', 'pr', 'github'],
   },
   {
     id: 'left-sidebar-timestamps',
-    label: 'Left sidebar timestamps',
+    label: 'Sidebar timestamps',
     tab: 'interface',
     description: 'Show the relative task timestamp in the left sidebar.',
     keywords: ['time'],
@@ -427,9 +427,10 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   },
   {
     id: 'context-bar',
-    label: 'Context bar',
+    label: 'Hide the context bar',
     tab: 'interface',
-    description: 'Hide the on-screen context trigger.',
+    description: 'Remove the on-screen context trigger.',
+    keywords: ['context bar'],
   },
   {
     id: 'keyboard-shortcuts',
@@ -440,9 +441,9 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   },
   {
     id: 'open-in-tools',
-    label: 'Tools',
+    label: 'Open in menu',
     tab: 'interface',
-    description: 'Show or hide detected "Open in" apps in menus.',
+    description: 'Show or hide installed editors and tools in the Open in menu.',
     keywords: ['open in', 'editor', 'hidden tools'],
   },
   // Browser

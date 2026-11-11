@@ -1,5 +1,4 @@
-import { Button, Dialog, useToast } from '@emdash/ui/react/primitives';
-import { Loader2 } from 'lucide-react';
+import { Button, Dialog, Spinner, useToast } from '@emdash/ui/react/primitives';
 import { useState, type ReactNode } from 'react';
 import { useIntegrationsContext } from '@core/features/integrations/contributions/browser/integrations-provider';
 import { ConfirmButton } from '@core/primitives/keybindings/browser/confirm-button';
@@ -58,13 +57,13 @@ export function SetupFormShell({
       <Dialog.Body>
         <div className="pt-1">{children}</div>
         {error ? (
-          <p className="text-xs text-foreground-destructive" role="alert">
+          <p className="text-xs text-foreground-error" role="alert">
             {error}
           </p>
         ) : null}
       </Dialog.Body>
       <Dialog.Footer>
-        <Button variant="secondary" onClick={onClose}>
+        <Button variant="ghost" onClick={onClose}>
           Cancel
         </Button>
         <ConfirmButton
@@ -72,7 +71,7 @@ export function SetupFormShell({
           onClick={() => void handleSubmit()}
           disabled={!canSubmit || isMutating}
         >
-          {isMutating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          {isMutating && <Spinner size="sm" />}
           {reconnect ? 'Reconnect' : 'Connect'}
         </ConfirmButton>
       </Dialog.Footer>

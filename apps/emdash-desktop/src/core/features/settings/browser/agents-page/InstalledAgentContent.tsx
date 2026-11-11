@@ -1,42 +1,14 @@
-import {
-  Button,
-  Collapsible,
-  Field,
-  Input,
-  Label,
-  Switch,
-  Tooltip,
-} from '@emdash/ui/react/primitives';
+import { Button, Collapsible, Field, Input, Label, Switch } from '@emdash/ui/react/primitives';
 import { useForm } from '@tanstack/react-form';
-import { ChevronRight, Info, RotateCcw } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
-import React, { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { ProviderCustomConfig } from '@core/primitives/app-settings/api';
 import {
   EnvironmentVariableInputs,
   type EnvironmentVariableEntry,
 } from '@core/primitives/environment-variables/browser/environment-variable-inputs';
 import { log } from '@core/primitives/logging/browser/logger';
-import { cn } from '@core/primitives/styling/browser/cn';
-
-const FieldTooltip: React.FC<{ content: string }> = ({ content }) => (
-  <Tooltip.Provider>
-    <Tooltip.Root>
-      <Tooltip.Trigger>
-        <button
-          type="button"
-          className="text-muted-foreground hover:text-foreground"
-          aria-label="More information"
-        >
-          <Info className="h-3.5 w-3.5" aria-hidden="true" />
-        </button>
-      </Tooltip.Trigger>
-      <Tooltip.Content side="top" className="max-w-[200px] text-xs">
-        {content}
-      </Tooltip.Content>
-    </Tooltip.Root>
-  </Tooltip.Provider>
-);
+import { InfoMark } from './agent-sheet-section';
 
 export interface InstalledAgentContentProps {
   storedConfig: ProviderCustomConfig | undefined;
@@ -132,105 +104,99 @@ export const InstalledAgentContent = observer(function InstalledAgentContent({
   }, [form, reset]);
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-2">
+    <section className="flex flex-col">
       <Collapsible.Root open={open} onOpenChange={setOpen}>
-        <Collapsible.Trigger
-          hideChevron
-          type="button"
-          className="flex w-full items-center justify-between rounded-md py-2 text-sm font-medium text-foreground-muted hover:text-foreground"
-        >
-          <span className="flex h-6 items-center gap-1.5">
-            <Label>Advanced settings</Label>
-            <ChevronRight
-              className={cn('size-3.5', 'transition-transform', open ? 'rotate-90' : '')}
-            />
-          </span>
+        <div className="flex min-h-6 items-center gap-3">
+          <Collapsible.Trigger variant="text" type="button" className="text-sm">
+            Advanced settings
+          </Collapsible.Trigger>
           {isOverridden && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-6 gap-1.5 px-2 text-xs"
-              onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-                e.stopPropagation();
-                handleResetToDefaults();
-              }}
-            >
-              <RotateCcw className="size-3.5" />
-              Reset to defaults
-            </Button>
+            <>
+              <span className="text-xs text-foreground-passive">Customized</span>
+              <Button
+                type="button"
+                variant="text"
+                size="xs"
+                className="ml-auto"
+                onClick={handleResetToDefaults}
+              >
+                Reset to defaults
+              </Button>
+            </>
           )}
-        </Collapsible.Trigger>
+        </div>
 
-        <Collapsible.Panel className="space-y-4 rounded-lg border p-3">
-          {/* Additional parameters */}
-          <form.Field name="extraArgs">
-            {(field) => (
-              <Field.Root>
-                <div className="flex items-center gap-2">
-                  <Label htmlFor="sheet-extraArgs">Additional parameters</Label>
-                  <FieldTooltip content="Extra flags appended to the command (e.g. --enable-all-github-mcp-tools)" />
-                </div>
-                <Input
-                  id="sheet-extraArgs"
-                  value={field.state.value}
-                  onChange={(e) => field.handleChange(e.target.value)}
-                  onBlur={() => commit()}
-                  placeholder="e.g. --enable-all-github-mcp-tools"
-                  className="font-mono text-sm"
-                />
-              </Field.Root>
-            )}
-          </form.Field>
-
-          {/* Run in WSL2 */}
-          {showWsl && (
-            <form.Field name="wsl">
+        <Collapsible.Panel>
+          <div className="flex flex-col gap-5 px-0.5 pt-4 pb-0.5">
+            {/* Additional parameters */}
+            <form.Field name="extraArgs">
               {(field) => (
-                <Field.Root>
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <Label htmlFor="sheet-wsl">Run in WSL2</Label>
-                      <FieldTooltip content="Starts this agent's terminal sessions inside your default WSL2 distro. The agent must be installed and signed in there. Without such a distro it runs on Windows as before. Chat sessions always run on Windows." />
-                    </div>
-                    <Switch
-                      id="sheet-wsl"
-                      checked={field.state.value}
-                      onCheckedChange={(checked) => {
-                        field.handleChange(checked);
-                        commit();
-                      }}
-                    />
-                  </div>
+                <Field.Root className="gap-1.5">
+                  <span className="flex items-center gap-1.5">
+                    <Label htmlFor="sheet-extraArgs">Additional parameters</Label>
+                    <InfoMark>
+                      Extra flags appended to the command (e.g. --enable-all-github-mcp-tools)
+                    </InfoMark>
+                  </span>
+                  <Input
+                    id="sheet-extraArgs"
+                    value={field.state.value}
+                    onChange={(e) => field.handleChange(e.target.value)}
+                    onBlur={() => commit()}
+                    placeholder="e.g. --enable-all-github-mcp-tools"
+                    className="font-mono text-xs"
+                  />
                 </Field.Root>
               )}
             </form.Field>
-          )}
 
-          {/* Environment variables */}
-          <form.Field name="envEntries">
-            {(field) => (
-              <Field.Root>
-                <div className="flex items-center gap-2">
-                  <Label>Environment variables</Label>
-                  <FieldTooltip content="Environment variables set when running the agent" />
-                </div>
-                <EnvironmentVariableInputs
-                  entries={field.state.value}
-                  onChange={field.handleChange}
-                  onCommit={commit}
-                />
-              </Field.Root>
+            {/* Run in WSL2 */}
+            {showWsl && (
+              <form.Field name="wsl">
+                {(field) => (
+                  <Field.Root>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="flex items-center gap-1.5">
+                        <Label htmlFor="sheet-wsl">Run in WSL2</Label>
+                        <InfoMark>
+                          Starts this agent&apos;s terminal sessions inside your default WSL2
+                          distro. The agent must be installed and signed in there. Without such a
+                          distro it runs on Windows as before. Chat sessions always run on Windows.
+                        </InfoMark>
+                      </span>
+                      <Switch
+                        id="sheet-wsl"
+                        checked={field.state.value}
+                        onCheckedChange={(checked) => {
+                          field.handleChange(checked);
+                          commit();
+                        }}
+                      />
+                    </div>
+                  </Field.Root>
+                )}
+              </form.Field>
             )}
-          </form.Field>
 
-          {isOverridden && (
-            <div className="rounded-md border border-border-warning bg-background-warning px-3 py-2 text-xs text-foreground-warning">
-              Custom configuration is applied
-            </div>
-          )}
+            {/* Environment variables */}
+            <form.Field name="envEntries">
+              {(field) => (
+                <Field.Root className="gap-1.5">
+                  <span className="flex items-center gap-1.5">
+                    <Label>Environment variables</Label>
+                    <InfoMark>Environment variables set when running the agent</InfoMark>
+                  </span>
+                  <EnvironmentVariableInputs
+                    entries={field.state.value}
+                    onChange={field.handleChange}
+                    onCommit={commit}
+                  />
+                </Field.Root>
+              )}
+            </form.Field>
+          </div>
         </Collapsible.Panel>
       </Collapsible.Root>
-    </div>
+    </section>
   );
 });

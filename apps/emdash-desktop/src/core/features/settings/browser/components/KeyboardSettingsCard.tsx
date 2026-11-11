@@ -1,5 +1,5 @@
 import { SettingsCard } from '@emdash/ui/react/patterns';
-import { Button, toast, Tooltip } from '@emdash/ui/react/primitives';
+import { Button, SectionLabel, toast, Tooltip } from '@emdash/ui/react/primitives';
 import { RotateCcw, X } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import React, { useState } from 'react';
@@ -112,13 +112,11 @@ const KeyboardSettingsCard: React.FC = observer(function KeyboardSettingsCard() 
 
   return (
     <SettingsCard>
-      <div className="space-y-6">
-        {groups.map((group) => (
-          <div key={group.category}>
-            <div className="text-muted-foreground mb-3 text-xs font-medium tracking-wide uppercase">
-              {group.category}
-            </div>
-            <div className="space-y-3">
+      <Tooltip.Provider delay={150}>
+        <div className="flex flex-col gap-8">
+          {groups.map((group) => (
+            <section key={group.category} className="flex flex-col gap-4">
+              <SectionLabel as="h4">{group.category}</SectionLabel>
               {group.entries.map((entry) => {
                 const key = entry.binding.settingsKey;
                 const capturing = editingKey === key && recorder.isRecording;
@@ -128,31 +126,32 @@ const KeyboardSettingsCard: React.FC = observer(function KeyboardSettingsCard() 
                 return (
                   <div
                     key={entry.command.id}
-                    className="group/shortcut flex min-w-0 flex-wrap items-start justify-between gap-x-2 gap-y-2"
+                    className="group/shortcut flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2"
                   >
-                    <div className="min-w-0 flex-1 basis-64 space-y-1">
-                      <div className="text-sm wrap-break-word">{entry.command.title}</div>
-                      <div className="text-muted-foreground text-xs wrap-break-word">
-                        {entry.command.description}
+                    <div className="min-w-0 flex-1 basis-64">
+                      <div className="text-sm wrap-break-word text-foreground">
+                        {entry.command.title}
                       </div>
+                      {entry.command.description ? (
+                        <div className="mt-0.5 text-xs wrap-break-word text-foreground-muted">
+                          {entry.command.description}
+                        </div>
+                      ) : null}
                     </div>
-                    <div className="ml-auto flex shrink-0 items-center gap-2">
+                    <div className="ml-auto flex shrink-0 items-center gap-1">
                       {capturing ? (
                         <>
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            className="min-w-[80px] animate-pulse"
-                            onClick={recorder.cancelRecording}
-                            disabled={saving}
+                          <span
+                            role="status"
+                            className="flex h-7 min-w-20 items-center justify-center rounded-md px-2.5 text-xs text-foreground ring-1 ring-ring"
                           >
-                            Press keys...
-                          </Button>
+                            Press keys…
+                          </span>
                           <Button
                             type="button"
-                            variant="ghost"
-                            size="sm"
+                            variant="text"
+                            size="xs"
+                            className="ml-2"
                             onClick={recorder.cancelRecording}
                             disabled={saving}
                           >
@@ -162,16 +161,16 @@ const KeyboardSettingsCard: React.FC = observer(function KeyboardSettingsCard() 
                       ) : (
                         <>
                           {(showClear || showReset) && (
-                            <div className="pointer-events-none flex items-center gap-1 opacity-0 transition-opacity group-hover/shortcut:pointer-events-auto group-hover/shortcut:opacity-100">
-                              <Tooltip.Provider delay={150}>
-                                {showReset && (
-                                  <Tooltip.Root>
-                                    <Tooltip.Trigger>
+                            <div className="pointer-events-none flex items-center opacity-0 transition-opacity group-focus-within/shortcut:pointer-events-auto group-focus-within/shortcut:opacity-100 group-hover/shortcut:pointer-events-auto group-hover/shortcut:opacity-100">
+                              {showReset && (
+                                <Tooltip.Root>
+                                  <Tooltip.Trigger
+                                    render={
                                       <Button
                                         type="button"
                                         variant="ghost"
+                                        size="sm"
                                         icon
-                                        className="text-muted-foreground hover:text-foreground"
                                         onClick={() => {
                                           resetField(key);
                                           toast('Shortcut reset', {
@@ -181,20 +180,22 @@ const KeyboardSettingsCard: React.FC = observer(function KeyboardSettingsCard() 
                                         disabled={loading || saving}
                                         aria-label="Reset to default"
                                       >
-                                        <RotateCcw className="h-3.5 w-3.5" />
+                                        <RotateCcw className="size-3.5" />
                                       </Button>
-                                    </Tooltip.Trigger>
-                                    <Tooltip.Content side="top">Reset to default</Tooltip.Content>
-                                  </Tooltip.Root>
-                                )}
-                                {showClear && (
-                                  <Tooltip.Root>
-                                    <Tooltip.Trigger>
+                                    }
+                                  />
+                                  <Tooltip.Content side="top">Reset to default</Tooltip.Content>
+                                </Tooltip.Root>
+                              )}
+                              {showClear && (
+                                <Tooltip.Root>
+                                  <Tooltip.Trigger
+                                    render={
                                       <Button
                                         type="button"
                                         variant="ghost"
+                                        size="sm"
                                         icon
-                                        className="text-muted-foreground hover:text-foreground"
                                         onClick={() => {
                                           update({ [key]: null });
                                           toast('Shortcut removed', {
@@ -204,24 +205,29 @@ const KeyboardSettingsCard: React.FC = observer(function KeyboardSettingsCard() 
                                         disabled={loading || saving}
                                         aria-label="Remove shortcut"
                                       >
-                                        <X className="h-3.5 w-3.5" />
+                                        <X className="size-3.5" />
                                       </Button>
-                                    </Tooltip.Trigger>
-                                    <Tooltip.Content side="top">Remove shortcut</Tooltip.Content>
-                                  </Tooltip.Root>
-                                )}
-                              </Tooltip.Provider>
+                                    }
+                                  />
+                                  <Tooltip.Content side="top">Remove shortcut</Tooltip.Content>
+                                </Tooltip.Root>
+                              )}
                             </div>
                           )}
                           <Button
                             type="button"
                             variant="ghost"
                             size="sm"
-                            className="min-w-[80px] justify-end px-0 hover:bg-transparent"
+                            className="min-w-20 justify-end px-1.5"
                             onClick={() => startCapture(key)}
                             disabled={loading || saving}
+                            aria-label={`Change shortcut for ${entry.command.title}`}
                           >
-                            <Shortcut hotkey={entry.chord} variant="keycaps" />
+                            {entry.chord ? (
+                              <Shortcut hotkey={entry.chord} variant="keycaps" />
+                            ) : (
+                              <span className="text-xs text-foreground-passive">Not set</span>
+                            )}
                           </Button>
                         </>
                       )}
@@ -229,10 +235,10 @@ const KeyboardSettingsCard: React.FC = observer(function KeyboardSettingsCard() 
                   </div>
                 );
               })}
-            </div>
-          </div>
-        ))}
-      </div>
+            </section>
+          ))}
+        </div>
+      </Tooltip.Provider>
     </SettingsCard>
   );
 });

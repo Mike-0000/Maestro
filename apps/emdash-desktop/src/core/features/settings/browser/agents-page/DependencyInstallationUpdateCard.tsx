@@ -1,4 +1,4 @@
-import { ArrowRight, Loader2, RefreshCw } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import { useMemo } from 'react';
 import { hostRefFromConnectionId } from '@core/features/agents/api/browser/client';
 import { useAgentInstallationStatus } from '@core/features/agents/api/browser/use-agent-installation-statuses';
@@ -9,6 +9,7 @@ import {
   CommandRow,
 } from '@core/primitives/agents/browser/install-command-row';
 import { SudoRetryPanel } from '@core/primitives/agents/browser/SudoRetryPanel';
+import { UpdateAvailableBadge } from './agent-status-badge';
 
 export type DependencyInstallationUpdateCardProps = {
   agentId: string;
@@ -70,10 +71,10 @@ export function DependencyInstallationUpdateCard({
 
   const versionArrow =
     usedInstallation.version && usedInstallation.latestVersion ? (
-      <span className="flex items-center gap-1 text-xs text-foreground-muted">
-        <span className="font-sans">{usedInstallation.version}</span>
-        <ArrowRight className="h-3 w-3 shrink-0" />
-        <span className="font-sans">{usedInstallation.latestVersion}</span>
+      <span className="flex items-center gap-1 text-xs text-foreground-muted tabular-nums">
+        <span>{usedInstallation.version}</span>
+        <ArrowRight className="size-3 shrink-0 text-foreground-passive" aria-label="to" />
+        <span className="text-foreground">{usedInstallation.latestVersion}</span>
       </span>
     ) : null;
 
@@ -106,7 +107,7 @@ export function DependencyInstallationUpdateCard({
               disabled={isUpdatingThis}
               onClick={() => void update(usedMethod as InstallMethod)}
             >
-              {isUpdatingThis ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Update'}
+              {isUpdatingThis ? 'Updating…' : 'Update'}
             </CommandActionButton>
           }
         />
@@ -138,7 +139,7 @@ export function DependencyInstallationUpdateCard({
           command={command}
           action={
             <CommandActionButton disabled={isUpdatingThis} onClick={() => void update()}>
-              {isUpdatingThis ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Update'}
+              {isUpdatingThis ? 'Updating…' : 'Update'}
             </CommandActionButton>
           }
         />
@@ -157,18 +158,9 @@ function UpdateCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className="space-y-2 rounded-lg border p-3">
+    <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <div className="flex size-6 items-center justify-center rounded-lg bg-background-warning">
-            <RefreshCw
-              className="size-3.5 shrink-0 text-foreground-warning"
-              absoluteStrokeWidth
-              strokeWidth={3}
-            />
-          </div>
-          <span>Update available</span>
-        </div>
+        <UpdateAvailableBadge />
         {versionArrow}
       </div>
       {children}

@@ -1,4 +1,5 @@
-import { Button, Checkbox, Popover, Separator } from '@emdash/ui/react/primitives';
+import { StateGlyph } from '@emdash/ui/react/components';
+import { Button, Checkbox, Popover, SectionLabel, Separator } from '@emdash/ui/react/primitives';
 import { useState, type ReactNode } from 'react';
 import { identityStripView } from '@core/features/integrations/api/identity-strip-state';
 import { provenanceSourceText } from '@core/features/projects/contributions/browser/settings-provenance-labels';
@@ -45,9 +46,9 @@ export type ProviderIdentityStripProps<Account extends ProviderAccountSummary> =
 function provenanceDotClass(provenance: Provenance): string {
   switch (provenance.kind) {
     case 'set':
-      return 'bg-foreground-info';
-    case 'inferred':
       return 'bg-foreground-muted';
+    case 'inferred':
+      return 'border border-foreground-passive';
     case 'broken-setting':
       return 'bg-foreground-warning';
     case 'unresolvable':
@@ -99,7 +100,7 @@ export function ProviderIdentityStrip<Account extends ProviderAccountSummary>({
         </div>
         <Button
           type="button"
-          variant={accountRequired ? 'primary' : 'secondary'}
+          variant={accountRequired ? 'primary' : 'ghost'}
           size="xs"
           onClick={onConnect}
           disabled={disabled}
@@ -113,9 +114,12 @@ export function ProviderIdentityStrip<Account extends ProviderAccountSummary>({
   if (view.kind === 'unresolvable') {
     return (
       <StripFrame error>
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="font-medium text-foreground-error">{view.message}</span>
-          <span className="text-xs text-foreground-muted">{emptyState.unavailable}</span>
+        <div className="flex min-w-0 flex-1 items-start gap-2">
+          <StateGlyph state="error" className="mt-0.5" />
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <span className="font-medium text-foreground">{view.message}</span>
+            <span className="text-xs text-foreground-muted">{emptyState.unavailable}</span>
+          </div>
         </div>
         <ChangeAccountPopover
           providerIcon={providerIcon}
@@ -196,8 +200,8 @@ function StripFrame({ error, children }: { error?: boolean; children: React.Reac
     <div
       data-testid="provider-identity-strip"
       className={cn(
-        'flex items-center gap-2 rounded-md border px-3 py-2 text-sm',
-        error ? 'border-border-error bg-background-error/20' : 'border-border bg-background-1'
+        'flex min-h-10 items-center gap-2 rounded-lg border border-border-subtle bg-surface-emphasis px-3 py-1.5 text-sm',
+        error && 'py-2.5'
       )}
     >
       {children}
@@ -235,7 +239,7 @@ function ChangeAccountPopover<Account extends ProviderAccountSummary>({
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger render={trigger} disabled={disabled} />
       <Popover.Content align="end" className="flex w-72 flex-col gap-2 p-3">
-        <span className="text-xs font-medium text-foreground-muted">Act as</span>
+        <SectionLabel>Act as</SectionLabel>
         <div className="flex flex-col gap-1">
           {accounts.map((candidate) => (
             <button
@@ -247,8 +251,8 @@ function ChangeAccountPopover<Account extends ProviderAccountSummary>({
                 setOpen(false);
               }}
               className={cn(
-                'flex items-center rounded-md px-2 py-1.5 text-left text-sm hover:bg-background-2',
-                current?.accountId === candidate.accountId && 'bg-background-2'
+                'flex min-h-8 items-center rounded-md px-2 py-1.5 text-left text-sm transition-colors outline-none hover:bg-surface-hover focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset disabled:opacity-50',
+                current?.accountId === candidate.accountId && 'bg-surface-selected'
               )}
             >
               <ProviderAccountLabel

@@ -1,13 +1,14 @@
 import type { HostRef } from '@emdash/core/primitives/host/api';
 import type { McpServer } from '@emdash/core/primitives/mcp/api';
-import { Button, Field, Label } from '@emdash/ui/react/primitives';
-import { ExternalLink, Globe, Loader2, Terminal, X } from 'lucide-react';
-import React from 'react';
+import { Button, Spinner } from '@emdash/ui/react/primitives';
+import { Globe, Terminal, X } from 'lucide-react';
 import { useAgentMcps } from '@core/features/agents/api/browser/use-agent-mcps';
 import { settingsViewDef } from '@core/features/settings/contributions/views';
 import { useNavigate } from '@core/primitives/navigation/browser/navigation-hooks';
+import { AgentSheetSection } from './agent-sheet-section';
 
-function McpServerPill({
+/** One MCP server: transport glyph, name, transport in words, and a remove action on hover. */
+function McpServerRow({
   server,
   isRemoving,
   onRemove,
@@ -19,40 +20,29 @@ function McpServerPill({
   const Icon = server.transport === 'http' ? Globe : Terminal;
 
   return (
-    <span
-      className="group hover:border-destructive/60 inline-flex h-8 max-w-full items-center gap-1.5 rounded-full border border-border bg-background-quaternary-1 pr-1.5 pl-3 text-xs text-foreground transition-colors hover:bg-background-destructive hover:text-foreground-destructive"
-      title={`${server.name} (${server.transport})`}
-    >
-      <Icon
-        className="size-3.5 shrink-0 text-foreground-muted transition-opacity group-hover:opacity-35"
-        aria-hidden="true"
-      />
-      <span className="min-w-0 truncate font-medium transition-opacity group-hover:opacity-35">
+    <li className="group/row -mx-2 flex h-8 items-center gap-2 rounded-md px-2 transition-colors hover:bg-surface-hover">
+      <Icon className="size-3.5 shrink-0 text-foreground-passive" aria-hidden="true" />
+      <span className="min-w-0 truncate text-sm text-foreground" title={server.name}>
         {server.name}
       </span>
-      <span className="shrink-0 text-foreground-muted transition-opacity group-hover:opacity-35">
-        {server.transport}
-      </span>
-      <button
+      <span className="shrink-0 text-xs text-foreground-passive">{server.transport}</span>
+      <Button
         type="button"
+        variant="ghost"
+        size="xs"
+        icon
         disabled={isRemoving}
-        className="inline-flex size-5 shrink-0 items-center justify-center rounded-full text-foreground-muted opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground-destructive disabled:opacity-60"
+        className="ml-auto shrink-0 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 disabled:opacity-100"
         onClick={onRemove}
         aria-label={`Remove ${server.name} from this agent`}
       >
         {isRemoving ? (
-          <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+          <Spinner size="sm" aria-hidden="true" />
         ) : (
-          <X className="size-3" aria-hidden="true" />
+          <X className="size-3.5" aria-hidden="true" />
         )}
-      </button>
-    </span>
-  );
-}
-
-function EmptyMcpState() {
-  return (
-    <p className="text-muted-foreground text-xs">No MCP servers configured for this agent yet.</p>
+      </Button>
+    </li>
   );
 }
 
@@ -73,42 +63,35 @@ export function AgentMcpSection({
   const { servers, isLoading, removeServer, removingServerName } = useAgentMcps(agentId, host);
 
   return (
-    <Field.Root>
-      <div className="flex items-center justify-between">
-        <Label>MCP Servers</Label>
-        {onManage && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-6 gap-1 px-2 text-xs"
-            onClick={onManage}
-          >
+    <AgentSheetSection
+      title="MCP servers"
+      action={
+        onManage ? (
+          <Button type="button" variant="text" size="xs" onClick={onManage}>
             Manage in Settings
-            <ExternalLink className="size-3" aria-hidden="true" />
           </Button>
-        )}
-      </div>
-      <div>
-        {isLoading ? (
-          <div className="flex h-9 items-center justify-center">
-            <Loader2 className="text-muted-foreground size-4 animate-spin" />
-          </div>
-        ) : servers.length === 0 ? (
-          <EmptyMcpState />
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {servers.map((server) => (
-              <McpServerPill
-                key={server.name}
-                server={server}
-                isRemoving={removingServerName === server.name}
-                onRemove={() => removeServer(server.name)}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-    </Field.Root>
+        ) : undefined
+      }
+    >
+      {isLoading ? (
+        <p className="flex items-center gap-2 text-xs text-foreground-muted">
+          <Spinner size="sm" className="text-foreground-passive" />
+          Loading servers…
+        </p>
+      ) : servers.length === 0 ? (
+        <p className="text-xs text-foreground-muted">No MCP servers for this agent yet.</p>
+      ) : (
+        <ul className="flex flex-col">
+          {servers.map((server) => (
+            <McpServerRow
+              key={server.name}
+              server={server}
+              isRemoving={removingServerName === server.name}
+              onRemove={() => removeServer(server.name)}
+            />
+          ))}
+        </ul>
+      )}
+    </AgentSheetSection>
   );
 }

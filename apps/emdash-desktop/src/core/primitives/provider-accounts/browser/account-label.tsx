@@ -67,7 +67,7 @@ export function ProviderAccountLabel({
       {avatar}
       {name}
       {layout === 'inline' && account.displayDetail ? (
-        <span className="text-muted-foreground shrink-0 text-xs">{account.displayDetail}</span>
+        <span className="shrink-0 text-xs text-foreground-muted">{account.displayDetail}</span>
       ) : null}
       {defaultBadge}
     </div>

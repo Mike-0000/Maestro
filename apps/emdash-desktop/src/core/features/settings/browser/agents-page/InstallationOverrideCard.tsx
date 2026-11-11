@@ -1,5 +1,5 @@
-import { Alert, Button, Input, toast } from '@emdash/ui/react/primitives';
-import { Loader2 } from 'lucide-react';
+import { Button, Input, Spinner, toast } from '@emdash/ui/react/primitives';
+import { TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 import type { HostDependencyInstallation } from '@core/features/agents/api/browser/use-agent-installation-statuses';
 
@@ -49,39 +49,48 @@ export function InstallationOverrideCard({
   const hasValue = value.trim().length > 0;
 
   return (
-    <div className="space-y-2 rounded-lg border p-3">
-      <Input
-        aria-label={kind === 'path' ? 'Executable path' : 'Command name'}
-        value={value}
-        onChange={(e) => {
-          setValue(e.target.value);
-          setError(null);
-        }}
-        placeholder={
-          kind === 'path' ? '/usr/local/bin/claude' : kind === 'cli' ? 'claude' : undefined
-        }
-        className="font-mono text-sm"
-        disabled={isChecking}
-      />
-      <Alert.Root status="warning">
-        {kind === 'path'
-          ? "Using an absolute path to the agent binary overrides auto-resolution and disables emdash's ability to update the agent."
-          : "Enter the command name or binary resolved on PATH. This overrides auto-resolution and disables emdash's ability to update the agent."}
-      </Alert.Root>
-      {error && <Alert.Root status="destructive">{error}</Alert.Root>}
-      {hasValue && (
-        <div className="flex justify-end">
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <Input
+          aria-label={kind === 'path' ? 'Executable path' : 'Command name'}
+          aria-invalid={error ? true : undefined}
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setError(null);
+          }}
+          placeholder={
+            kind === 'path' ? '/usr/local/bin/claude' : kind === 'cli' ? 'claude' : undefined
+          }
+          className="min-w-0 flex-1 font-mono text-xs"
+          disabled={isChecking}
+        />
+        {hasValue && (
           <Button
             variant="secondary"
             size="sm"
+            className="shrink-0"
             disabled={isChecking}
             onClick={() => void handleValidate()}
           >
-            {isChecking && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            {isChecking && <Spinner size="sm" />}
             Validate
           </Button>
-        </div>
+        )}
+      </div>
+      {error && (
+        <p role="alert" className="text-xs text-foreground-error">
+          {error}
+        </p>
       )}
+      <p className="flex items-start gap-1.5 text-xs text-foreground-muted">
+        <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-foreground-warning" aria-hidden />
+        <span>
+          {kind === 'path'
+            ? "Using an absolute path to the agent binary overrides auto-resolution and disables Maestro's ability to update the agent."
+            : "Enter the command name or binary resolved on PATH. This overrides auto-resolution and disables Maestro's ability to update the agent."}
+        </span>
+      </p>
     </div>
   );
 }

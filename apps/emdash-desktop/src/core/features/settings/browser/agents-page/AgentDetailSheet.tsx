@@ -1,4 +1,4 @@
-import { MicroLabel, Sheet } from '@emdash/ui/react/primitives';
+import { Sheet } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
 import { hostRefFromConnectionId } from '@core/features/agents/api/browser/client';
 import { useAgentSettings } from '@core/features/agents/api/browser/use-agent-settings';
@@ -58,13 +58,16 @@ const AgentDetailSheetContent = observer(function AgentDetailSheetContent({
 
   return (
     <>
-      <Sheet.Header>
-        <MicroLabel>{isInstalled ? 'Agent Settings' : 'Install Agent'}</MicroLabel>
-      </Sheet.Header>
-      <div className="overflow-y-auto px-4">
+      {agentPayload ? (
+        <AgentSheetHeaderSection agent={agentPayload} />
+      ) : (
+        <Sheet.Header>
+          <Sheet.Title>{isInstalled ? 'Agent settings' : 'Install agent'}</Sheet.Title>
+        </Sheet.Header>
+      )}
+      <Sheet.Body className="gap-8">
         {agentPayload && (
-          <div className="space-y-6">
-            <AgentSheetHeaderSection agent={agentPayload} />
+          <>
             <InstallSection
               agentId={agentId}
               connectionId={connectionId}
@@ -78,19 +81,21 @@ const AgentDetailSheetContent = observer(function AgentDetailSheetContent({
             {isInstalled && (
               <AgentMcpSection agentId={agentId} host={host} onManage={handleManageMcp} />
             )}
-          </div>
+            {isInstalled && (
+              <InstalledAgentContent
+                storedConfig={storedConfig}
+                isOverridden={isOverridden}
+                isLoading={isLoading}
+                update={update}
+                reset={reset}
+                showWsl={
+                  agentId === 'claude' && !isRemote && navigator.userAgent.includes('Windows')
+                }
+              />
+            )}
+          </>
         )}
-      </div>
-      {agentPayload && isInstalled && (
-        <InstalledAgentContent
-          storedConfig={storedConfig}
-          isOverridden={isOverridden}
-          isLoading={isLoading}
-          update={update}
-          reset={reset}
-          showWsl={agentId === 'claude' && !isRemote && navigator.userAgent.includes('Windows')}
-        />
-      )}
+      </Sheet.Body>
     </>
   );
 });
@@ -103,7 +108,7 @@ export function AgentDetailSheet({
 }: AgentDetailSheetProps) {
   return (
     <Sheet.Root open={agentId !== null} onOpenChange={(open) => !open && onClose()}>
-      <Sheet.Content side="right" className="flex flex-col gap-0 p-0">
+      <Sheet.Content side="right">
         {agentId && (
           <AgentDetailSheetContent
             agentId={agentId}

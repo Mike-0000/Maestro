@@ -3,11 +3,11 @@ import IntegrationsCard from '../components/IntegrationsCard';
 
 export function IntegrationsSettingsPage() {
   return (
-    <div className="space-y-8">
+    <div className="pb-16">
       <PageLayout.Header
         sticky
         title="Integrations"
-        description="Connect external services and tools."
+        description="Issue trackers and code hosts Maestro can read from when you create a task."
       />
       <IntegrationsCard />
     </div>

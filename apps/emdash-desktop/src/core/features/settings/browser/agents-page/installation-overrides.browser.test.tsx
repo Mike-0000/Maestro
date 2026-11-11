@@ -131,7 +131,7 @@ describe('installation override settings', () => {
       .poll(() => vi.mocked(vm.setUsed).mock.calls)
       .toEqual([[{ kind: 'path', path: '/custom/wrapper' }]]);
     expect(vm.resolve).toHaveBeenCalledWith({ kind: 'path', path: '/custom/wrapper' });
-    await expect.element(page.getByText('Found', { exact: true })).toBeVisible();
+    await expect.element(page.getByText('Installed', { exact: true })).toBeVisible();
     await expect
       .element(page.getByRole('textbox', { name: 'Executable path' }))
       .toHaveValue('/custom/wrapper');

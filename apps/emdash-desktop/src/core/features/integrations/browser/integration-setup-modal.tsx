@@ -1,5 +1,5 @@
-import { Button, Dialog, Input } from '@emdash/ui/react/primitives';
-import { ExternalLink } from 'lucide-react';
+import { Button, Dialog, Field, Input } from '@emdash/ui/react/primitives';
+import { ArrowUpRight } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { IntegrationProviderDescriptor } from '@core/features/integrations/api/contract';
 import { useIntegrationsContext } from '@core/features/integrations/contributions/browser/integrations-provider';
@@ -30,7 +30,7 @@ export function IntegrationSetupModal({ integration, accountId, displayName }: P
 
   return (
     <>
-      <Dialog.Header className="flex-col items-start gap-1" showCloseButton={false}>
+      <Dialog.Header>
         <Dialog.Title>
           {metadata
             ? `${accountId ? 'Reconnect' : 'Connect'} ${metadata.name}`
@@ -38,7 +38,11 @@ export function IntegrationSetupModal({ integration, accountId, displayName }: P
         </Dialog.Title>
       </Dialog.Header>
       {metadata && !reconnectSupported ? (
-        <Dialog.Body>This connection method cannot reconnect a selected account.</Dialog.Body>
+        <Dialog.Body>
+          <p className="text-sm text-foreground-muted">
+            This connection method cannot reconnect a selected account.
+          </p>
+        </Dialog.Body>
       ) : metadata && AuthUi && (!accountId || authUi?.supportsReconnect) ? (
         <AuthUi
           metadata={metadata}
@@ -122,52 +126,60 @@ function IntegrationSetupForm({
       onSuccess={onSuccess}
       onClose={onClose}
     >
-      <div className="grid gap-3">
+      <div className="flex flex-col gap-5">
         {needsAccountName ? (
-          <div className="grid gap-1.5">
+          <Field.Root className="gap-1.5">
+            <Field.Label htmlFor="integration-account-name">Account name</Field.Label>
             <Input
               id="integration-account-name"
               aria-label="Account name"
-              placeholder="Account name *"
+              placeholder="Your team or workspace"
               value={accountName}
               onChange={(event) => setAccountName(event.target.value)}
               autoFocus
+              required
             />
-            <p className="text-xs text-foreground-muted">
-              A name to distinguish this account, such as your team or workspace.
-            </p>
-          </div>
+            <Field.Description>A name to tell this account apart from others.</Field.Description>
+          </Field.Root>
         ) : null}
         {method.fields.map((field, index) => (
-          <div key={field.id} className="grid gap-1.5">
+          <Field.Root key={field.id} className="gap-1.5">
+            <Field.Label htmlFor={`integration-field-${field.id}`}>
+              {field.label}
+              {field.required ? null : (
+                <span className="font-normal text-foreground-passive"> (optional)</span>
+              )}
+            </Field.Label>
             <Input
               id={`integration-field-${field.id}`}
               type={field.secret ? 'password' : 'text'}
-              placeholder={`${field.placeholder ?? field.label}${field.required ? ' *' : ''}`}
+              placeholder={field.placeholder ?? undefined}
               value={values[field.id] ?? ''}
               onChange={(event) => updateField(field.id, event.target.value)}
-              className="h-9 w-full"
+              className={field.secret ? 'font-mono' : undefined}
               autoComplete="off"
               autoFocus={!needsAccountName && index === 0}
+              required={field.required}
             />
-          </div>
+          </Field.Root>
         ))}
         {method.help || method.helpUrl ? (
-          <div className="flex items-start justify-between gap-2">
-            {method.help ? <p className="text-xs text-foreground-muted">{method.help}</p> : null}
+          <p className="text-xs text-foreground-muted">
+            {method.help}
+            {method.help && method.helpUrl ? ' ' : null}
             {method.helpUrl ? (
               <Button
-                variant="link"
+                variant="text"
                 size="xs"
-                icon
-                className="mt-0.5 size-4 shrink-0 p-0"
+                className="inline-flex gap-0.5 align-baseline"
                 aria-label={`Open ${metadata.name} setup guide`}
                 onClick={() => window.open(method.helpUrl, '_blank', 'noopener,noreferrer')}
               >
-                <ExternalLink className="h-3 w-3" />
+                Setup guide
+                <ArrowUpRight className="size-3" aria-hidden />
               </Button>
             ) : null}
-          </div>
+          </p>
         ) : null}
       </div>
     </SetupFormShell>

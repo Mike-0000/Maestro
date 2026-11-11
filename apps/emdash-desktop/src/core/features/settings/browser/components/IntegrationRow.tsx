@@ -1,6 +1,7 @@
-import { Tooltip } from '@emdash/ui/react/primitives';
+import { Button, Tooltip } from '@emdash/ui/react/primitives';
 import { Check, Copy, ExternalLink, Trash2 } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
+import { cn } from '@core/primitives/styling/browser/cn';
 import { useTheme } from '@core/primitives/theme/browser';
 
 type IntegrationStatus =
@@ -32,15 +33,6 @@ interface IntegrationRowProps {
   installCommand?: string | null;
 }
 
-const STATUS_CLASSES: Record<IntegrationStatus, string> = {
-  connected: 'border border-border-success bg-background-success text-foreground-success',
-  loading: 'border border-border/60 bg-transparent text-muted-foreground',
-  error: 'border border-border/60 bg-transparent text-muted-foreground',
-  disconnected: 'border border-border/60 bg-transparent text-muted-foreground',
-  missing: 'border border-border/60 bg-transparent text-muted-foreground',
-  needs_key: 'border border-border/60 bg-transparent text-muted-foreground',
-};
-
 const STATUS_LABELS: Record<IntegrationStatus, string> = {
   connected: 'Connected',
   loading: 'Connecting…',
@@ -50,18 +42,11 @@ const STATUS_LABELS: Record<IntegrationStatus, string> = {
   needs_key: 'Not connected',
 };
 
-const BUTTON_BASE =
-  'inline-flex h-8 min-w-[2.5rem] items-center justify-center rounded-md border border-border/70 bg-background px-2.5 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60';
-
-const ICON_BUTTON =
-  'rounded-md p-1.5 text-muted-foreground transition hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background';
-
-const ICON_WRAPPER =
-  'flex h-6 w-6 items-center justify-center rounded-md bg-muted/40 text-muted-foreground';
-
-/** Logo wrapper without background - logos render directly. */
-const LOGO_WRAPPER = 'flex h-6 w-6 items-center justify-center';
-
+/**
+ * One tool or service in a settings card: its logo and name on the left, its state in words and
+ * at most one visible action on the right. Secondary actions (open, disconnect, copy the install
+ * command) are quiet icon buttons that come forward on hover or focus.
+ */
 const IntegrationRow: React.FC<IntegrationRowProps> = ({
   logoSrc,
   logoSrcDark,
@@ -86,35 +71,38 @@ const IntegrationRow: React.FC<IntegrationRowProps> = ({
   const isDark = effectiveTheme === 'emdark';
   const themedLogoSrc = isDark && logoSrcDark ? logoSrcDark : logoSrc;
   const shouldInvertLogo = isDark && !!invertInDark && !logoSrcDark;
-  const resolvedStatus = STATUS_CLASSES[status] ? status : 'disconnected';
-  const showConnect = resolvedStatus !== 'connected' && status !== 'loading' && !!onConnect;
-  const showDisconnect = resolvedStatus === 'connected' && !!onDisconnect;
-  const showOpen = resolvedStatus === 'connected' && !!onOpen;
+  const connected = status === 'connected';
+  const showConnect = !connected && status !== 'loading' && !!onConnect;
+  const showDisconnect = connected && !!onDisconnect;
+  const showOpen = connected && !!onOpen;
   const [copied, setCopied] = useState(false);
   const copyResetRef = useRef<number | null>(null);
 
   const resolvedStatusLabel = statusLabel ?? STATUS_LABELS[status] ?? STATUS_LABELS.disconnected;
 
   const defaultMiddle =
-    status === 'connected' && accountLabel ? (
-      <span className="text-muted-foreground truncate text-sm">{accountLabel}</span>
+    connected && accountLabel ? (
+      <span className="truncate text-xs text-foreground-muted">{accountLabel}</span>
     ) : null;
 
   const isSvg = themedLogoSrc?.trimStart().startsWith('<svg');
 
   const avatar = (
-    <span className={themedLogoSrc ? LOGO_WRAPPER : ICON_WRAPPER}>
+    <span className="flex size-5 shrink-0 items-center justify-center text-foreground-muted">
       {themedLogoSrc ? (
         isSvg ? (
           <span
-            className={`${shouldInvertLogo ? 'invert' : ''} inline-flex h-5 w-5 items-center justify-center [&_svg]:h-full [&_svg]:w-full [&_svg]:shrink-0`}
+            className={cn(
+              'inline-flex size-5 items-center justify-center [&_svg]:size-full [&_svg]:shrink-0',
+              shouldInvertLogo && 'invert'
+            )}
             dangerouslySetInnerHTML={{ __html: themedLogoSrc }}
           />
         ) : (
           <img
             src={themedLogoSrc}
             alt=""
-            className={`${shouldInvertLogo ? 'invert' : ''} h-5 w-5 object-contain`}
+            className={cn('size-5 object-contain', shouldInvertLogo && 'invert')}
           />
         )
       ) : icon ? (
@@ -152,60 +140,89 @@ const IntegrationRow: React.FC<IntegrationRowProps> = ({
   }, []);
 
   const CopyIcon = copied ? Check : Copy;
-  const showInstallCopy = !!installCommand && status !== 'connected';
+  const showInstallCopy = !!installCommand && !connected;
+  const quietAction = 'opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100';
 
   return (
-    <div className="group hover:bg-muted/40 relative grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-3 py-2 transition-colors">
-      <div className="flex items-center gap-3">
-        {avatar}
+    <div className="group/row flex min-h-10 items-center gap-3">
+      {avatar}
+      <div className="flex min-w-0 flex-1 flex-col">
         {onNameClick ? (
           <button
             type="button"
             onClick={onNameClick}
-            className="group focus-visible:ring-ring flex items-center gap-1 text-sm font-medium text-foreground transition focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none"
+            className="flex w-fit items-center gap-1 rounded-sm text-sm text-foreground outline-none hover:underline hover:underline-offset-4 focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <span>{name}</span>
-            <span className="text-muted-foreground text-xs transition group-hover:text-foreground/80">
-              ↗
-            </span>
+            {name}
+            <ExternalLink className="size-3 text-foreground-passive" aria-hidden />
           </button>
         ) : (
-          <span className="text-sm font-medium text-foreground">{name}</span>
+          <span className="truncate text-sm text-foreground">{name}</span>
         )}
+        {middle ?? defaultMiddle}
       </div>
 
-      <div className="text-muted-foreground flex items-center justify-end gap-2 text-sm">
+      <div className="flex shrink-0 items-center gap-1">
         {showInstallCopy ? (
-          <Tooltip.Provider>
-            <Tooltip.Root>
-              <Tooltip.Trigger>
-                <button
+          <Tooltip.Root>
+            <Tooltip.Trigger
+              render={
+                <Button
                   type="button"
-                  onClick={() => {
-                    void handleCopyInstall();
-                  }}
-                  className={ICON_BUTTON}
+                  variant="ghost"
+                  size="sm"
+                  icon
+                  className={quietAction}
+                  onClick={() => void handleCopyInstall()}
                   aria-label={copied ? 'Command copied' : `Copy install command for ${name}`}
                 >
-                  <CopyIcon className="h-4 w-4" aria-hidden="true" />
-                </button>
-              </Tooltip.Trigger>
-              <Tooltip.Content side="top">
-                <div className="max-w-[240px] space-y-1">
-                  <div className="text-xs font-medium text-foreground">Copy install command</div>
-                  <code className="text-muted-foreground block truncate font-mono text-tiny">
-                    {installCommand}
-                  </code>
-                </div>
-              </Tooltip.Content>
-            </Tooltip.Root>
-          </Tooltip.Provider>
+                  <CopyIcon className="size-3.5" aria-hidden />
+                </Button>
+              }
+            />
+            <Tooltip.Content side="top" className="max-w-60">
+              <div className="text-xs text-foreground">Copy install command</div>
+              <code className="block truncate font-mono text-tiny text-foreground-muted">
+                {installCommand}
+              </code>
+            </Tooltip.Content>
+          </Tooltip.Root>
         ) : null}
 
-        <div className="min-w-0">{middle ?? defaultMiddle}</div>
-        {showStatusPill ? (
+        {showOpen ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            icon
+            className={quietAction}
+            onClick={onOpen}
+            aria-label={`Open ${name} settings`}
+          >
+            <ExternalLink className="size-3.5" aria-hidden />
+          </Button>
+        ) : null}
+
+        {showDisconnect ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            icon
+            className={quietAction}
+            onClick={onDisconnect}
+            aria-label={`Disconnect ${name}`}
+          >
+            <Trash2 className="size-3.5" aria-hidden />
+          </Button>
+        ) : null}
+
+        {showStatusPill && !showConnect ? (
           <span
-            className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_CLASSES[resolvedStatus] ?? STATUS_CLASSES.disconnected}`}
+            className={cn(
+              'px-1 text-xs',
+              connected ? 'text-foreground-muted' : 'text-foreground-passive'
+            )}
           >
             {resolvedStatusLabel}
           </span>
@@ -213,37 +230,17 @@ const IntegrationRow: React.FC<IntegrationRowProps> = ({
 
         {rightExtra}
 
-        {showOpen ? (
-          <button
-            type="button"
-            onClick={onOpen}
-            className={ICON_BUTTON}
-            aria-label={`Open ${name} settings`}
-          >
-            <ExternalLink className="h-4 w-4" aria-hidden="true" />
-          </button>
-        ) : null}
-
-        {showDisconnect ? (
-          <button
-            type="button"
-            onClick={onDisconnect}
-            className={ICON_BUTTON}
-            aria-label={`Disconnect ${name}`}
-          >
-            <Trash2 className="h-4 w-4" aria-hidden="true" />
-          </button>
-        ) : null}
-
         {showConnect ? (
-          <button
+          <Button
             type="button"
+            variant="text"
+            size="sm"
+            className="ml-1"
             onClick={onConnect}
-            className={BUTTON_BASE}
             disabled={connectDisabled}
           >
             {connectContent ?? 'Connect'}
-          </button>
+          </Button>
         ) : null}
       </div>
     </div>
