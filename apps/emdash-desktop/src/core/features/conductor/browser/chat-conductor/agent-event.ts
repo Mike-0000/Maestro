@@ -1,11 +1,14 @@
 import type { AgentStatus } from '@core/primitives/agents/api/agent-events';
 import type { CompletionReport } from '@core/primitives/agents/api/completion-report';
+import type { ConductorDecisionMark } from '@core/primitives/agents/api/conductor-decisions';
 
 /** What a chat conductor reads of its agent's live state. */
 export type AgentSnapshot = {
   status: AgentStatus;
   report: CompletionReport | null;
   notification: string | null;
+  /** Present when the status is what a conductor decided about the event (see decisions). */
+  conductor?: ConductorDecisionMark | null;
 };
 
 export type AgentEventSignal = {

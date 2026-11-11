@@ -1,11 +1,16 @@
 import { observable, reaction, runInAction } from 'mobx';
 import type { CanvasStore } from '@core/features/canvas/api/browser/stores/canvas-store';
+import {
+  getTaskManagerStore,
+  getTaskStore,
+} from '@core/features/tasks/api/browser/task-state/task-selectors';
 import { log } from '@core/primitives/logging/browser/logger';
 import { getConductorClient } from '../../api/browser/client';
 import type { ConductorStatus } from '../../api/contract';
 import { DEFAULT_CONDUCTOR_SETTINGS } from '../../api/contract';
 import { chatName, createTaskAgentPort } from './agent-port';
 import { createTaskBrowserPort } from './browser-port';
+import { DecisionDesk } from './decision-desk';
 import type { FrontConductor, FrontConductorSource } from './front';
 import { ChatConductorSession, type ChatConductorPorts, type LegacyThread } from './session';
 
@@ -157,10 +162,78 @@ export class ChatConductorManager implements FrontConductorSource {
 
   activate(): void {
     void this.followSavedThreads();
+    this.decisions.start();
+    // A deleted task's conductor stops (main deletes its thread); an archived one stays.
+    this.disposers.push(
+      reaction(
+        () => [...this.sessions.keys()].filter((taskId) => this.taskDeleted(taskId)),
+        (deleted) => {
+          for (const taskId of deleted) this.forgetTask(taskId);
+        }
+      )
+    );
   }
+
+  /** Where each followed task lives, as last seen, to tell a deleted task from one not loaded. */
+  private readonly taskProjects = new Map<string, string>();
+
+  /** The task's project is loaded and the task is gone from it: deleted, not unloaded. */
+  private taskDeleted(taskId: string): boolean {
+    const entry = this.canvas.agentEntries.find((candidate) => candidate.taskId === taskId);
+    if (entry) {
+      this.taskProjects.set(taskId, entry.projectId);
+      return false;
+    }
+    const projectId = this.taskProjects.get(taskId);
+    if (!projectId || !getTaskManagerStore(projectId)) return false;
+    return getTaskStore(projectId, taskId) === undefined;
+  }
+
+  private forgetTask(taskId: string): void {
+    const session = this.sessions.get(taskId);
+    if (!session) return;
+    session.dispose();
+    this.taskProjects.delete(taskId);
+    runInAction(() => this.sessions.delete(taskId));
+  }
+
+  /**
+   * The conversations whose conductor decides what the developer is told of their events: every
+   * chat of a task whose conductor follows it, while conductors can run and the setting is on.
+   */
+  get decidingChats(): string[] {
+    const on =
+      this.conductor.status?.settings?.conductorDecidesAttention ??
+      DEFAULT_CONDUCTOR_SETTINGS.conductorDecidesAttention;
+    if (!this.ready || !on) return [];
+    return [...this.sessions.values()]
+      .filter((session) => session.attached && session.loaded)
+      .flatMap((session) => session.chatIds);
+  }
+
+  private readonly decisions = new DecisionDesk({
+    claimable: () => this.decidingChats,
+    sessionFor: (conversationId) => {
+      const entry = this.canvas.agentEntries.find(
+        (candidate) => candidate.conversationId === conversationId
+      );
+      return entry ? (this.sessions.get(entry.taskId) ?? null) : null;
+    },
+    sessions: () => this.sessions.values(),
+    claim: async (conversationIds) =>
+      (await getConductorClient()).claimDecisions({ conversationIds: [...conversationIds] }),
+    ack: async (holdId) => (await getConductorClient()).ackDecision({ holdId }),
+    resolve: async (holdId, conversationId, decision) =>
+      (await getConductorClient()).resolveDecision({ holdId, conversationId, decision }),
+    open: async () => (await getConductorClient()).openDecisions(),
+    subscribe: async (onEvent) =>
+      (await getConductorClient()).decisions.subscribe(undefined, { onEvent }),
+    warn: (message, data) => log.warn(message, data),
+  });
 
   dispose(): void {
     this.disposed = true;
+    this.decisions.dispose();
     for (const dispose of this.disposers.splice(0)) dispose();
     for (const session of this.sessions.values()) session.dispose();
     runInAction(() => {
@@ -253,6 +326,16 @@ export class ChatConductorManager implements FrontConductorSource {
       now: () => new Date(),
       newId: () => crypto.randomUUID(),
       warn: (message, data) => log.warn(message, data),
+      resolveDecision: (holdId, conversationId, decision) => {
+        void getConductorClient()
+          .then((client) => client.resolveDecision({ holdId, conversationId, decision }))
+          .catch((error: unknown) =>
+            log.warn('task conductor: decision could not be sent', { error, holdId })
+          );
+      },
+      announceCompletions: () =>
+        this.conductor.status?.settings?.announceCompletions ??
+        DEFAULT_CONDUCTOR_SETTINGS.announceCompletions,
     };
   }
 }

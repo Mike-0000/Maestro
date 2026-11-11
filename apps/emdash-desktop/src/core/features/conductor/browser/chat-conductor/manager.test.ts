@@ -15,7 +15,28 @@ vi.mock('../../api/browser/client', () => ({
 }));
 vi.mock('./agent-port', () => ({
   chatName: () => 'Chat',
-  createTaskAgentPort: () => ({ chats: () => [], snapshot: () => null, watch: () => () => {} }),
+  createTaskAgentPort: (_canvas: unknown, taskId: string) => ({
+    chats: () =>
+      ['conv-atlas', 'conv-bravo', 'conv-cid']
+        .filter((id) => (taskId === 'task-login' ? id !== 'conv-cid' : id === 'conv-cid'))
+        .map((id) => ({
+          id,
+          name: id,
+          providerId: 'claude',
+          providerLabel: 'Claude',
+          status: 'idle',
+          running: true,
+        })),
+    snapshot: () => null,
+    watch: () => () => {},
+    readOutput: async () => '',
+  }),
+}));
+const tasks = vi.hoisted(() => ({ projects: new Map<string, Set<string>>() }));
+vi.mock('@core/features/tasks/api/browser/task-state/task-selectors', () => ({
+  getTaskManagerStore: (projectId: string) => (tasks.projects.has(projectId) ? {} : undefined),
+  getTaskStore: (projectId: string, taskId: string) =>
+    tasks.projects.get(projectId)?.has(taskId) ? {} : undefined,
 }));
 vi.mock('@core/primitives/logging/browser/logger', () => ({
   log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
@@ -55,6 +76,67 @@ const screen = (
   taskId,
   focusedPane: options.focusedPane ?? true,
   conductor: options.conductor ?? true,
+});
+
+describe('a deleted task', () => {
+  it('stops its conductor, while one archived or only unloaded keeps it', () => {
+    const entries = observable.array([
+      { conversationId: 'conv-atlas', taskId: 'task-login', taskName: 'Fix login', projectId: 'p' },
+      { conversationId: 'conv-cid', taskId: 'task-docs', taskName: 'Docs', projectId: 'p' },
+    ]);
+    const conductor = observable(
+      { status: { chatConductorReady: true } as unknown as ConductorStatus | null },
+      { status: observable.ref }
+    );
+    const canvas = { agentEntries: entries, spokenName: () => 'Agent' } as unknown as CanvasStore;
+    const manager = new ChatConductorManager(canvas, conductor);
+    manager.activate();
+    const login = manager.session('task-login');
+    const docs = manager.session('task-docs');
+    const dispose = vi.spyOn(docs, 'dispose');
+
+    // The project is not loaded: its chats leaving says nothing about the tasks.
+    runInAction(() => entries.replace([]));
+    expect(manager.peek('task-docs')).toBe(docs);
+
+    // Loaded again: the login task is still there (archived tasks stay too), docs is gone.
+    tasks.projects.set('p', new Set(['task-login']));
+    runInAction(() =>
+      entries.replace([
+        {
+          conversationId: 'conv-atlas',
+          taskId: 'task-login',
+          taskName: 'Fix login',
+          projectId: 'p',
+        },
+      ])
+    );
+    expect(manager.peek('task-login')).toBe(login);
+    expect(manager.peek('task-docs')).toBeUndefined();
+    expect(dispose).toHaveBeenCalled();
+    manager.dispose();
+    tasks.projects.clear();
+  });
+});
+
+describe('the chats whose conductor decides what the developer is told', () => {
+  it('are the chats of followed tasks, while conductors run and the setting is on', async () => {
+    const { manager, login, setReady } = setup();
+    expect(manager.decidingChats).toEqual([]);
+    await login.attach();
+    expect(manager.decidingChats).toEqual(['conv-atlas', 'conv-bravo']);
+    setReady(false);
+    expect(manager.decidingChats).toEqual([]);
+    setReady(true);
+    runInAction(() => {
+      (manager as unknown as { conductor: { status: ConductorStatus } }).conductor.status = {
+        chatConductorReady: true,
+        settings: { conductorDecidesAttention: false },
+      } as unknown as ConductorStatus;
+    });
+    expect(manager.decidingChats).toEqual([]);
+    manager.dispose();
+  });
 });
 
 describe('the conductor in front', () => {
