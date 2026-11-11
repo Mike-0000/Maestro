@@ -6,6 +6,12 @@ const navigationMocks = vi.hoisted(() => ({
   useWorkspaceSlots: vi.fn(),
 }));
 
+vi.mock('@core/features/canvas/browser/browser-surface-host', () => ({
+  BrowserSurfaceHost: () => null,
+}));
+vi.mock('@core/features/conductor/browser/hud/conductor-hud', () => ({
+  ConductorHud: () => null,
+}));
 vi.mock('@core/features/workbench/browser/sidebar/left-sidebar', () => ({
   LeftSidebar: () => null,
 }));

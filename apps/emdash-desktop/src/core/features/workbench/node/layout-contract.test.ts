@@ -111,7 +111,15 @@ const checks: ContractCheck[] = [
     name: 'no onResize handlers',
     pattern: /\bonResize\b/,
     scope: wholeSrc,
-    allowlist: [],
+    allowlist: [
+      {
+        path: 'core/features/terminals/contributions/browser/pty/terminal-mirror.ts',
+        reason:
+          "Subscribes to xterm's Terminal.onResize (the source terminal's cols/rows grid " +
+          'changing) to resize its read-only mirror terminal to match. Not a panel onResize; ' +
+          'it writes no store and programs no panel.',
+      },
+    ],
     rationale:
       'onResize is a measurement channel only and must never write to stores. No legitimate ' +
       'use exists in app code today; a genuine measurement-only use may be allowlisted with a ' +

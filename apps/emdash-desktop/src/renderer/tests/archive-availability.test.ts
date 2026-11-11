@@ -72,6 +72,8 @@ vi.mock('@core/primitives/view-scopes/react', () => ({
 vi.mock('@core/features/source-control/api/browser/stores/task-source-control-selectors', () => ({
   getTaskGitCheckoutStore: () => null,
   getTaskPrAssociationStore: () => ({ pullRequests: [] }),
+  // The mock task has no worktree workspace, so the real selector would report false.
+  canIntegrateTask: () => false,
 }));
 vi.mock('@core/features/source-control/api/browser/stores/source-control-selectors', () => ({
   getGitRepositoryStore: vi.fn(),
@@ -99,6 +101,12 @@ vi.mock('@core/features/agents/contributions/browser/stacked-agent-logos', () =>
 vi.mock('@core/features/workbench/browser/sidebar/task-sidebar-agent-status', () => ({
   TaskSidebarTrailingSlot: () => null,
 }));
+vi.mock('@core/features/conductor/contributions/browser/task-conductor-subtitle', () => ({
+  TaskConductorSubtitle: () => null,
+}));
+vi.mock('@core/features/conductor/contributions/browser/task-ownership', () => ({
+  isSidebarTaskYours: () => false,
+}));
 vi.mock('@core/features/tasks/contributions/browser/task-git-diff-stats', () => ({
   TaskGitDiffStats: () => null,
 }));
@@ -121,10 +129,12 @@ vi.mock('@emdash/ui/react/primitives', () => ({
 vi.mock('@emdash/ui/react/components', () => ({
   ListPopoverCard: ({ children }: { children: ReactNode }) => children,
   AgentStatus: () => null,
+  StateGlyph: () => null,
 }));
 vi.mock('@emdash/ui/react/patterns', () => ({
   CollectionView: ({ footer }: { footer: ReactNode }) => footer,
   CollectionToolbar: {},
+  MetaLine: () => null,
   SortSelect: () => null,
 }));
 vi.mock('@core/features/projects/browser/components/task-view/task-list-model', () => ({
