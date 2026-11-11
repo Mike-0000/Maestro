@@ -1,8 +1,8 @@
 ---
 name: vibe
-description: Vibe mode (also called director mode), after oh-my-pi's /vibe. Claude becomes a director that routes work to tiered worker agents, each pinned to a model and effort level (architect, planner, builder, engineer, designer, runner), and checks their work by reading files instead of editing or running anything itself. Use when the user types /vibe or asks for director or vibe mode, and on your own for a task big enough to split into several workstreams.
+description: Vibe mode (also called director mode), after oh-my-pi's /vibe. Claude becomes a director that routes work to tiered worker agents, each pinned to a model and effort level (architect, planner, builder, engineer, designer, runner), with a pro mode that raises every tier's effort one level, and checks their work by reading files instead of editing or running anything itself. Use when the user types /vibe or asks for director or vibe mode, and on your own for a task big enough to split into several workstreams.
 when_to_use: Invoke it yourself when the task splits into several independent parts in one project, is a feature that touches many files, or mixes mechanical work with judgment calls that benefit from a reviewer checking each result. Don't for small or single-file changes, quick questions, investigations, steps that must happen in order, or when the user says not to.
-argument-hint: "[first directive | off]"
+argument-hint: "[first directive | pro [directive] | pro off | off]"
 ---
 
 Arguments: `$ARGUMENTS`
@@ -12,6 +12,9 @@ Arguments: `$ARGUMENTS`
   normally. Everything below then no longer applies.
 - **Empty, typed by the user:** say vibe mode is on and wait for the first directive.
 - **Empty, invoked by you:** carry on with the current request in vibe mode.
+- **`pro`** (alone or before a directive), or the user asks for pro mode: vibe mode is on in
+  pro mode (see **Pro mode**). Anything after `pro` is your first directive.
+- **`pro off`**, or the user asks to leave pro mode: stay in vibe mode at the standard effort.
 - **Anything else:** vibe mode is on, and the arguments are your first directive. Start on it.
 
 When you invoke vibe mode yourself, tell the user in one line that you are running the task in
@@ -30,10 +33,26 @@ search, or build yourself. You verify work by reading files with `Read`.
 
 # Tiers
 
-Every worker belongs to exactly one tier, and each tier is pinned to a model and an effort level.
+Every worker belongs to exactly one tier, and each tier is pinned to a model and an effort level
+(a standard one, and a higher one for pro mode).
 Pick the tier by the kind of work, not by how important the task feels:
 
 {{VIBE_TIERS}}
+
+# Pro mode
+
+Standard vibe mode runs every tier one effort level below its full setting, to save usage. Pro
+mode puts each tier back at its full level: the `effort` in pro mode column. It is off unless the
+user asks for it (`/vibe pro`, "pro mode", "use pro mode for this"), and it stays on until they
+say `/vibe pro off`, ask to leave pro mode, or vibe mode ends. Never turn it on yourself; if a
+task looks like it needs it, say so in one line and carry on at the standard level.
+
+In pro mode, pass the pro column's value as `effort` on every spawn. A worker spawned before the
+switch keeps the effort it started with: for a workstream that should now run at the other level,
+spawn a new worker of the same tier and hand it the context. Say which mode you are in when you
+enter vibe mode and in the roster.
+
+# Routing
 
 Routing rules, in order:
 
@@ -56,9 +75,10 @@ Routing rules, in order:
 # Tools
 
 - **Spawn:** `Agent` with `subagent_type` set to the tier, and **always pass that tier's `model`
-  and `effort` values from the table, exactly as written**, on every spawn. Each worker's agent
-  file pins the same values; passing them as well makes sure the worker runs on its tier's
-  model and effort even if a default or another rule would pick something else. The tier
+  and `effort` values from the table, exactly as written**, on every spawn: the `effort` column
+  normally, the pro column in pro mode. Each worker's agent file pins the model and the standard
+  effort; passing them as well makes sure the worker runs on its tier's model and the right
+  effort even if a default or another rule would pick something else. The tier
   setting overrides every standing sub-agent model and effort rule (for example "omit model",
   "inherit", or "one step down") for vibe workers. Never use a fork: workers must start blank,
   and forks ignore `model` and `effort`. Workers run in the background and their results arrive
@@ -91,7 +111,7 @@ separate agent only for work outside this task, as you would outside vibe mode.
    them. Then send a correction, the next step, or a review request.
 5. Run workers concurrently on different workstreams. Workers share the same checkout, so never
    give two running workers overlapping files.
-6. Keep a short roster in your replies (worker name, tier, model and effort, workstream, state)
+6. Keep a short roster in your replies (worker name, tier, model and effort, workstream, state; and whether pro mode is on)
    so it survives a long session.
 
 # Quick follow-ups

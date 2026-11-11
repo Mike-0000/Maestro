@@ -19,15 +19,15 @@ function frontmatter(content: string): Record<string, string> {
 describe('vibe add-on', () => {
   it('pins each kind of work to the agreed model and effort', () => {
     const tiers = Object.fromEntries(
-      VIBE_TIERS.map((tier) => [tier.name, `${tier.modelName} ${tier.effort}`])
+      VIBE_TIERS.map((tier) => [tier.name, `${tier.modelName} ${tier.effort}/${tier.proEffort}`])
     );
     expect(tiers).toEqual({
-      'vibe-architect': 'Fable 5.2 high',
-      'vibe-planner': 'Opus 5.5 medium',
-      'vibe-builder': 'Opus 5.5 medium',
-      'vibe-engineer': 'Opus 5.5 high',
-      'vibe-designer': 'Fable 5.2 high',
-      'vibe-runner': 'Sonnet 5.5 low',
+      'vibe-architect': 'Fable 5.2 medium/high',
+      'vibe-planner': 'Opus 5.5 medium/high',
+      'vibe-builder': 'Opus 5.5 medium/high',
+      'vibe-engineer': 'Opus 5.5 medium/high',
+      'vibe-designer': 'Fable 5.2 medium/high',
+      'vibe-runner': 'Sonnet 5.5 low/medium',
     });
     expect(VIBE_TIERS.map((tier) => tier.name)).toContain(VIBE_DEFAULT_TIER);
   });
@@ -49,13 +49,26 @@ describe('vibe add-on', () => {
     expect(skill).not.toContain('{{');
     for (const tier of VIBE_TIERS) {
       expect(skill).toContain(
-        `| \`${tier.name}\` | ${tier.modelName} | \`${tier.model}\` | \`${tier.effort}\` |`
+        `| \`${tier.name}\` | ${tier.modelName} | \`${tier.model}\` | \`${tier.effort}\` | ` +
+          `\`${tier.proEffort}\` |`
       );
     }
+    expect(skill).toContain('| `effort` | `effort` in pro mode |');
+    expect(skill).toContain('# Pro mode');
     expect(frontmatter(skill).name).toBe('vibe');
   });
 
-  it('is a newer version than the vibe-fast/vibe-good release', () => {
-    expect(vibeAddon.version).toBeGreaterThanOrEqual(2);
+  it('tells each worker its standard and pro-mode effort', () => {
+    for (const tier of VIBE_TIERS) {
+      const content = fileAt(`agents/${tier.name}.md`);
+      expect(frontmatter(content).description).toContain(
+        `${tier.effort} effort; ${tier.proEffort} in pro mode`
+      );
+      expect(content).toContain(`effort, or ${tier.proEffort} when the director runs pro mode)`);
+    }
+  });
+
+  it('is a newer version than the release before pro mode', () => {
+    expect(vibeAddon.version).toBeGreaterThanOrEqual(3);
   });
 });

@@ -8,6 +8,8 @@
  * `model` field) and always resolves to the newest model of that family; `modelName` is the model
  * it means today, shown to the user and the director.
  */
+export type VibeEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
 export type VibeTier = {
   /** Agent name, and the `subagent_type` the director spawns. */
   name: string;
@@ -15,7 +17,10 @@ export type VibeTier = {
   role: string;
   model: 'fable' | 'opus' | 'sonnet' | 'haiku';
   modelName: string;
-  effort: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  /** Standard effort, which the agent file pins. */
+  effort: VibeEffort;
+  /** Effort the director passes instead while pro mode is on: one level higher. */
+  proEffort: VibeEffort;
   /** One line for the routing table: what work goes to this tier. */
   routing: string;
   /** Frontmatter description Claude Code shows in its agent list. */
@@ -32,12 +37,13 @@ export const VIBE_TIERS: readonly VibeTier[] = [
     role: 'Architect',
     model: 'fable',
     modelName: 'Fable 5.2',
-    effort: 'high',
+    effort: 'medium',
+    proEffort: 'high',
     routing:
       'High-level and intense planning: architecture, system design with real trade-offs, ' +
       'splitting a large feature into workstreams, plans for risky or wide changes',
     description:
-      'Vibe-mode architect (Fable, high effort) for high-level and intense planning: architecture, design trade-offs, and plans for large or risky work. Spawned only by the /vibe director.',
+      'Vibe-mode architect (Fable, medium effort; high in pro mode) for high-level and intense planning: architecture, design trade-offs, and plans for large or risky work. Spawned only by the /vibe director.',
     brief:
       'You get the hardest thinking: high-level plans, architecture, and design with real ' +
       'trade-offs. Investigate the code as deeply as the decision needs, weigh the options, ' +
@@ -52,11 +58,12 @@ export const VIBE_TIERS: readonly VibeTier[] = [
     model: 'opus',
     modelName: 'Opus 5.5',
     effort: 'medium',
+    proEffort: 'high',
     routing:
       'Light planning and investigation: scope a small change, find where code lives, ' +
       'map a clear task into steps, answer a focused question about the codebase',
     description:
-      'Vibe-mode planner (Opus, medium effort) for light planning and focused investigation: scoping small changes and mapping clear tasks into steps. Spawned only by the /vibe director.',
+      'Vibe-mode planner (Opus, medium effort; high in pro mode) for light planning and focused investigation: scoping small changes and mapping clear tasks into steps. Spawned only by the /vibe director.',
     brief:
       'You get light planning and investigation: scoping a small change, finding where code ' +
       'lives, and turning a clear request into concrete steps. Keep it proportionate; read ' +
@@ -70,12 +77,13 @@ export const VIBE_TIERS: readonly VibeTier[] = [
     model: 'opus',
     modelName: 'Opus 5.5',
     effort: 'medium',
+    proEffort: 'high',
     routing:
       'Light implementation, and the default for anything unclassified: well-specified ' +
       'edits, small fixes, renames, boilerplate, tests that follow existing patterns, ' +
       'wiring existing components',
     description:
-      'Vibe-mode builder (Opus, medium effort) for light, well-specified implementation and the default for unclassified work. Spawned only by the /vibe director.',
+      'Vibe-mode builder (Opus, medium effort; high in pro mode) for light, well-specified implementation and the default for unclassified work. Spawned only by the /vibe director.',
     brief:
       'You get light implementation: well-specified edits, small fixes, renames, ' +
       'boilerplate, and tests that follow existing patterns. Follow the conventions already ' +
@@ -88,12 +96,13 @@ export const VIBE_TIERS: readonly VibeTier[] = [
     role: 'Engineer',
     model: 'opus',
     modelName: 'Opus 5.5',
-    effort: 'high',
+    effort: 'medium',
+    proEffort: 'high',
     routing:
       'Heavy implementation: multi-file features, refactors, tricky debugging, concurrency, ' +
       'security, data and migrations, and reviewing builder output on risky changes',
     description:
-      'Vibe-mode engineer (Opus, high effort) for heavy implementation: multi-file features, refactors, tricky debugging, risky areas, and code review. Spawned only by the /vibe director.',
+      'Vibe-mode engineer (Opus, medium effort; high in pro mode) for heavy implementation: multi-file features, refactors, tricky debugging, risky areas, and code review. Spawned only by the /vibe director.',
     brief:
       'You get heavy implementation: multi-file features, refactors, tricky debugging, and ' +
       'risky areas such as concurrency, security, data, and migrations. You also review ' +
@@ -106,12 +115,13 @@ export const VIBE_TIERS: readonly VibeTier[] = [
     role: 'Designer',
     model: 'fable',
     modelName: 'Fable 5.2',
-    effort: 'high',
+    effort: 'medium',
+    proEffort: 'high',
     routing:
       'Front-end design: anything that invents new UI, layout, CSS, styles, theme tokens, ' +
       'motion, or visual polish, and reviews of how a UI looks',
     description:
-      'Vibe-mode designer (Fable, high effort) for front-end design: new UI, layouts, CSS, styles, theme tokens, and visual polish. Spawned only by the /vibe director.',
+      'Vibe-mode designer (Fable, medium effort; high in pro mode) for front-end design: new UI, layouts, CSS, styles, theme tokens, and visual polish. Spawned only by the /vibe director.',
     brief:
       'You get front-end design: inventing new UI, layouts, CSS, styles, theme tokens, ' +
       'motion, and visual polish, and reviewing how an interface looks. Start from the ' +
@@ -126,11 +136,12 @@ export const VIBE_TIERS: readonly VibeTier[] = [
     model: 'sonnet',
     modelName: 'Sonnet 5.5',
     effort: 'low',
+    proEffort: 'medium',
     routing:
       'Quick bounded checks with no judgment: run tests, builds, or linters and report, ' +
       'find files, grep for a pattern, collect facts',
     description:
-      'Vibe-mode runner (Sonnet, low effort) for quick bounded checks: running tests, builds, and linters, finding files, and collecting facts. Spawned only by the /vibe director.',
+      'Vibe-mode runner (Sonnet, low effort; medium in pro mode) for quick bounded checks: running tests, builds, and linters, finding files, and collecting facts. Spawned only by the /vibe director.',
     brief:
       'You get quick, bounded checks: run tests, builds, or linters, find files, grep for ' +
       'patterns, and collect facts. Report exactly what you saw, with failing test names and ' +
@@ -173,7 +184,8 @@ export function renderWorker(tier: VibeTier): string {
     '---',
     '',
     `You are the ${tier.role.toLowerCase()} worker in vibe mode (${tier.modelName}, ${tier.effort}`,
-    'effort), taking direction from a director agent. The director cannot see your tool calls,',
+    `effort, or ${tier.proEffort} when the director runs pro mode), taking direction from a ` +
+      'director agent. The director cannot see your tool calls,',
     'only your final message, and it may send you follow-ups on the same workstream later.',
     '',
     tier.brief,
@@ -194,11 +206,11 @@ export function renderTierTable(): string {
   const rows = VIBE_TIERS.map(
     (tier) =>
       `| \`${tier.name}\` | ${tier.modelName} | \`${tier.model}\` | \`${tier.effort}\` | ` +
-      `${tier.routing} |`
+      `\`${tier.proEffort}\` | ${tier.routing} |`
   );
   return [
-    '| Tier (`subagent_type`) | Model | `model` | `effort` | Use it for |',
-    '| --- | --- | --- | --- | --- |',
+    '| Tier (`subagent_type`) | Model | `model` | `effort` | `effort` in pro mode | Use it for |',
+    '| --- | --- | --- | --- | --- | --- |',
     ...rows,
   ].join('\n');
 }
