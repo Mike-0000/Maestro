@@ -1,4 +1,4 @@
-import { Button, Dialog, Input, Label, Select } from '@emdash/ui/react/primitives';
+import { Button, Dialog, Input, Label, ModalLayout, Select } from '@emdash/ui/react/primitives';
 import { useState, type FormEvent } from 'react';
 import { usePreviewServers } from '@core/features/workbench/api/browser/task-composition-context';
 import type { PreviewServerProtocol } from '@core/primitives/preview-servers/api';
@@ -64,65 +64,76 @@ export function ManualForwardDialog({ onClose }: { onClose: () => void }) {
     }
   };
 
+  // The standard form dialog (design brief 2.9): title and one sentence, labelled fields with
+  // the label over the control, the error as a line under them, Cancel and the one Forward.
   return (
-    <Dialog.Content>
+    <Dialog.Content size="sm">
       <form onSubmit={handleSubmit}>
-        <Dialog.Header>
-          <Dialog.Title>Forward Port</Dialog.Title>
-        </Dialog.Header>
-        <Dialog.Body>
-          <Dialog.Description>
-            Create a preview tunnel from a remote dev server port.
-          </Dialog.Description>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[120px_1fr]">
-            <Label htmlFor="preview-protocol" className="self-center">
-              Protocol
-            </Label>
-            <Select.Root
-              value={protocol}
-              onValueChange={(value) => {
-                if (value) setProtocol(value as PreviewServerProtocol);
-              }}
-            >
-              <Select.Trigger id="preview-protocol" appearance="input" className="w-full">
-                <Select.Value>{protocol === 'https:' ? 'HTTPS' : 'HTTP'}</Select.Value>
-              </Select.Trigger>
-              <Select.Content align="start" width="trigger">
-                <Select.Item value="http:">HTTP</Select.Item>
-                <Select.Item value="https:">HTTPS</Select.Item>
-              </Select.Content>
-            </Select.Root>
-            <Label htmlFor="preview-remote-port" className="self-center">
-              Remote port
-            </Label>
-            <Input
-              id="preview-remote-port"
-              inputMode="numeric"
-              value={remotePort}
-              onChange={(event) => setRemotePort(event.target.value)}
-              placeholder="5173"
-            />
-            <Label htmlFor="preview-local-port" className="self-center">
-              Local port
-            </Label>
-            <Input
-              id="preview-local-port"
-              inputMode="numeric"
-              value={localPort}
-              onChange={(event) => setLocalPort(event.target.value)}
-              placeholder="Auto"
-            />
-          </div>
-          {error ? <p className="text-xs text-foreground-destructive">{error}</p> : null}
-        </Dialog.Body>
-        <Dialog.Footer>
-          <Button type="button" variant="secondary" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant="primary" type="submit" disabled={isSubmitting}>
-            {isSubmitting ? 'Forwarding...' : 'Forward'}
-          </Button>
-        </Dialog.Footer>
+        <ModalLayout
+          title="Forward port"
+          description="Open a preview tunnel to a dev server on the remote machine."
+          actions={
+            <>
+              <Button type="button" variant="ghost" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button variant="primary" type="submit" disabled={isSubmitting}>
+                {isSubmitting ? 'Forwarding…' : 'Forward'}
+              </Button>
+            </>
+          }
+        >
+          <Dialog.Body>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="preview-protocol">Protocol</Label>
+              <Select.Root
+                value={protocol}
+                onValueChange={(value) => {
+                  if (value) setProtocol(value as PreviewServerProtocol);
+                }}
+              >
+                <Select.Trigger id="preview-protocol" appearance="input" className="w-full">
+                  <Select.Value>{protocol === 'https:' ? 'HTTPS' : 'HTTP'}</Select.Value>
+                </Select.Trigger>
+                <Select.Content align="start" width="trigger">
+                  <Select.Item value="http:">HTTP</Select.Item>
+                  <Select.Item value="https:">HTTPS</Select.Item>
+                </Select.Content>
+              </Select.Root>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="preview-remote-port">Remote port</Label>
+                <Input
+                  id="preview-remote-port"
+                  inputMode="numeric"
+                  value={remotePort}
+                  aria-invalid={error?.includes('remote') || undefined}
+                  onChange={(event) => setRemotePort(event.target.value)}
+                  placeholder="5173"
+                  className="tabular-nums"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="preview-local-port">Local port</Label>
+                <Input
+                  id="preview-local-port"
+                  inputMode="numeric"
+                  value={localPort}
+                  aria-invalid={error?.includes('local') || undefined}
+                  onChange={(event) => setLocalPort(event.target.value)}
+                  placeholder="Auto"
+                  className="tabular-nums"
+                />
+              </div>
+            </div>
+            {error ? (
+              <p role="alert" className="text-xs text-foreground-error">
+                {error}
+              </p>
+            ) : null}
+          </Dialog.Body>
+        </ModalLayout>
       </form>
     </Dialog.Content>
   );

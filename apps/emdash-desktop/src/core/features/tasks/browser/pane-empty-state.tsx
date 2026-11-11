@@ -37,17 +37,20 @@ export function PaneEmptyState() {
     actions[index]()
   );
 
+  // The empty pane (design brief 2.12): a quiet title and one sentence, then the two ways to
+  // fill it as menu-like rows with their shortcuts. Arrow keys move between them.
   return (
-    <div className="text-muted-foreground flex h-full flex-col items-center justify-center gap-3">
-      <span className="text-[40px] leading-none font-semibold tracking-tight text-background-2 select-none">
-        chorus
-      </span>
-      <div className="mx-auto mt-10 flex w-full max-w-xs flex-col gap-0.5">
+    <div className="flex h-full flex-col items-center justify-center px-6">
+      <div className="mb-5 flex flex-col items-center gap-1 text-center">
+        <p className="text-sm font-medium text-foreground">Nothing open here</p>
+        <p className="text-xs text-foreground-muted">Start a conversation or open a file.</p>
+      </div>
+      <div className="flex w-full max-w-72 flex-col gap-0.5">
         <PaneEmptyStateAction
           isSelected={selectedIndex === 0}
           onMouseEnter={() => setSelectedIndex(0)}
           onClick={actions[0]}
-          icon={<MessageSquare className="size-3.5" />}
+          icon={<MessageSquare className="size-4" />}
           label="New conversation"
           commandId="task.newConversation"
         />
@@ -55,7 +58,7 @@ export function PaneEmptyState() {
           isSelected={selectedIndex === 1}
           onMouseEnter={() => setSelectedIndex(1)}
           onClick={actions[1]}
-          icon={<FileSearch className="size-3.5" />}
+          icon={<FileSearch className="size-4" />}
           label="Open file"
           commandId="app.commandPalette"
         />
@@ -81,18 +84,20 @@ function PaneEmptyStateAction({
 }) {
   return (
     <button
+      type="button"
       data-slot="button"
       onClick={onClick}
       onMouseEnter={onMouseEnter}
       className={cn(
-        'flex items-center justify-between  gap-2 text-foreground-muted hover:text-foreground transition-colors hover:bg-background-1 py-2 px-3 rounded-md',
-        isSelected && 'bg-background-1 text-foreground'
+        'flex h-8 items-center justify-between gap-3 rounded-md px-2.5 text-sm text-foreground-muted transition-colors outline-none',
+        'hover:bg-surface-hover hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring',
+        isSelected && 'bg-surface-hover text-foreground'
       )}
     >
-      <div className="flex items-center gap-2 text-sm">
-        {icon}
+      <span className="flex items-center gap-2">
+        <span className="text-foreground-passive">{icon}</span>
         {label}
-      </div>
+      </span>
       <BoundShortcut command={commandId} variant="keycaps" />
     </button>
   );

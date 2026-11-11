@@ -8,7 +8,7 @@ export const root = style({
   height: '22.5rem',
   minHeight: '18rem',
   flexDirection: 'column',
-  gap: tokenVars.space2,
+  gap: tokenVars.space3,
   overflow: 'hidden',
   color: vars.foreground,
 });
@@ -52,7 +52,6 @@ export const taskName = style({
 export const taskNameLabel = style({
   color: vars.foregroundMuted,
   fontSize: tokenVars.textXs,
-  fontWeight: 500,
 });
 
 export const taskNameInput = style({
@@ -72,7 +71,7 @@ export const taskNameError = style({
   flexShrink: 0,
   alignItems: 'center',
   gap: tokenVars.space1,
-  color: vars.foregroundDestructive,
+  color: vars.foregroundError,
   fontSize: tokenVars.textXs,
 });
 
@@ -142,7 +141,7 @@ export const popupFooter = style({
 });
 
 export const comboboxHeader = style({
-  padding: tokenVars.space2,
+  padding: `${tokenVars.space2} ${tokenVars.space2} ${tokenVars.space1}`,
   color: vars.foreground,
   fontSize: tokenVars.textSm,
   fontWeight: 600,
@@ -174,7 +173,7 @@ export const itemLabel = style({
 export const itemDescription = style({
   minWidth: 0,
   overflow: 'hidden',
-  color: vars.foregroundMuted,
+  color: vars.foregroundPassive,
   fontSize: tokenVars.textXs,
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
@@ -249,15 +248,17 @@ export const inline = style({
 });
 
 export const notice = style({
-  borderRadius: tokenVars.radiusSm,
-  backgroundColor: vars.surfaceHover,
-  padding: tokenVars.space2,
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'flex-start',
+  gap: tokenVars.space1,
   color: vars.foregroundMuted,
   fontSize: tokenVars.textXs,
 });
 
 export const error = style({
-  color: vars.surfaceDestructiveForeground,
+  color: vars.foregroundError,
+  fontSize: tokenVars.textXs,
 });
 
 export const destination = style({
@@ -265,9 +266,8 @@ export const destination = style({
   flexShrink: 0,
   alignItems: 'center',
   gap: tokenVars.space2,
-  padding: tokenVars.space2,
-  backgroundColor: vars.surfaceHover,
-  color: vars.foregroundMuted,
+  padding: `${tokenVars.space2} ${tokenVars.space3}`,
+  color: vars.foregroundPassive,
   fontSize: tokenVars.textXs,
 });
 

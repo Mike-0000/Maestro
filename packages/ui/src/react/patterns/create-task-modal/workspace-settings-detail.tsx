@@ -282,7 +282,7 @@ export function WorkspaceSettingsDetail({
                 });
             }}
           >
-            Reuse existing Workspace
+            Reuse existing workspace
           </Button>
         </div>
       )}

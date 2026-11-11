@@ -115,10 +115,12 @@ export function TaskContextMenu({
             Restore
           </ContextMenu.Item>
         )}
+        {/* The branch's own actions form a second group (design brief 2.10). */}
+        {(onIntegrate || branchName) && <ContextMenu.Separator />}
         {onIntegrate && (
           <ContextMenu.Item onClick={onIntegrate}>
             <GitMerge className="size-4" />
-            Integrate into main directory…
+            Merge into main directory…
           </ContextMenu.Item>
         )}
         {branchName && (

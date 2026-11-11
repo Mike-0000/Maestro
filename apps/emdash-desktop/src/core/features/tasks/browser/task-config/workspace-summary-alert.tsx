@@ -1,5 +1,5 @@
 import { Collapsible } from '@emdash/ui/react/primitives';
-import { ChevronDown, Info } from 'lucide-react';
+import { ChevronRight, Info } from 'lucide-react';
 import { cn } from '@core/primitives/styling/browser/cn';
 import type { WorkspacePresetId } from '@core/primitives/workspaces/api';
 
@@ -34,6 +34,10 @@ interface WorkspaceSummaryAlertProps {
   className?: string;
 }
 
+/**
+ * A quiet notice (design brief 2.12): a passive glyph and one sentence, with the steps behind
+ * a disclosure in the caption role. No tinted fill, no coloured edge.
+ */
 export function WorkspaceSummaryAlert({
   description,
   steps,
@@ -44,28 +48,24 @@ export function WorkspaceSummaryAlert({
   return (
     <Collapsible.Root
       disabled={!hasSteps}
-      className={cn(
-        'rounded-md border bg-background-info border-border-info text-foreground-info text-xs',
-        className
-      )}
+      className={cn('group/summary flex flex-col text-xs text-foreground-muted', className)}
     >
-      <Collapsible.Trigger
-        hideChevron
-        className={cn('flex w-full items-center gap-2 px-3 py-2 text-left outline-none')}
-      >
-        <Info className="size-3.5 shrink-0" />
-        <span className="flex-1">{description}</span>
+      <Collapsible.Trigger variant="text" hideChevron className="flex w-auto items-start gap-2">
+        <Info className="mt-0.5 size-3.5 shrink-0 text-foreground-passive" />
+        <span className="flex-1 text-pretty">{description}</span>
         {hasSteps && (
-          <ChevronDown className="size-3.5 shrink-0 transition-transform duration-150 group-data-open:rotate-180" />
+          <ChevronRight className="mt-0.5 size-3.5 shrink-0 text-foreground-passive transition-transform duration-150 group-data-open/summary:rotate-90 motion-reduce:transition-none" />
         )}
       </Collapsible.Trigger>
 
       {hasSteps && (
-        <Collapsible.Panel className="h-(--collapsible-panel-height) overflow-hidden transition-[height] duration-200 ease-out">
-          <ol className="flex flex-col gap-0.5 border-t border-border px-3 py-2">
+        <Collapsible.Panel>
+          <ol className="flex flex-col gap-1 pt-2 pl-5.5">
             {steps.map((step, i) => (
-              <li key={i} className="flex items-start gap-2 text-foreground-muted">
-                <span className="mt-px shrink-0 font-sans text-foreground-passive">{i + 1}.</span>
+              <li key={i} className="flex items-start gap-2">
+                <span className="w-3 shrink-0 text-right text-foreground-passive tabular-nums">
+                  {i + 1}
+                </span>
                 <span>{step}</span>
               </li>
             ))}

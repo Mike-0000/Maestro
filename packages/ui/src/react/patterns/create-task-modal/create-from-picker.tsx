@@ -136,9 +136,9 @@ export function CreateFromPicker({
       </Popover.Trigger>
       <Popover.Content align="end" className={styles.popup}>
         <div className={styles.popupHeader}>
-          <Popover.Title>Create From</Popover.Title>
+          <Popover.Title>Create from</Popover.Title>
           {state.selection.kind === 'linked' && (
-            <Button size="xs" onClick={() => onIntent({ type: 'origin.cleared' })}>
+            <Button variant="text" size="xs" onClick={() => onIntent({ type: 'origin.cleared' })}>
               Clear
             </Button>
           )}
@@ -312,6 +312,7 @@ export function CreateFromPicker({
             {state.activeKind === 'issue' && (
               <div className={styles.popupFooter}>
                 <Button
+                  variant="text"
                   size="sm"
                   onClick={() => onIntent({ type: 'origin.manage-integrations-requested' })}
                 >

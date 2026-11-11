@@ -21,6 +21,18 @@ import { AgentCapabilityIcons } from '@core/features/agents/contributions/browse
 import { AgentIcon } from '@core/features/agents/contributions/browser/agent-icon';
 import { cn } from '@core/primitives/styling/browser/cn';
 
+/**
+ * The trigger faces (design brief 2.8): `field` reads like the kit Input (a form control that
+ * keeps its column width); `quiet` is a borderless ghost chip for option rows such as the one
+ * under the New conductor prompt, where the agent reads as part of a sentence.
+ */
+const TRIGGER_APPEARANCE = {
+  field:
+    'h-8 w-full rounded-md border border-border bg-(--em-surface-input) px-2.5 hover:border-border-1 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring data-popup-open:border-border-1 emlight:border-border-1 emlight:bg-surface-elevated emlight:hover:border-border-2',
+  quiet:
+    '-ml-2 h-7 max-w-full rounded-md px-2 hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring data-popup-open:bg-surface-hover',
+} as const;
+
 interface AgentSelectorProps {
   value: AgentProviderId | null;
   onChange: (agent: AgentProviderId) => void;
@@ -32,6 +44,8 @@ interface AgentSelectorProps {
   installable?: boolean;
   autoFocus?: boolean;
   placeholder?: string;
+  /** Trigger face: `field` (default, a form control) or `quiet` (a ghost chip in a row). */
+  appearance?: keyof typeof TRIGGER_APPEARANCE;
 }
 
 export const AgentSelector: React.FC<AgentSelectorProps> = observer(
@@ -46,6 +60,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = observer(
     installable = true,
     autoFocus = false,
     placeholder = 'No agent installed',
+    appearance = 'field',
   }) => {
     const [open, setOpen] = useState(false);
     const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
@@ -95,29 +110,42 @@ export const AgentSelector: React.FC<AgentSelectorProps> = observer(
           data-autofocus={autoFocus || undefined}
           disabled={disabled}
           className={cn(
-            'flex h-9 w-full min-w-0 items-center gap-2 rounded-lg border border-border bg-transparent px-2.5 py-1 text-sm outline-none',
-            disabled && 'cursor-not-allowed opacity-60',
+            'flex min-w-0 items-center gap-2 text-left text-sm text-foreground outline-none transition-colors',
+            TRIGGER_APPEARANCE[appearance],
+            disabled && 'cursor-not-allowed opacity-50',
             className
           )}
         >
           {value ? (
             <>
-              <AgentIcon id={value} size={16} className="rounded-sm" />
-              <span className="flex-1 truncate text-left">{selectedOption?.label ?? value}</span>
+              <AgentIcon id={value} size={16} className="rounded-xs" />
+              <span
+                className={cn('truncate', appearance === 'field' ? 'flex-1' : 'min-w-0 shrink')}
+              >
+                {selectedOption?.label ?? value}
+              </span>
             </>
           ) : (
-            <span className="flex-1 truncate text-foreground-muted">{placeholder}</span>
+            <span
+              className={cn(
+                'truncate text-foreground-passive',
+                appearance === 'field' ? 'flex-1' : 'min-w-0 shrink'
+              )}
+            >
+              {placeholder}
+            </span>
           )}
-          <ChevronDown className="size-3.5 shrink-0 text-foreground-muted" />
+          <ChevronDown className="size-3.5 shrink-0 text-foreground-passive" />
         </Combobox.Trigger>
         <Combobox.Content
           ref={setAnchorEl}
-          className={cn('min-w-(--anchor-width)', contentClassName)}
+          width="content-at-least-trigger"
+          className={cn('min-w-60', contentClassName)}
         >
-          <Combobox.Input showTrigger={false} placeholder="Search agents..." />
-          <Combobox.List className="pb-0">
+          <Combobox.Input showTrigger={false} placeholder="Search agents…" />
+          <Combobox.List>
             {(group: AgentGroup) => (
-              <Combobox.Group key={group.value} items={group.items} className="py-1">
+              <Combobox.Group key={group.value} items={group.items} className="pb-1">
                 <Combobox.Label>{group.label}</Combobox.Label>
                 <Combobox.Collection>
                   {(item: AgentOption) => {
@@ -137,16 +165,19 @@ export const AgentSelector: React.FC<AgentSelectorProps> = observer(
                         <AgentIcon
                           id={item.agentId}
                           size={16}
-                          className={cn('rounded-sm', showInstall && 'opacity-50')}
+                          className={cn('rounded-xs', showInstall && 'opacity-50 grayscale')}
                         />
-                        <span className="min-w-0 flex-1">
+                        <span className="min-w-0 flex-1 py-1">
                           <span
-                            className={cn('block truncate', showInstall && 'text-foreground-muted')}
+                            className={cn(
+                              'block truncate',
+                              showInstall && 'text-foreground-passive'
+                            )}
                           >
                             {item.label}
                           </span>
                           {item.disabledReason ? (
-                            <span className="block truncate text-xs text-foreground-muted">
+                            <span className="block truncate text-xs text-foreground-passive">
                               {item.disabledReason}
                             </span>
                           ) : null}

@@ -9,6 +9,8 @@ interface ConversationFieldProps {
   showAutoApproveToggle?: boolean;
   requirePromptDelivery?: boolean;
   claudeAccount?: ClaudeAccountPicker;
+  /** Puts the caret in the prompt once the form opens. */
+  autoFocus?: boolean;
 }
 
 export function ConversationField({
@@ -18,6 +20,7 @@ export function ConversationField({
   requirePromptDelivery,
   showAutoApproveToggle,
   claudeAccount,
+  autoFocus,
 }: ConversationFieldProps) {
   const { initialConversation, linkedIssue, includeIssueContextByDefault } = useTaskState();
 
@@ -32,6 +35,7 @@ export function ConversationField({
       requirePromptDelivery={requirePromptDelivery}
       showAutoApproveToggle={showAutoApproveToggle}
       claudeAccount={claudeAccount}
+      autoFocus={autoFocus}
     />
   );
 }

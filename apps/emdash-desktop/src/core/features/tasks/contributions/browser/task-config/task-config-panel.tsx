@@ -12,17 +12,18 @@ interface TaskConfigPanelProps {
   defaultTab?: string;
 }
 
+/** Text tabs with a 1px underline over the active section (design brief 2.10), no track. */
 export function TaskConfigPanel({ tabs, defaultTab }: TaskConfigPanelProps) {
   const [activeTab, setActiveTab] = useState<string>(defaultTab ?? tabs[0]?.value ?? '');
 
   const currentContent = tabs.find((t) => t.value === activeTab)?.content ?? null;
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-4">
       <Tabs.Root value={activeTab} onValueChange={(value) => setActiveTab(String(value))}>
-        <Tabs.List>
+        <Tabs.List variant="underline">
           {tabs.map(({ value, label }) => (
-            <Tabs.Tab key={value} value={value}>
+            <Tabs.Tab key={value} value={value} size="sm">
               {label}
             </Tabs.Tab>
           ))}

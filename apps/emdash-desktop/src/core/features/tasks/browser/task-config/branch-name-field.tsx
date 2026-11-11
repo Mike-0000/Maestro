@@ -1,4 +1,5 @@
 import { Input, Label, Switch } from '@emdash/ui/react/primitives';
+import { useId } from 'react';
 import type { BranchNameState } from '@core/features/tasks/browser/create-task-modal/use-branch-name';
 import { useTaskConfig } from '@core/features/tasks/contributions/browser/task-config/task-config-context';
 
@@ -8,38 +9,46 @@ interface BranchNameFieldProps {
   onPushBranchChange?: (value: boolean) => void;
 }
 
+/** A plain labelled field (design brief 2.8): label, the input, helper text, then the switch. */
 export function BranchNameField({ state, pushBranch, onPushBranchChange }: BranchNameFieldProps) {
   const { autoBranchName } = useTaskConfig();
   const { branchName, setBranchName, branchAlreadyExists } = state;
   const showPush = pushBranch !== undefined && onPushBranchChange !== undefined;
+  const inputId = useId();
+  const pushId = useId();
 
   return (
-    <div className="flex flex-col rounded-lg border border-border px-2.5 py-2">
-      <span className="flex items-center gap-1.5 text-xs text-foreground-passive">Branch name</span>
+    <div className="flex flex-col gap-1.5">
+      <label
+        htmlFor={autoBranchName ? undefined : inputId}
+        className="text-xs text-foreground-muted"
+      >
+        Branch name
+      </label>
       {autoBranchName ? (
-        <span className="py-1 text-sm text-foreground-muted italic">
-          Branch name will be auto-generated
-        </span>
+        <p className="text-sm text-foreground-passive">Generated when the conductor starts</p>
       ) : (
         <>
           <Input
-            bare
+            id={inputId}
             value={branchName}
             onChange={(e) => setBranchName(e.target.value)}
             placeholder="branch-name"
-            className="px-0"
+            className="font-mono"
           />
           {branchAlreadyExists && (
-            <p className="text-muted-foreground mt-1 text-xs">
-              This branch already exists — the task will check it out instead of creating a new one.
+            <p className="text-xs text-pretty text-foreground-muted">
+              This branch already exists, so the conductor checks it out instead of creating it.
             </p>
           )}
         </>
       )}
       {showPush && (
-        <div className="mt-1 flex items-center gap-1.5">
-          <Switch size="sm" checked={pushBranch} onCheckedChange={onPushBranchChange} />
-          <Label>Push branch to remote</Label>
+        <div className="mt-1.5 flex items-center gap-2">
+          <Switch id={pushId} size="sm" checked={pushBranch} onCheckedChange={onPushBranchChange} />
+          <Label htmlFor={pushId} className="font-normal">
+            Push branch to remote
+          </Label>
         </div>
       )}
     </div>

@@ -234,8 +234,9 @@ const SplitPaneLayout = observer(function SplitPaneLayout({
 
 function TerminalDragPreview({ label }: { label: string }) {
   return (
-    <div className="surface-paper flex cursor-grabbing items-center gap-1.5 rounded-md border border-border bg-(--em-surface) px-2 py-1 text-sm opacity-80 shadow-lg">
-      <span className="max-w-[200px] truncate">{label}</span>
+    // A floating chip: the elevated surface plus one hairline, no shadow (design brief 2.1).
+    <div className="surface-elevated flex h-7 cursor-grabbing items-center gap-1.5 rounded-md bg-(--em-surface) px-2.5 text-sm text-foreground ring-1 ring-border-subtle">
+      <span className="max-w-52 truncate">{label}</span>
     </div>
   );
 }

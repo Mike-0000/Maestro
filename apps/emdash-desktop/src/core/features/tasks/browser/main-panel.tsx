@@ -1,7 +1,7 @@
+import { EmptyState } from '@emdash/ui/react/components';
 import { Button, Resizable, toast, useCollapsiblePanelBinding } from '@emdash/ui/react/primitives';
-import { Loader2 } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
-import { useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import {
   getTaskManagerStore,
   getTaskStore,
@@ -20,13 +20,34 @@ import { createLayoutStorage } from '@core/primitives/mementos/browser';
 import { TaskMainColumn } from './view/task-main-column';
 import { TaskSidebar } from './view/task-sidebar';
 
-/** The task view's shared loading presentation: a centered spinner with an optional label. */
+/**
+ * The task view's shared loading presentation (design brief 2.12): the kit empty state in its
+ * loading tone, a passive spinner over one quiet line, shown only after a short delay so fast
+ * loads never flash.
+ */
 export function TaskViewLoadingState({ label }: { label?: string }) {
+  return <EmptyState tone="loading" label={label ?? 'Loading…'} bare />;
+}
+
+/** A failed task state: the error dot before a plain title, the reason under it. */
+function TaskViewErrorState({
+  title,
+  message,
+  action,
+}: {
+  title: string;
+  message?: string;
+  action?: ReactNode;
+}) {
   return (
-    <div className="flex h-full w-full flex-col items-center justify-center gap-3">
-      <Loader2 className="h-5 w-5 animate-spin text-foreground-muted" />
-      {label && <p className="font-sans text-xs text-foreground-muted">{label}</p>}
-    </div>
+    <EmptyState
+      tone="error"
+      label={title}
+      description={message || undefined}
+      action={action}
+      bare
+      className="p-8"
+    />
   );
 }
 
@@ -59,14 +80,10 @@ const TaskMainPanelContent = observer(function TaskMainPanelContent() {
 
   if (kind === 'create-error') {
     return (
-      <div className="flex h-full w-full flex-col items-center justify-center p-8">
-        <div className="flex max-w-xs flex-col items-center gap-2 text-center">
-          <p className="font-sans text-sm font-medium text-foreground-destructive">
-            Error creating task
-          </p>
-          <p className="font-sans text-xs text-foreground-passive">{taskErrorMessage(taskStore)}</p>
-        </div>
-      </div>
+      <TaskViewErrorState
+        title="Could not create the conductor"
+        message={taskErrorMessage(taskStore)}
+      />
     );
   }
 
@@ -96,14 +113,10 @@ const TaskMainPanelContent = observer(function TaskMainPanelContent() {
 
   if (kind === 'project-error') {
     return (
-      <div className="flex h-full w-full flex-col items-center justify-center p-8">
-        <div className="flex max-w-xs flex-col items-center gap-2 text-center">
-          <p className="font-sans text-sm font-medium text-foreground-destructive">
-            Failed to set up workspace
-          </p>
-          <p className="font-sans text-xs text-foreground-muted">{taskErrorMessage(taskStore)}</p>
-        </div>
-      </div>
+      <TaskViewErrorState
+        title="Could not set up the workspace"
+        message={taskErrorMessage(taskStore)}
+      />
     );
   }
 
@@ -126,14 +139,10 @@ const TaskMainPanelContent = observer(function TaskMainPanelContent() {
 
   if (kind === 'teardown-error') {
     return (
-      <div className="flex h-full w-full flex-col items-center justify-center p-8">
-        <div className="flex max-w-xs flex-col items-center gap-2 text-center">
-          <p className="font-sans text-sm font-medium text-foreground-destructive">
-            Failed to tear down workspace
-          </p>
-          <p className="font-sans text-xs text-foreground-muted">{taskErrorMessage(taskStore)}</p>
-        </div>
-      </div>
+      <TaskViewErrorState
+        title="Could not tear down the workspace"
+        message={taskErrorMessage(taskStore)}
+      />
     );
   }
 
@@ -146,7 +155,7 @@ const TaskMainPanelContent = observer(function TaskMainPanelContent() {
 
 function MissingWorkspaceState({
   title = 'Workspace is missing',
-  description = 'Chorus could not activate this workspace. Re-provision it or remove the task.',
+  description = 'Maestro could not activate this workspace. Re-provision it or remove the task.',
   actionDisabledReason,
   reprovision,
   removeAndReprovision,
@@ -157,43 +166,49 @@ function MissingWorkspaceState({
   reprovision?: () => Promise<void>;
   removeAndReprovision?: () => Promise<void>;
 }) {
+  // One move (re-provision) as the primary; the destructive alternative is a quiet text action
+  // that still asks before it discards anything.
   return (
-    <div className="flex h-full w-full flex-col items-center justify-center gap-2 p-8 text-center">
-      <p className="text-sm font-medium text-foreground">{title}</p>
-      <p className="max-w-sm text-xs text-foreground-muted">{description}</p>
-      {reprovision && (
-        <div className="mt-2 flex gap-2">
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={!!actionDisabledReason}
-            title={actionDisabledReason}
-            aria-label={
-              actionDisabledReason ? `Re-provision. ${actionDisabledReason}` : 'Re-provision'
-            }
-            onClick={() => void reprovision()}
-          >
-            Re-provision
-          </Button>
-          {removeAndReprovision && (
+    <EmptyState
+      label={title}
+      description={description}
+      bare
+      className="p-8"
+      action={
+        reprovision ? (
+          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
             <Button
               size="sm"
-              variant="ghost"
+              variant="primary"
               disabled={!!actionDisabledReason}
               title={actionDisabledReason}
               aria-label={
-                actionDisabledReason
-                  ? `Remove and re-provision. ${actionDisabledReason}`
-                  : 'Remove and re-provision'
+                actionDisabledReason ? `Re-provision. ${actionDisabledReason}` : 'Re-provision'
               }
-              onClick={() => void removeAndReprovision()}
+              onClick={() => void reprovision()}
             >
-              Remove and re-provision
+              Re-provision
             </Button>
-          )}
-        </div>
-      )}
-    </div>
+            {removeAndReprovision && (
+              <Button
+                size="sm"
+                variant="text"
+                disabled={!!actionDisabledReason}
+                title={actionDisabledReason}
+                aria-label={
+                  actionDisabledReason
+                    ? `Remove and re-provision. ${actionDisabledReason}`
+                    : 'Remove and re-provision'
+                }
+                onClick={() => void removeAndReprovision()}
+              >
+                Remove and re-provision
+              </Button>
+            )}
+          </div>
+        ) : undefined
+      }
+    />
   );
 }
 
@@ -268,48 +283,48 @@ const TaskProvisionLoader = observer(function TaskProvisionLoader({
     return null;
   }
 
-  return (
-    <div className="flex h-full w-full flex-col items-center justify-center gap-3 p-8">
-      {!error && <Loader2 className="size-5 animate-spin text-foreground-muted" />}
-      <p className="text-sm font-medium text-foreground">
-        {error
-          ? failedCreation
-            ? 'Workspace creation failed'
-            : 'Workspace activation failed'
-          : creation
-            ? 'Creating workspace…'
-            : 'Activating workspace…'}
-      </p>
-      {!error && creation && (
-        <p className="text-center font-sans text-xs text-foreground-muted">
-          {CREATION_STAGE_LABELS[creation.stage] ?? creation.stage}…
-        </p>
-      )}
-      {error && (
-        <p className="text-center font-sans text-xs text-foreground-muted">
-          {failedCreation
+  if (error) {
+    return (
+      <TaskViewErrorState
+        title={failedCreation ? 'Workspace creation failed' : 'Workspace activation failed'}
+        message={
+          failedCreation
             ? [
                 failedCreation.stage ? `Failed at ${failedCreation.stage}` : null,
                 failedCreation.message ?? null,
               ]
                 .filter(Boolean)
                 .join(': ')
-            : errorMessage}
-        </p>
-      )}
-      {error && (
-        <Button
-          size="sm"
-          variant="ghost"
-          disabled={!!retryDisabledReason}
-          title={retryDisabledReason}
-          aria-label={retryDisabledReason ? `Retry. ${retryDisabledReason}` : 'Retry'}
-          onClick={retry}
-        >
-          Retry
-        </Button>
-      )}
-    </div>
+            : errorMessage
+        }
+        action={
+          <Button
+            size="sm"
+            variant="text"
+            disabled={!!retryDisabledReason}
+            title={retryDisabledReason}
+            aria-label={retryDisabledReason ? `Retry. ${retryDisabledReason}` : 'Retry'}
+            onClick={retry}
+          >
+            Retry
+          </Button>
+        }
+      />
+    );
+  }
+
+  // The loader already waited PROVISION_LOADER_DELAY_MS, so the kit state shows at once.
+  return (
+    <EmptyState
+      tone="loading"
+      delayMs={0}
+      label={creation ? 'Creating workspace…' : 'Activating workspace…'}
+      description={
+        creation ? `${CREATION_STAGE_LABELS[creation.stage] ?? creation.stage}…` : undefined
+      }
+      bare
+      className="p-8"
+    />
   );
 });
 

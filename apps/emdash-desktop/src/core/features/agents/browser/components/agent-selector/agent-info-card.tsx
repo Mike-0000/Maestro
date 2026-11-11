@@ -37,34 +37,40 @@ export const AgentInfoCard: React.FC<Props> = ({ id, connectionId }) => {
     updateDefaultAgent(id as AppSettings['defaultAgent']);
   }
 
+  // One quiet card (design brief 2.10): the agent's name as the card headline, the website as
+  // a text action, a sentence of description, then the default-agent switch as a plain row
+  // and the install details. No inner boxes; space separates the groups. The popover around
+  // it owns the padding.
   return (
-    <div className="w-96 bg-background-quaternary p-3">
-      <div className="mb-2 flex items-center justify-between gap-1.5">
-        <div className="flex items-center gap-2 text-sm">
-          <AgentIcon id={id} size={16} className="rounded-sm" />
-          <span className="text-sm text-foreground">{title}</span>
+    <div className="flex w-80 flex-col gap-3">
+      <div className="flex min-w-0 items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <AgentIcon id={id} size={16} className="rounded-xs" />
+          <span className="truncate text-sm font-semibold text-foreground">{title}</span>
         </div>
         {docUrl && (
           <Button
-            variant="ghost"
+            variant="text"
             size="xs"
-            className="p-0 text-foreground-muted"
+            className="shrink-0 gap-1"
             onClick={() => window.open(docUrl, '_blank', 'noreferrer')}
           >
-            View Website
-            <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+            Website
+            <ExternalLink className="size-3" aria-hidden="true" />
           </Button>
         )}
       </div>
 
       {description ? (
-        <p className="mb-2 text-xs leading-relaxed text-foreground-muted">{description}</p>
+        <p className="-mt-1 text-xs leading-relaxed text-pretty text-foreground-muted">
+          {description}
+        </p>
       ) : null}
 
-      <div className="mb-3 flex items-center justify-between gap-3 rounded-md border border-border bg-background-1 px-2.5 py-2">
+      <div className="flex min-h-7 items-center justify-between gap-3">
         <label
           htmlFor={`set-default-agent-${id}`}
-          className="min-w-0 flex-1 text-xs text-foreground"
+          className="min-w-0 flex-1 text-sm text-foreground"
         >
           Set as the default agent
         </label>

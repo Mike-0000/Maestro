@@ -73,7 +73,7 @@ export const resourceName = style({
 });
 
 export const resourceError = style({
-  color: vars.surfaceDestructiveForeground,
+  color: vars.foregroundError,
 });
 
 export const imageShelf = style({
@@ -95,9 +95,9 @@ export const image = style({
   alignItems: 'center',
   gap: tokenVars.space1,
   overflow: 'hidden',
-  border: `1px solid ${vars.border}`,
+  border: `1px solid ${vars.borderSubtle}`,
   borderRadius: tokenVars.radiusMd,
-  backgroundColor: vars.surface,
+  backgroundColor: vars.surfaceEmphasis,
   padding: tokenVars.space1,
   color: vars.foreground,
 });
@@ -138,7 +138,7 @@ export const dropOverlay = style({
   inset: tokenVars.space1,
   display: 'grid',
   placeItems: 'center',
-  border: `1px dashed ${vars.borderPrimary}`,
+  boxShadow: `0 0 0 2px ${vars.focusRing}`,
   borderRadius: tokenVars.radiusMd,
   backgroundColor: `color-mix(in srgb, ${vars.surface} 88%, transparent)`,
   color: vars.foreground,

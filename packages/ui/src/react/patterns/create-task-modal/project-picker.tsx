@@ -39,8 +39,12 @@ export function ProjectPicker({
         </>
       )}
       renderFooter={() => (
-        <Button size="sm" onClick={() => onIntent({ type: 'project.add-requested' })}>
-          Add Project
+        <Button
+          variant="text"
+          size="sm"
+          onClick={() => onIntent({ type: 'project.add-requested' })}
+        >
+          Add project
         </Button>
       )}
       onOpenChange={(nextOpen) =>

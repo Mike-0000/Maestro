@@ -1,4 +1,4 @@
-import { Button, Dialog, Field, Input } from '@emdash/ui/react/primitives';
+import { Button, Dialog, Field, Input, ModalLayout } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
 import { useCallback, useState } from 'react';
 import { useTaskSettings } from '@core/features/tasks/api/browser/hooks/useTaskSettings';
@@ -83,49 +83,49 @@ export const RenameTaskModal = observer(function RenameTaskModal({
     }
   }, [isValid, taskManager, taskId, normalizedName, complete]);
 
+  const message = error ?? (validationMessage && !isUnchanged ? validationMessage : null);
+
   return (
-    <>
-      <Dialog.Header showCloseButton={false}>
-        <Dialog.Title>Rename conductor</Dialog.Title>
-      </Dialog.Header>
-      <Dialog.Body className="pt-0">
-        <Field.Group>
-          <Field.Root>
-            <Field.Label>Conductor name</Field.Label>
-            <Input
-              value={name}
-              onChange={(e) => handleNameChange(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void handleSubmit();
-              }}
-              maxLength={MAX_TASK_NAME_LENGTH}
-              autoFocus
-            />
-            {validationMessage && !isUnchanged && (
-              <p className="text-destructive mt-1 text-xs">{validationMessage}</p>
-            )}
-            {error && <p className="text-destructive mt-1 text-xs">{error}</p>}
-          </Field.Root>
-        </Field.Group>
+    <ModalLayout
+      title="Rename conductor"
+      showCloseButton={false}
+      actions={
+        <>
+          <Button variant="ghost" onClick={dismiss}>
+            Cancel
+          </Button>
+          <ConfirmButton
+            variant="primary"
+            onClick={() => void handleSubmit()}
+            disabled={!isValid || isSubmitting}
+          >
+            {isSubmitting ? 'Renaming…' : 'Rename'}
+          </ConfirmButton>
+        </>
+      }
+    >
+      <Dialog.Body>
+        <Field.Root invalid={Boolean(message)}>
+          <Field.Label>Conductor name</Field.Label>
+          <Input
+            value={name}
+            onChange={(e) => handleNameChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void handleSubmit();
+            }}
+            maxLength={MAX_TASK_NAME_LENGTH}
+            aria-invalid={Boolean(message) || undefined}
+            autoFocus
+          />
+          {message && <p className="text-xs text-foreground-error">{message}</p>}
+        </Field.Root>
       </Dialog.Body>
-      <Dialog.Footer>
-        <Button variant="secondary" onClick={dismiss}>
-          Cancel
-        </Button>
-        <ConfirmButton
-          variant="primary"
-          onClick={() => void handleSubmit()}
-          disabled={!isValid || isSubmitting}
-        >
-          {isSubmitting ? 'Renaming...' : 'Rename'}
-        </ConfirmButton>
-      </Dialog.Footer>
-    </>
+    </ModalLayout>
   );
 });
 
 export const renameTaskModal = defineModal<void>()({
   id: 'renameTaskModal',
   component: RenameTaskModal,
-  size: 'xs',
+  size: 'sm',
 });

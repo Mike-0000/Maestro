@@ -14,18 +14,21 @@ export function StackedAgentLogos({ stats }: StackedAgentLogosProps) {
   const nameMap = new Map((agents ?? []).map((a) => [a.id, a.name]));
 
   return (
-    <div className="flex shrink-0 items-center [&>span]:ring-2 [&>span]:ring-background [&>span:not(:first-child)]:-ml-1.5">
+    // Overlapping tiles on the emphasis step, each cut out of the row by a ring in the page
+    // colour. A second conversation with the same agent shows as a count after its tile in the
+    // caption role, not as a badge squeezed into the 20px tile.
+    <div className="flex shrink-0 items-center [&>span]:ring-2 [&>span]:ring-background [&>span:not(:first-child)]:-ml-1">
       {entries.map(([providerId, count]) => {
         const name = nameMap.get(providerId) ?? providerId;
         return (
           <span
             key={providerId}
-            className="relative flex h-5 w-5 items-center justify-center overflow-hidden rounded-sm bg-background-2"
+            className="relative flex h-5 min-w-5 items-center justify-center gap-0.5 rounded-xs bg-surface-emphasis px-0.5"
             title={count > 1 ? `${name}: ${String(count)}` : name}
           >
             <AgentIcon id={providerId} size={14} />
             {count > 1 && (
-              <span className="absolute -right-px -bottom-px rounded-tl bg-background px-px text-[8px] leading-none font-semibold text-foreground-passive">
+              <span className="pr-px text-micro leading-none text-foreground-muted tabular-nums">
                 {count}
               </span>
             )}

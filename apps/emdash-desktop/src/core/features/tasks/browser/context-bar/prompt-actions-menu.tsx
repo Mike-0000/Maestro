@@ -58,11 +58,11 @@ export function PromptActionsMenu({
           render={
             <Popover.Trigger
               disabled={disabled}
-              className="relative flex h-7 max-w-full items-center gap-1.5 self-center rounded-md border border-border bg-background-1 px-2 text-xs font-normal text-foreground hover:bg-background-1/80 disabled:pointer-events-none disabled:opacity-50"
+              className="relative flex h-7 max-w-full items-center gap-1.5 self-center rounded-md px-2 text-xs text-foreground-muted transition-colors outline-none hover:bg-surface-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 data-popup-open:bg-surface-hover data-popup-open:text-foreground"
             >
-              <FileSearch className="size-3.5 shrink-0" />
+              <FileSearch className="size-3.5 shrink-0 text-foreground-passive" />
               <span className="max-w-72 truncate">Prompts</span>
-              <ChevronDown className="size-3 shrink-0" />
+              <ChevronDown className="size-3 shrink-0 text-foreground-passive" />
             </Popover.Trigger>
           }
         />
@@ -71,24 +71,24 @@ export function PromptActionsMenu({
 
       <Popover.Content
         align="start"
-        className="max-h-[min(var(--available-height),420px,80vh)] w-[min(420px,92vw)] gap-0 p-0"
+        className="max-h-[min(var(--available-height),420px,80vh)] w-[min(420px,92vw)]"
       >
-        <div className="shrink-0 border-b px-4 py-3">
-          <div className="text-sm font-semibold">Prompts</div>
-          <div className="text-muted-foreground text-xs">{actionTooltip}</div>
+        <div className="flex shrink-0 flex-col gap-0.5">
+          <div className="text-sm font-semibold text-foreground">Prompts</div>
+          <div className="text-xs text-foreground-muted">{actionTooltip}</div>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-1">
+        <div className="-mx-2 min-h-0 flex-1 overflow-y-auto">
           {actions.map((action) => {
             const canExpand = action.prompt.prompt.length > EXPAND_TEXT_LENGTH;
             const expanded = expandedIds.has(action.id);
             return (
               <div
                 key={action.id}
-                className="flex items-start gap-2 rounded-md px-3 py-2 transition-colors focus-within:bg-background-quaternary-1 hover:bg-background-quaternary-1"
+                className="flex items-start gap-2 rounded-md px-2 py-2 transition-colors focus-within:bg-surface-hover hover:bg-surface-hover"
               >
                 <button
                   type="button"
-                  className="min-w-0 flex-1 text-left focus:outline-none"
+                  className="min-w-0 flex-1 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   onClick={() => handleActionClick(action)}
                 >
                   <span className="min-w-0 flex-1">
@@ -98,8 +98,8 @@ export function PromptActionsMenu({
                     <span
                       className={
                         expanded
-                          ? 'text-muted-foreground mt-0.5 block max-h-48 overflow-y-auto pr-1 text-xs leading-relaxed'
-                          : 'text-muted-foreground mt-0.5 block text-xs leading-relaxed'
+                          ? 'mt-0.5 block max-h-48 overflow-y-auto pr-1 text-xs leading-relaxed text-foreground-muted'
+                          : 'mt-0.5 block text-xs leading-relaxed text-foreground-muted'
                       }
                       style={previewStyle(expanded)}
                     >
@@ -111,7 +111,7 @@ export function PromptActionsMenu({
                   {canExpand ? (
                     <button
                       type="button"
-                      className="rounded-sm p-1 text-foreground-muted hover:bg-background-quaternary-2 hover:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-foreground/30"
+                      className="rounded-sm p-1 text-foreground-passive outline-none hover:bg-foreground/8 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
                       onClick={() => toggleExpanded(action.id)}
                       aria-label={`${expanded ? 'Collapse' : 'Expand'} ${action.prompt.title}`}
                     >
@@ -124,7 +124,7 @@ export function PromptActionsMenu({
                   ) : null}
                   <button
                     type="button"
-                    className="rounded-sm p-1 text-foreground-muted hover:bg-background-quaternary-2 hover:text-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-foreground/30"
+                    className="rounded-sm p-1 text-foreground-passive outline-none hover:bg-foreground/8 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
                     onClick={() => handleActionClick(action)}
                     aria-label={`Add ${action.prompt.title}`}
                   >

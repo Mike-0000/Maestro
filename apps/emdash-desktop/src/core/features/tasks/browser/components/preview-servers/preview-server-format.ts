@@ -37,15 +37,18 @@ export function previewServerStatusLabel(server: PreviewServer): string {
   }
 }
 
+/**
+ * Text tone for a preview pill (design brief 2.6): no tinted fills. A live server reads in full
+ * strength, a pending one muted; the state itself is carried by the pill's glyph and its title.
+ */
 export function previewServerStatusClasses(server: PreviewServer): string {
   switch (server.status.kind) {
     case 'ready':
-      return 'bg-background-info text-foreground-info hover:bg-background-info-hover';
+      return 'text-foreground';
     case 'starting':
     case 'not-listening':
     case 'reconnecting':
-      return 'bg-background-warning text-foreground-warning hover:bg-background-warning-hover';
     case 'failed':
-      return 'bg-background-destructive text-foreground-destructive hover:bg-destructive/20';
+      return 'text-foreground-muted';
   }
 }

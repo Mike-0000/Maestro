@@ -1,12 +1,5 @@
 import { Select } from '@emdash/ui/react/primitives';
-import {
-  ChevronsUpDown,
-  FolderGit2,
-  GitBranch,
-  GitPullRequest,
-  GitPullRequestArrow,
-  Layers,
-} from 'lucide-react';
+import { FolderGit2, GitBranch, GitPullRequest, GitPullRequestArrow, Layers } from 'lucide-react';
 import React from 'react';
 import { useTaskConfig } from '@core/features/tasks/contributions/browser/task-config/task-config-context';
 import { cn } from '@core/primitives/styling/browser/cn';
@@ -43,6 +36,11 @@ interface WorkspacePresetPickerProps {
   disabled?: boolean;
 }
 
+/**
+ * Where the conductor works. The closed control is one quiet field line (the preset's
+ * name); the open list carries each preset's sentence. A reason the chosen preset cannot
+ * run shows under the field, in the helper role.
+ */
 export function WorkspacePresetPicker({
   value,
   onValueChange,
@@ -69,59 +67,48 @@ export function WorkspacePresetPicker({
   const selected = options.find((o) => o.id === value) ?? options[0];
 
   return (
-    <Select.Root
-      value={value}
-      onValueChange={(nextValue) => onValueChange(nextValue as WorkspacePresetId)}
-      disabled={disabled}
-    >
-      <Select.Trigger
-        appearance="input"
-        showChevron={false}
-        style={{ height: 'auto', minHeight: '4.25rem' }}
-        className={cn(
-          'data-popup-open:border-ring flex w-full items-center justify-between gap-2 rounded-lg border border-border py-2 px-2.5  text-sm outline-none transition-colors hover:bg-background-2',
-          disabled && 'cursor-not-allowed opacity-50'
-        )}
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <Select.Root
+        value={value}
+        onValueChange={(nextValue) => onValueChange(nextValue as WorkspacePresetId)}
+        disabled={disabled}
       >
-        <span className="flex min-w-0 flex-col gap-1.5">
-          <div className="flex items-center gap-2">
-            <span className="text-foreground-muted">{PRESET_ICONS[value]}</span>
+        <Select.Trigger appearance="input" aria-label="Workspace">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="text-foreground-passive">{PRESET_ICONS[value]}</span>
             <span className="truncate">{selected?.label ?? 'Select workspace…'}</span>
-          </div>
-          <span className="text-xs text-foreground-muted">
-            {selected?.disabledReason ?? selected?.description}
           </span>
-        </span>
-        <ChevronsUpDown className="size-4 shrink-0 text-foreground-passive" />
-      </Select.Trigger>
+        </Select.Trigger>
 
-      <Select.Content width="trigger" align="start">
-        {options.map((option) => (
-          <Select.Item
-            key={option.id}
-            value={option.id}
-            disabled={option.disabled}
-            className="items-start rounded-md px-2.5 py-2"
-          >
-            <span className="flex flex-col items-start gap-1.5">
-              <span className="flex gap-1.5">
-                <span
-                  className={cn(
-                    'mt-px shrink-0',
-                    option.disabled ? 'text-foreground-passive' : 'text-foreground-muted'
-                  )}
-                >
-                  {PRESET_ICONS[option.id]}
+        <Select.Content width="trigger" align="start">
+          {options.map((option) => (
+            <Select.Item
+              key={option.id}
+              value={option.id}
+              disabled={option.disabled}
+              className="h-auto items-start py-2"
+            >
+              <span className="flex min-w-0 items-start gap-2">
+                <span className="mt-0.5 text-foreground-passive">{PRESET_ICONS[option.id]}</span>
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span className="truncate">{option.label}</span>
+                  <span
+                    className={cn(
+                      'text-xs text-pretty',
+                      option.disabledReason ? 'text-foreground-warning' : 'text-foreground-passive'
+                    )}
+                  >
+                    {option.disabledReason ?? option.description}
+                  </span>
                 </span>
-                <span className="text-sm leading-none">{option.label}</span>
               </span>
-              <span className="text-xs leading-snug text-foreground-muted">
-                {option.disabledReason ?? option.description}
-              </span>
-            </span>
-          </Select.Item>
-        ))}
-      </Select.Content>
-    </Select.Root>
+            </Select.Item>
+          ))}
+        </Select.Content>
+      </Select.Root>
+      {selected?.disabledReason ? (
+        <p className="text-xs text-foreground-warning">{selected.disabledReason}</p>
+      ) : null}
+    </div>
   );
 }

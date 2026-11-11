@@ -1,9 +1,10 @@
 import { EmptyState } from '@emdash/ui/react/components';
-import { Combobox, Tooltip } from '@emdash/ui/react/primitives';
+import { Combobox, Spinner, Tooltip } from '@emdash/ui/react/primitives';
 import { ChevronsUpDown, FolderGit2, GitBranch, Link } from 'lucide-react';
 import { useState } from 'react';
 import type { ProjectWorkspaceOption } from '@core/features/tasks/api/browser/create-task-modal/project-workspace-options';
 import { cn } from '@core/primitives/styling/browser/cn';
+import { FIELD_TRIGGER_CLASS } from './field-trigger';
 
 function workspaceLabel(ws: ProjectWorkspaceOption): string {
   if (ws.kind === 'repository') return 'Repository root';
@@ -14,30 +15,33 @@ function workspaceLabel(ws: ProjectWorkspaceOption): string {
   return ws.branchName ?? ws.workspaceId ?? ws.path;
 }
 
+/** Two lines: the workspace's name with its facts, then its path (or why it is unavailable). */
 function WorkspaceItemContent({ ws }: { ws: ProjectWorkspaceOption }) {
   const isRoot = ws.kind === 'repository';
   const label = workspaceLabel(ws);
   const hasDiff = ws.linesAdded != null || ws.linesDeleted != null;
 
   return (
-    <span className="flex min-w-0 flex-1 flex-col gap-1.5">
-      <span className={cn('shrink-0 flex items-center gap-1.5')}>
-        {isRoot ? <FolderGit2 className="size-3.5" /> : <GitBranch className="size-3.5" />}
-        <span className="truncate text-sm leading-none">{label}</span>
+    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <span className="flex min-w-0 items-center gap-2">
+        <span className="shrink-0 text-foreground-passive">
+          {isRoot ? <FolderGit2 className="size-3.5" /> : <GitBranch className="size-3.5" />}
+        </span>
+        <span className="truncate text-sm text-foreground">{label}</span>
         {hasDiff && (
-          <span className="ml-1 text-xs text-foreground-muted">
+          <span className="flex shrink-0 items-center gap-1 text-xs tabular-nums">
             {ws.linesAdded != null && (
               <span className="text-foreground-diff-added">+{ws.linesAdded}</span>
             )}
             {ws.linesDeleted != null && (
-              <span className="ml-1 text-foreground-diff-deleted">−{ws.linesDeleted}</span>
+              <span className="text-foreground-diff-deleted">−{ws.linesDeleted}</span>
             )}
           </span>
         )}
         {ws.linkedTaskCount > 0 && (
           <Tooltip.Provider>
             <Tooltip.Root>
-              <Tooltip.Trigger className="ml-1 flex items-center gap-0.5 text-xs text-foreground-info">
+              <Tooltip.Trigger className="flex shrink-0 items-center gap-0.5 text-xs text-foreground-passive tabular-nums">
                 <Link className="size-3" />
                 {ws.linkedTaskCount}
               </Tooltip.Trigger>
@@ -50,7 +54,12 @@ function WorkspaceItemContent({ ws }: { ws: ProjectWorkspaceOption }) {
           </Tooltip.Provider>
         )}
       </span>
-      <span className="truncate text-left text-xs leading-snug text-foreground-muted">
+      <span
+        className={cn(
+          'truncate pl-5.5 text-left text-xs',
+          ws.disabledReason ? 'text-foreground-warning' : 'text-foreground-passive'
+        )}
+      >
         {ws.disabledReason ?? ws.path}
       </span>
     </span>
@@ -82,7 +91,8 @@ export function ExistingWorkspacePicker({
 
   if (isLoading) {
     return (
-      <div className="flex h-9 items-center justify-center text-xs text-foreground-muted">
+      <div role="status" className="flex h-8 items-center gap-2 text-xs text-foreground-muted">
+        <Spinner size="sm" className="text-foreground-passive" />
         Loading workspaces…
       </div>
     );
@@ -91,7 +101,7 @@ export function ExistingWorkspacePicker({
   if (workspaces.length === 0) {
     return (
       <p className="text-xs text-foreground-muted">
-        No existing workspaces found for this project.
+        This project has no other workspaces yet. Pick a new worktree instead.
       </p>
     );
   }
@@ -107,13 +117,15 @@ export function ExistingWorkspacePicker({
       }}
       isItemEqualToValue={(a: ProjectWorkspaceOption, b: ProjectWorkspaceOption) => a.key === b.key}
     >
-      <Combobox.Trigger className="data-popup-open:border-ring flex w-full items-center justify-between gap-2 rounded-lg border border-border px-2.5 py-2 text-sm transition-colors outline-none hover:bg-background-2">
+      <Combobox.Trigger className={cn(FIELD_TRIGGER_CLASS, selected ? 'py-1.5' : 'h-8')}>
         {selected ? (
           <WorkspaceItemContent ws={selected} />
         ) : (
-          <span className="text-foreground-muted">Select a workspace…</span>
+          <span className="min-w-0 flex-1 truncate text-foreground-passive">
+            Select a workspace…
+          </span>
         )}
-        <ChevronsUpDown className="size-4 shrink-0 text-foreground-passive" />
+        <ChevronsUpDown className="size-3.5 shrink-0 self-center text-foreground-passive" />
       </Combobox.Trigger>
       <Combobox.Content>
         <Combobox.Input
@@ -122,21 +134,19 @@ export function ExistingWorkspacePicker({
           placeholder="Search workspaces…"
           showTrigger={false}
         />
-        <Combobox.List className="max-h-52 overflow-y-auto p-1!">
+        <Combobox.List className="max-h-56">
           {filtered.map((ws) => (
             <Combobox.Item
               key={ws.key}
               value={ws}
               disabled={!!ws.disabledReason}
               showCheck={false}
-              className="items-start py-2 pr-3"
+              className="items-start py-1.5"
             >
               <WorkspaceItemContent ws={ws} />
             </Combobox.Item>
           ))}
-          {filtered.length === 0 && (
-            <EmptyState label="No workspaces found" className="border-none bg-transparent" />
-          )}
+          {filtered.length === 0 && <EmptyState label="No workspaces match" bare />}
         </Combobox.List>
       </Combobox.Content>
     </Combobox.Root>

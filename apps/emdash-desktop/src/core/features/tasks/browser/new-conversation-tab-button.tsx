@@ -43,7 +43,7 @@ export const NewConversationTabButton = observer(function NewConversationTabButt
         </Button>
       </Tooltip.Trigger>
       <Tooltip.Content>
-        New Conversation <BoundShortcut command="task.newConversation" variant="keycaps" />
+        New conversation <BoundShortcut command="task.newConversation" variant="keycaps" />
       </Tooltip.Content>
     </Tooltip.Root>
   );

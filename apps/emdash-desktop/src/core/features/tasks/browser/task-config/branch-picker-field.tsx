@@ -6,6 +6,7 @@ import type { BranchNameState } from '@core/features/tasks/browser/create-task-m
 import type { BranchSelectionState } from '@core/features/tasks/browser/create-task-modal/use-branch-selection';
 import { cn } from '@core/primitives/styling/browser/cn';
 import { BranchNameField } from './branch-name-field';
+import { FIELD_TRIGGER_CLASS } from './field-trigger';
 
 interface BranchPickerFieldProps {
   state: BranchSelectionState;
@@ -17,6 +18,10 @@ interface BranchPickerFieldProps {
   isUnborn?: boolean;
 }
 
+/**
+ * The source branch as a labelled field, then a quiet disclosure for creating and pushing a
+ * feature branch. No outer box or rules (design brief 2.2): space groups the parts.
+ */
 export function BranchPickerField({
   state,
   branchNameState,
@@ -29,58 +34,50 @@ export function BranchPickerField({
   const { createBranchAndWorktree, setCreateBranchAndWorktree, pushBranch, setPushBranch } = state;
 
   return (
-    <div className={cn('border border-border rounded-md overflow-hidden', className)}>
+    <div className={cn('flex flex-col gap-3', className)}>
       {!createBranchAndWorktree && currentBranch ? (
         <BranchDisplay label={label} branchName={currentBranch} />
       ) : projectId ? (
-        <ProjectBranchSelector
-          projectId={projectId}
-          value={state.selectedBranch}
-          onValueChange={state.setSelectedBranch}
-          showRemoteSelectorFooter
-          trigger={
-            <Combobox.Trigger className="flex w-full items-center justify-between gap-2 p-2 outline-none hover:bg-background-1 data-popup-open:bg-background-1">
-              <div className="flex flex-col gap-0.5 text-left text-sm">
-                <span className="text-xs text-foreground-passive">{label}</span>
-                <span className="flex items-center gap-1">
-                  <GitBranch
-                    absoluteStrokeWidth
-                    strokeWidth={2}
-                    className="size-3.5 shrink-0 text-foreground-muted"
-                  />
+        <div className="flex flex-col gap-1.5">
+          <span aria-hidden className="text-xs text-foreground-muted">
+            {label}
+          </span>
+          <ProjectBranchSelector
+            projectId={projectId}
+            value={state.selectedBranch}
+            onValueChange={state.setSelectedBranch}
+            showRemoteSelectorFooter
+            trigger={
+              <Combobox.Trigger aria-label={label} className={cn(FIELD_TRIGGER_CLASS, 'h-8')}>
+                <GitBranch className="size-3.5 shrink-0 text-foreground-passive" />
+                <span className="min-w-0 flex-1 truncate">
                   <Combobox.Value placeholder="Select a branch" />
                 </span>
-              </div>
-
-              <ChevronDown className="size-4 shrink-0 text-foreground-muted" />
-            </Combobox.Trigger>
-          }
-        />
+                <ChevronDown className="size-3.5 shrink-0 text-foreground-passive" />
+              </Combobox.Trigger>
+            }
+          />
+        </div>
       ) : null}
       {!isUnborn && (
-        <Collapsible.Root className="border-t border-border">
-          <Collapsible.Trigger
-            hideChevron
-            className="flex w-full items-center justify-between gap-2 p-2 text-xs text-foreground-muted hover:bg-background-1 data-open:bg-background-1"
-          >
-            Should create and push feature branch
-            <ChevronDown className="size-4 shrink-0 text-foreground-muted" />
-          </Collapsible.Trigger>
-          <Collapsible.Panel className="h-(--collapsible-panel-height) overflow-hidden transition-[height] duration-200 ease-out">
-            <div className="flex flex-col gap-2 p-2">
-              <Field.Root orientation="horizontal">
+        <Collapsible.Root className="flex flex-col">
+          <Collapsible.Trigger variant="text">Create and push a feature branch</Collapsible.Trigger>
+          <Collapsible.Panel>
+            <div className="flex flex-col gap-3 pt-3">
+              <Field.Root orientation="horizontal" className="items-center gap-2">
                 <Switch
+                  size="sm"
                   checked={createBranchAndWorktree}
                   onCheckedChange={setCreateBranchAndWorktree}
                 />
-                <Field.Label>Create a branch and worktree</Field.Label>
+                <Field.Label className="font-normal">Create a branch and worktree</Field.Label>
               </Field.Root>
               {createBranchAndWorktree && (
                 <>
                   {branchNameState && <BranchNameField state={branchNameState} />}
-                  <Field.Root orientation="horizontal">
-                    <Switch checked={pushBranch} onCheckedChange={setPushBranch} />
-                    <Field.Label>Push branch to remote</Field.Label>
+                  <Field.Root orientation="horizontal" className="items-center gap-2">
+                    <Switch size="sm" checked={pushBranch} onCheckedChange={setPushBranch} />
+                    <Field.Label className="font-normal">Push branch to remote</Field.Label>
                   </Field.Root>
                 </>
               )}
@@ -89,7 +86,7 @@ export function BranchPickerField({
         </Collapsible.Root>
       )}
       {isUnborn && (
-        <p className="border-t border-border bg-background-1 px-2 py-1 text-xs text-foreground-muted">
+        <p className="text-xs text-foreground-muted">
           Create an initial commit to enable branch-based tasks.
         </p>
       )}

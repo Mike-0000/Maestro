@@ -6,6 +6,8 @@ import {
   asAvailableProject,
   getProjectManagerStore,
 } from '@core/features/projects/api/browser/stores/project-selectors';
+import { FIELD_TRIGGER_CLASS } from '@core/features/tasks/browser/task-config/field-trigger';
+import { cn } from '@core/primitives/styling/browser/cn';
 
 interface ProjectOption {
   value: string;
@@ -15,7 +17,7 @@ interface ProjectOption {
 
 function ProjectIcon({ isSsh }: { isSsh: boolean }) {
   const Icon = isSsh ? FolderInput : FolderClosed;
-  return <Icon className="text-muted-foreground h-4 w-4 shrink-0" />;
+  return <Icon className="size-3.5 shrink-0 text-foreground-passive" />;
 }
 
 interface ProjectSelectorProps {
@@ -68,20 +70,22 @@ export const ProjectSelector = observer(function ProjectSelector({
       autoHighlight
     >
       {trigger ?? (
-        <Combobox.Trigger className="flex w-full min-w-0 items-center gap-2 rounded-lg border border-border bg-transparent px-2.5 py-2 text-sm outline-none hover:bg-background-2 data-popup-open:bg-background-2">
+        <Combobox.Trigger className={cn(FIELD_TRIGGER_CLASS, 'h-8')}>
           {selectedOption && <ProjectIcon isSsh={selectedOption.isSsh} />}
-          <Combobox.Value placeholder="Select a project" />
-          <ChevronDown className="ml-auto size-4 shrink-0 text-foreground-passive" />
+          <span className="min-w-0 flex-1 truncate">
+            <Combobox.Value placeholder="Select a project" />
+          </span>
+          <ChevronDown className="size-3.5 shrink-0 text-foreground-passive" />
         </Combobox.Trigger>
       )}
-      <Combobox.Content className="w-auto min-w-(--anchor-width)">
-        <Combobox.Input showTrigger={false} placeholder="Search projects..." />
-        <Combobox.List className="pb-0">
+      <Combobox.Content width="content-at-least-trigger">
+        <Combobox.Input showTrigger={false} placeholder="Search projects…" />
+        <Combobox.List>
           {(group: { value: string; items: ProjectOption[] }) => (
-            <Combobox.Group key={group.value} items={group.items} className="py-1">
+            <Combobox.Group key={group.value} items={group.items}>
               <Combobox.Collection>
                 {(item: ProjectOption) => (
-                  <Combobox.Item key={item.value} value={item} className="flex items-center gap-2">
+                  <Combobox.Item key={item.value} value={item}>
                     <ProjectIcon isSsh={item.isSsh} />
                     {item.label}
                   </Combobox.Item>
