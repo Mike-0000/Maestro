@@ -1,4 +1,3 @@
-import { AgentStatus } from '@emdash/ui/react/components';
 import { observer } from 'mobx-react-lite';
 import { AgentIcon } from '@core/features/agents/contributions/browser/agent-icon';
 import { formatConversationTitleForDisplay } from '@core/features/conversations/api/browser/conversation-title-utils';
@@ -11,6 +10,7 @@ import {
   GenericTabDragPreview,
   GenericTabItem,
 } from '@core/primitives/workbench-shell/browser/tabs/tab-bar/generic-tab-item';
+import { ConversationStateGlyph } from './conversation-state-glyph';
 import type { ConversationTabResource } from './conversation-tab-resource';
 
 export const ConversationTabBarItem = observer(function ConversationTabBarItem({
@@ -30,9 +30,10 @@ export const ConversationTabBarItem = observer(function ConversationTabBarItem({
       label={title}
       preSlot={<AgentIcon id={store.data.providerId} size={16} />}
       statusSlot={
-        <span className="transition-opacity group-hover:opacity-0">
-          <AgentStatus status={store.indicatorStatus} />
-        </span>
+        <ConversationStateGlyph
+          status={store.indicatorStatus}
+          className="flex transition-opacity group-hover:opacity-0"
+        />
       }
       kindCommands={[
         {

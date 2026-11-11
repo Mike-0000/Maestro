@@ -120,12 +120,23 @@ export function MarkdownDocView({
   );
   const openLink = useMarkdownLinkOpener(openLocalLink);
 
-  if (state.status === 'loading')
-    return <div className={cn('h-full bg-(--em-surface)', className)} />;
+  if (state.status === 'loading') {
+    // A fast read shows nothing at all; a slow one shows a passive spinner after 400ms.
+    return (
+      <div className={cn('h-full bg-(--em-surface)', className)}>
+        <EmptyState tone="loading" bare label="Opening the file…" />
+      </div>
+    );
+  }
   if (state.status === 'unavailable') {
     return (
       <div className={cn('h-full bg-(--em-surface)', className)}>
-        <EmptyState label="This file cannot be shown" description={state.message} />
+        <EmptyState
+          size="page"
+          bare
+          label="This file cannot be shown"
+          description={state.message}
+        />
       </div>
     );
   }
@@ -140,7 +151,8 @@ export function MarkdownDocView({
       <Markdown
         content={state.content}
         variant="full"
-        className="w-full max-w-3xl px-8 py-8"
+        // The reading measure the conductor thread uses, centred in the pane.
+        className="reading-column pt-10 pb-16"
         resolveImage={resolveImage}
         onOpenLink={openLink}
       />

@@ -37,16 +37,22 @@
  *   --composer-fg-passive          placeholder text
  *
  * Borders:
- *   --composer-border              default border color
- *   --composer-border-strong       hover / focus-within border
- *   --composer-border-focus        focus-ring outline color
+ *   --composer-border              the field's hairline
+ *   --composer-border-strong       strong control edges
+ *   --composer-border-focus        the neutral `borderPrimary` slot (the field's focus ring and
+ *                                  every kit focus outline use the theme's accent focus-ring role,
+ *                                  which this bridge leaves alone)
  *
- * Surfaces (elevation ramp — base is the popup/menu bg, elevated is the shell):
- *   --composer-surface             base surface (menus, attachment remove btn)
+ * Surfaces (base-level slots read by kit pieces inside the composer):
+ *   --composer-surface             base surface
  *   --composer-surface-hover       hover tint on base surface
  *   --composer-surface-selected    selected tint on base surface
- *   --composer-surface-elevated    elevated shell background (composer border bg)
- *   --composer-surface-elevated-hover  elevated shell hover tint
+ *   --composer-surface-elevated    the base-emphasis slot
+ *   --composer-surface-elevated-hover  base-emphasis hover tint
+ *
+ * The field itself paints the emphasis step of the surface cascade it sits in
+ * (`--em-surface-emphasis`, inherited from the host's surface scope), like the
+ * conductor composer, so it follows the host's surfaces without a bridge input.
  *
  * Primary / send button (accent):
  *   --composer-accent              accent button background
@@ -78,9 +84,12 @@
  *   --composer-info-border         info band border
  *   --composer-info-surface-fg     info band foreground
  *
+ * Layout:
+ *   --composer-editor-min-height   resting height of the editor (default one line); the
+ *                                  `minRows` prop sets it, e.g. `minRows={3}` → 4.5em
+ *
  * Legacy single-property override (pre-contract, still honoured):
- *   --composer-bg                  overrides the shell background directly
- *                                  (takes priority over --composer-surface-elevated)
+ *   --composer-bg                  overrides the field background directly
  */
 
 import { globalStyle, style } from '@vanilla-extract/css';

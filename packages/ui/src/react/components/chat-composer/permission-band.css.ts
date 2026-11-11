@@ -1,72 +1,65 @@
-import { globalStyle, style } from '@vanilla-extract/css';
+import { style } from '@vanilla-extract/css';
 import { vars } from '@theme/core/contract/contract.css';
 import { tokenVars } from '@theme/tokens.css';
 
+// A permission request at the top of the composer field: the needs-you mark, the request in
+// words, a caption, and the decision on the right. It wraps under the words in a narrow pane.
+
 export const band = style({
   display: 'flex',
+  flexWrap: 'wrap',
   alignItems: 'center',
-  gap: '0.75rem',
-  borderRadius: `${tokenVars.radiusXl} ${tokenVars.radiusXl} 0 0`,
-  border: `1px solid ${vars.border}`,
-  borderBottomWidth: 0,
-  paddingLeft: '0.75rem',
-  paddingRight: '0.75rem',
-  paddingTop: '0.5rem',
-  paddingBottom: '0.5rem',
-  backgroundColor: `var(--composer-bg, ${vars.surfaceBaseEmphasis})`,
-  color: vars.foreground,
-  fontSize: tokenVars.textXs,
-});
-
-export const bandIcon = style({
-  flexShrink: 0,
-  width: '0.875rem',
-  height: '0.875rem',
-  color: vars.foregroundMuted,
-});
-
-export const bandLabel = style({
-  flex: 1,
+  columnGap: '0.625rem',
+  rowGap: '0.5rem',
   minWidth: 0,
+  paddingTop: '0.625rem',
+  paddingBottom: '0.625rem',
+  paddingLeft: '0.75rem',
+  paddingRight: '0.625rem',
+  color: vars.foreground,
+});
+
+/** The mark sits level with the first line of the request. */
+export const glyph = style({
+  display: 'flex',
+  alignSelf: 'flex-start',
+  height: '1.25rem',
+  alignItems: 'center',
+  flexShrink: 0,
+});
+
+export const text = style({
+  flex: '1 1 12rem',
+  minWidth: 0,
+});
+
+export const title = style({
+  margin: 0,
   display: '-webkit-box',
   overflow: 'hidden',
   WebkitBoxOrient: 'vertical',
   WebkitLineClamp: 2,
-  lineHeight: 1.375,
-  color: vars.foregroundMuted,
-});
-
-export const bandLabelStrong = style({
-  fontWeight: 400,
+  overflowWrap: 'anywhere',
+  fontSize: tokenVars.textSm,
+  lineHeight: tokenVars.textSmLineHeight,
+  fontWeight: 500,
   color: vars.foreground,
 });
 
-export const bandCounter = style({
-  marginLeft: '0.375rem',
-  opacity: 0.6,
+export const meta = style({
+  margin: 0,
+  marginTop: '0.125rem',
+  fontSize: tokenVars.textTiny,
+  lineHeight: tokenVars.textTinyLineHeight,
+  color: vars.foregroundPassive,
 });
 
-export const bandAction = style({
+export const counter = style({
+  fontVariantNumeric: 'tabular-nums',
+});
+
+export const action = style({
   flexShrink: 0,
-});
-
-globalStyle(`${bandAction} button`, {
-  backgroundColor: vars.surfaceElevated,
-  color: vars.foreground,
-  borderColor: `color-mix(in srgb, ${vars.foreground} 12%, transparent)`,
-});
-
-globalStyle(`${bandAction} button:hover`, {
-  backgroundColor: vars.surfaceElevatedHover,
-  color: vars.foreground,
-});
-
-globalStyle(`${bandAction} button[aria-expanded="true"]`, {
-  backgroundColor: vars.surfaceElevatedSelected,
-  color: vars.foreground,
-});
-
-globalStyle(`${bandAction} button[data-popup-open]`, {
-  backgroundColor: vars.surfaceElevatedSelected,
-  color: vars.foreground,
+  marginLeft: 'auto',
+  maxWidth: '100%',
 });

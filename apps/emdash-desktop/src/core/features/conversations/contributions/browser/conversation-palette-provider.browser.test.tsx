@@ -15,10 +15,10 @@ const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
 }));
 
+// The row shows the conversation's state with the kit StateGlyph (the one state language).
 vi.mock('@emdash/ui/react/components', () => ({
-  AgentStatus: ({ status }: { status: string | null }) => (
-    <span data-agent-status={status ?? 'none'} />
-  ),
+  STATE_GLYPH_LABELS: { working: 'Working' },
+  StateGlyph: ({ state }: { state: string }) => <span data-state-glyph={state} />,
 }));
 
 vi.mock('mobx-react-lite', () => ({
@@ -115,7 +115,8 @@ describe('ConversationPaletteProviderRow', () => {
 
     expect(host.textContent).toContain('Claude (2)');
     expect(host.querySelector('[data-agent-id="claude"]')).not.toBeNull();
-    expect(host.querySelector('[data-agent-status="working"]')).not.toBeNull();
+    expect(host.querySelector('[data-state-glyph="working"]')).not.toBeNull();
+    expect(host.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('Working');
 
     await act(async () => {
       host.querySelector<HTMLElement>('[cmdk-item]')?.click();

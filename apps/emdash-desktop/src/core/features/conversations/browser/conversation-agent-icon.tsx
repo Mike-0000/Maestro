@@ -22,11 +22,12 @@ export function ConversationAgentIcon({
     <span className="relative inline-flex shrink-0" style={{ width: size, height: size }}>
       <AgentIcon id={providerId} size={size} className={className} />
       {isAcp && (
+        // A small chat mark cut out of the corner: the surface the icon sits on, ringed in it.
         <span
-          title="ACP chat"
-          className="absolute -right-1 -bottom-1 flex items-center justify-center rounded-full bg-background ring-1 ring-background"
+          title="Chat view"
+          className="absolute -right-1 -bottom-1 flex items-center justify-center rounded-full bg-surface ring-1 ring-surface"
         >
-          <MessageSquare className="size-2.5 text-foreground-muted" />
+          <MessageSquare className="size-2.5 text-foreground-passive" />
         </span>
       )}
     </span>

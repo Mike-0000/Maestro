@@ -1,10 +1,10 @@
 /**
- * PermissionBand — a composer-docked band that surfaces an ACP permission
- * request to the user.
+ * PermissionBand — surfaces an ACP permission request to the user.
  *
- * Renders flush above the composer input box, styled like NoticeBand but with
- * a SplitButton instead of a dismiss button.  A "1 of N" counter is shown when
- * multiple requests are queued, so the user knows more are coming.
+ * Inside ChatComposer it leads the field: the needs-you mark, what the agent
+ * wants to do in words, and the decision as the one primary action (a
+ * SplitButton whose menu holds the other choices). It stays unmissable
+ * without a coloured fill. A "1 of N" count tells the user more are waiting.
  *
  * Tone mapping from ACP PermissionOption.kind:
  *   allow_*  → accept
@@ -13,9 +13,9 @@
  */
 
 import { cx } from '@styles/utilities/cx';
-import { ShieldAlertIcon } from 'lucide-react';
 import * as React from 'react';
 import { SplitButton, type SplitButtonOption } from '@/react/primitives/split-button';
+import { StateGlyph } from '../state-glyph/state-glyph';
 import { composerThemeScope } from './composer-contract.css';
 import * as styles from './permission-band.css';
 
@@ -86,29 +86,36 @@ export function PermissionBand({
   }, [request.requestId]);
 
   return (
-    <div className={cx(styles.band, className)}>
-      <ShieldAlertIcon className={styles.bandIcon} aria-hidden />
-
-      {/* Context label */}
-      <span className={styles.bandLabel}>
-        <span className={styles.bandLabelStrong}>Allow</span> <span>{request.title}</span>
-        {queueCount > 1 && (
-          <span className={styles.bandCounter}>
-            ({1} of {queueCount})
-          </span>
-        )}
+    <div
+      role="group"
+      aria-label="Permission request"
+      className={cx(styles.band, className)}
+      data-slot="permission-band"
+    >
+      <span className={styles.glyph}>
+        <StateGlyph state="needs-you" />
       </span>
 
-      {/* Split button — its option menu portals out of the composer root and
-          must carry the theme-bridge scope. */}
+      <div className={styles.text}>
+        <p className={styles.title} title={request.title}>
+          {request.title}
+        </p>
+        <p className={styles.meta}>
+          Needs your permission
+          {queueCount > 1 && <span className={styles.counter}> · 1 of {queueCount}</span>}
+        </p>
+      </div>
+
+      {/* The decision. Its option menu portals out of the composer root and must carry the
+          theme-bridge scope. */}
       <SplitButton
         options={splitOptions}
         selectedId={selectedId}
         onSelectedChange={setSelectedId}
         onAction={onResolve}
-        size="xs"
-        variant="secondary"
-        className={styles.bandAction}
+        size="sm"
+        variant="primary"
+        className={styles.action}
         menuClassName={composerThemeScope}
       />
     </div>

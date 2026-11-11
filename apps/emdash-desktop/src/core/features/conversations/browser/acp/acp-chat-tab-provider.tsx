@@ -1,4 +1,3 @@
-import { AgentStatus } from '@emdash/ui/react/components';
 import { observer } from 'mobx-react-lite';
 import { ChatConductorLayer } from '@core/features/conductor/contributions/browser/chat-conductor-layer';
 import { formatConversationTitleForDisplay } from '@core/features/conversations/api/browser/conversation-title-utils';
@@ -21,6 +20,7 @@ import {
   GenericTabItem,
 } from '@core/primitives/workbench-shell/browser/tabs/tab-bar/generic-tab-item';
 import { ConversationAgentIcon } from '../conversation-agent-icon';
+import { ConversationStateGlyph } from '../conversation-state-glyph';
 import { AcpChatPanel } from './acp-chat-panel';
 import { getAcpChatResourceManager } from './acp-chat-resource-manager';
 import { AcpChatTabResource } from './acp-chat-tab-resource';
@@ -46,7 +46,7 @@ export const AcpChatTabBarItem = observer(function AcpChatTabBarItem({
   const rawTitle = conversation?.data.title ?? '';
   const label = conversation
     ? formatConversationTitleForDisplay(conversation.data.providerId, conversation.data.title)
-    : 'ACP Chat';
+    : 'Chat';
 
   return (
     <GenericTabItem
@@ -57,9 +57,10 @@ export const AcpChatTabBarItem = observer(function AcpChatTabBarItem({
       preSlot={<ConversationAgentIcon providerId={providerId} isAcp size={16} />}
       statusSlot={
         conversation ? (
-          <span className="transition-opacity group-hover:opacity-0">
-            <AgentStatus status={conversation.indicatorStatus} />
-          </span>
+          <ConversationStateGlyph
+            status={conversation.indicatorStatus}
+            className="flex transition-opacity group-hover:opacity-0"
+          />
         ) : undefined
       }
       kindCommands={[
@@ -89,7 +90,7 @@ export const AcpChatTabBarItemDragPreview = observer(function AcpChatTabBarItemD
   const providerId = conversation?.data.providerId ?? '';
   const label = conversation
     ? formatConversationTitleForDisplay(conversation.data.providerId, conversation.data.title)
-    : 'ACP Chat';
+    : 'Chat';
 
   return (
     <GenericTabDragPreview

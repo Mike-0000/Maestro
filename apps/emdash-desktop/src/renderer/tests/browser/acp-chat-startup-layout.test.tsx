@@ -230,7 +230,7 @@ it.each([false, true])(
       });
       expect(retry).not.toHaveBeenCalled();
       const authError = store.loadError;
-      await act(async () => page.getByRole('button', { name: 'Retry', exact: true }).click());
+      await act(async () => page.getByRole('button', { name: 'Try again', exact: true }).click());
       expect(retry).toHaveBeenCalledOnce();
       await act(async () =>
         runInAction(() => {
@@ -468,7 +468,8 @@ it.each([
     expect(store.historyLoading).toBe(true);
     if (restored) {
       expect(editor()).toBeNull();
-      expect(parent.textContent).toContain('Loading chat...');
+      // The loading state appears after the EmptyState delay, so fast loads never flash.
+      await vi.waitFor(() => expect(parent.textContent).toContain('Loading chat…'));
     } else {
       expect(store.isEmpty).toBe(true);
       expect(editorY()).toBeLessThan(450);
@@ -700,7 +701,7 @@ it.each([
       store.bootstrap();
       await vi.waitFor(() => expect(store.messageCount).toBe(2));
       await vi.waitFor(() => expect(parent.textContent).toContain('Work currently in progress'));
-      await vi.waitFor(() => expect(parent.textContent).not.toContain('Loading chat...'));
+      await vi.waitFor(() => expect(parent.textContent).not.toContain('Loading chat…'));
       expect(store.session?.usable).toBe(true);
       expect(parent.querySelector('[contenteditable="true"]')).not.toBeNull();
       if (delayed === 'history') expect(store.historyLoading).toBe(true);

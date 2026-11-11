@@ -149,7 +149,12 @@ export const ConversationsPanel = observer(function ConversationsPanel() {
           <PaneSizingContextProvider sessionIds={allSessionIds} bottomPadding={contextBarHeight}>
             <div className="flex min-h-0 flex-1 flex-col">
               {disabledReason && activeSession?.status !== 'ready' ? (
-                <EmptyState label="Conversation unavailable" description={disabledReason} />
+                <EmptyState
+                  size="page"
+                  bare
+                  label="This conversation is unavailable"
+                  description={disabledReason}
+                />
               ) : activeSessionId &&
                 attachments &&
                 activeSession?.status === 'ready' &&
@@ -183,8 +188,10 @@ export const ConversationsPanel = observer(function ConversationsPanel() {
                     />
                   </div>
                   {disabledReason && (
+                    // A floating note over the read-only terminal: the elevated step and one
+                    // hairline, no shadow.
                     <div
-                      className="absolute inset-x-2 top-2 z-20 rounded-md border bg-background/95 px-2 py-1 text-center text-xs text-foreground-muted shadow-sm"
+                      className="surface-elevated absolute inset-x-3 top-3 z-20 rounded-lg border border-border-subtle bg-surface px-3 py-1.5 text-center text-xs text-foreground-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                       tabIndex={0}
                       role="note"
                     >
@@ -192,6 +199,8 @@ export const ConversationsPanel = observer(function ConversationsPanel() {
                     </div>
                   )}
                 </div>
+              ) : activeSession?.status === 'connecting' ? (
+                <EmptyState tone="loading" bare label="Connecting to the agent…" />
               ) : null}
             </div>
           </PaneSizingContextProvider>
