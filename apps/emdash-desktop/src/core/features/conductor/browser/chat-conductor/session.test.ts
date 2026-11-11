@@ -1,5 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { describe, expect, it, vi } from 'vitest';
+import type { ConductorDecision } from '@core/primitives/agents/api/conductor-decisions';
 import { CHAT_NOTHING_NEW } from '../../api/chat-conductor/prompt';
 import type { ConductorTaskThread } from '../../api/chat-conductor/thread';
 import {
@@ -107,12 +108,14 @@ function harness(
     ),
     stop: vi.fn(async (_chatId: string) => 'Stopped the session.'),
     listAccounts: vi.fn((_chatId: string) => 'Claude accounts:\n- Primary\n- Work'),
+    chatDeleted: vi.fn((_chatId: string) => false),
     /** What the agent received since the cursor; tests push prompts into `received`. */
     receivedPrompts: vi.fn(async (_chatId: string, _cursor: number | null) => ({
       prompts: received.splice(0),
       cursor: ++cursor,
     })),
   };
+  const announce: { mode: 'all' | 'attention_only' } = { mode: 'all' };
   const tabs: TaskBrowser[] = [];
   const browsers = {
     devOrigins: ['http://localhost:5173'],
@@ -162,6 +165,10 @@ function harness(
     newId: () => `id-${++id}`,
     warn: vi.fn(),
     eventGatherMs: 0,
+    resolveDecision: vi.fn(
+      (_holdId: string, _conversationId: string, _decision: ConductorDecision) => {}
+    ),
+    announceCompletions: () => announce.mode,
   };
   const session = new ChatConductorSession('task-1', ports);
   return {
@@ -169,6 +176,13 @@ function harness(
     ports,
     agent,
     browsers,
+    announce,
+    resolved: () =>
+      vi.mocked(ports.resolveDecision).mock.calls.map(([holdId, conversationId, decision]) => ({
+        holdId,
+        conversationId,
+        decision,
+      })),
     replies,
     calls,
     saved,
@@ -1221,5 +1235,318 @@ describe("the task's browser tabs", () => {
     await off.idle();
     expect(off.browsers.open).not.toHaveBeenCalled();
     expect(off.session.entries.at(-1)).toMatchObject({ kind: 'action', status: 'refused' });
+  });
+});
+
+describe('deciding what the developer is told', () => {
+  const FAR = new Date('2026-11-10T12:00:00Z').getTime() + 60_000;
+  const held = (
+    overrides: Partial<{
+      holdId: string;
+      conversationId: string;
+      kind: 'finished' | 'awaiting-input';
+      notificationType: 'permission_prompt' | 'idle_prompt';
+      text: string | null;
+      decideBy: number;
+    }> = {}
+  ) => {
+    const text = overrides.text === undefined ? 'Published batch 2 of 3.' : overrides.text;
+    return {
+      holdId: overrides.holdId ?? 'hold-1',
+      conversationId: overrides.conversationId ?? 'conv-1',
+      kind: overrides.kind ?? 'finished',
+      ...(overrides.notificationType ? { notificationType: overrides.notificationType } : {}),
+      completionReport: text === null ? null : { text, truncated: false, appUrls: [] },
+      decideBy: overrides.decideBy ?? FAR,
+    };
+  };
+
+  it('shows needs_you with its headline, notifying by default', async () => {
+    const h = await following();
+    h.replies.push(
+      says(tool('set_status', { state: 'needs_you', headline: 'Zeus wants a release name' })),
+      says(text('Zeus needs a name for the release.'))
+    );
+    expect(h.session.decide(held())).toBe(true);
+    await h.idle();
+    expect(lastUserText(h.calls[0]!)).toContain('Published batch 2 of 3.');
+    expect(h.resolved()).toEqual([
+      {
+        holdId: 'hold-1',
+        conversationId: 'conv-1',
+        decision: {
+          kind: 'surface',
+          state: 'needs_you',
+          headline: 'Zeus wants a release name',
+          notify: true,
+        },
+      },
+    ]);
+  });
+
+  it('notifies done only when every finished agent is announced, unless told otherwise', async () => {
+    const h = await following();
+    h.announce.mode = 'attention_only';
+    h.replies.push(
+      says(tool('set_status', { state: 'done', headline: 'Release published' })),
+      says(text('Done.'))
+    );
+    h.session.decide(held());
+    await h.idle();
+    expect(h.resolved()[0]?.decision).toMatchObject({
+      kind: 'surface',
+      state: 'done',
+      notify: false,
+    });
+
+    h.replies.push(
+      says(
+        tool('set_status', {
+          state: 'done',
+          headline: 'Release published',
+          detail: 'All three batches are live.',
+          notify: true,
+        })
+      ),
+      says(text('Done.'))
+    );
+    h.session.decide(held({ holdId: 'hold-2', text: 'Published batch 3 of 3.' }));
+    await h.idle();
+    expect(h.resolved()[1]?.decision).toEqual({
+      kind: 'surface',
+      state: 'done',
+      headline: 'Release published',
+      detail: 'All three batches are live.',
+      notify: true,
+    });
+  });
+
+  it('keeps quiet on nothing new, no status, or a working status', async () => {
+    const h = await following();
+    h.replies.push(says(text(CHAT_NOTHING_NEW)));
+    h.session.decide(held());
+    await h.idle();
+    h.replies.push(
+      says(tool('set_status', { state: 'working', headline: 'Batch 3 is publishing' })),
+      says(text('It goes on.'))
+    );
+    h.session.decide(held({ holdId: 'hold-2', text: 'Batch 2 done, starting 3.' }));
+    await h.idle();
+    expect(h.resolved().map((call) => call.decision)).toEqual([
+      { kind: 'quiet' },
+      { kind: 'quiet' },
+    ]);
+  });
+
+  it('says a prompt was answered when it answered it this turn', async () => {
+    const h = await following();
+    h.replies.push(says(tool('answer_prompt', { decision: 'allow' })), says(text('Allowed it.')));
+    h.session.decide(
+      held({ kind: 'awaiting-input', notificationType: 'permission_prompt', text: null })
+    );
+    await h.idle();
+    expect(h.agent.answerPrompt).toHaveBeenCalledWith('conv-1', 'allow');
+    expect(h.resolved()[0]?.decision).toEqual({ kind: 'quiet', answered: true });
+  });
+
+  it('falls back on every way a turn can fail', async () => {
+    const h = await following();
+    h.replies.push(new Error('network down'));
+    h.session.decide(held({ holdId: 'model' }));
+    await h.idle();
+
+    h.replies.push({
+      success: false,
+      error: { type: 'budget-exceeded', message: 'Budget used up.' },
+    });
+    h.session.decide(held({ holdId: 'budget', text: 'Another reply.' }));
+    await h.idle();
+
+    for (let round = 0; round < MAX_TURN_ROUNDS; round++) h.replies.push(says(tool('list_chats')));
+    h.session.decide(held({ holdId: 'rounds', text: 'A third reply.' }));
+    await h.idle();
+
+    h.session.decide(held({ holdId: 'late', text: 'A fourth reply.', decideBy: 0 }));
+    await h.idle();
+
+    const pending = deferred<ChatTurnResult>();
+    h.replies.push(pending.promise);
+    h.session.decide(held({ holdId: 'stopped', text: 'A fifth reply.' }));
+    await vi.waitFor(() => expect(h.session.busy).toBe(true));
+    h.session.stop();
+    pending.resolve(says(tool('list_chats')));
+    await h.idle();
+
+    const fellBack = h.resolved().filter((call) => call.decision.kind === 'fallback');
+    expect(fellBack.map((call) => call.holdId)).toEqual([
+      'model',
+      'budget',
+      'rounds',
+      'late',
+      'stopped',
+    ]);
+  });
+
+  it('falls back for a turn cut off by a reset, and for holds still waiting at dispose', async () => {
+    const h = await following();
+    const pending = deferred<ChatTurnResult>();
+    h.replies.push(pending.promise);
+    h.session.decide(held({ holdId: 'running' }));
+    await vi.waitFor(() => expect(h.session.busy).toBe(true));
+    h.session.decide(held({ holdId: 'waiting', conversationId: 'conv-1', text: 'Newer reply.' }));
+    await h.session.reset();
+    pending.resolve(says(text('Late.')));
+    await h.idle();
+    expect(h.resolved().map((call) => [call.holdId, call.decision.kind])).toEqual([
+      ['waiting', 'fallback'],
+      ['running', 'fallback'],
+    ]);
+
+    const other = await following();
+    const blocked = deferred<ChatTurnResult>();
+    other.replies.push(blocked.promise);
+    other.session.send('Busy.');
+    await vi.waitFor(() => expect(other.session.busy).toBe(true));
+    other.session.decide(held({ holdId: 'at-dispose' }));
+    other.session.dispose();
+    blocked.resolve(says(text('Done.')));
+    expect(other.resolved()).toEqual([
+      {
+        holdId: 'at-dispose',
+        conversationId: 'conv-1',
+        decision: { kind: 'fallback', reason: 'the conductor closed' },
+      },
+    ]);
+  });
+
+  it('refuses what it cannot take, and drops a hold main closed before its turn', async () => {
+    const h = harness();
+    expect(h.session.decide(held())).toBe(false);
+    const f = await following();
+    expect(f.session.decide(held({ conversationId: 'conv-x' }))).toBe(false);
+    f.setReady(false);
+    expect(f.session.decide(held())).toBe(false);
+    f.setReady(true);
+
+    const blocked = deferred<ChatTurnResult>();
+    f.replies.push(blocked.promise, says(text('Hi.')));
+    f.session.send('Hello.');
+    await vi.waitFor(() => expect(f.session.busy).toBe(true));
+    f.session.decide(held({ holdId: 'closed' }));
+    f.session.decisionClosed('closed');
+    blocked.resolve(says(text('Hello.')));
+    await f.idle();
+    expect(f.resolved()).toEqual([]);
+    expect(f.calls).toHaveLength(1);
+  });
+
+  it('goes before waiting developer messages, and runs no second turn for what main publishes', async () => {
+    const h = await following();
+    const blocked = deferred<ChatTurnResult>();
+    h.replies.push(blocked.promise);
+    h.session.send('First.');
+    await vi.waitFor(() => expect(h.session.busy).toBe(true));
+    h.session.send('Second.');
+    h.session.decide(held());
+    h.replies.push(says(text(CHAT_NOTHING_NEW)), says(text('Second answer.')));
+    blocked.resolve(says(text('First answer.')));
+    await h.idle();
+    expect(lastUserText(h.calls[1]!)).toContain('Published batch 2 of 3.');
+    expect(lastUserText(h.calls[2]!)).toContain('Second.');
+
+    // Main publishes the decided state, then falls back for another: neither is news again.
+    h.agentIs({
+      status: 'completed',
+      report: { text: 'Published batch 2 of 3.', truncated: false, appUrls: [] },
+      notification: null,
+      conductor: { state: 'quiet', notify: false },
+    });
+    h.agentIs({
+      status: 'completed',
+      report: { text: 'Published batch 2 of 3.', truncated: false, appUrls: [] },
+      notification: null,
+    });
+    await h.idle();
+    expect(h.calls).toHaveLength(3);
+  });
+
+  it('applies a status naming a chat to that chat, and an unnamed one to the chats that reported', async () => {
+    const h = harness({
+      chats: [
+        { id: 'conv-1', name: 'Zeus', providerId: 'claude' },
+        { id: 'conv-2', name: 'Hera', providerId: 'codex' },
+      ],
+    });
+    h.replies.push(says(text('Caught up.')));
+    await h.session.attach();
+    await h.idle();
+    const blocked = deferred<ChatTurnResult>();
+    h.replies.push(blocked.promise);
+    h.session.send('Wait.');
+    await vi.waitFor(() => expect(h.session.busy).toBe(true));
+    h.session.decide(held({ holdId: 'zeus' }));
+    h.session.decide(held({ holdId: 'hera', conversationId: 'conv-2', text: 'Review done.' }));
+    h.replies.push(
+      says(
+        tool('set_status', { state: 'needs_you', headline: 'Hera found a blocker', chat: 'Hera' }),
+        tool('set_status', { state: 'working', headline: 'Zeus carries on', chat: 'zeus' })
+      ),
+      says(text('Hera needs you.'))
+    );
+    blocked.resolve(says(text('OK.')));
+    await h.idle();
+    const byHold = Object.fromEntries(h.resolved().map((call) => [call.holdId, call.decision]));
+    expect(byHold.zeus).toEqual({ kind: 'quiet' });
+    expect(byHold.hera).toMatchObject({ kind: 'surface', state: 'needs_you' });
+  });
+});
+
+describe('a deleted chat', () => {
+  it('drops its bookkeeping, while one only unloaded keeps it', async () => {
+    const h = await following();
+    h.replies.push(says(text('It finished.')));
+    h.agentIs(working);
+    h.agentIs(finished('Done.'));
+    await h.idle();
+    expect(h.saved.at(-1)?.chats['conv-1']).toBeDefined();
+
+    h.agentIs(null);
+    await h.idle();
+    expect(h.saved.at(-1)?.chats['conv-1']).toBeDefined();
+
+    vi.mocked(h.agent.chatDeleted).mockReturnValue(true);
+    h.agentIs(null);
+    await h.idle();
+    expect(h.saved.at(-1)?.chats['conv-1']).toBeUndefined();
+    expect(h.saved.at(-1)?.lastChatId).toBeNull();
+  });
+});
+
+describe('stopping a busy agent on its own', () => {
+  it('refuses stop and restart on an event turn while the agent works, not when the developer asks', async () => {
+    const h = await following();
+    h.agentIs(working);
+    h.chatIs('conv-1', working);
+    h.replies.push(
+      says(tool('stop_agent'), tool('restart_agent')),
+      says(text('Asking the developer.'))
+    );
+    // An event from another chat starts an event turn while Zeus works.
+    h.session.decide({
+      holdId: 'hold',
+      conversationId: 'conv-1',
+      kind: 'awaiting-input',
+      completionReport: null,
+      decideBy: Number.MAX_SAFE_INTEGER,
+    });
+    await h.idle();
+    expect(h.agent.stop).not.toHaveBeenCalled();
+    expect(h.agent.restart).not.toHaveBeenCalled();
+    expect(JSON.stringify(h.calls.at(-1)!.at(-1))).toContain('middle of a turn');
+
+    h.replies.push(says(tool('stop_agent')), says(text('Stopped it.')));
+    h.session.send('Stop Zeus now.');
+    await h.idle();
+    expect(h.agent.stop).toHaveBeenCalledWith('conv-1');
   });
 });

@@ -32,6 +32,11 @@ export function createConductorWireController(options: {
   investigator: InvestigationPorts;
   /** The project search that project lookups run on; see `LookupSearchPort`. */
   lookup: LookupSearchPort;
+  /**
+   * Calls back with the id of each task that is deleted (not archived); returns the stop function.
+   * Its conductor's thread goes with it.
+   */
+  onTaskDeleted?: (listener: (taskId: string) => void) => () => void;
 }): Controller {
   const service = new ConductorService(options.host, options.logger);
   service.start();
@@ -67,6 +72,16 @@ export function createConductorWireController(options: {
   options.scope.add(() => investigations.dispose());
   const chatThreads = new ChatConductorThreads(options.host.dataDir, options.logger);
   const taskThreads = new TaskConductorThreads(options.host.dataDir, options.logger);
+  // A deleted task's conductor thread is deleted too; an archived one keeps its thread.
+  const stopTaskDeleted = options.onTaskDeleted?.((taskId) => {
+    void taskThreads.delete(taskId).catch((error: unknown) =>
+      options.logger.warn('task conductor: thread of a deleted task not removed', {
+        taskId,
+        error,
+      })
+    );
+  });
+  if (stopTaskDeleted) options.scope.add(stopTaskDeleted);
   return createController(conductorContract, {
     runTurn: ({ mode, messages }) => service.runTurn(mode, messages),
     runChatTurn: ({ messages }) => service.runChatTurn(messages),

@@ -1,5 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
+import { DECISION_DETAIL_CHARS } from '@core/primitives/agents/api/conductor-decisions';
 import { CHAT_THREAD_LIMITS, chatConductorStateSchema } from './thread';
 
 /**
@@ -85,7 +86,29 @@ export const chatConductorToolSchemas = {
       .string()
       .min(1)
       .max(CHAT_THREAD_LIMITS.headlineChars)
-      .describe('One line the developer can take in at a glance.'),
+      .describe(
+        'One line the developer can take in at a glance. It is also the text of any notification, so it must make sense on its own.'
+      ),
+    chat: z
+      .string()
+      .min(1)
+      .max(120)
+      .optional()
+      .describe(
+        'The chat this status is about, by name. Omit it when it is about the chats whose events started this turn, or about the task as a whole.'
+      ),
+    detail: z
+      .string()
+      .min(1)
+      .max(DECISION_DETAIL_CHARS)
+      .optional()
+      .describe('A little more for the notification body, when the headline is not enough.'),
+    notify: z
+      .boolean()
+      .optional()
+      .describe(
+        'On a chat event with needs_you or done: whether a notification (sound, desktop, phone) goes out. Omit it for the default: needs_you notifies; done notifies only when the developer asked to hear about every finished agent.'
+      ),
   }),
   restart_agent: z.object({
     chat: chatRef,
@@ -149,7 +172,7 @@ const descriptions: Record<ChatConductorToolName, string> = {
   update_notes:
     'Replace your working notes. They are kept for the whole life of the task and shown to you at the start of every turn, while older turns of this conversation are dropped: whatever you will need later belongs here.',
   set_status:
-    'Set the one-line status pinned above the thread. It is what the developer sees before reading anything else, and what they see of this task from elsewhere in Maestro. Keep it true as things change.',
+    "Set the one-line status pinned above the thread. It is what the developer sees before reading anything else, and what they see of this task from elsewhere in Maestro. Keep it true as things change. On a chat event it is also your decision about what the developer is told of that event: needs_you or done shows the chat as needing them or finished, with this headline as the notification (notify says whether one goes out); anything else, or no status, tells them nothing. With chat it is about that chat's event; without it, about the chats whose events started the turn.",
   restart_agent:
     "Restart a chat's agent session in Maestro: its process is stopped and started again on the same conversation, which the agent resumes. With claude_account, the chat moves to that Claude account first and continues there; Maestro does the whole switch. A session that is not running is simply started. Whatever the agent is in the middle of is cut off, so say what to pick up in prompt when that matters. The result says what actually happened.",
   stop_agent:

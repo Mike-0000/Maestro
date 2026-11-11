@@ -463,6 +463,41 @@ describe('gateChatTool', () => {
     }
   });
 
+  it('never stops or restarts a working agent on an event, whatever the autonomy', () => {
+    for (const tool of ['stop_agent', 'restart_agent']) {
+      const refused = gateChatTool({
+        tool,
+        trigger: 'event',
+        autonomy: true,
+        unattendedActionsLeft: 5,
+        targetWorking: true,
+      });
+      expect(refused).toMatchObject({ allowed: false });
+      expect(!refused.allowed && refused.reason).toContain('needs_you');
+      expect(
+        gateChatTool({ tool, trigger: 'event', autonomy: true, unattendedActionsLeft: 5 })
+      ).toEqual({ allowed: true });
+      expect(
+        gateChatTool({
+          tool,
+          trigger: 'developer',
+          autonomy: false,
+          unattendedActionsLeft: 0,
+          targetWorking: true,
+        })
+      ).toEqual({ allowed: true });
+    }
+    expect(
+      gateChatTool({
+        tool: 'send_to_agent',
+        trigger: 'event',
+        autonomy: true,
+        unattendedActionsLeft: 5,
+        targetWorking: true,
+      })
+    ).toEqual({ allowed: true });
+  });
+
   it('always allows acting in a turn the developer started', () => {
     for (const tool of acting) {
       expect(

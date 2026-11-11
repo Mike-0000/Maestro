@@ -472,9 +472,19 @@ export function gateChatTool(input: {
   trigger: 'developer' | 'event';
   autonomy: boolean;
   unattendedActionsLeft: number;
+  /** The chat the tool acts on is mid-turn (its agent is working). */
+  targetWorking?: boolean;
 }): { allowed: true } | { allowed: false; reason: string } {
   if (!CHAT_ACTING_TOOLS.has(input.tool as ChatConductorToolName)) return { allowed: true };
   if (input.trigger === 'developer') return { allowed: true };
+  if (input.targetWorking && (input.tool === 'stop_agent' || input.tool === 'restart_agent')) {
+    // Ending a session cuts off work the developer may have asked for: never on the conductor's
+    // own say-so while the agent is in the middle of it.
+    return {
+      allowed: false,
+      reason: `${input.tool} was not run: that chat's agent is in the middle of a turn, and stopping or restarting it on your own could cut off work the developer asked for. Put it to the developer instead: say what you would do and why, and set the status to needs_you.`,
+    };
+  }
   if (!input.autonomy) {
     return {
       allowed: false,
