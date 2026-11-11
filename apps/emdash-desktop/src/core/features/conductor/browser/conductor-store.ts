@@ -35,6 +35,7 @@ import {
   terminalTailReport,
   type CompletionReport,
 } from '@core/primitives/agents/api/completion-report';
+import type { ConductorDecisionMark } from '@core/primitives/agents/api/conductor-decisions';
 import { log } from '@core/primitives/logging/browser/logger';
 import { playNotificationSound } from '@core/primitives/notifications/browser/notification-sound';
 import { ActivityLedger, formatAgo } from '../api/activity-ledger';
@@ -5781,7 +5782,12 @@ export class ConductorStore {
    * follow-up turn (when enabled and the conductor is free) that narrates what they reported;
    * the rest, and every fallback, get the fixed sentence. Each completion is spoken once.
    */
-  private async announceBatch(entries: AgentTileEntry[]): Promise<void> {
+  private async announceBatch(batch: AgentTileEntry[]): Promise<void> {
+    // What a chat's conductor already decided is told as it decided, in its words: never gated,
+    // narrated again, or sounded here (the notification service sounds it when it notifies).
+    for (const entry of batch) if (entry.conductor) this.tellDecided(entry, entry.conductor);
+    const entries = batch.filter((entry) => !entry.conductor);
+    if (entries.length === 0) return;
     const reports = new Map<string, CompletionReport>();
     const fresh: AgentTileEntry[] = [];
     for (const entry of entries) {
@@ -5860,6 +5866,38 @@ export class ConductorStore {
     if (followUp.length > 0) {
       await this.followUpCompletions(followUp, reports, undefined, gated?.interactionId);
     }
+  }
+
+  /**
+   * An agent whose chat conductor decided what the developer is told: with a notification, its
+   * headline is spoken (or offered as a call); a finished one only when every finished agent is
+   * announced, and shown otherwise. Without one, nothing: the conductor chose silence.
+   */
+  private tellDecided(entry: AgentTileEntry, mark: ConductorDecisionMark): void {
+    const headline = mark.headline?.trim();
+    if (!mark.notify || !headline || mark.state === 'quiet') return;
+    const agents = [entry.conversationId];
+    if (mark.state === 'needs_you') {
+      if (this.callMode !== 'off') {
+        this.offerCall(
+          entry,
+          entry.notificationType === 'permission_prompt' ? 'permission' : 'attention',
+          headline
+        );
+      } else {
+        this.notify(headline, null, { source: 'attention', agents });
+      }
+      return;
+    }
+    const announceAll =
+      (this.settings?.announceCompletions ?? DEFAULT_CONDUCTOR_SETTINGS.announceCompletions) ===
+      'all';
+    if (!announceAll) {
+      this.showQuietly(headline);
+      return;
+    }
+    if (this.callMode !== 'off') this.offerCall(entry, 'completion', headline);
+    else this.notify(headline, null, { source: 'completion', agents });
   }
 
   /**

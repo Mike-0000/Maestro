@@ -534,12 +534,14 @@ export const desktopNodeControllers = {
       scope,
       search,
       ssh,
+      taskService,
       workspaceIdentity,
     }) =>
       createConductorWireController({
         host: chorus,
         logger,
         scope,
+        onTaskDeleted: (listener) => taskService.on('task:deleted', (taskId) => listener(taskId)),
         // Built here because a slice may not import another slice's node surface.
         investigator: {
           // The resolver alone, not a probe: probing would refresh every dependency.

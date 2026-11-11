@@ -6,9 +6,9 @@ import { openDemoProject } from './open-project.mjs';
  * `agentLabel` is the visible name in the agent selector, e.g. "Claude Code" or "Codex".
  */
 export async function createIdleAgentTask(page, { taskName, agentLabel }) {
-  await page.getByRole('button', { name: 'New task for chorus-demo' }).click();
+  await page.getByRole('button', { name: 'New conductor for chorus-demo' }).click();
   const dialog = page.getByRole('dialog');
-  await dialog.getByText('Task name').waitFor();
+  await dialog.getByText('Conductor name').waitFor();
   await page.keyboard.type(taskName);
   // Wait for agent detection to preselect something, then switch if needed.
   await dialog

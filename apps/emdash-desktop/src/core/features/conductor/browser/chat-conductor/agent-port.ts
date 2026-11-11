@@ -99,12 +99,18 @@ function snapshotOf(entry: AgentTileEntry): AgentSnapshot {
     status: entry.status,
     report: entry.completionReport,
     notification: entry.notificationType,
+    conductor: entry.conductor ?? null,
   };
 }
 
 function sameSnapshot(a: AgentSnapshot | null, b: AgentSnapshot | null): boolean {
   if (a === null || b === null) return a === b;
-  return a.status === b.status && a.report === b.report && a.notification === b.notification;
+  return (
+    a.status === b.status &&
+    a.report === b.report &&
+    a.notification === b.notification &&
+    a.conductor === b.conductor
+  );
 }
 
 function heldWhile(hold: DeliveryHold): string {
@@ -362,6 +368,12 @@ export function createTaskAgentPort(canvas: CanvasStore, taskId: string): TaskAg
 
     listAccounts(chatId) {
       return describeClaudeAccountsForChat(conversationOf(need(chatId)), Date.now());
+    },
+
+    chatDeleted(chatId) {
+      // The task's chats are still loaded but this one is gone from them: deleted or moved.
+      const manager = conversationRegistry.get(taskId);
+      return manager !== undefined && !manager.conversations.has(chatId);
     },
 
     async receivedPrompts(chatId, cursor) {

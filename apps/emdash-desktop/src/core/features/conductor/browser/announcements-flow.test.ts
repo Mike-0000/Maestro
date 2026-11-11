@@ -868,3 +868,68 @@ describe('a confirmation said aloud', () => {
     store.dispose();
   });
 });
+
+describe("what a chat's conductor decided", () => {
+  const decided = (
+    state: 'needs_you' | 'done' | 'quiet',
+    notify: boolean,
+    overrides: Partial<AgentTileEntry> = {}
+  ) =>
+    agent({
+      status: state === 'needs_you' ? 'awaiting-input' : 'completed',
+      seen: false,
+      completionReport: { text: 'Published batch 3 of 3.', truncated: false, appUrls: [] },
+      conductor: {
+        state,
+        notify,
+        ...(state === 'quiet' ? {} : { headline: 'Zulu needs a release name' }),
+      },
+      ...overrides,
+    });
+
+  it('says a needs-you headline it asked to notify, with no gate or follow-up', async () => {
+    const { store, speech } = await setup([agent()], { completionFollowUp: true });
+    await store['announceBatch']([decided('needs_you', true)]);
+    await settle();
+    expect(speech.heard).toEqual(['Zulu needs a release name']);
+    expect(mocks.runTurn).not.toHaveBeenCalled();
+    store.dispose();
+  });
+
+  it('says nothing for what it kept quiet or did not notify', async () => {
+    const { store, speech } = await setup();
+    await store['announceBatch']([
+      decided('quiet', false),
+      decided('needs_you', false, { tileId: 'tile-y', conversationId: 'conv-y' }),
+    ]);
+    await settle();
+    expect(speech.heard).toEqual([]);
+    expect(store.reply).toBe('');
+    store.dispose();
+  });
+
+  it('says a done headline only when every finished agent is announced, and shows it otherwise', async () => {
+    const quiet = await setup([agent()], { announceCompletions: 'attention_only' });
+    await quiet.store['announceBatch']([decided('done', true)]);
+    await settle();
+    expect(quiet.speech.heard).toEqual([]);
+    expect(quiet.store.reply).toBe('Zulu needs a release name');
+    quiet.store.dispose();
+
+    const all = await setup([agent()], { announceCompletions: 'all' });
+    await all.store['announceBatch']([decided('done', true)]);
+    await settle();
+    expect(all.speech.heard).toEqual(['Zulu needs a release name']);
+    all.store.dispose();
+  });
+
+  it('raises a call with the headline when calls are on', async () => {
+    const { store } = await setup([agent()], { calls: 'quiet' });
+    await store['announceBatch']([decided('needs_you', true)]);
+    await settle();
+    expect(store.calls.current?.call.text ?? store.calls.waiting[0]?.text).toBe(
+      'Zulu needs a release name'
+    );
+    store.dispose();
+  });
+});

@@ -1,6 +1,13 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { action, makeObservable, observable, runInAction } from 'mobx';
 import type { CompletionReport } from '@core/primitives/agents/api/completion-report';
+import {
+  DECISION_DETAIL_CHARS,
+  DECISION_HEADLINE_CHARS,
+  type ConductorDecision,
+  type ConductorDecisionRequest,
+} from '@core/primitives/agents/api/conductor-decisions';
+import type { CompletionAnnouncementMode } from '../../api/announcements';
 import { decideBrowserUrl } from '../../api/chat-conductor/browser-policy';
 import { digestFromInput } from '../../api/chat-conductor/digest';
 import { CHAT_NOTHING_NEW } from '../../api/chat-conductor/prompt';
@@ -37,7 +44,12 @@ import {
 } from '../../api/chat-conductor/turns';
 import { markInputLines, type InputLineLabels } from '../../api/completion-follow-up';
 import { cleanTerminalOutput } from '../../api/terminal-text';
-import { agentEventSignal, type AgentEventSignal, type AgentSnapshot } from './agent-event';
+import {
+  agentEventSignal,
+  textHash,
+  type AgentEventSignal,
+  type AgentSnapshot,
+} from './agent-event';
 
 type Message = Anthropic.Beta.BetaMessageParam;
 type ToolResult = Anthropic.Beta.BetaToolResultBlockParam;
@@ -152,6 +164,8 @@ export interface TaskAgentPort {
   stop(chatId: string): Promise<string>;
   /** The Claude accounts with their usage, and the one a chat's agent runs on. */
   listAccounts(chatId: string): string;
+  /** The chat left its task for good (deleted or moved), rather than being unloaded with it. */
+  chatDeleted(chatId: string): boolean;
 }
 
 /** One of the task's browser tabs. */
@@ -176,6 +190,26 @@ export interface TaskBrowserPort {
 /** A chat's own conductor thread from before conductors went per task, with its chat's name. */
 export type LegacyThread = { readonly thread: ChatConductorThread; readonly name: string };
 
+/**
+ * An event main holds for this conductor to decide (see `conductor-decisions.ts`): a chat's turn
+ * that ended, or a prompt it waits on. Nothing reaches the developer until it is resolved.
+ */
+export type DecisionRequest = Pick<
+  ConductorDecisionRequest,
+  'holdId' | 'conversationId' | 'kind' | 'notificationType' | 'completionReport' | 'decideBy'
+>;
+
+/** How an event turn ended, for the decisions it was asked for. */
+type TurnEnd = { readonly ok: true } | { readonly ok: false; readonly reason: string };
+
+/** A status the running event turn set, with what the developer is to be told of it. */
+type TurnStatus = ChatConductorStatus & {
+  /** The chat it concerns; null for the chats whose events started the turn. */
+  readonly chatId: string | null;
+  readonly detail?: string;
+  readonly notify?: boolean;
+};
+
 export interface ChatConductorPorts {
   runTurn(messages: Message[]): Promise<ChatTurnResult>;
   readThread(): Promise<ConductorTaskThread | null>;
@@ -198,6 +232,10 @@ export interface ChatConductorPorts {
   warn(message: string, data?: Record<string, unknown>): void;
   /** Overrides `EVENT_GATHER_MS` (tests use 0). */
   eventGatherMs?: number;
+  /** Hands main the decision on a held event. Never throws. */
+  resolveDecision(holdId: string, conversationId: string, decision: ConductorDecision): void;
+  /** Whether the developer wants to hear about every finished agent, or only those that need them. */
+  announceCompletions(): CompletionAnnouncementMode;
 }
 
 type PendingEvent = { signal: AgentEventSignal; snapshot: AgentSnapshot };
@@ -394,8 +432,12 @@ export class ChatConductorSession {
   private gatherTimer: ReturnType<typeof setTimeout> | null = null;
   /** The developer's message the running turn answers; null for an event turn. */
   private turnWords: string | null = null;
-  /** The last status the running event turn set, for what a turn ending decides. */
-  private eventTurnStatus: ChatConductorStatus | null = null;
+  /** Held events waiting for their turn, by chat; they go before the developer's messages. */
+  private readonly pendingDecisions = new Map<string, DecisionRequest>();
+  /** The statuses the running event turn set, in order, for the decisions it was asked for. */
+  private turnStatuses: TurnStatus[] = [];
+  /** Chats whose permission prompt the running turn answered. */
+  private readonly turnAnswered = new Set<string>();
   private draining = false;
   private stopRequested = false;
   /** Bumped by reset and dispose: a turn that started before must not write after. */
@@ -614,10 +656,57 @@ export class ChatConductorSession {
     if (this.busy) this.stopRequested = true;
   }
 
+  /**
+   * Main holds a chat's event for this conductor to decide what the developer is told. Its turn
+   * goes before the developer's waiting messages, and every way that turn ends resolves the hold.
+   * False when this conductor cannot take it (not following the chats, cannot run, or the chat
+   * is not one of the task's): the caller hands it back to main.
+   */
+  decide(request: DecisionRequest): boolean {
+    if (this.disposed || !this.loaded || !this.attached || !this.ports.ready()) return false;
+    if (!this.ports.agent.chats().some((chat) => chat.id === request.conversationId)) return false;
+    const state = this.chatState(request.conversationId);
+    // What main publishes once this is decided, or when it falls back, is this same turn end:
+    // it is not news again.
+    const report = request.completionReport;
+    state.lastEventKey =
+      request.kind === 'finished'
+        ? report
+          ? `finished:${textHash(report.text)}`
+          : 'finished:none'
+        : `awaiting-input:${request.notificationType ?? ''}`;
+    state.sawActivity = false;
+    // A newer event of the chat replaced the one waiting (main closed the older hold).
+    this.pendingDecisions.set(request.conversationId, request);
+    this.pendingEvents.delete(request.conversationId);
+    this.pump();
+    return true;
+  }
+
+  /** Main closed a hold: one whose turn has not started decides nothing any more. */
+  decisionClosed(holdId: string): void {
+    for (const [chatId, request] of this.pendingDecisions) {
+      if (request.holdId === holdId) this.pendingDecisions.delete(chatId);
+    }
+  }
+
+  /** Hands every waiting decision back to main: this conductor will not run their turns. */
+  private releaseDecisions(reason: string): void {
+    const waiting = [...this.pendingDecisions.values()];
+    this.pendingDecisions.clear();
+    for (const request of waiting) {
+      this.ports.resolveDecision(request.holdId, request.conversationId, {
+        kind: 'fallback',
+        reason,
+      });
+    }
+  }
+
   /** Clears the thread and its saved copy. The conductor keeps following the task's chats. */
   async reset(): Promise<void> {
     this.epoch++;
     this.stopRequested = true;
+    this.releaseDecisions('the developer cleared the thread');
     this.developerQueue.length = 0;
     this.pendingEvents.clear();
     this.pendingAttach = false;
@@ -647,6 +736,7 @@ export class ChatConductorSession {
   }
 
   dispose(): void {
+    this.releaseDecisions('the conductor closed');
     this.disposed = true;
     this.epoch++;
     this.stopWatch?.();
@@ -681,6 +771,14 @@ export class ChatConductorSession {
 
   private onAgentChange(chatId: string, snapshot: AgentSnapshot | null): void {
     if (this.disposed) return;
+    if (!snapshot && this.ports.agent.chatDeleted(chatId)) {
+      // The chat was deleted, not just unloaded: nothing of it is kept.
+      this.chatStates.delete(chatId);
+      this.pendingEvents.delete(chatId);
+      if (this.lastChatId === chatId) this.lastChatId = null;
+      this.persist();
+      return;
+    }
     const state = this.chatState(chatId);
     if (!snapshot) {
       // The chat was unloaded: what it shows when it is back is restored, not news.
@@ -693,6 +791,12 @@ export class ChatConductorSession {
     const signal = agentEventSignal(snapshot);
     if (!signal) {
       state.sawActivity = true;
+      return;
+    }
+    if (snapshot.conductor) {
+      // Main published what this conductor decided about the event: its turn already ran.
+      state.sawActivity = false;
+      state.lastEventKey = signal.key;
       return;
     }
     if (!state.sawActivity) {
@@ -871,6 +975,17 @@ export class ChatConductorSession {
       await this.load();
       for (;;) {
         if (this.disposed) return;
+        // A held event waits on this conductor while the developer is told nothing: it goes
+        // first, with whatever else the chats reported meanwhile.
+        const decisions = [...this.pendingDecisions.values()];
+        this.pendingDecisions.clear();
+        if (decisions.length > 0) {
+          const epoch = this.epoch;
+          this.stopRequested = false;
+          await this.runDecisionTurn(decisions, epoch);
+          if (epoch === this.epoch) this.persist();
+          continue;
+        }
         const said = this.developerQueue.shift();
         const attach = said === undefined && this.pendingAttach;
         const pending = said === undefined && !attach ? [...this.pendingEvents] : [];
@@ -920,29 +1035,124 @@ export class ChatConductorSession {
       // Something queued between the last check and here.
       if (
         !this.disposed &&
-        (this.developerQueue.length > 0 || this.pendingAttach || this.pendingEvents.size > 0)
+        (this.developerQueue.length > 0 ||
+          this.pendingAttach ||
+          this.pendingEvents.size > 0 ||
+          this.pendingDecisions.size > 0)
       ) {
         this.pump();
       }
     }
   }
 
+  /** One event turn for chats' events. */
+  private async runEventTurn(events: readonly ChatEvent[], epoch: number): Promise<TurnEnd> {
+    this.turnStatuses = [];
+    this.turnAnswered.clear();
+    return this.runTurn(
+      'event',
+      chatEventTurnText(events, this.facts()),
+      chatEventLabel(events),
+      epoch
+    );
+  }
+
   /**
-   * One turn for chat events. Every way out of it passes the `finally`: the place where what an
-   * event turn decided (the status it set last, `eventTurnStatus`) is handed on.
+   * The turn for held events, with whatever else the chats reported meanwhile. Every way out of
+   * it resolves each hold: what the turn decided when it finished, a fallback when it could not
+   * (too late, a failed model call, stopped, reset, closed, any error).
    */
-  private async runEventTurn(events: readonly ChatEvent[], epoch: number): Promise<void> {
-    this.eventTurnStatus = null;
+  private async runDecisionTurn(
+    requests: readonly DecisionRequest[],
+    epoch: number
+  ): Promise<void> {
+    let end: TurnEnd = { ok: false, reason: 'the turn failed' };
+    const now = this.ports.now().getTime();
+    const live = requests.filter((request) => request.decideBy > now);
+    const late = requests.filter((request) => request.decideBy <= now);
+    this.settleDecisions(late, { ok: false, reason: 'no time left to decide' });
+    if (live.length === 0) return;
     try {
-      await this.runTurn(
-        'event',
-        chatEventTurnText(events, this.facts()),
-        chatEventLabel(events),
-        epoch
+      const others = [...this.pendingEvents].filter(
+        ([chatId]) => !live.some((request) => request.conversationId === chatId)
       );
+      this.pendingEvents.clear();
+      this.setActivity('Reading the chat…');
+      const events = [
+        ...(await Promise.all(live.map((request) => this.decisionEventFor(request)))),
+        ...(await Promise.all(others.map(([chatId, event]) => this.chatEventFor(chatId, event)))),
+      ];
+      if (epoch !== this.epoch) return;
+      const last = live.at(-1);
+      if (last) this.lastChatId = last.conversationId;
+      end = await this.runEventTurn(events, epoch);
+    } catch (error) {
+      this.ports.warn('task conductor: turn failed', { error });
+      if (epoch === this.epoch) {
+        this.addEntry({ kind: 'error', text: `The turn failed: ${errorMessage(error)}` });
+      }
     } finally {
-      this.eventTurnStatus = null;
+      this.settleDecisions(live, epoch === this.epoch ? end : { ok: false, reason: 'stopped' });
+      this.turnStatuses = [];
+      this.turnAnswered.clear();
     }
+  }
+
+  /** A held event as its chat's event in the turn. */
+  private async decisionEventFor(request: DecisionRequest): Promise<ChatEvent> {
+    const chatId = request.conversationId;
+    if (request.kind === 'awaiting-input') {
+      return this.chatEventFor(chatId, {
+        signal: { kind: 'awaiting-input', key: `awaiting-input:${request.notificationType ?? ''}` },
+        snapshot: {
+          status: 'awaiting-input',
+          report: null,
+          notification: request.notificationType ?? null,
+        },
+      });
+    }
+    const report = request.completionReport;
+    return this.chatEventFor(chatId, {
+      signal: {
+        kind: 'finished',
+        key: report ? `finished:${textHash(report.text)}` : 'finished:none',
+      },
+      snapshot: { status: 'completed', report, notification: null },
+    });
+  }
+
+  /** Resolves each hold with what the turn decided about its chat, or with the fallback. */
+  private settleDecisions(requests: readonly DecisionRequest[], end: TurnEnd): void {
+    for (const request of requests) {
+      const decision: ConductorDecision = end.ok
+        ? this.decisionFor(request.conversationId)
+        : { kind: 'fallback', reason: end.reason.slice(0, 200) };
+      this.ports.resolveDecision(request.holdId, request.conversationId, decision);
+    }
+  }
+
+  /**
+   * What the turn decided for one chat: the last status it set that concerns the chat (naming
+   * it, or naming none, which means the chats whose events started the turn). needs_you and done
+   * are shown; anything else, or no status at all, tells the developer nothing.
+   */
+  private decisionFor(chatId: string): ConductorDecision {
+    const status = [...this.turnStatuses]
+      .reverse()
+      .find((candidate) => candidate.chatId === chatId || candidate.chatId === null);
+    if (status && (status.state === 'needs_you' || status.state === 'done')) {
+      const detail = status.detail?.trim().slice(0, DECISION_DETAIL_CHARS);
+      return {
+        kind: 'surface',
+        state: status.state,
+        headline: status.headline.trim().slice(0, DECISION_HEADLINE_CHARS) || 'Needs a look',
+        ...(detail ? { detail } : {}),
+        notify:
+          status.notify ??
+          (status.state === 'needs_you' || this.ports.announceCompletions() === 'all'),
+      };
+    }
+    return { kind: 'quiet', ...(this.turnAnswered.has(chatId) ? { answered: true } : {}) };
   }
 
   private facts(): ChatFacts {
@@ -984,7 +1194,8 @@ export class ChatConductorSession {
     userText: string,
     marker: string | null,
     epoch: number
-  ): Promise<void> {
+  ): Promise<TurnEnd> {
+    let end: TurnEnd = { ok: true };
     const committed = this.messages;
     const messages: Message[] = [...committed, { role: 'user', content: userText }];
     let markerShown = marker === null;
@@ -1005,6 +1216,7 @@ export class ChatConductorSession {
         if (spoken) show({ kind: 'conductor', text: spoken });
         // An event turn stopped before it began leaves nothing to mark.
         if (answered || trigger === 'developer') show({ kind: 'event', text: 'Stopped' });
+        end = { ok: false, reason: 'the turn was stopped' };
         break;
       }
       if (round >= MAX_TURN_ROUNDS) {
@@ -1013,6 +1225,7 @@ export class ChatConductorSession {
           kind: 'error',
           text: `Stopped after ${MAX_TURN_ROUNDS} steps without a final answer. Write to continue.`,
         });
+        end = { ok: false, reason: 'the turn took too many steps' };
         break;
       }
       this.setActivity('Thinking…');
@@ -1022,7 +1235,7 @@ export class ChatConductorSession {
       } catch (error) {
         result = { success: false, error: { type: 'api-error', message: errorMessage(error) } };
       }
-      if (epoch !== this.epoch) return;
+      if (epoch !== this.epoch) return { ok: false, reason: 'the turn was cut short' };
       if (result.success && result.data.content.length === 0) {
         result = {
           success: false,
@@ -1035,6 +1248,7 @@ export class ChatConductorSession {
         if (trigger === 'developer' || !this.repeatsLastError(result.error.message)) {
           show({ kind: 'error', text: result.error.message });
         }
+        end = { ok: false, reason: `the model call failed (${result.error.type})` };
         break;
       }
       const { content } = result.data;
@@ -1062,7 +1276,7 @@ export class ChatConductorSession {
         const outcome: ToolOutcome = this.stopRequested
           ? { content: 'Not run: the developer stopped this turn.', isError: true }
           : await this.runTool(use, trigger, show, epoch);
-        if (epoch !== this.epoch) return;
+        if (epoch !== this.epoch) return { ok: false, reason: 'the turn was cut short' };
         results.push({
           type: 'tool_result',
           tool_use_id: use.id,
@@ -1079,6 +1293,7 @@ export class ChatConductorSession {
     // A turn that failed before the model said anything leaves no half-turn behind.
     this.messages = answered ? storeChatHistory(messages) : committed;
     this.persist();
+    return end;
   }
 
   // ── Tools ──────────────────────────────────────────────────────────────────
@@ -1102,6 +1317,7 @@ export class ChatConductorSession {
       trigger,
       autonomy: this.autonomy,
       unattendedActionsLeft: this.unattendedActionsLeft,
+      targetWorking: chat?.status === 'working',
     });
     if (!gate.allowed) {
       show({
@@ -1183,11 +1399,15 @@ export class ChatConductorSession {
       }
       case 'interrupt_agent':
         return agent.interrupt(chatId);
-      case 'answer_prompt':
-        return agent.answerPrompt(
+      case 'answer_prompt': {
+        const answered = await agent.answerPrompt(
           chatId,
           (input as ChatConductorToolInput<'answer_prompt'>).decision
         );
+        // Its prompt no longer waits on the developer (see `decisionFor`).
+        this.turnAnswered.add(chatId);
+        return answered;
+      }
       case 'start_chat': {
         const start = input as ChatConductorToolInput<'start_chat'>;
         const chats = agent.chats();
@@ -1274,10 +1494,29 @@ export class ChatConductorSession {
         return `Closed the browser ${id}.`;
       }
       case 'set_status': {
-        const { state, headline } = input as ChatConductorToolInput<'set_status'>;
+        const {
+          state,
+          headline,
+          chat: named,
+          detail,
+          notify,
+        } = input as ChatConductorToolInput<'set_status'>;
+        let about: ChatInfo | null = null;
+        if (named) {
+          const resolved = this.resolveChat(named);
+          if ('error' in resolved) throw new Error(resolved.error);
+          about = resolved;
+        }
         const status = { state, headline };
         runInAction(() => (this.status = status));
-        if (trigger === 'event') this.eventTurnStatus = status;
+        if (trigger === 'event') {
+          this.turnStatuses.push({
+            ...status,
+            chatId: about?.id ?? null,
+            ...(detail ? { detail } : {}),
+            ...(notify !== undefined ? { notify } : {}),
+          });
+        }
         this.persist();
         return 'Status set.';
       }

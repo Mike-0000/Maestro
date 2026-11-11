@@ -1052,6 +1052,19 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
             />
           }
         />
+        <SettingsRow
+          label="Conductors decide when you are told"
+          description="On: when an agent finishes or waits on you, its conductor reads it first and decides whether the chat shows as needing you or done, and whether a sound, desktop notification or phone push goes out. Anything it cannot decide in time falls back to the usual rules. Off: the usual rules decide. Needs chat conductors on."
+          control={
+            <Switch
+              checked={conductorSettings?.conductorDecidesAttention ?? true}
+              disabled={!conductorSettings || !(conductorSettings.chatConductors ?? true)}
+              onCheckedChange={(conductorDecidesAttention) =>
+                void conductor.updateSettings({ conductorDecidesAttention })
+              }
+            />
+          }
+        />
       </SettingsSection>
 
       <StandingInstructionSettings />

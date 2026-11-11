@@ -44,6 +44,12 @@ export const ADJUSTABLE_SETTINGS = {
     about:
       'Which finished agents are announced: all, or attention_only (only those that need the developer are spoken and sound; the rest show on screen). attention_only needs attention_verdicts on.',
   },
+  conductor_decides_attention: {
+    key: 'conductorDecidesAttention',
+    schema: onOff,
+    about:
+      "Let each chat's conductor decide when its agent shows as needing the developer or done, and whether a notification goes out; off uses the built-in rules.",
+  },
   agent_requests: {
     key: 'agentRequests',
     schema: onOff,
