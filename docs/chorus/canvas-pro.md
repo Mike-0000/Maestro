@@ -207,7 +207,7 @@ in view as they did.
   signals and the strip show where it went, and an agent the developer asked for is focused,
   which brings its desk into view. A destination the developer names wins: `spawn_agent` takes an
   optional `desk` ("on this desk", "on the Review desk"; a new name makes that desk), and a plan's
-  region still collects its agents. The setting "Canvas Pro: one desk per project"
+  region still collects its agents. The setting "One desk per project in Canvas Pro"
   (`placeNewWindowsOnProjectDesk`, on by default) turns it off, back to the desk in view.
 - **Removing a desk** moves its windows to the desk before it, or a named one. The last desk
   stays.
@@ -499,7 +499,7 @@ Taken on the recommendations, at the developer's direction (2026-10-10).
 | 5 | Desk shape | Always full: screen-sized pages, everything tiled (§4.3). Reversed on 2026-10-11 from "free placement inside a desk still works", which is what let desks stop filling the screen |
 | 6 | Desks before glass? | Yes. Phase 1 ships on the color wash |
 | 7 | Backgrounds per desk? | One default, optional per-desk override |
-| 8 | One desk per project? | The existing "new windows open in the project's sub-canvas" setting does this; left as it is |
+| 8 | One desk per project? | The existing "Open new windows in their project's region" setting does this; left as it is |
 | 9 | Platforms | Windows 11 22H2 or later for glass; macOS vibrancy in phase 3 |
 
 Still open:

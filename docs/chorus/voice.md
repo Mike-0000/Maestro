@@ -38,7 +38,7 @@ talks to the conductor; dictation goes straight to the agent that is open, in yo
 | Drop it | **Esc** or **Discard** |
 
 Transcription runs on this computer, through the same sherpa-onnx runtime as the offline voice,
-with the model picked in **Settings → Voice & Conductor → Voice → On-device speech model**:
+with the model picked in **Settings → Voice & Conductor → Voice → Speech model on this computer**:
 
 | Model | Languages | Download |
 |---|---|---|
@@ -340,7 +340,7 @@ So these work:
 ("tell the latest agent in Chorus to run the tests"). With agents in more than one project, the
 send countdown names the project ("Send to Atlas 3 (Chorus): …"), so a message headed to the
 wrong project can be cancelled before it leaves. Recent activity is kept in memory; with
-diagnostic history on, the last 20 turns are recalled after a restart.
+**Keep a voice history** on, the last 20 turns are recalled after a restart.
 
 ### When an agent finishes
 
@@ -426,8 +426,8 @@ include whatever the TUI showed last, such as reasoning summaries that Codex pri
 
 Add an Anthropic API key in **Settings → Voice & Conductor**. The default model is
 `claude-opus-5` with low effort for commands and high effort for plans; both are configurable,
-and a daily token budget (3M by default) stops runaway spend. **Diagnostic history is off by
- default.** Enable it in Settings → Voice & Conductor to retain recent, redacted command summaries
+and a daily token limit (3M by default) stops runaway spend. **Keep a voice history is off by
+ default.** Enable it in Settings → Voice & Conductor → Troubleshooting to retain recent, redacted command summaries
 and interaction events under the Chorus profile's `chorus/` directory (`conductor-log.jsonl` and
 `interaction-trace.jsonl`). On a standard Windows install this is `%APPDATA%\chorus\chorus\`;
 development, canary, and overridden profiles have different locations. Traces include final STT
@@ -442,8 +442,8 @@ queue events, the model id of each model call, capture cancel causes, and delive
 conductor log also keeps request bodies, redacted and capped.
 
 Diagnostics are limited to 2 MB per file and 7 days by default (configurable up to 30 days).
-Turning the setting off deletes stored diagnostics. Use **Delete diagnostics** to erase them
-without disabling collection. **Copy recent events for agent** requires confirmation and copies
+Turning the setting off deletes stored diagnostics. Use **Delete history** to erase them
+without disabling collection. **Copy recent events** requires confirmation and copies
 up to 200 redacted events to the clipboard; paste into a trusted coding agent only after review.
 The app does not silently grant worktree agents access to the desktop profile. Speech and tool
 arguments may contain private data despite automatic secret redaction; do not export without
@@ -521,7 +521,7 @@ Off by default. Turn it on with **Calls from agents** in Settings → Voice & Co
 
 With calls on, agents reach you **one at a time**. A finished agent, an agent's question, a
 request that needs your yes or no, and a permission prompt each become a call from exactly one
-agent. Maestro says it (or only shows it, with **Shown**), marks that agent's window with a green
+agent. Maestro says it (or only shows it, with **Show on screen**), marks that agent's window with a green
 ring, and keeps the call "on the line" for a few seconds. The ring is a mark, not focus: nothing
 moves on the canvas.
 
@@ -614,8 +614,8 @@ Always on, with or without calls:
 
 ### The realtime voice conductor (experimental)
 
-Off by default. Turn it on with **Use a realtime voice model as the conductor** in Settings →
-Voice & Conductor → Realtime voice conductor. It needs an OpenAI API key (API keys, in the same
+Off by default. Turn it on with **Use the live voice conductor** in Settings →
+Voice & Conductor → Live voice conductor. It needs an OpenAI API key (API keys, in the same
 settings); OpenRouter does not carry realtime sessions.
 
 While it is on, one realtime voice session (OpenAI's Realtime API, over WebRTC) takes the
@@ -683,10 +683,10 @@ session, or over its daily limit. Those need an Anthropic or OpenRouter key, as 
 | Voice style | How the voice should sound, in your words (tone, pace, manner). It is added after the built-in rules, changes how Maestro speaks but not what it does or reports, and reaches the open line from its next answer |
 | Web and X search | On by default. Gives the line xAI's built-in `web_search` and `x_search` tools, for news and facts from outside your projects. Each search is billed by xAI on top of the minutes |
 | Listen without the talk key | Keeps the microphone open all the time. Off, Maestro hears you while you hold the key and for a moment after it speaks |
-| Seconds the microphone stays open | The follow-up window after Maestro speaks; 0 means the microphone opens only with the talk key |
-| Seconds of quiet before the line closes | 20 by default. Nothing said, played, held or worked on for this long closes the line, until the next press of the talk key. 0 keeps it open until xAI closes it after 15 minutes of quiet. Not used when Maestro listens without the key |
+| Seconds to reply after Maestro speaks | The follow-up window after Maestro speaks; 0 means the microphone opens only with the talk key |
+| Seconds of quiet before disconnecting | 20 by default. Nothing said, played, held or worked on for this long closes the line, until the next press of the talk key. 0 keeps it open until xAI closes it after 15 minutes of quiet. Not used when Maestro listens without the key |
 | Speak over the voice to stop it | Keeps the microphone open while the voice speaks. Use it with headphones, or if echo cancellation holds on your speakers. Off, the talk key stops the voice |
-| Daily limit | In US dollars ($5 by default). The line is billed for every minute it is open, used or not. At the limit the line closes, the dot turns into a hollow red ring, and the text conductor takes over; it opens again by itself within half an hour of the next day (UTC) starting, or at once when the limit is raised |
+| Daily spending limit in US dollars | In US dollars ($5 by default). The line is billed for every minute it is open, used or not. At the limit the line closes, the dot turns into a hollow red ring, and the text conductor takes over; it opens again by itself within half an hour of the next day (UTC) starting, or at once when the limit is raised |
 
 Privacy and cost: while the line is open, what you say with the key held or the microphone open,
 the state of your agents, and what the model reads (redacted like diagnostics) go to OpenAI. No
@@ -708,7 +708,7 @@ See [the design](../design/talk-mode.md) for what to check.
 
 ## Spoken replies (text-to-speech)
 
-In **Settings → Voice & Conductor → Spoken output**, select **Kitten Mini (offline)** for
+In **Settings → Voice & Conductor → Voice for replies**, select **Kitten Mini, offline** for
 higher-quality English speech on the CPU without an account, download, or GPU. The packaged app
 includes [KittenTTS Mini 0.8](https://huggingface.co/KittenML/kitten-tts-mini-0.8) and its
 English phonemizer data; the model is about 96 MB unpacked. Pick from eight local
@@ -722,13 +722,13 @@ stay in the encrypted secret store or main-process environment; the renderer nev
 key. Only short conductor replies to spoken commands and enabled attention notices are
 synthesized, not entire agent transcripts. **Gemini sends that reply text to Google**; both
 engines stream 24 kHz PCM and stop when you start talking, mute, or another reply arrives. If
-synthesis fails or times out, Chorus uses the chosen Windows fallback voice. The **Test** button
+synthesis fails or times out, Chorus uses the chosen Windows backup voice. The **Test** button
 previews the active output engine.
 
 A custom Gemini voice id is used only with the Google Cloud (Vertex) engines.
 
-The same two models are also available **through OpenRouter**: choose **Gemini 3.8 Flash via
-OpenRouter** (`google/gemini-3.8-flash-tts`) or **Gemini 3.8 Flash-Lite via OpenRouter**
+The same two models are also available **through OpenRouter**: choose **Gemini 3.8 Flash on
+OpenRouter** (`google/gemini-3.8-flash-tts`) or **Gemini 3.8 Flash-Lite on OpenRouter**
 (`google/gemini-3.8-flash-lite-tts`). They use the OpenRouter key that already runs the conductor,
 STT, and Jev (or `OPENROUTER_API_KEY`), so no Google key is needed, and are billed to your
 OpenRouter account. Chorus calls OpenRouter's OpenAI-compatible `POST /api/v1/audio/speech` with
@@ -743,8 +743,8 @@ All four Gemini engines speak in a prebuilt voice (Kore, Puck, Aoede, Zephyr) un
 engine. Clear the field to go back to the prebuilt voice.
 
 A voice made with voice design belongs to the Google Cloud project it was made in, so OpenRouter
-and Gemini API keys cannot speak with it. For those voices choose **Gemini 3.8 Flash via Google
-Cloud** or **Flash-Lite via Google Cloud**. They call Vertex AI
+and Gemini API keys cannot speak with it. For those voices choose **Gemini 3.8 Flash on Google
+Cloud** or **Gemini 3.8 Flash-Lite on Google Cloud**. They call Vertex AI
 (`aiplatform.googleapis.com/v1beta1/projects/<project>/locations/global/.../:streamGenerateContent`)
 with your gcloud application default credentials: run
 `gcloud auth application-default login` once. Chorus reads only `authorized_user` credentials
@@ -769,7 +769,7 @@ roughly 100 MB plus platform runtime libraries to the installer; no install scri
 
 Google bills paid usage by text input and generated audio tokens; check the current
 [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing) before enabling cloud output.
-The cloud option is separate from speech-to-text and from the conductor provider.
+The cloud option is separate from speech-to-text and from the conductor's AI service.
 
 ## Speech-to-text engines
 
@@ -791,8 +791,8 @@ is on, every voice command is transcribed by the same on-device Parakeet model t
 whatever engine is chosen above, and the text goes straight to the conductor: no audio is sent to
 a speech-to-text API, and the live Deepgram transcript is not used. The model is a one-time
 download from the same row. If it is missing or fails, the command shows an error naming the cause;
-voice never silently switches back to a cloud engine. The model is the one picked in **On-device
-speech model** (see dictation above); Unified is English only, Ultra detects 25 European languages,
+voice never silently switches back to a cloud engine. The model is the one picked in **Speech model
+on this computer** (see dictation above); Unified is English only, Ultra detects 25 European languages,
 and neither takes vocabulary hints.
 
 Parakeet warms up when a capture starts. Long captures are transcribed in phrases while you record,
@@ -810,8 +810,8 @@ Claude Code).
    .\whisper-server.exe -m .\models\ggml-base.en.bin --host 127.0.0.1 --port 8178
    ```
 
-3. In **Settings → Voice & Conductor**, choose **Local whisper.cpp server** and keep the URL
-   `http://127.0.0.1:8178`.
+3. In **Settings → Voice & Conductor**, choose **whisper.cpp on your computer** and keep the
+   **whisper.cpp server address** `http://127.0.0.1:8178`.
 
 Chorus posts 16 kHz mono WAV to `/inference`.
 
@@ -870,22 +870,22 @@ What happens next:
 | --- | --- |
 | Confident navigation (focus, status, reopen, overview, next) | Runs directly |
 | Confident close or interrupt | Runs behind the usual cancel window |
-| Confident send or start, with **Fast verbatim routing** on | Your words go to the agent unchanged, behind the countdown |
+| Confident send or start, with **Send your exact words** on | Your words go to the agent unchanged, behind the countdown |
 | Two similar live names split the vote ("Maple" or "Maple 2") | Chorus asks "Maple or Maple 2?"; answer "the first" or the name |
 | Speech-to-text artifact ("I'm sorry, I can't hear any audio") | Dropped: "I didn't catch that." |
 | Anything else | Claude handles it, with Jev's reading as hints; plan mode only when Jev expects several agents |
 
-Thresholds come from **Jev confidence to act** (default 0.8): navigation acts at 0.1 below it,
+Thresholds come from **Confidence to act** (default 0.8): navigation acts at 0.1 below it,
 close and interrupt at it, and sends and starts at 0.05 above it. Kill, archive, permission
 answers, closing many windows, delivery, and composed messages ("write Delta a better prompt")
 always go to Claude. Jev also refuses to act when more than 15% of its intent probability is on a
 destructive action.
 
-**Fast verbatim routing** (settings, on by default) is the switch for direct sends and starts.
+**Send your exact words** (settings, on by default) is the switch for direct sends and starts.
 Turn it off to send those through Claude.
 
-New work always lands in a project you named or meant. When Jev reads the project at **Jev
-confidence to act** or above, that project is settled: a new agent or plan goes there even when
+New work always lands in a project you named or meant. When Jev reads the project at **Confidence
+to act** or above, that project is settled: a new agent or plan goes there even when
 Claude takes the turn and leaves the project out or names another. "Here" and "this project" mean
 the project on screen. When you named none and several projects are open, nothing starts and
 nothing is guessed from focus: the conductor asks "Which project, Chorus or Website?" and starts
@@ -901,7 +901,7 @@ When agents finish, Jev reads their final reports before Claude does, in one req
 - Only reports that need interpretation get a Claude follow-up: terminal output, low confidence,
   or a follow-up you asked for ("open it when it's done").
 
-This is part of **Completion follow-up**.
+This is part of **Report what finished agents said**.
 
 ### Triage and plan review
 
@@ -912,7 +912,7 @@ This is part of **Completion follow-up**.
 
 ### Diagnostics
 
-With diagnostic history on, every Jev evaluation is traced as a `jev` event. The event records the
+With **Keep a voice history** on, every Jev evaluation is traced as a `jev` event. The event records the
 purpose (`route`, `completion`, `triage`, `permission-risk`, `plan-review`), latency, cost, the
 decision and its reason, and a compact form of each answer. The following summarizes fallback
 reasons and lists the most uncertain decisions (good eval candidates):
@@ -935,15 +935,15 @@ The eval fails on any wrong action and reports how many expected actions ran dir
 One OpenRouter key can run everything: turn on **Use OpenRouter for everything** in settings. The
 conductor then uses an OpenRouter model with tool calling (default `anthropic/claude-opus-5`),
 speech-to-text uses an audio-input model (default `google/gemini-3.5-flash-lite`), and Jev runs
-through OpenRouter's System One API (`~typesafe/jev-latest`). No TypeSafe key is needed; Jev's
-source can also be set to Auto or TypeSafe.
+through OpenRouter's System One API (`~typesafe/jev-latest`). No TypeSafe key is needed; **Service for
+quick decisions** can also be set to Automatic or TypeSafe.
 
 ## Troubleshooting
 
 - **"Windows is blocking microphone access for desktop apps"**: Windows Settings → Privacy & security → Microphone → turn on
   "Let desktop apps access your microphone". The HUD error has a button that opens that page.
-- **Global shortcut does nothing**: another app owns it. Pick a different one in settings (the row
+- **Talk shortcut does nothing**: another app owns it. Pick a different one in settings (the row
   says when registration failed).
 - **Names are misheard**: rename agents to distinct words ("Frontend", "Tests"), or switch engines.
 - **No spoken replies**: check the mute button in the HUD and "Speak replies" in settings; pick an
-  installed Windows fallback voice or configure Gemini under "Spoken output".
+  installed Windows backup voice or configure Gemini under "Voice for replies".

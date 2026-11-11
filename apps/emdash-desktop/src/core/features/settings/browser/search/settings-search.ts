@@ -56,11 +56,11 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   },
   {
     id: 'chorus-spoken-output',
-    label: 'Spoken output',
+    label: 'Voice for replies',
     tab: 'chorus',
-    description:
-      'Speak replies with Windows, offline Kitten Mini, or Gemini Flash / Flash-Lite (direct, via OpenRouter, or via Google Cloud).',
+    description: 'Read replies aloud with the Windows voice, Kitten Mini, or a Gemini voice.',
     keywords: [
+      'spoken output',
       'tts',
       'text to speech',
       'gemini',
@@ -83,10 +83,10 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   },
   {
     id: 'spawn-windows-in-a-project-sub-canvas',
-    label: 'Spawn windows in a project sub-canvas',
+    // The id keeps the old label's slug, so links to this entry still resolve.
+    label: "Open new windows in their project's region",
     tab: 'chorus',
-    description:
-      "New agents and app browsers open in that project's main sub-canvas. Turn off to place them on the board.",
+    description: 'New agents and browsers go to a region named after their project.',
     keywords: ['canvas', 'region', 'sub-canvas', 'subcanvas', 'project', 'spawn', 'group'],
   },
   // General
