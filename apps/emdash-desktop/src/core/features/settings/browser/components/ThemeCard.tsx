@@ -12,8 +12,8 @@ const themeOptions: Array<{
   icon: LucideIcon;
 }> = [
   { value: null, label: 'System', ariaLabel: 'Set theme to system preference', icon: Monitor },
-  { value: 'emlight', label: 'Chorus Light', ariaLabel: 'Set theme to Chorus Light', icon: Sun },
-  { value: 'emdark', label: 'Chorus Dark', ariaLabel: 'Set theme to Chorus Dark', icon: Moon },
+  { value: 'emlight', label: 'Maestro Light', ariaLabel: 'Set theme to Maestro Light', icon: Sun },
+  { value: 'emdark', label: 'Maestro Dark', ariaLabel: 'Set theme to Maestro Dark', icon: Moon },
 ];
 
 const ThemeCard: React.FC = () => {

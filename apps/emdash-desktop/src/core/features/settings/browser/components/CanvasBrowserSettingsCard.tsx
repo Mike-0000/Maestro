@@ -26,7 +26,7 @@ export function CanvasBrowserSettingsCard() {
           />
           <SettingRow
             title="Coding agents can use their task's app"
-            description="Agents get Chorus browser tools for their own task's tile: screenshots and page structure any time, clicking and typing once the tile is set to Agents. New agent sessions pick this up."
+            description="Agents get Maestro browser tools for their own task's tile: screenshots and page structure any time, clicking and typing once the tile is set to Agents. New agent sessions pick this up."
             control={
               <Switch
                 checked={value?.agentControl ?? true}

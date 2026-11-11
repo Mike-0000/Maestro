@@ -428,23 +428,27 @@
     --monaco-line-highlight: var(--background-2);
     --monaco-line-number: var(--foreground-passive);
     --monaco-gutter: var(--monaco-bg);
-    --monaco-inserted-text-bg: color(display-p3 0.063 0.725 0.506 / 0.251);
-    --monaco-inserted-line-bg: color(display-p3 0.925 0.992 0.961 / 0.502);
-    --monaco-removed-text-bg: color(display-p3 0.957 0.247 0.369 / 0.251);
-    --monaco-removed-line-bg: color(display-p3 1 0.945 0.949 / 0.502);
-    --monaco-unchanged-region-bg: color(display-p3 0.886 0.91 0.941);
+    /* Diff rooms are tints of the diff-stat colours, semi-transparent so the selection
+       layer beneath stays visible (ENG-1248). */
+    --monaco-inserted-text-bg: color-mix(in oklab, var(--foreground-diff-added) 24%, transparent);
+    --monaco-inserted-line-bg: color-mix(in oklab, var(--foreground-diff-added) 9%, transparent);
+    --monaco-removed-text-bg: color-mix(in oklab, var(--foreground-diff-deleted) 22%, transparent);
+    --monaco-removed-line-bg: color-mix(in oklab, var(--foreground-diff-deleted) 8%, transparent);
+    --monaco-unchanged-region-bg: var(--neutral-3);
     --monaco-diff-diagonal-fill: var(--background-2);
-    --monaco-selection-bg: var(--selection);
-    --monaco-selection-fg: var(--selection-foreground);
-    --monaco-inactive-selection-bg: color-mix(in srgb, var(--selection) 15.3%, transparent);
+    /* Selection: a calm accent tint under full-strength text (12:1 on paper), not a blue
+       block. Shared by the editor and the terminals. */
+    --monaco-selection-bg: color-mix(in oklab, var(--em-accent-9) 22%, transparent);
+    --monaco-selection-fg: var(--foreground);
+    --monaco-inactive-selection-bg: color-mix(in oklab, var(--em-accent-9) 11%, transparent);
 
     /* xterm terminals */
     --xterm-bg: var(--em-surface-paper);
     --xterm-fg: var(--foreground);
     --xterm-cursor: var(--foreground);
     --xterm-cursor-accent: var(--foreground-inverse);
-    --xterm-selection-bg: color(display-p3 0.004 0.502 0.984 / 0.212);
-    --xterm-selection-fg: var(--blue-12);
+    --xterm-selection-bg: var(--monaco-selection-bg);
+    --xterm-selection-fg: var(--foreground);
 
     --foreground-diff-added: var(--green-9);
     --foreground-diff-modified: var(--amber-9);
@@ -472,41 +476,6 @@
 
     --foreground-conflict: var(--orange-9);
     --foreground-merged: var(--purple-9);
-
-    /* ── ChatComposer theme contract ──────────────────────────── */
-    /* Map --composer-* to desktop tokens for the @emdash/ui ChatComposer. */
-    /* See packages/ui/src/react/components/chat-composer/composer-contract.css.ts */
-    --composer-fg: var(--foreground);
-    --composer-fg-muted: var(--foreground-muted);
-    --composer-fg-passive: var(--foreground-passive);
-    --composer-fg-destructive: var(--foreground-destructive);
-    --composer-fg-warning: var(--foreground-warning);
-    --composer-fg-info: var(--foreground-info);
-    --composer-border: var(--border);
-    --composer-border-strong: var(--border-1);
-    --composer-border-focus: var(--border-primary);
-    --composer-border-destructive: var(--border-destructive);
-    --composer-surface: var(--background-1);
-    --composer-surface-hover: var(--background-2);
-    --composer-surface-selected: var(--background-3);
-    --composer-surface-elevated: var(--background);
-    --composer-surface-elevated-hover: var(--background-1);
-    --composer-accent: var(--primary-button-background);
-    --composer-accent-hover: var(--primary-button-background-hover);
-    --composer-accent-fg: var(--primary-button-foreground);
-    --composer-accent-border: var(--primary-button-border);
-    --composer-destructive-bg: var(--background-error);
-    --composer-destructive-hover: var(--background-error-hover);
-    --composer-destructive-selected: var(--background-error-hover);
-    --composer-error-surface: var(--background-error);
-    --composer-error-border: var(--border-destructive);
-    --composer-error-fg: var(--foreground-error);
-    --composer-warning-surface: var(--background-warning);
-    --composer-warning-border: var(--border-warning);
-    --composer-warning-surface-fg: var(--foreground-warning);
-    --composer-info-surface: var(--background-info);
-    --composer-info-border: var(--border-info);
-    --composer-info-surface-fg: var(--foreground-info);
   }
 
   .emdark {
@@ -740,7 +709,8 @@
     --monaco-error-fg: color(display-p3 1 0.592 0.49);
 
     --monaco-line-highlight: var(--neutral-3);
-    --monaco-line-number: var(--neutral-7);
+    /* Passive text: 4.5:1 or more on the editor ground (step 7 was 2.3:1). */
+    --monaco-line-number: var(--foreground-passive);
     --monaco-gutter: var(--monaco-bg);
     /* Semi-transparent so the selection layer beneath stays visible (ENG-1248). */
     --monaco-inserted-text-bg: color(display-p3 0.145 0.282 0.176 / 0.45);
@@ -752,17 +722,19 @@
     --monaco-unchanged-region-bg: var(--neutral-3);
     --monaco-diff-border: var(--border);
     --monaco-diff-diagonal-fill: var(--neutral-4);
-    --monaco-selection-bg: color(display-p3 0.3 0.52 0.82 / 0.7);
-    --monaco-selection-fg: color(display-p3 0.95 0.96 0.98);
-    --monaco-inactive-selection-bg: color(display-p3 0.3 0.52 0.82 / 0.35);
+    /* Selection: a calm sea-glass tint under full-strength text (9:1 on paper), not a blue
+       block. Shared by the editor and the terminals. */
+    --monaco-selection-bg: color-mix(in oklab, var(--em-accent-9) 30%, transparent);
+    --monaco-selection-fg: var(--foreground);
+    --monaco-inactive-selection-bg: color-mix(in oklab, var(--em-accent-9) 15%, transparent);
 
     /* xterm terminals */
     --xterm-bg: var(--em-surface-paper);
     --xterm-fg: var(--foreground);
     --xterm-cursor: var(--foreground);
     --xterm-cursor-accent: var(--foreground-inverse);
-    --xterm-selection-bg: color(display-p3 0.224 0.557 1 / 0.475);
-    --xterm-selection-fg: var(--blue-11);
+    --xterm-selection-bg: var(--monaco-selection-bg);
+    --xterm-selection-fg: var(--foreground);
 
     --foreground-diff-added: var(--green-10);
     --foreground-diff-modified: var(--amber-9);
@@ -790,39 +762,6 @@
 
     --foreground-conflict: var(--orange-9);
     --foreground-merged: var(--purple-9);
-
-    /* ── ChatComposer theme contract ──────────────────────────── */
-    --composer-fg: var(--foreground);
-    --composer-fg-muted: var(--foreground-muted);
-    --composer-fg-passive: var(--foreground-passive);
-    --composer-fg-destructive: var(--foreground-destructive);
-    --composer-fg-warning: var(--foreground-warning);
-    --composer-fg-info: var(--foreground-info);
-    --composer-border: var(--border);
-    --composer-border-strong: var(--border-1);
-    --composer-border-focus: var(--border-primary);
-    --composer-border-destructive: var(--border-destructive);
-    --composer-surface: var(--background-1);
-    --composer-surface-hover: var(--background-2);
-    --composer-surface-selected: var(--background-3);
-    --composer-surface-elevated: var(--background);
-    --composer-surface-elevated-hover: var(--background-1);
-    --composer-accent: var(--primary-button-background);
-    --composer-accent-hover: var(--primary-button-background-hover);
-    --composer-accent-fg: var(--primary-button-foreground);
-    --composer-accent-border: var(--primary-button-border);
-    --composer-destructive-bg: var(--background-error);
-    --composer-destructive-hover: var(--background-error-hover);
-    --composer-destructive-selected: var(--background-error-hover);
-    --composer-error-surface: var(--background-error);
-    --composer-error-border: var(--border-destructive);
-    --composer-error-fg: var(--foreground-error);
-    --composer-warning-surface: var(--background-warning);
-    --composer-warning-border: var(--border-warning);
-    --composer-warning-surface-fg: var(--foreground-warning);
-    --composer-info-surface: var(--background-info);
-    --composer-info-border: var(--border-info);
-    --composer-info-surface-fg: var(--foreground-info);
   }
 }
 

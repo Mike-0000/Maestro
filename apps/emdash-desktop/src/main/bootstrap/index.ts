@@ -42,7 +42,7 @@ export async function main(): Promise<void> {
       const { enterSafeMode } = await import('./core/recovery');
       await enterSafeMode(
         new Error(
-          `Emdash entered recovery mode after ${previousFailures} consecutive failed launches`
+          `Maestro entered recovery mode after ${previousFailures} consecutive failed launches`
         )
       );
       return;

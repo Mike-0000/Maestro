@@ -6,6 +6,10 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { useAppSettingsKey } from '@core/features/settings/api/browser/use-app-settings-key';
 import { useInstalledFonts } from '@core/features/settings/browser/use-installed-fonts';
 import {
+  buildTerminalFontFamily,
+  defaultTerminalFontName,
+} from '@core/features/terminals/api/browser/pty/terminal-font';
+import {
   DEFAULT_TERMINAL_SHELL_AVAILABILITY,
   useTerminalShellAvailability,
 } from '@core/features/terminals/api/browser/use-terminal-shell-availability';
@@ -40,17 +44,18 @@ const POPULAR_FONTS = [
   'MesloLGS NF',
 ];
 
-const DEFAULT_FONT_FAMILY = 'Menlo';
+const platformOs = detectPlatformContext().os;
 
+// The face the default family chain lands on here (Menlo on macOS, Consolas on Windows).
 const DEFAULT_OPTION: FontOption = {
   value: '',
-  label: `Default (${DEFAULT_FONT_FAMILY})`,
+  label: `Default (${defaultTerminalFontName(platformOs)})`,
 };
 
 const clampFontSize = (size: number) =>
   Math.min(TERMINAL_FONT_SIZE_MAX, Math.max(TERMINAL_FONT_SIZE_MIN, size));
 
-const isMac = detectPlatformContext().os === 'mac';
+const isMac = platformOs === 'mac';
 
 const TerminalSettingsCard: React.FC = () => {
   const {
@@ -239,7 +244,7 @@ const TerminalSettingsCard: React.FC = () => {
                       disabled={loading || saving}
                       className="flex h-9 w-full items-center justify-between rounded-md border border-border bg-transparent px-2.5 py-1 text-left text-sm font-normal outline-none disabled:opacity-50"
                     >
-                      <Combobox.Value placeholder="Default (Menlo)" />
+                      <Combobox.Value placeholder={DEFAULT_OPTION.label} />
                       <ChevronsUpDownIcon className="ml-2 size-4 shrink-0 text-foreground-muted" />
                     </button>
                   }
@@ -266,7 +271,9 @@ const TerminalSettingsCard: React.FC = () => {
                             <Combobox.Item key={item.value || '__default__'} value={item}>
                               <span
                                 style={{
-                                  fontFamily: item.value ? `"${item.value}"` : DEFAULT_FONT_FAMILY,
+                                  fontFamily: item.value
+                                    ? `"${item.value}"`
+                                    : buildTerminalFontFamily(),
                                 }}
                               >
                                 {item.label}

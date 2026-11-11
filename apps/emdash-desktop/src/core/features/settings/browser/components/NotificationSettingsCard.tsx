@@ -217,7 +217,7 @@ const NotificationSettingsCard: React.FC = () => {
 
             <SettingRow
               title="OS notifications"
-              description="Show system banners when agents need attention or finish (while Chorus is unfocused)."
+              description="Show system banners when agents need attention or finish (while Maestro is unfocused)."
               control={
                 <>
                   <ResetToDefaultButton

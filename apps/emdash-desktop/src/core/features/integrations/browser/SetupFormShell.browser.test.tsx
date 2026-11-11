@@ -73,7 +73,8 @@ describe('SetupFormShell', () => {
     expect(document.activeElement).toBe(input);
 
     await vi.waitFor(() => {
-      expect(getComputedStyle(input!).boxShadow).toMatch(/0px 0px 0px 3px/);
+      // Kit focus: the accent edge plus a 1px accent ring (design brief 2.11).
+      expect(getComputedStyle(input!).boxShadow).toMatch(/0px 0px 0px 1px/);
     });
     expect(
       input!.getBoundingClientRect().top - viewport!.getBoundingClientRect().top
