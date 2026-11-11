@@ -30,7 +30,7 @@ export const layoutSm = style({
 export const icon = style({
   pointerEvents: 'none',
   flexShrink: 0,
-  color: vars.foregroundMuted,
+  color: vars.foregroundPassive,
 });
 globalStyle(`${icon}:not([class*='size-'])`, { width: '1rem', height: '1rem' });
 

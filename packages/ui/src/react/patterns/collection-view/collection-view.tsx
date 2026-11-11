@@ -69,7 +69,7 @@ export interface CollectionViewProps<T> {
 
   // ── Behavior / appearance ───────────────────────────────────────────────
   /**
-   * `card` (default): one rounded card, internally scrolled and virtualized.
+   * `card` (default): one flat list on the page, internally scrolled and virtualized.
    * `grouped`: state mode only — one bordered card per section with its title
    * on the page background (settings-section look); not virtualized, the page
    * scrolls. Use for sectioned settings lists with modest item counts.
@@ -177,7 +177,8 @@ function ShellRow({ selected = false, isLast, interactive, onClick, children }: 
   return (
     <ListView.Row
       bare
-      divider="subtle"
+      divider="none"
+      rounded
       interactive={interactive}
       selected={selected}
       isLast={isLast}
@@ -390,7 +391,7 @@ const GroupedStateBody = observer(function GroupedStateBody({
 /**
  * CollectionView — the canonical page-level list surface.
  *
- * One rounded card shell (soft dividers, hover/selected states, always-on
+ * One flat list shell (no outer card, no row rules; rounded hover/selected steps, always-on
  * virtualization) rendering either tabular `columns` or freeform `renderRow`
  * content, with an optional `createListView` state layer:
  *

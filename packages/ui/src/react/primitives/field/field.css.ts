@@ -50,7 +50,8 @@ export const fieldControlSlot = style({
   alignItems: 'center',
   marginLeft: 'auto',
   flexShrink: 0,
-  maxWidth: '12rem',
+  // Room for a w-56 select / w-64 input (design brief 2.8); switches hug right.
+  maxWidth: '16rem',
   width: '100%',
 });
 
@@ -58,15 +59,18 @@ export const fieldControlSlot = style({
 // composes the same base so the two never drift.
 export const fieldLabel = style([labelBase]);
 
+// Helper text under a field: 12px muted.
 export const fieldDescription = style({
-  fontSize: tokenVars.textSm,
+  fontSize: tokenVars.textXs,
   color: vars.foregroundMuted,
-  lineHeight: 1.5,
+  lineHeight: tokenVars.textXsLineHeight,
 });
 
+// Validation message: 12px in the error tone, no red box (brief 2.8).
 export const fieldError = style({
-  fontSize: tokenVars.textSm,
-  color: vars.foregroundDestructive,
+  fontSize: tokenVars.textXs,
+  lineHeight: tokenVars.textXsLineHeight,
+  color: vars.foregroundError,
 });
 
 // A semantic grouping of related fields (renders a <fieldset>).
@@ -84,7 +88,7 @@ export const fieldLegend = recipe({
   base: {
     marginBottom: '0.75rem',
     padding: 0,
-    fontWeight: 500,
+    fontWeight: 600,
     color: vars.foreground,
   },
   variants: {
@@ -103,5 +107,5 @@ export const fieldGroup = style({
   display: 'flex',
   flexDirection: 'column',
   width: '100%',
-  gap: '1rem',
+  gap: '1.25rem',
 });

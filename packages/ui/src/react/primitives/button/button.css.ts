@@ -9,30 +9,30 @@ export const kbdHost = style({
   selectors: {
     '&[data-variant="primary"][data-tone="neutral"]': {
       vars: {
-        '--kbd-bg': 'color-mix(in srgb, black 20%, transparent)',
+        '--kbd-bg': `color-mix(in srgb, ${vars.primaryButtonForeground} 14%, transparent)`,
         '--kbd-border': 'transparent',
-        '--kbd-color': `color-mix(in srgb, ${vars.primaryButtonForeground} 70%, transparent)`,
+        '--kbd-color': `color-mix(in srgb, ${vars.primaryButtonForeground} 75%, transparent)`,
       },
     },
     '&[data-variant="primary"][data-tone="destructive"]': {
       vars: {
-        '--kbd-bg': vars.backgroundDestructive1,
+        '--kbd-bg': `color-mix(in srgb, ${vars.foregroundDestructive} 14%, transparent)`,
         '--kbd-border': 'transparent',
-        '--kbd-color': `color-mix(in srgb, ${vars.foregroundDestructive} 70%, transparent)`,
+        '--kbd-color': `color-mix(in srgb, ${vars.foregroundDestructive} 75%, transparent)`,
       },
     },
-    '&[data-variant="secondary"]': {
+    '&[data-variant="secondary"], &[data-variant="ghost"]': {
       vars: {
-        '--kbd-bg': vars.backgroundTertiary2,
+        '--kbd-bg': `color-mix(in srgb, ${vars.foreground} 8%, transparent)`,
         '--kbd-border': 'transparent',
-        '--kbd-color': `color-mix(in srgb, ${vars.foregroundMuted} 70%, transparent)`,
+        '--kbd-color': vars.foregroundPassive,
       },
     },
-    '&[data-variant="ghost"]': {
+    '&[data-variant="text"]': {
       vars: {
-        '--kbd-bg': vars.backgroundTertiary2,
+        '--kbd-bg': 'transparent',
         '--kbd-border': 'transparent',
-        '--kbd-color': `color-mix(in srgb, ${vars.foregroundMuted} 70%, transparent)`,
+        '--kbd-color': vars.foregroundPassive,
       },
     },
   },

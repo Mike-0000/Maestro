@@ -1,5 +1,10 @@
 import { globalStyle, style } from '@vanilla-extract/css';
 import { vars } from '@theme/core/contract/contract.css';
+import { tokenVars } from '@theme/tokens.css';
+
+// A checkbox is findable by its edge (border-2, >= 3:1 on every surface) and
+// checked reads as a filled neutral box with an inverse tick, never accent.
+// Keyboard focus draws the shared accent outline.
 
 export const root = style({
   position: 'relative',
@@ -10,8 +15,8 @@ export const root = style({
   alignItems: 'center',
   justifyContent: 'center',
   padding: 0,
-  borderRadius: '4px',
-  border: `1px solid ${vars.border1}`,
+  borderRadius: tokenVars.radiusXs,
+  border: `1px solid ${vars.border2}`,
   backgroundColor: 'transparent',
   color: vars.foreground,
   outline: 'none',
@@ -26,12 +31,13 @@ export const root = style({
       left: '-0.75rem',
       right: '-0.75rem',
     },
+    '&:hover': { borderColor: vars.foregroundMuted },
     '&:focus-visible': {
-      borderColor: vars.borderPrimary,
-      boxShadow: `0 0 0 3px color-mix(in srgb, ${vars.borderPrimary} 30%, transparent)`,
+      outline: `2px solid ${vars.focusRing}`,
+      outlineOffset: '2px',
     },
-    '&[data-checked]': {
-      borderColor: vars.borderPrimary,
+    '&[data-checked], &[data-indeterminate]': {
+      borderColor: vars.backgroundNeutral,
       backgroundColor: vars.backgroundNeutral,
       color: vars.foregroundNeutral,
     },

@@ -10,8 +10,8 @@
  *   <div className={card({ padding: 'md', interactive: true })} />
  *
  * Variants:
- *   padding     — none | sm | md | lg (default: md)
- *   radius      — sm | md | lg (default: md)
+ *   padding     — none | sm | md | lg | xl (default: md)
+ *   radius      — sm | md | lg | xl (default: lg)
  *   interactive — true | false: hover/selected state (default: false)
  *   level       — sunken | base | elevated | elevated-emphasis | paper (default: base)
  *   status      — destructive | warning | info | success (optional)
@@ -45,10 +45,11 @@ function statusRebindings(scope: string): Record<string, string> {
 }
 
 export const card = recipe({
+  // One hairline around a card, where the surface step alone does not separate it.
   base: {
     backgroundColor: vars.surface,
     color: vars.foreground,
-    border: `1px solid ${vars.border}`,
+    border: `1px solid ${vars.borderSubtle}`,
     overflow: 'hidden',
   },
 
@@ -114,7 +115,7 @@ export const card = recipe({
 
     status: {
       destructive: {
-        borderColor: vars.surfaceBorder,
+        borderColor: vars.borderSubtle,
         vars: {
           [vars.surface]: vars.surfaceDestructive,
           [vars.surfaceForeground]: vars.surfaceDestructiveForeground,
@@ -124,7 +125,7 @@ export const card = recipe({
         },
       },
       warning: {
-        borderColor: vars.surfaceBorder,
+        borderColor: vars.borderSubtle,
         vars: {
           [vars.surface]: vars.surfaceWarning,
           [vars.surfaceForeground]: vars.surfaceWarningForeground,
@@ -134,7 +135,7 @@ export const card = recipe({
         },
       },
       info: {
-        borderColor: vars.surfaceBorder,
+        borderColor: vars.borderSubtle,
         vars: {
           [vars.surface]: vars.surfaceInfo,
           [vars.surfaceForeground]: vars.surfaceInfoForeground,
@@ -144,7 +145,7 @@ export const card = recipe({
         },
       },
       success: {
-        borderColor: vars.surfaceBorder,
+        borderColor: vars.borderSubtle,
         vars: {
           [vars.surface]: vars.surfaceSuccess,
           [vars.surfaceForeground]: vars.surfaceSuccessForeground,
@@ -159,6 +160,7 @@ export const card = recipe({
       sm: { borderRadius: tokenVars.radiusSm },
       md: { borderRadius: tokenVars.radiusMd },
       lg: { borderRadius: tokenVars.radiusLg },
+      xl: { borderRadius: tokenVars.radiusXl },
     },
 
     padding: {
@@ -166,6 +168,7 @@ export const card = recipe({
       sm: { padding: '0.5rem' },
       md: { padding: '0.75rem' },
       lg: { padding: '1rem' },
+      xl: { padding: '1.25rem 1.5rem' },
     },
 
     interactive: {
@@ -183,7 +186,8 @@ export const card = recipe({
 
   defaultVariants: {
     level: 'base',
-    radius: 'md',
+    // Cards are rounded-lg (12px) per the design brief; pass radius 'md' for dense rows.
+    radius: 'lg',
     padding: 'md',
   },
 });

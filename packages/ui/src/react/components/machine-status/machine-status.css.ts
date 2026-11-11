@@ -56,17 +56,19 @@ export const statusDot = style({
 });
 
 export const statusDotVariant = {
+  // Brief 2.6: connected reads full strength, connecting is the accent pulse
+  // colour, idle passive, error red.
   idle: style({
     '@layer': {
       recipes: {
-        fill: vars.foregroundMuted,
+        fill: vars.foregroundPassive,
       },
     },
   }),
   successful: style({
     '@layer': {
       recipes: {
-        fill: vars.foregroundSuccess,
+        fill: vars.foreground,
       },
     },
   }),
@@ -80,7 +82,7 @@ export const statusDotVariant = {
   initializing: style({
     '@layer': {
       recipes: {
-        fill: vars.foregroundInfo,
+        fill: vars.accent,
       },
     },
   }),

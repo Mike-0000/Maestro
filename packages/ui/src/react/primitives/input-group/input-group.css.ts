@@ -1,6 +1,7 @@
 import { globalStyle, style } from '@vanilla-extract/css';
 import { recipe } from '@vanilla-extract/recipes';
 import { svgContainer, svgDefaultSize } from '@styles/effects/svg-helpers.css';
+import { fieldFocusRing, LIGHT_THEME_SCOPE } from '@styles/recipes/field-shell.css';
 import { vars } from '@theme/core/contract/contract.css';
 import { tokenVars } from '@theme/tokens.css';
 
@@ -8,7 +9,7 @@ export const inputGroup = recipe({
   base: {
     position: 'relative',
     display: 'flex',
-    height: '2.25rem',
+    height: '2rem',
     width: '100%',
     minWidth: 0,
     alignItems: 'center',
@@ -28,21 +29,27 @@ export const inputGroup = recipe({
   variants: {
     variant: {
       /**
-       * default — standalone input group with border, shadow, and focus ring.
-       * Use for form fields outside of popup containers.
+       * default — standalone input group: the same field shell as Input (fill one
+       * step off the surface, hairline edge in dark, control edge in light, accent
+       * focus ring). Use for form fields outside of popup containers.
        */
       default: {
         border: `1px solid ${vars.border}`,
-        boxShadow: '0 1px 2px 0 rgba(0,0,0,0.05)',
-        transition: 'color 150ms, box-shadow 150ms',
+        backgroundColor: vars.surfaceInput,
+        transition: 'color 150ms, box-shadow 150ms, border-color 150ms',
         selectors: {
-          '&:has([data-slot="input-group-control"]:focus-visible)': {
-            borderColor: vars.borderPrimary,
-            boxShadow: `0 0 0 3px color-mix(in srgb, ${vars.borderPrimary} 30%, transparent)`,
+          [`${LIGHT_THEME_SCOPE} &`]: {
+            borderColor: vars.border1,
+            backgroundColor: vars.surfaceElevated,
           },
+          '&:hover': { borderColor: vars.border1 },
+          [`${LIGHT_THEME_SCOPE} &:hover`]: { borderColor: vars.border2 },
+          '&:has([data-slot="input-group-control"]:focus-visible)': fieldFocusRing,
+          [`${LIGHT_THEME_SCOPE} &:has([data-slot="input-group-control"]:focus-visible)`]:
+            fieldFocusRing,
           '&:has([data-slot][aria-invalid="true"])': {
             borderColor: vars.borderDestructive,
-            boxShadow: `0 0 0 3px color-mix(in srgb, ${vars.borderDestructive} 20%, transparent)`,
+            boxShadow: 'none',
           },
         },
       },
@@ -58,7 +65,7 @@ export const inputGroup = recipe({
         borderTop: 'none',
         borderLeft: 'none',
         borderRight: 'none',
-        borderBottom: `1px solid ${vars.border}`,
+        borderBottom: `1px solid ${vars.borderSubtle}`,
         borderRadius: 0,
         backgroundColor: 'transparent',
         boxShadow: 'none',
@@ -103,7 +110,7 @@ const inputGroupAddonBase = style([
     paddingBottom: '0.375rem',
     fontSize: tokenVars.textSm,
     fontWeight: 400,
-    color: vars.foregroundMuted,
+    color: vars.foregroundPassive,
     userSelect: 'none',
     selectors: {
       '[data-slot="input-group"][data-disabled="true"] &': { opacity: 0.5 },
@@ -156,7 +163,7 @@ export const inputGroupAddon = recipe({
 });
 
 export const inputGroupButton = style({
-  borderRadius: `calc(${tokenVars.radiusMd} - 5px)`,
+  borderRadius: tokenVars.radiusSm,
   boxShadow: 'none',
 });
 

@@ -63,7 +63,7 @@ export const link = style({
       color: vars.foreground,
     },
     '&:focus-visible': {
-      outline: `2px solid ${vars.borderPrimary}`,
+      outline: `2px solid ${vars.focusRing}`,
       outlineOffset: '2px',
     },
   },

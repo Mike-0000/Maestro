@@ -18,7 +18,12 @@ export const inputVariants = recipe({
       width: '100%',
       minWidth: 0,
       fontSize: tokenVars.textSm,
+      lineHeight: tokenVars.textSmLineHeight,
+      // Native pickers, autofill and scrollbars follow the active theme.
       colorScheme: 'light',
+      selectors: {
+        ':where(.emdark, .emsolarized-dark) &': { colorScheme: 'dark' },
+      },
     },
   ],
 

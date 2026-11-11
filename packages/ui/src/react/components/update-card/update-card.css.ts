@@ -30,7 +30,7 @@ export const rowTitle = style({
   display: 'flex',
   alignItems: 'center',
   gap: '0.5rem',
-  fontSize: tokenVars.textBase,
+  fontSize: tokenVars.textSm,
   fontWeight: 400,
   color: vars.foreground,
 });
@@ -38,7 +38,7 @@ export const rowTitle = style({
 export const rowDescription = style({
   display: 'flex',
   alignItems: 'center',
-  fontSize: tokenVars.textSm,
+  fontSize: tokenVars.textXs,
   color: vars.foregroundMuted,
 });
 
@@ -50,14 +50,17 @@ export const rowControls = style({
   gap: '0.5rem',
 });
 
+// An error reads as a quiet note, not a red panel (design brief 2.12): one surface
+// step with a hairline; the message carries the error tone.
 export const errorPanel = style({
   display: 'flex',
   flexDirection: 'column',
   gap: '0.5rem',
   minWidth: 0,
   padding: '0.75rem',
-  borderRadius: tokenVars.radiusMd,
-  backgroundColor: vars.backgroundError,
+  borderRadius: tokenVars.radiusLg,
+  border: `1px solid ${vars.borderSubtle}`,
+  backgroundColor: vars.surfaceEmphasis,
   color: vars.foregroundError,
 });
 
@@ -79,7 +82,8 @@ export const errorActions = style({
 export const errorDetails = style({
   flex: '1 1 12rem',
   minWidth: 0,
-  fontSize: tokenVars.textSm,
+  fontSize: tokenVars.textXs,
+  color: vars.foregroundMuted,
 });
 
 export const errorSummary = style({
@@ -91,6 +95,7 @@ export const errorDetailsText = style({
   marginTop: '0.5rem',
   maxHeight: '12rem',
   overflowY: 'auto',
+  fontFamily: tokenVars.fontMono,
   whiteSpace: 'pre-wrap',
   overflowWrap: 'anywhere',
   lineHeight: 1.5,

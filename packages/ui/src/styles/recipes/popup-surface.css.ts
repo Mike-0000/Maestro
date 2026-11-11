@@ -1,16 +1,19 @@
 /**
  * popupSurface — shared base style for floating popup containers.
  *
- * Encapsulates the properties that are identical across DropdownMenu, Select,
- * Combobox, and ComboboxPopup content panels: animation entry/exit keyframes
- * keyed to [data-open]/[data-closed] and [data-side], the ring shadow formula,
- * and core visual properties.
+ * One look for every floating layer (design brief 2.10): menus, selects,
+ * comboboxes, popovers, hover cards, toasts and tooltips sit on the elevated
+ * surface (the component adds the `surface-elevated` scope class), with a 12px
+ * radius and one hairline in `border-subtle`. In dark the shadow tokens draw
+ * nothing, so the surface step plus the hairline carry the elevation; the
+ * light theme keeps a soft shadow because a white popup on a white page needs
+ * one.
  *
- * Each primitive extends this by composing it into their own `style()`:
- *   export const menuContent = style([popupSurface, { overflowY: 'auto', ... }]);
+ * Each primitive extends this by composing it into its own `style()`:
+ *   export const menuContent = style([popupSurface, popupShadowMd, { padding: '0.25rem' }]);
  *
- * Variants in sizing (minWidth, overflowY, anchor-width usage) and shadow depth
- * are applied at the composing level, not here.
+ * Sizing (minWidth, overflowY, anchor-width usage) and shadow depth are
+ * applied at the composing level, not here.
  */
 
 import { style } from '@vanilla-extract/css';
@@ -25,38 +28,59 @@ import {
 import { vars } from '@theme/core/contract/contract.css';
 import { tokenVars } from '@theme/tokens.css';
 
-const popupSurfaceBase = style({
-  position: 'relative',
-  zIndex: 50,
-  transformOrigin: 'var(--transform-origin)',
-  borderRadius: tokenVars.radiusMd,
-  outline: 'none',
+/** The hairline every floating layer draws around itself (as a box-shadow ring). */
+export const popupHairline = `0 0 0 1px ${vars.borderSubtle}`;
+
+const enter = '120ms cubic-bezier(0.22, 1, 0.36, 1) both';
+const exit = '100ms ease-in both';
+
+/** Entry / exit keyframes keyed to base-ui's data-open / data-closed / data-side. */
+export const popupMotion = style({
   selectors: {
-    '&[data-open]': { animation: `${kfPopupIn} 100ms both` },
-    '&[data-open][data-side="bottom"]': { animation: `${kfPopupInSlideFromTop} 100ms both` },
-    '&[data-open][data-side="top"]': { animation: `${kfPopupInSlideFromBottom} 100ms both` },
-    '&[data-open][data-side="right"]': { animation: `${kfPopupInSlideFromLeft} 100ms both` },
-    '&[data-open][data-side="inline-end"]': { animation: `${kfPopupInSlideFromLeft} 100ms both` },
-    '&[data-open][data-side="left"]': { animation: `${kfPopupInSlideFromRight} 100ms both` },
+    '&[data-open]': { animation: `${kfPopupIn} ${enter}` },
+    '&[data-open][data-side="bottom"]': { animation: `${kfPopupInSlideFromTop} ${enter}` },
+    '&[data-open][data-side="top"]': { animation: `${kfPopupInSlideFromBottom} ${enter}` },
+    '&[data-open][data-side="right"]': { animation: `${kfPopupInSlideFromLeft} ${enter}` },
+    '&[data-open][data-side="inline-end"]': { animation: `${kfPopupInSlideFromLeft} ${enter}` },
+    '&[data-open][data-side="left"]': { animation: `${kfPopupInSlideFromRight} ${enter}` },
     '&[data-open][data-side="inline-start"]': {
-      animation: `${kfPopupInSlideFromRight} 100ms both`,
+      animation: `${kfPopupInSlideFromRight} ${enter}`,
     },
-    '&[data-closed]': { animation: `${kfPopupOut} 100ms both` },
+    '&[data-closed]': { animation: `${kfPopupOut} ${exit}` },
+  },
+  '@media': {
+    '(prefers-reduced-motion: reduce)': {
+      selectors: {
+        '&[data-open], &[data-closed]': { animation: 'none' },
+      },
+    },
   },
 });
+
+const popupSurfaceBase = style([
+  popupMotion,
+  {
+    position: 'relative',
+    zIndex: 50,
+    transformOrigin: 'var(--transform-origin)',
+    borderRadius: tokenVars.radiusLg,
+    outline: 'none',
+  },
+]);
 
 export const popupSurface = style([
   popupSurfaceBase,
   {
     backgroundColor: vars.surface,
     color: vars.foreground,
+    boxShadow: `${vars.shadowMd}, ${popupHairline}`,
   },
 ]);
 
 /**
- * Inverted (neutral pill) tone for high-contrast popups such as tooltips —
- * same structure and animations as `popupSurface`, but painted with the
- * theme's inverted neutral slots.
+ * Inverted (neutral pill) tone — same structure and animations as
+ * `popupSurface`, painted with the theme's inverted neutral slots. Kept for
+ * compatibility; the kit's tooltip now uses the elevated-emphasis surface.
  */
 export const popupSurfaceInverted = style([
   popupSurfaceBase,
@@ -67,14 +91,14 @@ export const popupSurfaceInverted = style([
 ]);
 
 /**
- * Shadow tokens for popup containers.
- * - ringSm: subtle ring + gentle shadow (combobox, tooltips)
- * - ringMd: deeper shadow (dropdown menus, selects)
+ * Shadow + hairline for popup containers.
+ * - popupShadowSm: tooltips, comboboxes, hover cards
+ * - popupShadowMd: menus, selects, popovers, toasts
  */
 export const popupShadowSm = style({
-  boxShadow: `${vars.shadowSm}, 0 0 0 1px color-mix(in srgb, ${vars.foreground} 10%, transparent)`,
+  boxShadow: `${vars.shadowSm}, ${popupHairline}`,
 });
 
 export const popupShadowMd = style({
-  boxShadow: `${vars.shadowMd}, 0 0 0 1px color-mix(in srgb, ${vars.foreground} 10%, transparent)`,
+  boxShadow: `${vars.shadowMd}, ${popupHairline}`,
 });

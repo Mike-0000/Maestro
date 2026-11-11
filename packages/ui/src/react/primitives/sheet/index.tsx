@@ -49,7 +49,7 @@ function SheetContent({
       <SheetBackdrop />
       <Drawer.Popup
         data-slot="sheet-content"
-        className={cx('surface-base', styles.sheetContent({ side }), className)}
+        className={cx('surface-elevated', styles.sheetContent({ side }), className)}
         {...props}
       >
         {children}
@@ -74,7 +74,7 @@ function SheetHeader({
           render={
             <Button
               variant="ghost"
-              size="xs"
+              size="sm"
               icon
               aria-label="Close"
               className={styles.closeButtonOverride}

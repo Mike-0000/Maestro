@@ -3,7 +3,8 @@ import { vars } from '@theme/core/contract/contract.css';
 
 export const separator = style({
   flexShrink: 0,
-  backgroundColor: vars.border,
+  // One subtle hairline (brief 2.2); prefer space where a rule is not needed.
+  backgroundColor: vars.borderSubtle,
   selectors: {
     '&[data-orientation="horizontal"]': {
       height: '1px',

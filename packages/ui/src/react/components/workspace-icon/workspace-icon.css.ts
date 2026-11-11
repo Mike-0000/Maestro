@@ -63,10 +63,12 @@ export const statusDot = style({
 });
 
 export const statusDotVariant = {
+  // State marks follow brief 2.6: active is the accent (working), setting up is
+  // passive, idle muted, error red; tearing down keeps the amber solid.
   active: style({
     '@layer': {
       recipes: {
-        backgroundColor: vars.foregroundSuccess,
+        backgroundColor: vars.accent,
       },
     },
   }),
@@ -80,7 +82,7 @@ export const statusDotVariant = {
   'setting-up': style({
     '@layer': {
       recipes: {
-        backgroundColor: vars.foregroundInfo,
+        backgroundColor: vars.foregroundPassive,
       },
     },
   }),

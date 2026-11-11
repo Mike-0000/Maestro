@@ -21,10 +21,11 @@ export const toaster = style({
     '&&[data-sonner-toaster]': {
       fontFamily: tokenVars.fontSans,
       vars: {
-        '--normal-bg': vars.background,
-        '--normal-border': vars.border,
+        // The elevated surface every floating layer shares (brief 2.10).
+        '--normal-bg': vars.surfaceElevated,
+        '--normal-border': vars.borderSubtle,
         '--normal-text': vars.foreground,
-        '--border-radius': tokenVars.radiusMd,
+        '--border-radius': tokenVars.radiusLg,
       },
     },
   },
@@ -34,21 +35,34 @@ const scope = `${toaster}${toaster}[data-sonner-toaster]`;
 const toastEl = `${scope} [data-sonner-toast][data-styled='true']`;
 
 globalStyle(toastEl, {
-  boxShadow: `${vars.shadowMd}, 0 0 0 1px color-mix(in srgb, ${vars.foreground} 10%, transparent)`,
+  boxShadow: `${vars.shadowMd}, 0 0 0 1px ${vars.borderSubtle}`,
   borderColor: 'transparent',
+  padding: '0.75rem 1rem',
+  gap: '0.625rem',
+});
+
+// Title: 13px medium. Body: 12px muted.
+globalStyle(`${toastEl} [data-title]`, {
+  fontSize: tokenVars.textSm,
+  lineHeight: tokenVars.textSmLineHeight,
+  fontWeight: 500,
+  color: vars.foreground,
 });
 
 // Sonner hardcodes description colors per light/dark theme; own them instead.
 globalStyle(`${toastEl} [data-description]`, {
+  fontSize: tokenVars.textXs,
+  lineHeight: tokenVars.textXsLineHeight,
   color: vars.foregroundMuted,
 });
 
-// Tone-colored status icons on an otherwise neutral surface.
+// State reads from the glyph, not from colour: only an error and a warning
+// carry tone (brief 2.6); success and info glyphs stay neutral.
 const TONE_ICON_COLORS = {
-  success: vars.foregroundSuccess,
+  success: vars.foregroundMuted,
   error: vars.foregroundError,
   warning: vars.foregroundWarning,
-  info: vars.foregroundInfo,
+  info: vars.foregroundPassive,
 } as const;
 
 for (const [type, color] of Object.entries(TONE_ICON_COLORS)) {
@@ -60,13 +74,31 @@ globalStyle(`${scope} .sonner-loading-bar`, {
   backgroundColor: vars.foregroundMuted,
 });
 
-// Action button reads as the primary button.
+// The one action reads as a quiet text action (underlined, muted), like the
+// kit's Button variant="text".
 globalStyle(`${toastEl} [data-button]`, {
-  backgroundColor: vars.primaryButtonBackground,
-  color: vars.primaryButtonForeground,
+  height: 'auto',
+  padding: 0,
+  marginLeft: 'auto',
+  backgroundColor: 'transparent',
+  color: vars.foregroundMuted,
+  fontSize: tokenVars.textSm,
+  fontWeight: 400,
+  textDecorationLine: 'underline',
+  textUnderlineOffset: '4px',
+  textDecorationColor: `color-mix(in srgb, ${vars.foregroundPassive} 60%, transparent)`,
   cursor: 'pointer',
+  transition: 'color 150ms',
 });
 
 globalStyle(`${toastEl} [data-button]:hover`, {
-  backgroundColor: vars.primaryButtonBackgroundHover,
+  color: vars.foreground,
+  textDecorationColor: vars.foregroundMuted,
+});
+
+globalStyle(`${toastEl} [data-button]:focus-visible`, {
+  outline: `2px solid ${vars.focusRing}`,
+  outlineOffset: '2px',
+  borderRadius: tokenVars.radiusSm,
+  boxShadow: 'none',
 });

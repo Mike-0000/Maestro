@@ -3,7 +3,7 @@
  * (dialog, sheet, popover, dropdown, select, combobox)
  *
  *  - kfPopupIn/Out           fade + zoom (for dialogs and side-less popups)
- *  - kfPopupInSlideFrom*     fade + zoom + 0.5rem slide (for positioner popups)
+ *  - kfPopupInSlideFrom*     fade + 0.98 zoom + 0.25rem slide (for positioner popups)
  *  - kfSlide{In/Out}{From/To}{Right/Left}  full-width slides (for sheets)
  */
 
@@ -24,37 +24,37 @@ export const kfFadeOut = keyframes({
 // ── Popup: fade + zoom (dialog, no-side popups) ───────────────────────────────
 
 export const kfPopupIn = keyframes({
-  from: { opacity: 0, transform: 'scale(0.95)' },
+  from: { opacity: 0, transform: 'scale(0.98)' },
   to: { opacity: 1, transform: 'scale(1)' },
 });
 
 export const kfPopupOut = keyframes({
   from: { opacity: 1, transform: 'scale(1)' },
-  to: { opacity: 0, transform: 'scale(0.95)' },
+  to: { opacity: 0, transform: 'scale(0.98)' },
 });
 
-// ── Popup: fade + zoom + slide (positioner popups, 0.5rem offset) ─────────────
+// ── Popup: fade + zoom + slide (positioner popups, 0.25rem offset) ─────────────
 // data-side=bottom → popup opens below trigger → slides IN from the top
 export const kfPopupInSlideFromTop = keyframes({
-  from: { opacity: 0, transform: 'scale(0.95) translateY(-0.5rem)' },
+  from: { opacity: 0, transform: 'scale(0.98) translateY(-0.25rem)' },
   to: { opacity: 1, transform: 'scale(1) translateY(0)' },
 });
 
 // data-side=top → popup opens above trigger → slides IN from the bottom
 export const kfPopupInSlideFromBottom = keyframes({
-  from: { opacity: 0, transform: 'scale(0.95) translateY(0.5rem)' },
+  from: { opacity: 0, transform: 'scale(0.98) translateY(0.25rem)' },
   to: { opacity: 1, transform: 'scale(1) translateY(0)' },
 });
 
 // data-side=right / inline-end → popup to the right → slides IN from the left
 export const kfPopupInSlideFromLeft = keyframes({
-  from: { opacity: 0, transform: 'scale(0.95) translateX(-0.5rem)' },
+  from: { opacity: 0, transform: 'scale(0.98) translateX(-0.25rem)' },
   to: { opacity: 1, transform: 'scale(1) translateX(0)' },
 });
 
 // data-side=left / inline-start → popup to the left → slides IN from the right
 export const kfPopupInSlideFromRight = keyframes({
-  from: { opacity: 0, transform: 'scale(0.95) translateX(0.5rem)' },
+  from: { opacity: 0, transform: 'scale(0.98) translateX(0.25rem)' },
   to: { opacity: 1, transform: 'scale(1) translateX(0)' },
 });
 

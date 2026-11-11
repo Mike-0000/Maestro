@@ -135,58 +135,63 @@ globalStyle(':root', {
 // These chain var→var so they can't go in the typed contract (VE only accepts
 // static strings in the `vars` map). They keep the same --type-* names for
 // backward compatibility with typography.css.
+//
+// Roles (design brief 2.4): body = reading body 14/1.6; h1 = page title
+// (21/1.4, 500); h2 = dialog title (16, 600); h3 = section title (13, 600);
+// section = UI body 13; caption = meta line 11; description = helper 13.
 
 globalStyle(':root', {
   [nsName('type-body-font-family')]: tokenVars.fontSans,
   [nsName('type-body-font-size')]: tokenVars.textBase,
   [nsName('type-body-font-weight')]: tokenVars.fontWeightNormal,
-  [nsName('type-body-line-height')]: '20px',
+  [nsName('type-body-line-height')]: tokenVars.textBaseLineHeight,
 
   [nsName('type-body-bold-font-family')]: tokenVars.fontSans,
   [nsName('type-body-bold-font-size')]: tokenVars.textBase,
   [nsName('type-body-bold-font-weight')]: tokenVars.fontWeightSemibold,
-  [nsName('type-body-bold-line-height')]: '20px',
+  [nsName('type-body-bold-line-height')]: tokenVars.textBaseLineHeight,
 
   [nsName('type-body-italic-font-family')]: tokenVars.fontSans,
   [nsName('type-body-italic-font-size')]: tokenVars.textBase,
   [nsName('type-body-italic-font-weight')]: tokenVars.fontWeightNormal,
   [nsName('type-body-italic-font-style')]: 'italic',
-  [nsName('type-body-italic-line-height')]: '20px',
+  [nsName('type-body-italic-line-height')]: tokenVars.textBaseLineHeight,
 
   [nsName('type-body-link-font-family')]: tokenVars.fontSans,
   [nsName('type-body-link-font-size')]: tokenVars.textBase,
   [nsName('type-body-link-font-weight')]: tokenVars.fontWeightNormal,
-  [nsName('type-body-link-line-height')]: '20px',
+  [nsName('type-body-link-line-height')]: tokenVars.textBaseLineHeight,
 
   [nsName('type-h1-font-family')]: tokenVars.fontSans,
   [nsName('type-h1-font-size')]: tokenVars.textXl,
   [nsName('type-h1-font-weight')]: tokenVars.fontWeightMedium,
-  [nsName('type-h1-line-height')]: '28px',
+  [nsName('type-h1-line-height')]: tokenVars.textXlLineHeight,
+  [nsName('type-h1-letter-spacing')]: '-0.01em',
 
   [nsName('type-h2-font-family')]: tokenVars.fontSans,
   [nsName('type-h2-font-size')]: tokenVars.textLg,
-  [nsName('type-h2-font-weight')]: tokenVars.fontWeightMedium,
-  [nsName('type-h2-line-height')]: '25px',
+  [nsName('type-h2-font-weight')]: tokenVars.fontWeightSemibold,
+  [nsName('type-h2-line-height')]: tokenVars.textLgLineHeight,
 
   [nsName('type-h3-font-family')]: tokenVars.fontSans,
-  [nsName('type-h3-font-size')]: tokenVars.textBase,
-  [nsName('type-h3-font-weight')]: tokenVars.fontWeightMedium,
-  [nsName('type-h3-line-height')]: '22px',
+  [nsName('type-h3-font-size')]: tokenVars.textSm,
+  [nsName('type-h3-font-weight')]: tokenVars.fontWeightSemibold,
+  [nsName('type-h3-line-height')]: tokenVars.textSmLineHeight,
 
   [nsName('type-section-font-family')]: tokenVars.fontSans,
   [nsName('type-section-font-size')]: tokenVars.textSm,
   [nsName('type-section-font-weight')]: tokenVars.fontWeightNormal,
-  [nsName('type-section-line-height')]: '18px',
+  [nsName('type-section-line-height')]: tokenVars.textSmLineHeight,
 
   [nsName('type-caption-font-family')]: tokenVars.fontSans,
-  [nsName('type-caption-font-size')]: tokenVars.textXs,
-  [nsName('type-caption-font-weight')]: tokenVars.fontWeightMedium,
-  [nsName('type-caption-line-height')]: '16px',
+  [nsName('type-caption-font-size')]: tokenVars.textTiny,
+  [nsName('type-caption-font-weight')]: tokenVars.fontWeightNormal,
+  [nsName('type-caption-line-height')]: tokenVars.textTinyLineHeight,
 
   [nsName('type-description-font-family')]: tokenVars.fontSans,
   [nsName('type-description-font-size')]: tokenVars.textSm,
   [nsName('type-description-font-weight')]: tokenVars.fontWeightNormal,
-  [nsName('type-description-line-height')]: '18px',
+  [nsName('type-description-line-height')]: tokenVars.textSmLineHeight,
 
   [nsName('type-inline-code-font-family')]: tokenVars.fontMono,
   [nsName('type-inline-code-font-size')]: tokenVars.textXs,

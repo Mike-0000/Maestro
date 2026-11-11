@@ -17,16 +17,29 @@ import { tokenVars } from '@theme/tokens.css';
 
 const noDragRegion = { WebkitAppRegion: 'no-drag' } as Record<string, string>;
 
+// Sheets share the dialog anatomy (design brief 2.9): the elevated surface, one
+// hairline, the dialog-title role, 24px padding, no rules; 34rem wide from the
+// right, sliding in over 200ms.
+
+const reducedMotion = {
+  '@media': {
+    '(prefers-reduced-motion: reduce)': {
+      selectors: { '&[data-open], &[data-closed]': { animation: 'none' } },
+    },
+  },
+} as const;
+
 export const backdrop = style({
   ...noDragRegion,
   position: 'fixed',
   inset: 0,
   zIndex: 50,
-  backgroundColor: 'rgba(0,0,0,0.4)',
+  backgroundColor: vars.backdrop,
   selectors: {
     '&[data-open]': { animation: `${kfFadeIn} 150ms both` },
     '&[data-closed]': { animation: `${kfFadeOut} 150ms both` },
   },
+  ...reducedMotion,
 });
 
 export const sheetContent = recipe({
@@ -38,10 +51,12 @@ export const sheetContent = recipe({
     flexDirection: 'column',
     overflow: 'hidden',
     fontSize: tokenVars.textSm,
+    lineHeight: tokenVars.textSmLineHeight,
     color: vars.foreground,
     backgroundColor: vars.surface,
-    boxShadow: `${vars.shadowLg}, 0 0 0 1px color-mix(in srgb, ${vars.foreground} 10%, transparent)`,
+    boxShadow: `${vars.shadowOverlay}, 0 0 0 1px ${vars.borderSubtle}`,
     outline: 'none',
+    ...reducedMotion,
   },
   variants: {
     side: {
@@ -52,7 +67,7 @@ export const sheetContent = recipe({
         height: '100%',
         width: '75%',
         '@media': {
-          '(min-width: 640px)': { maxWidth: '36rem' },
+          '(min-width: 640px)': { maxWidth: '34rem' },
         },
         selectors: {
           '&[data-open]': { animation: `${kfSlideInFromRight} 200ms both` },
@@ -105,20 +120,24 @@ export const sheetHeader = style({
   flexShrink: 0,
   alignItems: 'flex-start',
   justifyContent: 'space-between',
-  gap: '0.5rem',
-  padding: '1rem',
+  gap: '1rem',
+  padding: '1.5rem 1.5rem 0',
 });
 
 export const sheetHeaderInner = style({
   display: 'flex',
   minWidth: 0,
   flexDirection: 'column',
-  gap: '0.25rem',
+  gap: '0.375rem',
 });
 
+/** Dialog-title role: 16px semibold. */
 export const sheetTitle = style({
-  fontSize: tokenVars.textSm,
-  letterSpacing: '-0.015em',
+  margin: 0,
+  fontSize: tokenVars.textLg,
+  lineHeight: tokenVars.textLgLineHeight,
+  fontWeight: 600,
+  letterSpacing: '-0.005em',
   color: vars.foreground,
 });
 
@@ -127,12 +146,11 @@ export const sheetFooter = style({
   flexShrink: 0,
   flexDirection: 'column-reverse',
   gap: '0.5rem',
-  borderTop: `1px solid ${vars.border}`,
-  padding: '0.75rem',
-  backgroundColor: vars.surfaceBaseEmphasis,
+  padding: '1rem 1.5rem 1.5rem',
   '@media': {
     '(min-width: 640px)': {
       flexDirection: 'row',
+      alignItems: 'center',
       justifyContent: 'flex-end',
     },
   },
@@ -142,9 +160,8 @@ export const sheetBody = style({
   display: 'flex',
   width: '100%',
   flexDirection: 'column',
-  gap: '0.5rem',
-  padding: '1rem',
-  paddingTop: 0,
+  gap: '1.25rem',
+  padding: '1.25rem 1.5rem 1.5rem',
   outline: 'none',
   selectors: {
     '&:focus-visible': { outline: 'none' },
@@ -153,9 +170,9 @@ export const sheetBody = style({
 
 export const closeButtonOverride = style({
   marginTop: '-0.25rem',
-  marginRight: '-0.25rem',
+  marginRight: '-0.5rem',
   flexShrink: 0,
-  color: vars.foregroundMuted,
+  color: vars.foregroundPassive,
   selectors: {
     '&:hover': { color: vars.foreground },
   },

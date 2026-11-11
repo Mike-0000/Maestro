@@ -7,19 +7,41 @@ import * as React from 'react';
 import type { ControlVariantProps } from '../../../styles/recipes/control';
 import * as styles from './tabs.css';
 
+/**
+ * Tab looks:
+ *  - `ghost` (default): flat ghost controls; the selected tab reads in full strength.
+ *  - `underline`: plain words, the selected one in full strength with a 1px
+ *    underline (the conductor status strip's Conductor | Raw switch).
+ */
+export type TabsVariant = 'ghost' | 'underline';
+
+const TabsVariantContext = React.createContext<TabsVariant>('ghost');
+
 // ── Root ──────────────────────────────────────────────────────────────────────
 
 const TabsRoot = TabsPrimitive.Root;
 
 // ── List ──────────────────────────────────────────────────────────────────────
 
-function TabsList({ className, ...props }: TabsPrimitive.List.Props) {
+export interface TabsListProps extends TabsPrimitive.List.Props {
+  /** The look of every tab in this list. Defaults to `ghost`. */
+  variant?: TabsVariant;
+}
+
+function TabsList({ className, variant = 'ghost', ...props }: TabsListProps) {
   return (
-    <TabsPrimitive.List
-      data-slot="tabs-list"
-      className={cx(styles.tabsList, className)}
-      {...props}
-    />
+    <TabsVariantContext.Provider value={variant}>
+      <TabsPrimitive.List
+        data-slot="tabs-list"
+        data-variant={variant}
+        className={cx(
+          styles.tabsList,
+          variant === 'underline' && styles.tabsListUnderline,
+          className
+        )}
+        {...props}
+      />
+    </TabsVariantContext.Provider>
   );
 }
 
@@ -28,17 +50,26 @@ function TabsList({ className, ...props }: TabsPrimitive.List.Props) {
 export interface TabsTabProps extends TabsPrimitive.Tab.Props {
   size?: ControlVariantProps['size'];
   tone?: ControlVariantProps['tone'];
+  /** Override the list's look for this tab. */
+  variant?: TabsVariant;
 }
 
 const TabsTab = React.forwardRef<HTMLButtonElement, TabsTabProps>(function TabsTab(
-  { className, size = 'xs', tone = 'neutral', ...props },
+  { className, size = 'xs', tone = 'neutral', variant, ...props },
   ref
 ) {
+  const listVariant = React.useContext(TabsVariantContext);
+  const resolved = variant ?? listVariant;
   return (
     <TabsPrimitive.Tab
       ref={ref}
       data-slot="tabs-tab"
-      className={cx(controlVariants({ variant: 'ghost', tone, size }), styles.tab, className)}
+      className={cx(
+        controlVariants({ variant: 'ghost', tone, size }),
+        styles.tab,
+        resolved === 'underline' && styles.tabUnderline,
+        className
+      )}
       {...props}
     />
   );

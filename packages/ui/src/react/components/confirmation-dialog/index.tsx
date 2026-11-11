@@ -31,7 +31,7 @@ export interface ConfirmationDialogProps {
   tone?: 'neutral' | 'destructive';
   /** Disables both actions while an async confirm handler is in flight. */
   isConfirming?: boolean;
-  /** Dialog size. Defaults to 'xs'. */
+  /** Dialog size. Defaults to 'sm' (400px, the confirm width). */
   size?: DialogSize;
   onConfirm: () => void | Promise<void>;
   onCancel?: () => void;
@@ -48,7 +48,7 @@ export function ConfirmationDialog({
   cancelLabel = 'Cancel',
   tone = 'neutral',
   isConfirming = false,
-  size = 'xs',
+  size = 'sm',
   onConfirm,
   onCancel,
   children,

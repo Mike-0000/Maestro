@@ -10,8 +10,8 @@ export const pill = style({
   alignItems: 'center',
   gap: '0.25rem',
   borderRadius: '999px',
-  border: `1px solid ${vars.border}`,
-  backgroundColor: vars.surfaceHover,
+  border: 'none',
+  backgroundColor: `color-mix(in srgb, ${vars.foreground} 7%, transparent)`,
   paddingLeft: '0.5rem',
   paddingRight: '0.25rem',
   paddingTop: '0.125rem',
@@ -45,11 +45,12 @@ export const pillRemove = style({
   borderRadius: '999px',
   border: 'none',
   backgroundColor: 'transparent',
-  color: vars.foregroundMuted,
+  color: vars.foregroundPassive,
   cursor: 'pointer',
   transition: 'color 150ms',
   selectors: {
     '&:hover': { color: vars.foreground },
+    '&:focus-visible': { outline: `2px solid ${vars.focusRing}`, outlineOffset: '1px' },
   },
 });
 globalStyle(`${pillRemove} svg`, { pointerEvents: 'none', width: '0.625rem', height: '0.625rem' });
@@ -71,6 +72,11 @@ export const filterButton = style({
   selectors: {
     '&:hover': { color: vars.foreground },
     '&[data-active="true"]': { color: vars.foreground, fontWeight: 400 },
+    '&:focus-visible': {
+      outline: `2px solid ${vars.focusRing}`,
+      outlineOffset: '2px',
+      borderRadius: tokenVars.radiusSm,
+    },
     '&:disabled': { pointerEvents: 'none', opacity: 0.4, cursor: 'not-allowed' },
   },
 });

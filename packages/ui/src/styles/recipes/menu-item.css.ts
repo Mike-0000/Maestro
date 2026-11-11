@@ -1,44 +1,68 @@
 /**
- * menuItemBase — shared structural recipe for dropdown/combobox/select list items.
+ * menuItemBase — shared recipe for every row in a floating list: DropdownMenu,
+ * ContextMenu, Select, Combobox and ComboboxPopup items (design brief 2.10).
  *
- * Encapsulates the layout, spacing, and typography that is identical across
- * DropdownMenu, Select, Combobox, and ComboboxPopup item rows. Interaction
- * states (hover, focus, highlighted, selected, checked) are component-specific
- * and should be composed on top via `style([menuItemBase({ ... }), { selectors: ... }])`.
+ * A row is 32px tall (min-height, so two-line rows grow), rounded-md, 8px side
+ * padding, 13px text in the muted tone; leading icons are 16px and passive.
+ * Highlighting (keyboard focus, `data-highlighted`, hover) lifts the row one
+ * surface step and brings text and icon to full strength. Selected / checked
+ * state is component-specific and composed on top.
  *
  * Variants:
- *   trailingIndicator — adds paddingRight: 2rem to leave room for a check/radio indicator
- *   fullWidth         — sets width: 100% (combobox and select items span the full popup width)
- *   inset             — shifts paddingLeft to 2rem (for inset label alignment)
- *   muted             — sets color to foregroundMuted (checkbox/radio items start de-emphasised)
+ *   trailingIndicator — paddingRight 2rem, room for a check/radio indicator
+ *   fullWidth         — width 100% (combobox and select items span the popup)
+ *   inset             — paddingLeft 2rem (for inset label alignment)
+ *   muted             — kept for compatibility; rows are muted by default now
  */
 
+import { globalStyle, style } from '@vanilla-extract/css';
 import { recipe } from '@vanilla-extract/recipes';
 import type { RecipeVariants } from '@vanilla-extract/recipes';
 import { svgContainer, svgDefaultSize } from '@styles/effects/svg-helpers.css';
 import { vars } from '@theme/core/contract/contract.css';
 import { tokenVars } from '@theme/tokens.css';
 
-export const menuItemBase = recipe({
-  base: [
-    svgContainer,
-    svgDefaultSize,
-    {
-      position: 'relative',
-      display: 'flex',
-      cursor: 'default',
-      alignItems: 'center',
-      gap: '0.5rem',
-      borderRadius: tokenVars.radiusSm,
-      paddingTop: '0.375rem',
-      paddingBottom: '0.375rem',
-      paddingLeft: '0.5rem',
-      paddingRight: '0.5rem',
-      fontSize: tokenVars.textSm,
-      outline: 'none',
-      userSelect: 'none',
+/** Highlight states shared by every popup row. */
+export const MENU_ITEM_HIGHLIGHT = '&:focus, &[data-highlighted], &:hover:not([data-disabled])';
+
+const menuItemRow = style([
+  svgContainer,
+  svgDefaultSize,
+  {
+    position: 'relative',
+    display: 'flex',
+    cursor: 'default',
+    alignItems: 'center',
+    gap: '0.5rem',
+    minHeight: '2rem',
+    borderRadius: tokenVars.radiusMd,
+    paddingTop: '0.375rem',
+    paddingBottom: '0.375rem',
+    paddingLeft: '0.5rem',
+    paddingRight: '0.5rem',
+    fontSize: tokenVars.textSm,
+    lineHeight: tokenVars.textSmLineHeight,
+    color: vars.foregroundMuted,
+    outline: 'none',
+    userSelect: 'none',
+    transition: 'background-color 100ms, color 100ms',
+    selectors: {
+      [MENU_ITEM_HIGHLIGHT]: { backgroundColor: vars.surfaceHover, color: vars.foreground },
+      '&[data-disabled]': { pointerEvents: 'none', opacity: 0.5 },
     },
-  ],
+  },
+]);
+
+// Leading icons sit in the passive tone and come up with the row's text.
+// (`svg` here is the row's own icon; both elements are owned by the row.)
+globalStyle(`${menuItemRow} > svg`, { color: vars.foregroundPassive, transition: 'color 100ms' });
+globalStyle(
+  `${menuItemRow}:focus > svg, ${menuItemRow}[data-highlighted] > svg, ${menuItemRow}:hover > svg`,
+  { color: 'currentColor' }
+);
+
+export const menuItemBase = recipe({
+  base: menuItemRow,
 
   variants: {
     trailingIndicator: {
@@ -64,3 +88,34 @@ export const menuItemBase = recipe({
 });
 
 export type MenuItemBaseVariants = RecipeVariants<typeof menuItemBase>;
+
+/** Section label inside a popup list ("Recent", "Agents"): the group-label role. */
+export const menuGroupLabel = style({
+  paddingLeft: '0.5rem',
+  paddingRight: '0.5rem',
+  paddingTop: '0.5rem',
+  paddingBottom: '0.25rem',
+  fontSize: tokenVars.textTiny,
+  lineHeight: tokenVars.textTinyLineHeight,
+  fontWeight: 400,
+  color: vars.foregroundPassive,
+  userSelect: 'none',
+});
+
+/** Separator between groups of rows: one subtle hairline with 4px air. */
+export const menuSeparatorLine = style({
+  marginTop: '0.25rem',
+  marginBottom: '0.25rem',
+  height: '1px',
+  border: 'none',
+  backgroundColor: vars.borderSubtle,
+});
+
+/** Trailing shortcut hint in a row: caption role. */
+export const menuShortcutHint = style({
+  marginLeft: 'auto',
+  paddingLeft: '1rem',
+  fontSize: tokenVars.textTiny,
+  color: vars.foregroundPassive,
+  fontVariantNumeric: 'tabular-nums',
+});

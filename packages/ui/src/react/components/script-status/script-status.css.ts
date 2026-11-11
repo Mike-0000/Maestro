@@ -44,10 +44,11 @@ export const icon = style({
   },
 });
 
+// A finished run reads full strength; only failure carries colour (brief 2.6).
 export const successIcon = style({
   '@layer': {
     recipes: {
-      color: vars.foregroundSuccess,
+      color: vars.foreground,
     },
   },
 });

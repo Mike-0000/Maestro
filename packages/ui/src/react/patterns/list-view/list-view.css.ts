@@ -1,5 +1,4 @@
 import { globalStyle, style } from '@vanilla-extract/css';
-import { vars } from '@theme/core/contract/contract.css';
 
 /** Root: flex column that fills available height. */
 export const root = style({
@@ -20,8 +19,8 @@ export const toolbar = style({
   flexShrink: 0,
   flexDirection: 'column',
   gap: '0.5rem',
-  borderBottom: `1px solid ${vars.border}`,
-  paddingBottom: '0.5rem',
+  // Separated from the list by space, not a rule (design brief 2.2).
+  paddingBottom: '0.75rem',
 });
 
 /**

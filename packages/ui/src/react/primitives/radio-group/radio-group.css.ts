@@ -16,27 +16,28 @@ export const radioItem = style({
   cursor: 'pointer',
   alignItems: 'center',
   justifyContent: 'center',
-  border: `1px solid ${vars.border}`,
+  border: `1px solid ${vars.border2}`,
   borderRadius: '9999px',
   backgroundColor: 'transparent',
   outline: 'none',
   transition: 'background-color 150ms, border-color 150ms, box-shadow 150ms',
   selectors: {
+    '&:hover': { borderColor: vars.foregroundMuted },
     '&:focus-visible': {
-      borderColor: vars.borderPrimary,
-      boxShadow: `0 0 0 3px color-mix(in srgb, ${vars.borderPrimary} 30%, transparent)`,
+      outline: `2px solid ${vars.focusRing}`,
+      outlineOffset: '2px',
     },
+    // Checked: a neutral filled disc with an inverse centre, like the checkbox.
     '&[data-checked]': {
-      borderColor: vars.primaryButtonBackground,
-      backgroundColor: vars.primaryButtonBackground,
+      borderColor: vars.backgroundNeutral,
+      backgroundColor: vars.backgroundNeutral,
     },
     '&[data-disabled]': {
       pointerEvents: 'none',
       opacity: 0.5,
     },
     '&[data-invalid], &[aria-invalid="true"]': {
-      borderColor: vars.foregroundDestructive,
-      boxShadow: `0 0 0 3px color-mix(in srgb, ${vars.foregroundDestructive} 20%, transparent)`,
+      borderColor: vars.borderDestructive,
     },
   },
 });
@@ -53,7 +54,7 @@ export const radioIndicatorDot = style({
   width: '0.375rem',
   height: '0.375rem',
   borderRadius: '9999px',
-  backgroundColor: vars.foregroundInverse,
+  backgroundColor: vars.foregroundNeutral,
 });
 
 globalStyle(`${radioItem} input[type="radio"]`, {

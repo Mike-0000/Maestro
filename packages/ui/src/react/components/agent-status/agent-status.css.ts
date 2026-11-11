@@ -108,8 +108,9 @@ export const warningShape = style({
 export const successShape = style({
   '@layer': {
     recipes: {
-      fill: vars.backgroundSuccess,
-      stroke: vars.foregroundSuccess,
+      // Done reads as a quiet neutral mark (brief 2.6), not a green badge.
+      fill: `color-mix(in srgb, ${vars.foreground} 8%, transparent)`,
+      stroke: vars.foreground,
     },
   },
 });
