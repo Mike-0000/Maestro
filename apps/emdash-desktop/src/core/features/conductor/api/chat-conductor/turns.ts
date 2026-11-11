@@ -482,7 +482,7 @@ export function gateChatTool(input: {
     // own say-so while the agent is in the middle of it.
     return {
       allowed: false,
-      reason: `${input.tool} was not run: that chat's agent is in the middle of a turn, and stopping or restarting it on your own could cut off work the developer asked for. Put it to the developer instead: say what you would do and why, and set the status to needs_you.`,
+      reason: `${input.tool} was not run: that chat's agent is in the middle of a turn, and stopping or restarting it on your own could cut off work the developer asked for. Put it to the developer instead: say that Maestro refused it, what you would do and why, and set the status to needs_you.`,
     };
   }
   if (!input.autonomy) {

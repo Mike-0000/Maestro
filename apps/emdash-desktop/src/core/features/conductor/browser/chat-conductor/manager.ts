@@ -305,7 +305,7 @@ export class ChatConductorManager implements FrontConductorSource {
 
   private ports(taskId: string): ChatConductorPorts {
     return {
-      runTurn: async (messages) => (await getConductorClient()).runChatTurn({ messages }),
+      runTurn: async (messages) => (await getConductorClient()).runChatTurn({ messages, taskId }),
       readThread: async () => (await getConductorClient()).readTaskThread({ taskId }),
       saveThread: async (thread) => (await getConductorClient()).saveTaskThread(thread),
       deleteThread: async () => (await getConductorClient()).deleteTaskThread({ taskId }),
