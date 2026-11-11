@@ -61,11 +61,11 @@ export const PairingScreen = observer(function PairingScreen() {
         className="animate-fade-in my-auto flex w-full max-w-sm flex-col items-center py-10"
         noValidate
       >
-        <BrandMark size={64} />
-        <h1 className="mt-6 text-center text-[26px] leading-tight font-semibold tracking-tight">
+        <BrandMark size={48} />
+        <h1 className="text-hero mt-6 text-center text-balance text-foreground">
           Connect to {app.session?.hostName ?? 'your computer'}
         </h1>
-        <p className="text-fg-muted mt-2 text-center text-[15px]">
+        <p className="text-body mt-3 text-center text-balance text-foreground-muted">
           Enter the pairing code shown in Maestro on your computer.
         </p>
 
@@ -86,18 +86,21 @@ export const PairingScreen = observer(function PairingScreen() {
           id={errorId}
           role="alert"
           className={cx(
-            'mt-3 min-h-10 text-center text-[13.5px] leading-snug',
-            failure ? 'text-danger' : 'text-fg-passive'
+            'mt-3 min-h-9 text-center text-detail text-balance',
+            failure ? 'text-foreground-error' : 'text-foreground-passive'
           )}
         >
           {failure ? FAILURE_TEXT[failure] : null}
         </div>
 
-        <label htmlFor={nameId} className="text-fg-muted mt-2 w-full text-[13px] font-medium">
+        <label htmlFor={nameId} className="text-body mt-4 w-full text-foreground">
           Name this device
         </label>
-        <div className="border-line-strong bg-surface focus-within:border-focus focus-within:ring-focus/30 mt-1.5 flex h-12 w-full items-center gap-2.5 rounded-xl border px-3.5 focus-within:ring-2">
-          <MonitorSmartphone className="text-fg-passive size-[18px] shrink-0" aria-hidden="true" />
+        <div className="field mt-1.5 flex h-12 w-full items-center gap-2.5 rounded-md px-3.5">
+          <MonitorSmartphone
+            className="size-4 shrink-0 text-foreground-passive"
+            aria-hidden="true"
+          />
           <input
             id={nameId}
             value={deviceName}
@@ -107,7 +110,7 @@ export const PairingScreen = observer(function PairingScreen() {
             autoCapitalize="words"
             enterKeyHint="go"
             required
-            className="text-fg placeholder:text-fg-passive h-full min-w-0 flex-1 bg-transparent outline-none"
+            className="text-reading h-full min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-foreground-passive"
             placeholder="My phone"
           />
         </div>
@@ -118,14 +121,14 @@ export const PairingScreen = observer(function PairingScreen() {
           block
           busy={busy}
           disabled={!complete || !name}
-          className="mt-5 h-12 text-[16px]"
+          className="mt-6 h-12"
         >
           {busy ? 'Connecting…' : 'Connect'}
         </Button>
 
-        <p className="text-fg-passive mt-6 text-center text-[13px] leading-relaxed">
+        <p className="text-detail mt-6 text-center text-balance text-foreground-muted">
           On your computer, open Maestro and go to{' '}
-          <span className="text-fg-muted">Settings → Remote access → Pair a device</span>.
+          <span className="text-foreground">Settings → Remote access → Pair a device</span>.
         </p>
       </form>
     </main>
@@ -157,16 +160,13 @@ function CodeField({ value, disabled, invalid, shake, describedBy, onChange }: C
         {Array.from({ length: PAIRING_CODE_LENGTH }, (_, index) => (
           <span key={index} className="contents">
             {index === PAIRING_CODE_LENGTH / 2 ? (
-              <span className="bg-line-strong mx-0.5 h-0.5 w-2.5 shrink-0 rounded-full" />
+              <span className="mx-0.5 h-0.5 w-2.5 shrink-0 rounded-full bg-border" />
             ) : null}
             <span
+              data-invalid={invalid || undefined}
+              data-focused={(!invalid && focused && index === active) || undefined}
               className={cx(
-                'flex aspect-[5/7] min-w-0 flex-1 items-center justify-center rounded-xl border bg-surface font-mono text-[22px] font-medium transition-[border-color,box-shadow] duration-150',
-                invalid
-                  ? 'border-danger-line'
-                  : focused && index === active
-                    ? 'border-focus ring-2 ring-focus/30'
-                    : 'border-line-strong',
+                'field flex aspect-[5/7] min-w-0 flex-1 items-center justify-center rounded-md font-mono text-title',
                 disabled && 'opacity-60'
               )}
             >
@@ -194,7 +194,7 @@ function CodeField({ value, disabled, invalid, shake, describedBy, onChange }: C
         aria-describedby={describedBy}
         // Wider than the code so a paste like "ABCD-EFGH " is not cut off before normalising.
         maxLength={PAIRING_CODE_LENGTH + 8}
-        className="absolute inset-0 h-full w-full cursor-text rounded-xl bg-transparent text-transparent caret-transparent opacity-0 outline-none"
+        className="absolute inset-0 h-full w-full cursor-text rounded-md bg-transparent text-transparent caret-transparent opacity-0 outline-none"
       />
     </div>
   );

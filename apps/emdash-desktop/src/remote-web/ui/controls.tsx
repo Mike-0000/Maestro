@@ -3,17 +3,22 @@ import { cx } from './hooks';
 
 // Touch-first controls on the Maestro tokens. The desktop kit (@emdash/ui) is sized for a
 // pointer and ships its whole stylesheet with any one component; this app needs 44px targets
-// and a small shell, so it draws the few controls it has itself.
+// and a small shell, so it draws the few controls it has itself, in the kit's language: one
+// primary per view, quiet ghost and text actions for the rest, the accent focus ring.
 
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 
 const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
   primary:
-    'bg-primary text-primary-fg hover:bg-primary-hover active:bg-primary-hover disabled:opacity-45',
-  secondary: 'bg-surface-2 text-fg hover:bg-surface-3 active:bg-surface-3 disabled:text-fg-passive',
-  ghost: 'text-fg-muted hover:bg-surface-2 active:bg-surface-2 disabled:text-fg-passive',
+    'bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-hover disabled:opacity-45',
+  // A quiet fill, for the rare second solid action.
+  secondary:
+    'bg-surface-emphasis text-foreground hover:bg-surface-selected active:bg-surface-selected disabled:text-foreground-passive',
+  ghost:
+    'text-foreground-muted hover:bg-surface-hover hover:text-foreground active:bg-surface-hover disabled:text-foreground-passive',
+  // The desktop's destructive button: a quiet red room with red ink, only inside its confirm.
   danger:
-    'bg-danger-soft text-danger border border-danger-line hover:brightness-110 disabled:opacity-45',
+    'bg-destructive text-foreground-destructive hover:bg-destructive-hover active:bg-destructive-hover disabled:opacity-45',
 };
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
@@ -38,9 +43,8 @@ export function Button({
       disabled={disabled || busy}
       aria-busy={busy || undefined}
       className={cx(
-        'inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-[15px] font-medium',
-        'transition-[background-color,opacity,transform] duration-150 active:scale-[0.98]',
-        'disabled:active:scale-100',
+        'inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-md px-4 text-body font-medium',
+        'transition-colors duration-150',
         block && 'w-full',
         BUTTON_VARIANTS[variant],
         className
@@ -48,6 +52,20 @@ export function Button({
       {...rest}
     >
       {busy ? <Spinner /> : null}
+      {children}
+    </button>
+  );
+}
+
+/** A quiet action in words: muted and underlined, full strength on hover, 44px tall to tap. */
+export function TextAction({
+  className,
+  children,
+  type = 'button',
+  ...rest
+}: ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button type={type} className={cx('text-action text-body', className)} {...rest}>
       {children}
     </button>
   );
@@ -72,9 +90,9 @@ export function IconButton({
       aria-label={label}
       title={label}
       className={cx(
-        'inline-flex size-10 shrink-0 items-center justify-center rounded-full text-fg-muted',
-        'transition-colors duration-150 hover:bg-surface-2 hover:text-fg active:bg-surface-3',
-        'disabled:text-fg-passive disabled:hover:bg-transparent',
+        'inline-flex size-11 shrink-0 items-center justify-center rounded-md text-foreground-muted',
+        'transition-colors duration-150 hover:bg-surface-hover hover:text-foreground active:bg-surface-hover',
+        'disabled:text-foreground-passive disabled:hover:bg-transparent',
         className
       )}
       {...rest}
@@ -107,14 +125,14 @@ export function Switch({ checked, onChange, labelledBy, describedBy }: SwitchPro
     >
       <span
         className={cx(
-          'flex h-[30px] w-[50px] items-center rounded-full p-[3px] transition-colors duration-200',
-          checked ? 'bg-primary' : 'bg-surface-3'
+          'flex h-7 w-12 items-center rounded-full border p-0.5 transition-colors duration-150',
+          checked ? 'border-transparent bg-primary' : 'border-border-control bg-surface-emphasis'
         )}
       >
         <span
           className={cx(
-            'size-6 rounded-full shadow-sm transition-transform duration-200',
-            checked ? 'translate-x-5 bg-primary-fg' : 'bg-fg-muted'
+            'size-[1.375rem] rounded-full transition-transform duration-150',
+            checked ? 'translate-x-5 bg-primary-foreground' : 'bg-foreground-muted'
           )}
         />
       </span>

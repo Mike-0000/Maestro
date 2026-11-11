@@ -1,0 +1,103 @@
+/*
+ * The terminal's 16 ANSI colours, one source for both terminals: the desktop renderer
+ * (src/renderer/index.css imports this file) and the phone web app (src/remote-web/styles.css).
+ * Both read them as `--xterm-ansi-*` (desktop: readXtermCssVars in terminals/api/browser/pty/pty.ts;
+ * phone: readTerminalTheme in remote-web/lib/terminal-theme.ts).
+ *
+ * The hues are the desktop's display-p3 text steps (11 for normal, leaning to 12 for bright), as
+ * literals because the phone app has no desktop ramps; black and white are the shared slate
+ * neutrals from @emdash/theme. Each colour reads at 4.5:1 or more on the desktop terminal ground
+ * (renderer/tests/browser/terminal-ansi-contrast.test.ts). In light, bright leans darker, not paler.
+ */
+@layer base {
+  :root,
+  .emlight {
+    --xterm-ansi-black: var(--em-neutral-12);
+    --xterm-ansi-red: color(display-p3 0.744 0.234 0.222);
+    --xterm-ansi-green: color(display-p3 0.263 0.488 0.261);
+    --xterm-ansi-yellow: color-mix(
+      in oklab,
+      color(display-p3 0.6 0.44 0) 80%,
+      color(display-p3 0.271 0.233 0.137)
+    );
+    --xterm-ansi-blue: color(display-p3 0.15 0.44 0.84);
+    --xterm-ansi-magenta: color(display-p3 0.473 0.281 0.687);
+    --xterm-ansi-cyan: color(display-p3 0.08 0.48 0.63);
+    --xterm-ansi-white: var(--em-neutral-9);
+    --xterm-ansi-bright-black: var(--em-neutral-10);
+    --xterm-ansi-bright-red: color-mix(
+      in oklab,
+      color(display-p3 0.744 0.234 0.222) 60%,
+      color(display-p3 0.36 0.115 0.143)
+    );
+    --xterm-ansi-bright-green: color-mix(
+      in oklab,
+      color(display-p3 0.263 0.488 0.261) 60%,
+      color(display-p3 0.151 0.233 0.153)
+    );
+    --xterm-ansi-bright-yellow: color-mix(
+      in oklab,
+      color(display-p3 0.6 0.44 0) 55%,
+      color(display-p3 0.271 0.233 0.137)
+    );
+    --xterm-ansi-bright-blue: color-mix(
+      in oklab,
+      color(display-p3 0.15 0.44 0.84) 60%,
+      color(display-p3 0.102 0.193 0.379)
+    );
+    --xterm-ansi-bright-magenta: color-mix(
+      in oklab,
+      color(display-p3 0.473 0.281 0.687) 60%,
+      color(display-p3 0.234 0.132 0.363)
+    );
+    --xterm-ansi-bright-cyan: color-mix(
+      in oklab,
+      color(display-p3 0.08 0.48 0.63) 60%,
+      color(display-p3 0.108 0.232 0.277)
+    );
+    --xterm-ansi-bright-white: var(--em-neutral-11);
+  }
+
+  .emdark {
+    --xterm-ansi-black: var(--em-neutral-9);
+    --xterm-ansi-red: color(display-p3 1 0.57 0.55);
+    --xterm-ansi-green: color(display-p3 0.535 0.807 0.542);
+    --xterm-ansi-yellow: color(display-p3 0.948 0.885 0.392);
+    --xterm-ansi-blue: color(display-p3 0.49 0.72 1);
+    --xterm-ansi-magenta: color(display-p3 0.8 0.62 1);
+    --xterm-ansi-cyan: color(display-p3 0.446 0.79 0.887);
+    --xterm-ansi-white: var(--em-neutral-11);
+    --xterm-ansi-bright-black: var(--em-neutral-10);
+    --xterm-ansi-bright-red: color-mix(
+      in oklab,
+      color(display-p3 1 0.57 0.55) 60%,
+      color(display-p3 0.971 0.826 0.852)
+    );
+    --xterm-ansi-bright-green: color-mix(
+      in oklab,
+      color(display-p3 0.535 0.807 0.542) 60%,
+      color(display-p3 0.797 0.936 0.776)
+    );
+    --xterm-ansi-bright-yellow: color-mix(
+      in oklab,
+      color(display-p3 0.948 0.885 0.392) 60%,
+      color(display-p3 0.959 0.934 0.731)
+    );
+    --xterm-ansi-bright-blue: color-mix(
+      in oklab,
+      color(display-p3 0.49 0.72 1) 60%,
+      color(display-p3 0.788 0.898 0.99)
+    );
+    --xterm-ansi-bright-magenta: color-mix(
+      in oklab,
+      color(display-p3 0.8 0.62 1) 60%,
+      color(display-p3 0.913 0.854 0.971)
+    );
+    --xterm-ansi-bright-cyan: color-mix(
+      in oklab,
+      color(display-p3 0.446 0.79 0.887) 60%,
+      color(display-p3 0.757 0.919 0.962)
+    );
+    --xterm-ansi-bright-white: var(--em-neutral-12);
+  }
+}

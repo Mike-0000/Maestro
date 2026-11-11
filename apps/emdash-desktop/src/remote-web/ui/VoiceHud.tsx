@@ -1,4 +1,4 @@
-import { ArrowUp, ChevronDown, MonitorUp, Square, Volume2, VolumeX, X } from 'lucide-react';
+import { ArrowUp, ChevronDown, Square, Volume2, VolumeX, X } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { examplePhrases } from '../lib/voice-logic';
@@ -6,6 +6,7 @@ import type { VoiceStore } from '../state/voice-store';
 import { useApp, useVoice } from './app-context';
 import { IconButton, Spinner } from './controls';
 import { cx, useIsWide } from './hooks';
+import { StateMark, type StateMarkState } from './StatusIndicator';
 import { PendingCard, PlanCard, ProblemCard } from './VoiceCards';
 import { HudTalkButton, Waveform } from './VoiceMic';
 
@@ -97,10 +98,11 @@ export const VoiceHud = observer(function VoiceHud() {
       role="dialog"
       aria-label="Voice"
       className={cx(
-        'border-line bg-surface absolute z-30 flex flex-col shadow-2xl shadow-black/40',
+        // The desktop voice bar's floating layer: elevated, one hairline, the bar's 20px radius.
+        'surface-elevated absolute z-30 flex flex-col border border-border-subtle bg-surface shadow-overlay',
         wide
-          ? 'animate-pop-in bottom-3 left-3 max-h-[calc(100%-1.5rem)] w-[354px] rounded-3xl border'
-          : 'animate-sheet-in inset-x-0 bottom-0 max-h-[82%] rounded-t-3xl border border-b-0'
+          ? 'animate-pop-in bottom-3 left-3 max-h-[calc(100%-1.5rem)] w-[354px] rounded-2xl'
+          : 'animate-sheet-in inset-x-0 bottom-0 max-h-[82%] rounded-t-2xl border-b-0'
       )}
     >
       <HudHeader />
@@ -137,13 +139,24 @@ function statusOf(voice: VoiceStore, hostName: string): { text: string; tone: To
 
 type Tone = 'idle' | 'busy' | 'recording' | 'waiting' | 'speaking';
 
-const TONE_DOT: Record<Tone, string> = {
-  idle: 'bg-success',
-  busy: 'bg-working animate-pulse',
-  recording: 'bg-danger animate-pulse',
-  waiting: 'bg-attention',
-  speaking: 'bg-working',
+/** The shared state marks for the conductor's status; busy moments get a passive spinner. */
+const TONE_MARK: Record<Exclude<Tone, 'busy'>, StateMarkState> = {
+  idle: 'idle',
+  recording: 'working',
+  waiting: 'needs-you',
+  speaking: 'working',
 };
+
+function StatusGlyph({ tone }: { tone: Tone }) {
+  if (tone === 'busy') {
+    return (
+      <span aria-hidden="true" className="flex size-4 shrink-0 items-center justify-center">
+        <Spinner className="size-3 border-[1.5px] text-foreground-passive" />
+      </span>
+    );
+  }
+  return <StateMark state={TONE_MARK[tone]} />;
+}
 
 const HudHeader = observer(function HudHeader() {
   const app = useApp();
@@ -153,25 +166,19 @@ const HudHeader = observer(function HudHeader() {
   return (
     <header className="shrink-0">
       {wide ? null : (
-        <div aria-hidden="true" className="flex justify-center pt-2.5">
-          <span className="bg-line-strong h-1 w-9 rounded-full" />
+        <div aria-hidden="true" className="flex justify-center pt-2">
+          <span className="h-1 w-9 rounded-full bg-border" />
         </div>
       )}
-      <div className={cx('flex items-center gap-1 pr-2 pl-5', wide ? 'pt-2.5' : 'pt-1')}>
+      <div className={cx('flex items-center gap-1 pr-1.5 pl-5', wide ? 'pt-2' : 'pt-0.5')}>
         <div className="min-w-0 flex-1">
-          <h2 className="text-[17px] leading-6 font-semibold tracking-tight">Conductor</h2>
+          <h2 className="text-heading font-semibold text-foreground">Conductor</h2>
           <p
             role="status"
             aria-live="polite"
-            className="text-fg-muted flex min-w-0 items-center gap-1.5 text-[13px] leading-5"
+            className="text-detail -ml-1 flex min-w-0 items-center gap-1 text-foreground-muted"
           >
-            <span
-              aria-hidden="true"
-              className={cx(
-                'size-2 shrink-0 rounded-full',
-                hudDotClass(status.tone, voice.available)
-              )}
-            />
+            <StatusGlyph tone={status.tone} />
             <span className="truncate">{status.text}</span>
           </p>
         </div>
@@ -181,9 +188,9 @@ const HudHeader = observer(function HudHeader() {
           onClick={() => voice.setMuted(!voice.muted)}
         >
           {voice.muted ? (
-            <VolumeX className="size-[21px]" aria-hidden="true" />
+            <VolumeX className="size-5" aria-hidden="true" />
           ) : (
-            <Volume2 className="size-[21px]" aria-hidden="true" />
+            <Volume2 className="size-5" aria-hidden="true" />
           )}
         </IconButton>
         <IconButton label="Close voice" onClick={() => voice.closeHud()}>
@@ -197,11 +204,6 @@ const HudHeader = observer(function HudHeader() {
     </header>
   );
 });
-
-function hudDotClass(tone: Tone, available: boolean): string {
-  if (tone === 'idle' && !available) return 'bg-fg-passive';
-  return TONE_DOT[tone];
-}
 
 const HudBody = observer(function HudBody() {
   const app = useApp();
@@ -221,7 +223,7 @@ const HudBody = observer(function HudBody() {
 
   if (!hud) {
     return (
-      <div className="text-fg-passive flex items-center justify-center px-5 py-10">
+      <div className="flex items-center justify-center px-5 py-10 text-foreground-passive">
         <Spinner className="size-5" />
         <span className="sr-only">Connecting to the conductor</span>
       </div>
@@ -230,14 +232,11 @@ const HudBody = observer(function HudBody() {
 
   if (!hud.available) {
     return (
-      <div className="flex flex-col items-center px-8 pt-5 pb-7 text-center">
-        <span className="bg-surface-2 text-fg-muted flex size-12 items-center justify-center rounded-full">
-          <MonitorUp className="size-[22px]" aria-hidden="true" />
-        </span>
-        <h3 className="mt-3.5 text-[17px] font-semibold tracking-tight">
+      <div className="flex flex-col items-center px-8 pt-6 pb-8 text-center">
+        <h3 className="text-heading font-semibold text-balance text-foreground">
           Open Maestro on {app.hostName}
         </h3>
-        <p className="text-fg-muted mt-1.5 max-w-xs text-[14px] leading-snug">
+        <p className="text-body mt-2 max-w-xs text-balance text-foreground-muted">
           The conductor runs in the Maestro window on that computer. Once the window is open, you
           can talk to it from here.
         </p>
@@ -275,7 +274,7 @@ const HudBody = observer(function HudBody() {
       {quiet ? <Examples /> : null}
 
       {utterance && !quiet ? (
-        <p className="bg-surface-2 text-fg max-w-[88%] self-end rounded-[20px] rounded-br-md px-3.5 py-2 text-[15px] leading-snug break-words">
+        <p className="text-body max-w-[88%] self-end rounded-lg bg-surface-emphasis px-3.5 py-2 break-words text-foreground">
           {utterance}
         </p>
       ) : null}
@@ -290,7 +289,7 @@ const HudBody = observer(function HudBody() {
                 : 'Sending…'
           }
           action={
-            <IconButton label="Cancel" className="size-9" onClick={() => voice.cancelTalking()}>
+            <IconButton label="Cancel" onClick={() => voice.cancelTalking()}>
               <X className="size-4" aria-hidden="true" />
             </IconButton>
           }
@@ -323,7 +322,7 @@ const HudBody = observer(function HudBody() {
       ) : null}
 
       {!hud.transcriptionReady && !voice.notice ? (
-        <p className="text-fg-muted bg-surface-2 rounded-2xl px-3.5 py-2.5 text-[13.5px] leading-snug">
+        <p className="text-detail px-1 text-foreground-muted">
           Speech-to-text isn’t set up on {app.hostName} yet (Settings → Voice &amp; Conductor
           there). Until then, type your commands.
         </p>
@@ -334,8 +333,8 @@ const HudBody = observer(function HudBody() {
 
 function BusyLine({ text, action }: { text: string; action?: ReactNode }) {
   return (
-    <div className="text-fg-muted flex min-h-9 items-center gap-2.5 px-1 text-[14.5px]">
-      <Spinner className="size-4 shrink-0" />
+    <div className="text-detail flex min-h-11 items-center gap-2.5 pl-1 text-foreground-muted">
+      <Spinner className="size-4 shrink-0 text-foreground-passive" />
       <span className="min-w-0 flex-1 truncate">{text}</span>
       {action}
     </div>
@@ -346,19 +345,20 @@ const Reply = observer(function Reply({ text }: { text: string }) {
   const voice = useVoice();
   return (
     <div className="animate-fade-in flex items-start gap-1 pl-1">
+      {/* The one line that matters most, as on the desktop conductor. */}
       <p
         aria-live="polite"
-        className="min-w-0 flex-1 py-1 text-[17px] leading-[1.42] break-words whitespace-pre-wrap"
+        className="text-heading min-w-0 flex-1 py-2.5 break-words whitespace-pre-wrap text-foreground"
       >
         {text}
       </p>
       {voice.speaking ? (
-        <IconButton label="Stop speaking" className="size-9" onClick={() => voice.stopSpeaking()}>
+        <IconButton label="Stop speaking" onClick={() => voice.stopSpeaking()}>
           <Square className="size-3.5 fill-current" aria-hidden="true" />
         </IconButton>
       ) : (
-        <IconButton label="Read aloud" className="size-9" onClick={() => voice.readReplyAloud()}>
-          <Volume2 className="size-[18px]" aria-hidden="true" />
+        <IconButton label="Read aloud" onClick={() => voice.readReplyAloud()}>
+          <Volume2 className="size-4" aria-hidden="true" />
         </IconButton>
       )}
     </div>
@@ -374,16 +374,14 @@ const Examples = observer(function Examples() {
   );
   return (
     <div className="px-1 pt-1 pb-1">
-      <p className="text-fg-muted text-[12.5px] font-semibold tracking-wide uppercase">
-        Try saying
-      </p>
-      <ul className="mt-1.5 flex flex-col">
+      <p className="text-caption text-foreground-passive">Try saying</p>
+      <ul className="mt-1 flex flex-col">
         {phrases.map((phrase) => (
           <li key={phrase}>
             <button
               type="button"
               onClick={() => voice.setTyped(phrase)}
-              className="text-fg hover:bg-surface-2 active:bg-surface-2 -mx-2 block w-[calc(100%+1rem)] rounded-xl px-2 py-2 text-left text-[16px] leading-snug transition-colors duration-100"
+              className="text-body -mx-2 flex min-h-11 w-[calc(100%+1rem)] items-center rounded-md px-2 py-2 text-left text-foreground-muted transition-colors duration-150 hover:bg-surface-hover hover:text-foreground active:bg-surface-hover"
             >
               “{phrase}”
             </button>
@@ -422,9 +420,9 @@ const HudFooter = observer(function HudFooter() {
   };
 
   return (
-    <footer className="hud-footer border-line pb-safe-or-3 shrink-0 border-t px-3 pt-2.5">
+    <footer className="hud-footer pb-safe-or-3 shrink-0 px-3 pt-2">
       {capturing && voice.partial ? (
-        <p className="text-fg mb-2 line-clamp-3 px-1.5 text-[15.5px] leading-snug italic">
+        <p className="text-body mb-2 line-clamp-3 px-1.5 text-foreground-body italic">
           {voice.partial}
         </p>
       ) : null}
@@ -433,7 +431,7 @@ const HudFooter = observer(function HudFooter() {
           <IconButton
             key="cancel"
             label="Cancel recording"
-            className="bg-surface-2 size-12"
+            className="size-12 rounded-full bg-surface-emphasis"
             onClick={() => voice.cancelTalking()}
           >
             <X className="size-5" aria-hidden="true" />
@@ -443,12 +441,14 @@ const HudFooter = observer(function HudFooter() {
           <div
             key="meter"
             className={cx(
-              'flex h-12 min-w-0 flex-1 items-center gap-3 rounded-full px-4 transition-colors duration-150',
-              armed ? 'bg-surface-2 text-fg-passive' : 'bg-danger-soft text-danger'
+              // The level in the accent, like the desktop bar's meter; passive once a release
+              // would cancel.
+              'flex h-12 min-w-0 flex-1 items-center gap-3 rounded-lg bg-surface-emphasis px-4 transition-colors duration-150',
+              armed ? 'text-foreground-passive' : 'text-accent'
             )}
           >
             <Waveform className="flex-1" />
-            <span className="text-fg shrink-0 text-[14px] font-medium tabular-nums">
+            <span className="text-body shrink-0 text-foreground tabular-nums">
               {voice.elapsedLabel}
             </span>
           </div>
@@ -465,7 +465,7 @@ const HudFooter = observer(function HudFooter() {
               autoComplete="off"
               autoCapitalize="sentences"
               enterKeyHint="send"
-              className="border-line-strong bg-canvas text-fg placeholder:text-fg-passive focus:border-focus focus:ring-focus/25 h-12 w-full rounded-full border px-4 outline-none focus:ring-2"
+              className="field text-reading h-12 w-full rounded-lg px-3.5"
             />
           </div>
         )}
@@ -477,12 +477,12 @@ const HudFooter = observer(function HudFooter() {
             disabled={busy}
             // Sending must not dismiss the on-screen keyboard.
             onMouseDown={(event) => event.preventDefault()}
-            className="bg-primary text-primary-fg flex size-12 shrink-0 items-center justify-center rounded-full transition-[transform,opacity] duration-150 active:scale-95 disabled:opacity-40"
+            className="bg-primary text-primary-foreground hover:bg-primary-hover flex size-12 shrink-0 items-center justify-center rounded-full transition-[background-color,opacity] duration-150 disabled:opacity-40"
           >
             {sending ? (
               <Spinner />
             ) : (
-              <ArrowUp className="size-[22px]" strokeWidth={2.5} aria-hidden="true" />
+              <ArrowUp className="size-5" strokeWidth={2.25} aria-hidden="true" />
             )}
           </button>
         ) : (
@@ -514,8 +514,8 @@ const RecordingHint = observer(function RecordingHint() {
     <p
       aria-live="polite"
       className={cx(
-        'mt-1.5 text-center text-[12.5px]',
-        armed ? 'text-danger font-medium' : 'text-fg-muted'
+        'mt-1.5 text-center text-caption',
+        armed ? 'font-medium text-foreground' : 'text-foreground-muted'
       )}
     >
       {hint}

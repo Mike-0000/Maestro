@@ -6,11 +6,10 @@ import { agentPreview, type AgentGroup } from '../lib/agent-groups';
 import { describeRelativeTime, formatRelativeTime } from '../lib/relative-time';
 import { routePath, type Route } from '../state/router';
 import { useApp, useRouter } from './app-context';
-import { BrandMark } from './BrandMark';
 import { ConnectionStatus } from './ConnectionStatus';
-import { Button, IconButton } from './controls';
+import { Button, IconButton, Spinner, TextAction } from './controls';
 import { cx, useIsWide } from './hooks';
-import { agentStatusLabel, agentTone, StatusIndicator } from './StatusIndicator';
+import { agentMark, agentStatusLabel, agentTone, StateMark } from './StatusIndicator';
 import { VoiceFab } from './VoiceMic';
 
 /** Follows an in-app link without a page load, leaving modified clicks to the browser. */
@@ -24,6 +23,16 @@ function useLinkHandler(route: Route): (event: MouseEvent<HTMLAnchorElement>) =>
   };
 }
 
+/** "Nothing needs you" / "2 need you": the line the desktop sidebar opens with. */
+function attentionSummary(count: number): string {
+  if (count === 0) return 'Nothing needs you';
+  return `${count} ${count === 1 ? 'needs' : 'need'} you`;
+}
+
+/**
+ * The agents, read like the desktop sidebar: the ones waiting on you first, each row its name,
+ * what it last said or is asking, and its state in words, with the shared state marks.
+ */
 export const AgentList = observer(function AgentList() {
   const app = useApp();
   const router = useRouter();
@@ -34,29 +43,39 @@ export const AgentList = observer(function AgentList() {
   const openNew = (): void => router.push({ name: 'new' });
 
   return (
-    <section aria-label="Agents" className="bg-canvas relative flex h-full min-w-0 flex-col">
-      <header className="px-safe pt-safe">
-        <div className="flex items-end gap-1 px-5 pt-4 pb-2">
+    <section aria-label="Agents" className="relative flex h-full min-w-0 flex-col bg-surface">
+      <header className="px-safe pt-safe shrink-0">
+        <div className="flex items-center gap-1 pt-3 pr-2 pb-1 pl-5">
           <div className="min-w-0 flex-1">
-            <h1 className="text-[28px] leading-8 font-bold tracking-tight">Agents</h1>
-            <div className="text-fg-muted mt-1 flex min-w-0 items-center gap-2 text-[13px]">
+            <h1 className="text-title text-foreground">Agents</h1>
+            <p className="text-detail flex min-w-0 items-center gap-1.5 text-foreground-muted">
               <span className="truncate">{app.hostName}</span>
-              <span aria-hidden="true" className="text-fg-passive">
-                ·
-              </span>
-              <ConnectionStatus className="shrink-0" />
-            </div>
+              {loading ? null : (
+                <>
+                  <span aria-hidden="true" className="text-foreground-passive">
+                    ·
+                  </span>
+                  <span className="shrink-0">{attentionSummary(app.attentionCount)}</span>
+                </>
+              )}
+              {app.linkStatus === 'online' ? null : (
+                <span aria-hidden="true" className="text-foreground-passive">
+                  ·
+                </span>
+              )}
+              <ConnectionStatus showOnline={false} className="shrink-0" />
+            </p>
           </div>
           <IconButton label="Settings" onClick={() => router.push({ name: 'settings' })}>
-            <Settings className="size-[21px]" aria-hidden="true" />
+            <Settings className="size-5" aria-hidden="true" />
           </IconButton>
           {wide ? (
             <IconButton
               label="New agent"
               onClick={openNew}
-              className="bg-primary text-primary-fg hover:bg-primary-hover hover:text-primary-fg"
+              className="bg-primary text-primary-foreground hover:bg-primary-hover hover:text-primary-foreground active:bg-primary-hover"
             >
-              <Plus className="size-[21px]" aria-hidden="true" />
+              <Plus className="size-5" aria-hidden="true" />
             </IconButton>
           ) : null}
         </div>
@@ -65,11 +84,11 @@ export const AgentList = observer(function AgentList() {
 
       <div className="scroll-area px-safe min-h-0 flex-1">
         {loading ? (
-          <ListSkeleton />
+          <ListLoading />
         ) : groups.length === 0 ? (
           <EmptyState />
         ) : (
-          <div className="flex flex-col gap-5 px-3 pt-2 pb-28">
+          <div className="flex flex-col gap-5 px-2 pt-2 pb-28">
             {groups.map((group) => (
               <GroupSection key={group.id} group={group} selectedId={selectedId} />
             ))}
@@ -82,9 +101,9 @@ export const AgentList = observer(function AgentList() {
           type="button"
           onClick={openNew}
           aria-label="New agent"
-          className="bg-primary text-primary-fg absolute right-[max(1.25rem,env(safe-area-inset-right))] bottom-[max(1.25rem,env(safe-area-inset-bottom))] flex h-14 items-center gap-2 rounded-full pr-5 pl-4 text-[15px] font-semibold shadow-lg shadow-black/30 transition-transform duration-150 active:scale-95"
+          className="bg-primary text-body text-primary-foreground shadow-float hover:bg-primary-hover active:bg-primary-hover absolute right-[max(1rem,env(safe-area-inset-right))] bottom-[max(1rem,env(safe-area-inset-bottom))] flex h-14 items-center gap-2 rounded-full pr-5 pl-4 font-medium transition-colors duration-150"
         >
-          <Plus className="size-5" strokeWidth={2.5} aria-hidden="true" />
+          <Plus className="size-5" aria-hidden="true" />
           New agent
         </button>
       ) : null}
@@ -94,7 +113,7 @@ export const AgentList = observer(function AgentList() {
           className={
             wide
               ? 'right-4 bottom-4'
-              : 'bottom-[max(1.25rem,env(safe-area-inset-bottom))] left-[max(1.25rem,env(safe-area-inset-left))]'
+              : 'bottom-[max(1rem,env(safe-area-inset-bottom))] left-[max(1rem,env(safe-area-inset-left))]'
           }
         />
       )}
@@ -111,7 +130,7 @@ const FilterBar = observer(function FilterBar() {
     <div
       role="toolbar"
       aria-label="Filter agents"
-      className="no-scrollbar flex gap-2 overflow-x-auto px-5 pt-1 pb-3"
+      className="no-scrollbar flex overflow-x-auto px-3.5 pb-1"
     >
       {showProjects ? (
         <>
@@ -145,6 +164,7 @@ const FilterBar = observer(function FilterBar() {
   );
 });
 
+/** A quiet segment: a pill that fills one step when chosen, inside a 44px tap target. */
 function Chip({
   selected,
   onClick,
@@ -162,23 +182,22 @@ function Chip({
       aria-pressed={selected}
       aria-label={label}
       onClick={onClick}
-      className={cx(
-        'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-[13.5px] font-medium whitespace-nowrap transition-colors duration-150',
-        selected
-          ? 'border-transparent bg-fg text-fg-inverse'
-          : 'border-line-strong text-fg-muted hover:bg-surface-2 hover:text-fg'
-      )}
+      className="group/chip flex h-11 shrink-0 items-center rounded-full px-0.5 outline-none"
     >
-      {children}
+      <span
+        className={cx(
+          'inline-flex h-8 items-center gap-1.5 rounded-full px-3.5 text-detail font-medium whitespace-nowrap transition-colors duration-150',
+          'group-focus-visible/chip:outline-2 group-focus-visible/chip:outline-offset-1 group-focus-visible/chip:outline-ring',
+          selected
+            ? 'bg-surface-selected text-foreground'
+            : 'text-foreground-muted group-hover/chip:bg-surface-hover group-hover/chip:text-foreground'
+        )}
+      >
+        {children}
+      </span>
     </button>
   );
 }
-
-const GROUP_ACCENT: Record<AgentGroup['id'], string> = {
-  attention: 'text-attention',
-  working: 'text-fg-muted',
-  idle: 'text-fg-muted',
-};
 
 const GroupSection = observer(function GroupSection({
   group,
@@ -192,22 +211,14 @@ const GroupSection = observer(function GroupSection({
     <section aria-labelledby={headingId}>
       <h2
         id={headingId}
-        className={cx(
-          'flex items-baseline gap-2 px-2.5 pb-1.5 text-[12.5px] font-semibold tracking-wide uppercase',
-          GROUP_ACCENT[group.id]
-        )}
+        className="text-caption flex items-baseline gap-1.5 px-3 pb-1 text-foreground-passive"
       >
         {group.label}
-        <span className="text-fg-passive font-medium tabular-nums">{group.agents.length}</span>
+        <span className="tabular-nums">{group.agents.length}</span>
       </h2>
-      <ul
-        className={cx(
-          'overflow-hidden rounded-2xl border bg-surface',
-          group.id === 'attention' ? 'border-attention-line/60' : 'border-line'
-        )}
-      >
-        {group.agents.map((agent, index) => (
-          <li key={agent.conversationId} className={cx(index > 0 && 'border-t border-line')}>
+      <ul className="flex flex-col gap-0.5">
+        {group.agents.map((agent) => (
+          <li key={agent.conversationId}>
             <AgentRow agent={agent} selected={agent.conversationId === selectedId} />
           </li>
         ))}
@@ -228,6 +239,7 @@ const AgentRow = observer(function AgentRow({
   const onClick = useLinkHandler(route);
   const preview = agentPreview(agent);
   const tone = agentTone(agent);
+  const waiting = tone === 'attention';
   const project = app.projectName(agent.projectId);
   const agentName = agent.title || app.providerName(agent.providerId) || agent.providerId;
   return (
@@ -236,15 +248,19 @@ const AgentRow = observer(function AgentRow({
       onClick={onClick}
       aria-current={selected ? 'page' : undefined}
       className={cx(
-        'flex gap-3 px-3.5 py-3 transition-colors duration-100 outline-offset-[-2px]',
-        selected ? 'bg-surface-3' : 'hover:bg-surface-2 active:bg-surface-2',
-        agent.archived && 'opacity-60'
+        'flex gap-2.5 rounded-lg py-2.5 pr-3 pl-2.5 transition-colors duration-150 outline-offset-[-2px]',
+        selected ? 'bg-surface-selected' : 'hover:bg-surface-hover active:bg-surface-hover'
       )}
     >
-      <StatusIndicator agent={agent} className="mt-px" />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-2">
-          <span className="min-w-0 flex-1 truncate text-[15.5px] leading-5 font-semibold">
+      <StateMark state={agentMark(agent)} className="mt-[3px]" />
+      <div className={cx('min-w-0 flex-1', agent.archived && 'opacity-60')}>
+        <div className="flex items-baseline gap-3">
+          <span
+            className={cx(
+              'min-w-0 flex-1 truncate text-body text-foreground',
+              waiting && 'font-medium'
+            )}
+          >
             {agent.taskName}
           </span>
           <time
@@ -254,66 +270,59 @@ const AgentRow = observer(function AgentRow({
                 : new Date(agent.lastActivityAt).toISOString()
             }
             aria-label={describeRelativeTime(agent.lastActivityAt, app.now)}
-            className="text-fg-passive shrink-0 text-[12.5px] tabular-nums"
+            className="text-caption shrink-0 text-foreground-passive tabular-nums"
           >
             {formatRelativeTime(agent.lastActivityAt, app.now)}
           </time>
         </div>
-        <div className="text-fg-muted mt-0.5 flex min-w-0 items-center gap-1.5 text-[12.5px]">
-          <span className="truncate">{agentName}</span>
-          {project ? (
-            <>
-              <span aria-hidden="true" className="text-fg-passive">
-                ·
-              </span>
-              <span className="truncate">{project}</span>
-            </>
-          ) : null}
-          {agent.archived ? (
-            <span className="bg-surface-3 text-fg-muted shrink-0 rounded-full px-1.5 text-[11px]">
-              Archived
-            </span>
-          ) : null}
-        </div>
         {preview ? (
           <p
             className={cx(
-              'mt-1.5 line-clamp-2 text-[13.5px] leading-[1.38]',
-              tone === 'attention' ? 'text-fg' : 'text-fg-muted'
+              'mt-0.5 text-detail break-words',
+              waiting ? 'line-clamp-2 text-foreground' : 'line-clamp-1 text-foreground-muted'
             )}
           >
             {preview}
           </p>
-        ) : (
-          <p className="text-fg-passive mt-1.5 text-[13.5px]">{agentStatusLabel(agent)}</p>
-        )}
+        ) : null}
+        <p className="text-caption mt-1 flex min-w-0 items-center gap-1.5 text-foreground-passive">
+          <span className={cx('shrink-0', tone === 'error' && 'text-foreground-error')}>
+            {agentStatusLabel(agent)}
+          </span>
+          <Dot />
+          <span className="truncate">{agentName}</span>
+          {project ? (
+            <>
+              <Dot />
+              <span className="truncate">{project}</span>
+            </>
+          ) : null}
+          {agent.archived ? (
+            <>
+              <Dot />
+              <span className="shrink-0">Archived</span>
+            </>
+          ) : null}
+        </p>
       </div>
     </a>
   );
 });
 
-function ListSkeleton() {
+function Dot() {
+  return <span aria-hidden="true">·</span>;
+}
+
+/** A passive spinner and one line, shown only if loading takes longer than a moment. */
+function ListLoading() {
   return (
-    <div aria-busy="true" aria-label="Loading agents" className="px-3 pt-2">
-      <div className="bg-surface-2 mx-2.5 mb-2 h-3 w-20 rounded" />
-      <div className="border-line bg-surface overflow-hidden rounded-2xl border">
-        {[72, 56, 64].map((width, index) => (
-          <div
-            key={width}
-            className={cx(
-              'flex animate-pulse gap-3 px-3.5 py-3.5',
-              index > 0 && 'border-t border-line'
-            )}
-          >
-            <div className="bg-surface-3 mt-1 size-3 rounded-full" />
-            <div className="flex-1 space-y-2">
-              <div className="bg-surface-3 h-3.5 rounded" style={{ width: `${width}%` }} />
-              <div className="bg-surface-2 h-3 w-2/5 rounded" />
-              <div className="bg-surface-2 h-3 w-4/5 rounded" />
-            </div>
-          </div>
-        ))}
-      </div>
+    <div
+      aria-busy="true"
+      aria-label="Loading agents"
+      className="animate-delayed-in text-detail flex items-center justify-center gap-2.5 pt-16 text-foreground-muted"
+    >
+      <Spinner className="size-4 text-foreground-passive" />
+      Loading agents…
     </div>
   );
 }
@@ -324,26 +333,21 @@ const EmptyState = observer(function EmptyState() {
   const filtered = app.projectFilter !== null && app.agents.some((agent) => !agent.archived);
   return (
     <div className="animate-fade-in flex min-h-full flex-col items-center justify-center px-8 pt-6 pb-24 text-center">
-      <div className="opacity-90">
-        <BrandMark size={56} />
-      </div>
-      <h2 className="mt-5 text-[19px] font-semibold tracking-tight">
+      <h2 className="text-hero text-balance text-foreground">
         {filtered ? 'No agents in this project' : 'No agents running'}
       </h2>
-      <p className="text-fg-muted mt-1.5 max-w-xs text-[14.5px]">
+      <p className="text-body mt-3 max-w-xs text-balance text-foreground-muted">
         {filtered
           ? 'Start one here, or switch back to all projects.'
           : `Start an agent on ${app.hostName} and steer it from here.`}
       </p>
-      <div className="mt-6 flex flex-col gap-2">
+      <div className="mt-8 flex flex-col items-center gap-1">
         <Button variant="primary" onClick={() => router.push({ name: 'new' })} className="px-6">
-          <Plus className="size-[18px]" strokeWidth={2.5} aria-hidden="true" />
+          <Plus className="size-5" aria-hidden="true" />
           New agent
         </Button>
         {filtered ? (
-          <Button variant="ghost" onClick={() => app.setProjectFilter(null)}>
-            Show all projects
-          </Button>
+          <TextAction onClick={() => app.setProjectFilter(null)}>Show all projects</TextAction>
         ) : null}
       </div>
     </div>

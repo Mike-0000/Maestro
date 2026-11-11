@@ -1,4 +1,3 @@
-import { MousePointerClick, WifiOff } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useEffect } from 'react';
 import { AgentList } from './AgentList';
@@ -21,7 +20,7 @@ export const App = observer(function App() {
   useEffect(() => voice.start(), [voice]);
 
   return (
-    <div className="app-frame">
+    <div className="app-frame surface-sunken">
       {app.phase === 'loading' ? (
         <Splash />
       ) : app.phase === 'unreachable' ? (
@@ -39,26 +38,24 @@ export const App = observer(function App() {
 function Splash() {
   return (
     <div className="flex h-full w-full flex-col items-center justify-center gap-6">
-      <BrandMark size={64} />
-      <Spinner className="text-fg-passive size-5" />
+      <BrandMark size={56} />
+      <Spinner className="size-5 text-foreground-passive" />
       <span className="sr-only">Loading Maestro</span>
     </div>
   );
 }
 
+/** The page-level error: a quiet title, one sentence, one action. It keeps retrying itself. */
 const Unreachable = observer(function Unreachable() {
   const app = useApp();
   return (
     <main className="pt-safe pb-safe flex h-full w-full flex-col items-center justify-center px-8 text-center">
-      <span className="bg-surface-2 text-fg-muted flex size-14 items-center justify-center rounded-full">
-        <WifiOff className="size-6" aria-hidden="true" />
-      </span>
-      <h1 className="mt-5 text-[22px] font-semibold tracking-tight">Can’t reach your computer</h1>
-      <p className="text-fg-muted mt-2 max-w-xs text-[15px]">
+      <h1 className="text-hero max-w-sm text-balance text-foreground">Can’t reach your computer</h1>
+      <p className="text-body mt-3 max-w-xs text-balance text-foreground-muted">
         Make sure it’s awake, Maestro is running, and this device is on your tailnet. Trying again
         automatically…
       </p>
-      <Button variant="secondary" className="mt-6 px-6" onClick={() => void app.loadSession()}>
+      <Button variant="secondary" className="mt-8 px-6" onClick={() => void app.loadSession()}>
         Try now
       </Button>
     </main>
@@ -67,8 +64,8 @@ const Unreachable = observer(function Unreachable() {
 
 /**
  * The paired app. A phone shows one screen at a time, the agent sliding over the list; a wide
- * window shows the list beside the agent. The list stays mounted underneath either way, so it
- * keeps its scroll position when you come back.
+ * window shows the list beside the agent, like the desktop's sidebar beside its content. The
+ * list stays mounted underneath either way, so it keeps its scroll position when you come back.
  */
 const Workspace = observer(function Workspace() {
   const router = useRouter();
@@ -81,16 +78,13 @@ const Workspace = observer(function Workspace() {
     <>
       <div
         inert={!wide && detailOpen}
-        className={cx(
-          'h-full min-w-0',
-          wide ? 'w-[380px] shrink-0 border-r border-line' : 'w-full'
-        )}
+        className={cx('h-full min-w-0', wide ? 'w-[380px] shrink-0' : 'w-full')}
       >
         <AgentList />
       </div>
 
       {wide ? (
-        <div className="h-full min-w-0 flex-1">
+        <div className="surface-paper h-full min-w-0 flex-1 bg-surface">
           {page.name === 'agent' ? (
             <AgentScreen conversationId={page.conversationId} />
           ) : (
@@ -120,12 +114,14 @@ const NothingSelected = observer(function NothingSelected() {
   const app = useApp();
   const waiting = app.attentionCount;
   return (
-    <div className="text-fg-muted flex h-full flex-col items-center justify-center px-8 text-center">
-      <MousePointerClick className="text-fg-passive size-7" aria-hidden="true" />
-      <p className="mt-4 text-[15px]">
+    <div className="flex h-full flex-col items-center justify-center px-8 text-center">
+      <h2 className="text-title text-foreground">
         {waiting > 0
-          ? `${waiting} ${waiting === 1 ? 'agent needs' : 'agents need'} you. Pick one to answer it.`
-          : 'Select an agent to watch it work.'}
+          ? `${waiting} ${waiting === 1 ? 'agent needs' : 'agents need'} you`
+          : 'Nothing needs you'}
+      </h2>
+      <p className="text-body mt-3 max-w-xs text-balance text-foreground-muted">
+        {waiting > 0 ? 'Pick one from the list to answer it.' : 'Pick an agent to watch it work.'}
       </p>
     </div>
   );

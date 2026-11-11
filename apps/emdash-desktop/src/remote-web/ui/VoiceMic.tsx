@@ -96,8 +96,9 @@ export const VoiceFab = observer(function VoiceFab({
       tabIndex={hidden ? -1 : 0}
       {...handlers}
       className={cx(
-        'absolute flex items-center justify-center rounded-full border border-line-strong bg-raised text-fg shadow-lg shadow-black/30',
-        'transition-[opacity,transform] duration-150 active:scale-95',
+        // A floating layer like the desktop's voice bar: the elevated surface and one hairline.
+        'surface-elevated absolute flex items-center justify-center rounded-full border border-border-subtle bg-surface text-foreground shadow-float',
+        'transition-[opacity,background-color] duration-150 hover:bg-surface-hover active:bg-surface-hover',
         size === 'large' ? 'size-14' : 'size-12',
         PRESS_SURFACE,
         // Hidden under the HUD, but only out of reach once no press is using it.
@@ -106,11 +107,12 @@ export const VoiceFab = observer(function VoiceFab({
         className
       )}
     >
-      <Mic className={size === 'large' ? 'size-6' : 'size-[22px]'} aria-hidden="true" />
+      <Mic className={size === 'large' ? 'size-6' : 'size-5'} aria-hidden="true" />
       {voice.needsLook && !hidden ? (
+        // The needs-you dot: something in the conductor is waiting to be looked at.
         <span
           aria-hidden="true"
-          className="border-raised bg-attention absolute top-0.5 right-0.5 size-3 rounded-full border-2"
+          className="absolute top-1 right-1 size-3 rounded-full border-2 border-surface bg-foreground"
         />
       ) : null}
     </button>
@@ -134,8 +136,8 @@ export const HudTalkButton = observer(function HudTalkButton({ disabled }: { dis
         <span
           aria-hidden="true"
           className={cx(
-            'absolute inset-0 rounded-full transition-transform duration-100',
-            armed ? 'bg-fg-passive/40' : 'bg-danger/35'
+            'absolute inset-0 rounded-full motion-safe:transition-transform motion-safe:duration-100',
+            armed ? 'bg-foreground-passive/30' : 'bg-accent/30'
           )}
           style={{ transform: `scale(${1.12 + voice.level * 0.5})` }}
         />
@@ -150,19 +152,20 @@ export const HudTalkButton = observer(function HudTalkButton({ disabled }: { dis
         {...handlers}
         className={cx(
           'relative flex size-12 items-center justify-center rounded-full',
-          'transition-[background-color,transform,opacity] duration-150 active:scale-95 disabled:opacity-40',
+          'transition-[background-color,opacity] duration-150 disabled:opacity-40',
           PRESS_SURFACE,
+          // While held the mic is live: the near-white of the needs-you mark, ringed in accent.
           holding
             ? armed
-              ? 'bg-surface-3 text-fg-muted'
-              : 'bg-danger text-white'
-            : 'bg-primary text-primary-fg'
+              ? 'bg-surface-selected text-foreground-muted'
+              : 'bg-foreground text-foreground-inverse'
+            : 'bg-primary text-primary-foreground hover:bg-primary-hover'
         )}
       >
         {tapMode ? (
-          <ArrowUp className="size-[22px]" strokeWidth={2.5} aria-hidden="true" />
+          <ArrowUp className="size-5" strokeWidth={2.25} aria-hidden="true" />
         ) : (
-          <Mic className="size-[22px]" aria-hidden="true" />
+          <Mic className="size-5" aria-hidden="true" />
         )}
       </button>
     </span>

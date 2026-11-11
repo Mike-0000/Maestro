@@ -28,20 +28,68 @@ export function cssColorToHex(color: string, fallback: string): string {
   return `#${[r, g, b].map((channel) => channel.toString(16).padStart(2, '0')).join('')}`;
 }
 
-/** The terminal palette for the active theme, read from the same tokens the desktop app uses. */
+/** `amount` (0–1) of `top` laid over `bottom`, both `#rrggbb`. */
+function mixHex(top: string, bottom: string, amount: number): string {
+  const channel = (hex: string, index: number): number =>
+    Number.parseInt(hex.slice(1 + index * 2, 3 + index * 2), 16);
+  return `#${[0, 1, 2]
+    .map((index) =>
+      Math.round(channel(top, index) * amount + channel(bottom, index) * (1 - amount))
+        .toString(16)
+        .padStart(2, '0')
+    )
+    .join('')}`;
+}
+
+/**
+ * xterm theme keys for the 16 ANSI colours and the tokens that define them, the same tokens and
+ * values as the desktop terminal (src/assets/styles/terminal-ansi.css, imported by styles.css).
+ */
+export const ANSI_COLOR_VARS = {
+  black: '--xterm-ansi-black',
+  red: '--xterm-ansi-red',
+  green: '--xterm-ansi-green',
+  yellow: '--xterm-ansi-yellow',
+  blue: '--xterm-ansi-blue',
+  magenta: '--xterm-ansi-magenta',
+  cyan: '--xterm-ansi-cyan',
+  white: '--xterm-ansi-white',
+  brightBlack: '--xterm-ansi-bright-black',
+  brightRed: '--xterm-ansi-bright-red',
+  brightGreen: '--xterm-ansi-bright-green',
+  brightYellow: '--xterm-ansi-bright-yellow',
+  brightBlue: '--xterm-ansi-bright-blue',
+  brightMagenta: '--xterm-ansi-bright-magenta',
+  brightCyan: '--xterm-ansi-bright-cyan',
+  brightWhite: '--xterm-ansi-bright-white',
+} as const satisfies Partial<Record<keyof ITheme, string>>;
+
+/**
+ * The terminal palette for the active theme, read from the same tokens the desktop app uses.
+ * Selection is an accent tint with ordinary text over it, as in the desktop terminal (30% in
+ * dark, 22% in light). The fallbacks are sRGB stand-ins for the tokens, used only when a token
+ * cannot be read.
+ */
 export function readTerminalTheme(): ITheme {
   const styles = getComputedStyle(document.documentElement);
   const dark = document.documentElement.classList.contains('emdark');
   const token = (name: string, fallback: string): string =>
     cssColorToHex(styles.getPropertyValue(name).trim(), fallback);
-  const foreground = token('--em-foreground', dark ? '#e9e9e9' : '#222222');
-  const background = token('--em-surface-paper', dark ? '#191919' : '#fcfcfc');
-  return {
+  const foreground = token('--em-foreground', dark ? '#eceff1' : '#12181c');
+  const background = token('--em-surface-paper', dark ? '#13191c' : '#fcfeff');
+  const accent = token('--em-accent', dark ? '#55b9a2' : '#007461');
+  const theme: ITheme = {
     background,
     foreground,
     cursor: foreground,
     cursorAccent: background,
-    selectionBackground: dark ? '#2b5a94' : '#a6c8ff',
-    selectionForeground: dark ? '#e6f1ff' : '#0b1f3d',
+    selectionBackground: mixHex(accent, background, dark ? 0.3 : 0.22),
+    selectionForeground: foreground,
   };
+  // A token that cannot be read keeps xterm's default for that colour.
+  for (const [key, name] of Object.entries(ANSI_COLOR_VARS)) {
+    const hex = token(name, '');
+    if (hex) theme[key as keyof typeof ANSI_COLOR_VARS] = hex;
+  }
+  return theme;
 }
