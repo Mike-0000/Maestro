@@ -48,6 +48,11 @@ export interface SendOptions {
   waitForTyping?: boolean;
   /** Told once, as soon as the send is held for the developer's typing. See `delivery-lane`. */
   onHold?: (hold: DeliveryHold) => void;
+  /**
+   * The text is the developer's own dictated words: once submitted it is recorded as their
+   * prompt, for the chat conductor (see `developerSubmissionsSince`).
+   */
+  dictated?: boolean;
 }
 
 /**
@@ -272,7 +277,7 @@ export async function sendToLiveSession(
   };
   if (!submit) {
     const typed = await writeToInput(entry.conversationId, paste);
-    if (typed) noteDictatedText(entry.conversationId);
+    if (typed) noteDictatedText(entry.conversationId, text);
     return typed;
   }
   return pasteAndSubmit(entry, options, paste, (typed) => typed);
@@ -311,10 +316,15 @@ export async function sendToAgent(
   const paste = () => sendRaw(entry.conversationId, pastePayload(entry, text));
   if (!submit) {
     await writeToInput(entry.conversationId, paste);
-    noteDictatedText(entry.conversationId);
+    noteDictatedText(entry.conversationId, text);
     return;
   }
-  await pasteAndSubmit(entry, options, paste, () => true);
+  const pasteWords = async () => {
+    await paste();
+    // In the input with whatever the developer typed there: the Enter submits both as theirs.
+    if (options.dictated) noteDictatedText(entry.conversationId, text);
+  };
+  await pasteAndSubmit(entry, options, pasteWords, () => true);
 }
 
 /** Presses Enter in an agent (submits dictated text). */

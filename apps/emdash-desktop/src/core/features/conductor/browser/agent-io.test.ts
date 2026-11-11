@@ -2,6 +2,7 @@ import { observable, runInAction } from 'mobx';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentTileEntry } from '@core/features/canvas/api/browser/stores/canvas-store';
 import {
+  developerSubmissionsSince,
   noteDeveloperInput,
   resetDeveloperTyping,
 } from '@core/features/terminals/api/browser/pty/developer-typing';
@@ -557,5 +558,53 @@ describe('holding a message while the developer types in that terminal', () => {
     await vi.advanceTimersByTimeAsync(4_000);
     await expect(second).resolves.toBeUndefined();
     expect(pastes()).toHaveLength(2);
+  });
+});
+
+describe("dictation, recorded as the developer's prompt once it is submitted", () => {
+  it('records the words dictation sent, with what the developer had typed before them', async () => {
+    vi.useFakeTimers();
+    try {
+      noteDeveloperInput('proj:task-1:conv-1', 'Publish this,', 1_000);
+      const sent = sendToAgent(
+        entry({ sessionActive: true }),
+        'go with your recommendations',
+        true,
+        { waitForTyping: false, dictated: true }
+      );
+      await vi.advanceTimersByTimeAsync(1_000);
+      await sent;
+      expect(developerSubmissionsSince('conv-1', 0)).toEqual([
+        { at: expect.any(Number), text: 'Publish this, go with your recommendations' },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('records words dictated without Enter when "send it" submits them, once', async () => {
+    await sendToAgent(entry({ sessionActive: true }), 'add a retry', false);
+    expect(developerSubmissionsSince('conv-1', 0)).toEqual([]);
+    await submitAgentInput(entry({ sessionActive: true }));
+    expect(developerSubmissionsSince('conv-1', 0)).toEqual([
+      { at: expect.any(Number), text: 'add a retry' },
+    ]);
+    // The input is empty now: a second Enter records nothing more.
+    await submitAgentInput(entry({ sessionActive: true }));
+    expect(developerSubmissionsSince('conv-1', 0)).toHaveLength(1);
+  });
+
+  it("never records the conductor's own messages", async () => {
+    vi.useFakeTimers();
+    try {
+      const sent = sendToAgent(entry({ sessionActive: true }), 'Run the tests.', true, {
+        waitForTyping: false,
+      });
+      await vi.advanceTimersByTimeAsync(1_000);
+      await sent;
+      expect(developerSubmissionsSince('conv-1', 0)).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

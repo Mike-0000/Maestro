@@ -2,15 +2,13 @@ import { parseCommand } from '../../api/grammar';
 import { isPureStop } from '../../api/stop-words';
 
 /**
- * What the HUD's routing needs of a chat conductor: a developer message, and the composer's
- * unsent text. `ChatConductorSession` is one; tests use fakes.
+ * What the HUD's routing needs of a chat conductor: a developer message, and a stop.
+ * `ChatConductorSession` is one; tests use fakes.
  */
 export interface FrontConductorSession {
-  readonly draft: string;
   /** A turn is running or waiting to run. */
   readonly busy: boolean;
   send(text: string): void;
-  setDraft(text: string): void;
   /** Ends the running turn at its next step. */
   stop(): void;
 }
@@ -23,6 +21,11 @@ export interface FrontConductor {
   readonly session: FrontConductorSession;
   /** What it conducts, as the developer knows it ("Atlas"). */
   readonly name: string;
+  /**
+   * The chat whose Conductor view is on screen. Its terminal is hidden behind the thread, but
+   * dictation still types into its agent.
+   */
+  readonly chatId: string;
 }
 
 export interface FrontConductorSource {
@@ -67,13 +70,4 @@ export function answersMaestro(text: string, floor: MaestroFloor): boolean {
 /** "send it", "submit", "press enter": what sends dictated words that are waiting. */
 export function isSubmitPhrase(text: string): boolean {
   return parseCommand(text, [], null)?.kind === 'submit';
-}
-
-/** Dictated words added after what the composer already holds. */
-export function joinDraft(base: string, text: string): string {
-  const head = base.trimEnd();
-  const tail = text.trim();
-  if (!head) return tail;
-  if (!tail) return base;
-  return `${head} ${tail}`;
 }

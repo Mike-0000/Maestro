@@ -2,14 +2,14 @@ import { AudioLines, CheckCircle2, Download, Loader2, SendHorizontal, X } from '
 import { observer } from 'mobx-react-lite';
 import { useEffect, useRef } from 'react';
 import { getDictationStore } from '@core/features/voice/contributions/browser/app-stores';
-import { getChatDictationRoute, getConductorStore } from '../../contributions/browser/app-stores';
+import { getConductorStore } from '../../contributions/browser/app-stores';
 
 type DictationStore = ReturnType<typeof getDictationStore>;
 
 /**
  * Dictation's own surface: the words as they are heard, where they will go, and Send. It is
- * separate from the conductor's status line because nothing here goes to Maestro: it goes to the
- * agent in front, or into the composer of the chat conductor in front.
+ * separate from the conductor's status line because nothing here goes to a conductor: it goes to
+ * the agent in front, even when that chat's Conductor view is on screen.
  */
 export const DictationPanel = observer(function DictationPanel() {
   const dictation = getDictationStore();
@@ -91,8 +91,7 @@ export const DictationPanel = observer(function DictationPanel() {
 });
 
 const Heading = observer(function Heading({ dictation }: { dictation: DictationStore }) {
-  // Begun with a chat conductor in front, the words go into its composer.
-  const target = getChatDictationRoute().target ?? getConductorStore().dictationTarget();
+  const target = getConductorStore().dictationTarget();
   if (dictation.phase === 'setup') return <>Dictation runs on this computer</>;
   if (dictation.phase === 'finishing') {
     return (
