@@ -108,7 +108,10 @@ export function AutomationSettingsFields({
                   content: (
                     <ConversationField
                       onPromptBlur={onPromptBlur}
-                      textareaClassName="min-h-40"
+                      // A taller prompt box than a task's: automation prompts are standing
+                      // instructions. Sized in lines on the field itself, so the agent row sits
+                      // right under the box.
+                      minRows={6}
                       placeholder="Add a prompt to the automation..."
                       showAutoApproveToggle={false}
                       requirePromptDelivery={true}

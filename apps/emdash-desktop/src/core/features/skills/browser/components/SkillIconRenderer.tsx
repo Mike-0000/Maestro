@@ -1,6 +1,7 @@
 import type { CatalogSkill } from '@emdash/core/primitives/skills/api';
 import React, { useState } from 'react';
 import { cn } from '@core/primitives/styling/browser/cn';
+import { useLogoTone } from './logo-tone';
 import { resolveSkillIcon } from './skillIcons';
 
 /** Library marks are drawn in the current text colour, so they follow the theme. */
@@ -16,24 +17,30 @@ interface SkillIconRendererProps {
 
 /**
  * The skill's mark on a small tile one step up from its row: a library glyph in the muted text
- * colour, a Skills.sh image as published, or the first letter.
+ * colour, a catalog logo in the theme's text colour (or as published when it is an opaque
+ * picture), a Skills.sh image as published, or the first letter.
  */
 export const SkillIconRenderer: React.FC<SkillIconRendererProps> = ({ skill }) => {
   const [imgError, setImgError] = useState(false);
+  // Catalog logos on a transparent ground are flattened to the theme's text colour; opaque ones
+  // (a square app icon) are drawn as published, or the flattening would leave a solid square.
+  const flattenable = skill.source !== 'skillssh';
+  const tone = useLogoTone(flattenable ? skill.iconUrl : undefined);
 
   const letter = skill.displayName.charAt(0).toUpperCase();
 
   const renderImageIcon = () => {
     if (!skill.iconUrl || imgError) return null;
-    // Catalog logos are single-colour artwork: flatten them to the text colour of the theme.
-    const monochrome = skill.source !== 'skillssh';
     return (
       <img
         src={skill.iconUrl}
         alt=""
+        data-tone={flattenable ? (tone ?? 'measuring') : undefined}
         className={cn(
           'h-full w-full rounded-xs object-contain',
-          monochrome && 'brightness-0 emdark:invert'
+          tone === 'glyph' && 'brightness-0 emdark:invert',
+          // Hidden for the moment it takes to measure, so a tile never flashes as a square.
+          tone === null && 'opacity-0'
         )}
         onError={() => setImgError(true)}
         loading="lazy"

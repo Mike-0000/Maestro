@@ -4,6 +4,7 @@ import { useAppSettingsKey } from '@core/features/settings/api/browser/use-app-s
 import { useOpenInApps } from '@core/features/settings/api/browser/useOpenInApps';
 import { OPEN_IN_APPS, type OpenInAppId } from '@core/primitives/open-in-apps/api/open-in-apps';
 import IntegrationRow from './IntegrationRow';
+import { OpenInAppIcon } from './OpenInAppIcon';
 
 /**
  * The "Open in" rows of the Interface page: every known editor and tool, installed ones first,
@@ -44,7 +45,8 @@ export default function HiddenToolsSettingsCard() {
     return (
       <IntegrationRow
         key={app.id}
-        logoSrc={icons[app.id]}
+        logoSrc={app.glyph ? undefined : icons[app.id]}
+        icon={app.glyph ? <OpenInAppIcon appId={app.id} className="size-5" /> : undefined}
         invertInDark={app.invertInDark}
         name={label}
         status={detected ? 'connected' : 'missing'}

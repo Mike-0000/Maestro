@@ -25,6 +25,12 @@ type OpenInAppConfigShape = {
   label: string;
   iconPath: (typeof ICON_PATHS)[keyof typeof ICON_PATHS];
   invertInDark?: boolean;
+  /**
+   * Draw a theme-following glyph instead of `iconPath` in the app's UI. For generic system
+   * tools whose bundled icon is one platform's dark app tile (the macOS Terminal icon read as a
+   * black square in the light theme, and is not what opens on Windows or Linux).
+   */
+  glyph?: 'terminal';
   alwaysAvailable?: boolean;
   hideIfUnavailable?: boolean;
   autoInstall?: boolean;
@@ -209,6 +215,7 @@ const _OPEN_IN_APPS = {
     id: 'terminal',
     label: 'Terminal',
     iconPath: ICON_PATHS.terminal,
+    glyph: 'terminal',
     alwaysAvailable: true,
     supportsRemote: true,
     platforms: {

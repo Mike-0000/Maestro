@@ -29,9 +29,17 @@ interface RunHistoryProps {
  * Active / Archived control), then the runs as two-line rows on the sheet, newest first.
  */
 export function RunHistory({ automation }: RunHistoryProps) {
-  const [filter, setFilter] = useState<RunHistoryFilter>('all');
+  const [chosenFilter, setFilter] = useState<RunHistoryFilter>('all');
   const availability = useAutomationTargetAvailability(automation.projectId);
   const runtimeAvailable = availability.data?.available === true;
+  const counts = useAutomationRunCounts(
+    automation.projectId!,
+    automation.id,
+    runtimeAvailable
+  ).data;
+  // Nothing to filter until a run has finished: the control waits for the first one.
+  const showFilter = runtimeAvailable && counts.all > 0;
+  const filter: RunHistoryFilter = showFilter ? chosenFilter : 'all';
   const runs = useAutomationRunHistory(
     automation.projectId!,
     automation.id,
@@ -39,30 +47,27 @@ export function RunHistory({ automation }: RunHistoryProps) {
     PAGE_SIZE,
     runtimeAvailable
   );
-  const counts = useAutomationRunCounts(
-    automation.projectId!,
-    automation.id,
-    runtimeAvailable
-  ).data;
 
   return (
     <section className="flex flex-col gap-3" aria-label="Runs">
-      <ToggleGroup.Root
-        multiple={false}
-        value={[filter]}
-        aria-label="Show runs"
-        className="self-start"
-        onValueChange={([value]) => {
-          if (value) setFilter(value as RunHistoryFilter);
-        }}
-      >
-        {FILTERS.map(({ value, label }) => (
-          <ToggleGroup.Item key={value} value={value} aria-label={`${label} (${counts[value]})`}>
-            {label}
-            <span className="text-foreground-passive tabular-nums">{counts[value]}</span>
-          </ToggleGroup.Item>
-        ))}
-      </ToggleGroup.Root>
+      {showFilter && (
+        <ToggleGroup.Root
+          multiple={false}
+          value={[filter]}
+          aria-label="Show runs"
+          className="self-start"
+          onValueChange={([value]) => {
+            if (value) setFilter(value as RunHistoryFilter);
+          }}
+        >
+          {FILTERS.map(({ value, label }) => (
+            <ToggleGroup.Item key={value} value={value} aria-label={`${label} (${counts[value]})`}>
+              {label}
+              <span className="text-foreground-passive tabular-nums">{counts[value]}</span>
+            </ToggleGroup.Item>
+          ))}
+        </ToggleGroup.Root>
+      )}
       <div className="flex min-h-40 flex-col gap-0.5">
         {!runtimeAvailable ? (
           <EmptyState

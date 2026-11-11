@@ -28,8 +28,10 @@ export function SectionHeader({
     // Inert fixed-height row rendered as a direct child of the sections
     // Resizable.Group (the library ignores non-panel children for layout
     // math). Sections separate by space and their group label, not rules; the
-    // resize handles between expanded bodies are ghost handles.
-    <div className="group/section flex h-9 shrink-0 items-center justify-between gap-2 pt-1 pr-4 pl-3">
+    // resize handles between expanded bodies are ghost handles. When the panel is
+    // too narrow for the label beside the actions, the actions wrap to a second
+    // line, right-aligned, instead of truncating the label (as the footer does).
+    <div className="group/section flex min-h-9 shrink-0 flex-wrap items-center justify-between gap-x-2 pt-1 pr-4 pl-3">
       <button
         type="button"
         onClick={onToggleCollapsed}
@@ -46,7 +48,7 @@ export function SectionHeader({
         <span className="truncate">{label}</span>
         <span className="tabular-nums">{count}</span>
       </button>
-      <div className="flex shrink-0 items-center gap-1.5">
+      <div className="ml-auto flex min-h-7 shrink-0 items-center gap-1.5">
         {actions}
         {showCheckbox && (
           <Checkbox

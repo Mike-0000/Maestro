@@ -73,19 +73,23 @@ export const GitStatusSection = observer(function GitStatusSection() {
   // The panel's footer strip: where this worktree's branch stands on the left,
   // the sync moves on the right as quiet icon buttons that carry their
   // ahead / behind counts, and Merge… as a text action. No rule above it.
+  // When the panel is too narrow for the branch name beside the actions, the
+  // actions wrap to a second line, right-aligned, instead of crushing the name.
   return (
     <Tooltip.Provider>
-      <div className="flex h-10 shrink-0 items-center justify-between gap-3 pr-2 pl-4">
-        <Tooltip.Root>
-          <Tooltip.Trigger className="flex min-w-0 items-center gap-1.5 rounded-sm text-xs text-foreground-muted outline-none focus-visible:ring-2 focus-visible:ring-ring">
-            <GitBranch aria-hidden className="size-3.5 shrink-0 text-foreground-passive" />
-            <span className="truncate">{headDisplay}</span>
-          </Tooltip.Trigger>
-          <Tooltip.Content side="top">
-            {getBranchTooltipText(headDisplay, headKind)}
-          </Tooltip.Content>
-        </Tooltip.Root>
-        <div className="flex shrink-0 items-center gap-0.5">
+      <div className="flex min-h-10 shrink-0 flex-wrap items-center justify-between gap-x-3 py-1 pr-2 pl-4">
+        <div className="flex min-h-8 min-w-0 grow basis-36 items-center">
+          <Tooltip.Root>
+            <Tooltip.Trigger className="flex min-w-0 items-center gap-1.5 rounded-sm text-xs text-foreground-muted outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <GitBranch aria-hidden className="size-3.5 shrink-0 text-foreground-passive" />
+              <span className="truncate">{headDisplay}</span>
+            </Tooltip.Trigger>
+            <Tooltip.Content side="top">
+              {getBranchTooltipText(headDisplay, headKind)}
+            </Tooltip.Content>
+          </Tooltip.Root>
+        </div>
+        <div className="ml-auto flex min-h-8 shrink-0 items-center gap-0.5">
           {showIntegrate && (
             <Tooltip.Root>
               <Tooltip.Trigger

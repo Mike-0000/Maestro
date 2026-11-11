@@ -21,6 +21,19 @@ export const headerSticky = style({
   zIndex: 10,
   backgroundColor: vars.background,
   paddingTop: '2.5rem',
+  selectors: {
+    // Rows scrolling up fade into the header over 20px instead of being cut by its edge
+    // (the conductor thread does the same under its strip).
+    '&::after': {
+      content: '""',
+      position: 'absolute',
+      insetInline: 0,
+      top: '100%',
+      height: '1.25rem',
+      pointerEvents: 'none',
+      backgroundImage: `linear-gradient(to bottom, ${vars.background}, transparent)`,
+    },
+  },
 });
 
 // ── Title block ──────────────────────────────────────────────────────────────

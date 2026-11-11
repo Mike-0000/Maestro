@@ -763,7 +763,10 @@ const CommandBox = observer(function CommandBox({
 
   return (
     <form
-      className="relative min-w-52 flex-[1.2]"
+      // The box is a fill one step off the bar, like the round voice buttons beside it, with no
+      // edge of its own (the kit field's light-theme edge read as a box inside the bar). Focus
+      // draws the accent ring around the whole box.
+      className="relative min-w-52 flex-[1.2] rounded-md bg-surface-hover transition-[background-color,box-shadow] focus-within:bg-surface-hover focus-within:ring-2 focus-within:ring-ring hover:bg-surface-selected"
       onSubmit={(event) => {
         event.preventDefault();
         const chosen = open ? suggestions[active] : undefined;
@@ -832,7 +835,8 @@ const CommandBox = observer(function CommandBox({
               ? 'Goes to Maestro'
               : 'Type a command for Maestro, or an agent to open, e.g. "Claude"'
         }
-        // The kit field at the bar's height: a fill one step off the bar, the accent ring on focus.
+        // Bare: the form above draws the fill and the focus ring.
+        bare
         className="h-9 px-3 text-ellipsis"
         onChange={(event) => {
           setText(event.target.value);

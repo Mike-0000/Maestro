@@ -11,6 +11,8 @@ interface ConversationFieldProps {
   claudeAccount?: ClaudeAccountPicker;
   /** Puts the caret in the prompt once the form opens. */
   autoFocus?: boolean;
+  /** Resting height of the prompt in lines; it still grows with what is typed. */
+  minRows?: number;
 }
 
 export function ConversationField({
@@ -21,6 +23,7 @@ export function ConversationField({
   showAutoApproveToggle,
   claudeAccount,
   autoFocus,
+  minRows,
 }: ConversationFieldProps) {
   const { initialConversation, linkedIssue, includeIssueContextByDefault } = useTaskState();
 
@@ -36,6 +39,7 @@ export function ConversationField({
       showAutoApproveToggle={showAutoApproveToggle}
       claudeAccount={claudeAccount}
       autoFocus={autoFocus}
+      minRows={minRows}
     />
   );
 }

@@ -3,10 +3,10 @@ import { ChevronDown } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo } from 'react';
 import { useAppSettingsKey } from '@core/features/settings/api/browser/use-app-settings-key';
 import { useOpenInApps } from '@core/features/settings/api/browser/useOpenInApps';
+import { OpenInAppIcon } from '@core/features/settings/browser/components/OpenInAppIcon';
 import { getHostClient } from '@core/primitives/desktop-host/browser/host-client';
 import { BoundShortcut } from '@core/primitives/keybindings/browser/shortcut';
 import {
-  getAppById,
   isValidOpenInAppId,
   type OpenInAppId,
 } from '@core/primitives/open-in-apps/api/open-in-apps';
@@ -140,15 +140,7 @@ export const OpenInMenu: React.FC<OpenInMenuProps> = ({
               />
             }
           >
-            {buttonAppId && icons[buttonAppId] && (
-              <img
-                src={icons[buttonAppId]}
-                alt=""
-                className={`size-4 rounded-xs ${
-                  getAppById(buttonAppId)?.invertInDark ? 'emdark:invert' : ''
-                }`}
-              />
-            )}
+            {buttonAppId && <OpenInAppIcon appId={buttonAppId} src={icons[buttonAppId]} />}
           </Tooltip.Trigger>
           <Tooltip.Content side="bottom">
             <div className="flex items-center gap-2">
@@ -185,13 +177,11 @@ export const OpenInMenu: React.FC<OpenInMenuProps> = ({
                 : availability[app.id] !== false;
               return (
                 <DropdownMenu.RadioItem key={app.id} value={app.id} disabled={!isAvailable}>
-                  {icons[app.id] && (
-                    <img
-                      src={icons[app.id]}
-                      alt={labels[app.id] || app.label}
-                      className={`size-4 rounded-xs ${app.invertInDark ? 'emdark:invert' : ''}`}
-                    />
-                  )}
+                  <OpenInAppIcon
+                    appId={app.id}
+                    src={icons[app.id]}
+                    alt={labels[app.id] || app.label}
+                  />
                   {labels[app.id] || app.label}
                 </DropdownMenu.RadioItem>
               );

@@ -200,7 +200,8 @@ export const SettingsPage = observer(function SettingsPage({
       >
         {detailView ? (
           <PageLayout.Content maxWidth={CONTENT_WIDTH}>
-            <div className="sticky top-0 z-10 bg-background pt-10 pb-8">
+            {/* Fades into the rows under it, like PageLayout.Header's sticky variant. */}
+            <div className="sticky top-0 z-10 bg-background pt-10 pb-8 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-5 after:bg-linear-to-b after:from-background after:to-transparent">
               <Breadcrumbs
                 items={[
                   {

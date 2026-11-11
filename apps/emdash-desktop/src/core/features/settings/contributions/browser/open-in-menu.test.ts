@@ -225,4 +225,17 @@ describe('OpenInMenu', () => {
     expect(cursorOption).not.toBeNull();
     expect(cursorOption).toHaveProperty('disabled', true);
   });
+
+  it('draws the generic terminal as a theme-following glyph, not a bundled tile', async () => {
+    await act(async () => {
+      root.render(React.createElement(OpenInMenu, { path: 'C:/repo' }));
+    });
+
+    const terminalOption = container.querySelector('[data-testid="open-in-option-terminal"]');
+    expect(terminalOption?.querySelector('img')).toBeNull();
+    const glyph = terminalOption?.querySelector('svg');
+    expect(glyph?.getAttribute('aria-label')).toBe('Terminal');
+    // Stroked in currentColor, so it takes the row's text colour in either theme.
+    expect(glyph?.getAttribute('stroke')).toBe('currentColor');
+  });
 });
