@@ -204,10 +204,28 @@ describe('what the developer submitted', () => {
     expect(developerSubmissionsSince('other', 0)).toEqual([]);
   });
 
-  it('counts dictated words sent with their Enter, without their text', () => {
+  it('counts dictated words sent with their Enter, without their text when it is unknown', () => {
     noteDictatedText('conv');
     noteDeveloperInput(SESSION, '\r', 2_000);
     expect(developerSubmissionsSince('conv', 0)).toEqual([{ at: 2_000, text: null }]);
+  });
+
+  it('records dictated words with what the developer typed around them, sent by their Enter', () => {
+    noteDeveloperInput(SESSION, 'Publish this,', 2_000);
+    noteDictatedText('conv', 'go with your recommendations');
+    noteDeveloperInput(SESSION, ' please', 2_100);
+    noteDeveloperInput(SESSION, '\r', 2_200);
+    expect(developerSubmissionsSince('conv', 0)).toEqual([
+      { at: 2_200, text: 'Publish this, go with your recommendations please' },
+    ]);
+  });
+
+  it('records dictated words the conductor submits for them, once', () => {
+    noteDictatedText('conv', 'add a retry');
+    noteConductorSubmit('conv', 3_000);
+    noteConductorSubmit('conv', 3_100);
+    noteDeveloperInput(SESSION, '\r', 3_200);
+    expect(developerSubmissionsSince('conv', 0)).toEqual([{ at: 3_000, text: 'add a retry' }]);
   });
 
   it('never records what the conductor submits', () => {

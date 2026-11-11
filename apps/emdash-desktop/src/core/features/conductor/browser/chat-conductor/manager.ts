@@ -81,7 +81,11 @@ export class ChatConductorManager implements FrontConductorSource {
     }
     const session = best ? this.sessions.get(best.conversationId) : undefined;
     if (!best || !session) return null;
-    return { session, name: this.canvas.spokenName(best.conversationId) };
+    return {
+      session,
+      name: this.canvas.spokenName(best.conversationId),
+      chatId: best.conversationId,
+    };
   }
 
   /**

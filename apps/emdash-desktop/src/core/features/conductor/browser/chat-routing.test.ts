@@ -20,7 +20,10 @@ import type * as Roster from './roster';
 
 const mocks = vi.hoisted(() => ({
   runTurn: vi.fn(),
-  sendToAgent: vi.fn(async (_entry: unknown, _text: string, _submit: boolean) => {}),
+  sendToAgent: vi.fn(
+    async (_entry: unknown, _text: string, _submit: boolean, _options?: unknown) => {}
+  ),
+  submitAgentInput: vi.fn(async (_entry: unknown) => {}),
   status: null as unknown,
 }));
 
@@ -66,7 +69,7 @@ vi.mock('./agent-io', () => ({
   sendToAgent: mocks.sendToAgent,
   sendToLiveSession: vi.fn(async () => false),
   stopAgentSession: vi.fn(async () => {}),
-  submitAgentInput: vi.fn(async () => {}),
+  submitAgentInput: mocks.submitAgentInput,
 }));
 vi.mock('./roster', async (importOriginal) => ({
   ...(await importOriginal<typeof Roster>()),
@@ -215,21 +218,17 @@ function fakeVoice() {
 
 function fakeFront(name = 'Atlas') {
   const session = observable({
-    draft: '',
     busy: false,
     stopped: 0,
     sent: [] as string[],
     send(text: string) {
       this.sent.push(text);
     },
-    setDraft(text: string) {
-      this.draft = text;
-    },
     stop() {
       this.stopped++;
     },
   });
-  const front: FrontConductor = { session, name };
+  const front: FrontConductor = { session, name, chatId: 'conv-atlas' };
   return { front, session };
 }
 
@@ -325,17 +324,40 @@ describe('with a chat conductor in front', () => {
     store.dispose();
   });
 
-  it('types dictation into its composer, and "send it" sends what is there', async () => {
+  it("types dictation into the agent of the chat on screen, and Maestro's send it submits it", async () => {
     const { store, voice, session } = setup();
-    session.setDraft('Ask it');
-    await voice.speak_('to add a retry', { intent: 'dictation' });
-    expect(session.draft).toBe('Ask it to add a retry');
-    expect(session.sent).toEqual([]);
-    expect(mocks.sendToAgent).not.toHaveBeenCalled();
+    // Nothing on the canvas or the workbench is focused here: only the Conductor view says which
+    // chat is on screen, and its terminal is hidden behind the thread.
+    await voice.speak_('add a retry', { intent: 'dictation' });
+    expect(mocks.sendToAgent).toHaveBeenCalledTimes(1);
+    expect(mocks.sendToAgent.mock.calls[0]?.[0]).toMatchObject({ conversationId: 'conv-atlas' });
+    expect(mocks.sendToAgent.mock.calls[0]?.[1]).toBe('add a retry');
+    expect(mocks.sendToAgent.mock.calls[0]?.[2]).toBe(false);
+    expect(store.listeningFor).toBeNull();
 
     await voice.speak_('send it');
-    expect(session.sent).toEqual(['Ask it to add a retry']);
-    expect(session.draft).toBe('');
+    await settle();
+    expect(mocks.submitAgentInput).toHaveBeenCalledTimes(1);
+    expect(mocks.submitAgentInput.mock.calls[0]?.[0]).toMatchObject({
+      conversationId: 'conv-atlas',
+    });
+    expect(session.sent).toEqual([]);
+    store.dispose();
+  });
+
+  it('sends finished on-device dictation to the agent of the chat on screen, as its words', async () => {
+    const { store, session } = setup();
+    expect(store.dictationTarget()).toBe('Atlas');
+    await expect(
+      store.sendDictation('Publish this, go with your recommendations')
+    ).resolves.toEqual({ ok: true, agentName: 'Atlas' });
+    expect(mocks.sendToAgent).toHaveBeenCalledWith(
+      expect.objectContaining({ conversationId: 'conv-atlas' }),
+      'Publish this, go with your recommendations',
+      true,
+      { waitForTyping: false, dictated: true }
+    );
+    expect(session.sent).toEqual([]);
     store.dispose();
   });
 
@@ -385,9 +407,6 @@ describe('with a chat conductor in front', () => {
     await voice.speak_('and Bravo?');
     await settle();
     expect(session.sent).toEqual([]);
-    // Dictation is no conversation with Maestro: it still goes into the composer.
-    await voice.speak_('add a retry', { intent: 'dictation' });
-    expect(session.draft).toBe('add a retry');
     store.setTalkLine(null);
     store.dispose();
   });
@@ -468,7 +487,8 @@ describe('with no chat conductor in front', () => {
     await voice.speak_('add a retry', { intent: 'dictation' });
     // Nothing is focused in this canvas: the existing path says so.
     expect(store.reply).toBe('Focus an agent first, then dictate.');
-    expect(session.draft).toBe('');
+    expect(mocks.sendToAgent).not.toHaveBeenCalled();
+    expect(session.sent).toEqual([]);
     store.dispose();
   });
 });

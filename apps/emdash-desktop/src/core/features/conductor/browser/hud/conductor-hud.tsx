@@ -253,16 +253,14 @@ const MicButton = observer(function MicButton() {
 /** Dictation to the open agent, transcribed on this computer. Separate from the command mic. */
 const DictationButton = observer(function DictationButton() {
   const dictation = getDictationStore();
-  const front = getChatConductorManager().front;
-  const to = front ? conductorLabel(front) : 'the open agent';
   const listening = dictation.phase === 'listening';
   const scale = listening ? 1 + Math.min(0.35, dictation.level * 0.5) : 1;
   return (
     <button
       type="button"
-      aria-label={listening ? 'Finish dictation and send' : `Dictate to ${to}`}
+      aria-label={listening ? 'Finish dictation and send' : 'Dictate to the open agent'}
       aria-pressed={dictation.active}
-      title={`Dictate to ${to}. Click, or tap Right Ctrl once; click or tap again to send. Runs on this computer.`}
+      title="Dictate to the open agent. Click, or tap Right Ctrl once; click or tap again to send. Runs on this computer."
       disabled={dictation.phase === 'finishing'}
       onClick={() => dictation.toggle()}
       className={cn(
@@ -465,11 +463,8 @@ const StatusLine = observer(function StatusLine() {
         {voice.partial ? (
           <span className="min-w-0 truncate italic">{voice.partial}</span>
         ) : voice.intent === 'dictation' ? (
-          conductor.listeningFor ? (
-            `Dictating into ${conductorLabel(conductor.listeningFor)}…`
-          ) : (
-            'Dictating into the focused agent…'
-          )
+          // Into the agent in front, even with its chat's Conductor view on screen.
+          `Dictating into ${conductor.dictationTarget() ?? 'the focused agent'}…`
         ) : voice.origin === 'hands-free' ? (
           'Listening (hands-free)…'
         ) : voice.mode === 'hold' ? (

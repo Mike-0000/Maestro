@@ -34,8 +34,9 @@ export interface DeveloperTyping {
 }
 
 /**
- * A prompt the developer submitted with their own Enter. `text` is what the keys typed, or null
- * when they cannot tell (recalled from history, completed, or dictated words).
+ * A prompt of the developer's that was submitted: with their own Enter, or by dictation's send.
+ * `text` is what their keys typed and their dictation put in the input, or null when that cannot
+ * be told (recalled from history, or completed).
  */
 export interface DeveloperSubmission {
   readonly at: number;
@@ -260,11 +261,10 @@ function lostTrack(record: TypingState): void {
   record.unsentMessage = false;
 }
 
-/** An Enter of the developer's sent what the input held: their prompt, when there was one. */
+/** The input, holding the developer's words, was submitted: their prompt, when there was one. */
 function noteSubmission(record: TypingState, now: number): void {
   const draft = record.draft;
-  // An empty input (Enter on a menu, or a bare Enter) submits no prompt of theirs; dictated
-  // words with nothing typed are theirs, but the keys never saw them.
+  // An empty input (Enter on a menu, or a bare Enter) submits no prompt of theirs.
   if (draft !== null && !draft.trim() && !record.dictated) return;
   // A pasted line break arrives as a carriage return.
   const text = draft !== null && draft.trim() ? draft.replace(/\r\n?/g, '\n').trim() : null;
@@ -340,11 +340,18 @@ export function noteDeveloperInput(sessionId: string, data: string, now = Date.n
 }
 
 /**
- * The conductor typed dictated words (the developer's own) into this conversation's input without
- * pressing Enter. Nothing else may be submitted with them. Not a keystroke.
+ * The conductor typed dictated words (the developer's own) into this conversation's input. They
+ * join what the input holds, so submitting it later records them as the developer's prompt.
+ * Nothing else may be submitted with them. Not a keystroke.
  */
-export function noteDictatedText(conversationId: string): void {
-  recordFor(conversationId).dictated = true;
+export function noteDictatedText(conversationId: string, text?: string): void {
+  const record = recordFor(conversationId);
+  record.dictated = true;
+  const words = text?.trim();
+  if (!words || record.draft === null) return;
+  // Pasted where the cursor is; after a cursor move that is unknown, and the end is a fair guess.
+  const gap = record.draft && !/\s$/.test(record.draft) ? ' ' : '';
+  record.draft = `${record.draft}${gap}${words}`;
 }
 
 /**
@@ -364,10 +371,15 @@ export function clearUnsentMark(conversationId: string): void {
   if (record) record.unsentMessage = false;
 }
 
-/** The conductor pressed Enter in this conversation's input, submitting whatever was there. */
-export function noteConductorSubmit(conversationId: string): void {
+/**
+ * The conductor pressed Enter in this conversation's input, submitting whatever was there. With
+ * dictated words in it, that was the developer's prompt (their dictation's send, or "send it").
+ */
+export function noteConductorSubmit(conversationId: string, now = Date.now()): void {
   const record = records.get(conversationId);
-  if (record) emptied(record);
+  if (!record) return;
+  if (record.dictated) noteSubmission(record, now);
+  emptied(record);
 }
 
 /** What the developer has typed into this conversation's terminal; null when nothing yet. */

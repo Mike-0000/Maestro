@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { answersMaestro, isSubmitPhrase, joinDraft } from './front';
+import { answersMaestro, isSubmitPhrase } from './front';
 
 const idle = { pending: false, busy: false, clarifying: false };
 
@@ -32,14 +32,8 @@ describe('answersMaestro', () => {
   });
 });
 
-describe('dictation into a composer', () => {
-  it('adds the words after what is there', () => {
-    expect(joinDraft('', ' fix the lint ')).toBe('fix the lint');
-    expect(joinDraft('Ask it to', 'fix the lint')).toBe('Ask it to fix the lint');
-    expect(joinDraft('Ask it  ', '')).toBe('Ask it  ');
-  });
-
-  it('knows the spoken submit', () => {
+describe('the spoken submit', () => {
+  it('is known, so it stays with Maestro and presses Enter on dictated words', () => {
     expect(isSubmitPhrase('send it')).toBe(true);
     expect(isSubmitPhrase('Press enter.')).toBe(true);
     expect(isSubmitPhrase('send it to Atlas')).toBe(false);

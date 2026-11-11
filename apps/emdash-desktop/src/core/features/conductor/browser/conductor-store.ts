@@ -233,7 +233,6 @@ import { CallDesk } from './call-desk';
 import {
   answersMaestro,
   isSubmitPhrase,
-  joinDraft,
   type FrontConductor,
   type FrontConductorSource,
 } from './chat-conductor/front';
@@ -1085,21 +1084,22 @@ export class ConductorStore {
   }
 
   /**
-   * Every transcript from the microphone. With a chat conductor's view in front when the capture
-   * began, the words go to it (see `chatFor`); otherwise a command goes to Maestro and dictation
-   * types into the agent in front, as always.
+   * Every transcript from the microphone. A command goes to the chat conductor in front when the
+   * capture began (see `chatFor`), or to Maestro. Dictation always types into the agent in front
+   * (`dictationEntry`), its chat conductor or not: the developer's own words to it.
    */
   hearTranscript(
     text: string,
     intent: 'command' | 'dictation',
     interactionId: string
   ): Promise<void> | void {
-    const kind = intent === 'dictation' ? 'dictation' : 'voice';
-    const chat = this.chatFor(text, kind, interactionId);
-    if (chat) return this.toChat(chat, text, kind, interactionId);
-    return intent === 'dictation'
-      ? this.dictate(text, interactionId)
-      : this.handleUtterance(text, 'voice', interactionId);
+    if (intent === 'dictation') {
+      this.forgetCaptureFront(interactionId);
+      return this.dictate(text, interactionId);
+    }
+    const chat = this.chatFor(text, 'voice', interactionId);
+    if (chat) return this.toChat(chat, text, 'voice', interactionId);
+    return this.handleUtterance(text, 'voice', interactionId);
   }
 
   /** The typed box: the chat conductor in front takes the words, unless they answer Maestro. */
@@ -1126,11 +1126,12 @@ export class ConductorStore {
    * to, or null for Maestro's own paths, unchanged. Maestro keeps them when no chat conductor was
    * in front (for speech: when its capture began; the Maestro button, hands-free speech and the
    * voice line are Maestro's), when they answer a call picked up for them, or when they answer
-   * what Maestro has open right now (`answersMaestro`). Dictation answers nothing but a call.
+   * what Maestro has open right now (`answersMaestro`). "Send it" stays Maestro's too: it presses
+   * Enter on what was dictated into the agent in front.
    */
   private chatFor(
     text: string,
-    kind: 'voice' | 'dictation' | 'typed',
+    kind: 'voice' | 'typed',
     interactionId: string | null
   ): FrontConductor | null {
     let front: FrontConductor | null;
@@ -1146,8 +1147,7 @@ export class ConductorStore {
     const answersCall =
       pickup !== null &&
       (pickup.interactionId === null ? kind === 'typed' : pickup.interactionId === interactionId);
-    if (answersCall) return null;
-    if (kind === 'dictation') return front;
+    if (answersCall || isSubmitPhrase(text)) return null;
     const floor = {
       pending: this.pending !== null,
       busy: this.busy,
@@ -1157,30 +1157,20 @@ export class ConductorStore {
   }
 
   /**
-   * Words for a chat conductor: a developer message in its thread, or dictation added to its
-   * composer. Maestro neither answers nor speaks; for a capture, what it held for the developer's
-   * words (a confirmation's clock, calls, agent requests) carries on as after any capture.
+   * Words for a chat conductor: a developer message in its thread. Maestro neither answers nor
+   * speaks; for a capture, what it held for the developer's words (a confirmation's clock, calls,
+   * agent requests) carries on as after any capture.
    */
   private toChat(
     chat: FrontConductor,
     text: string,
-    kind: 'voice' | 'dictation' | 'typed',
+    kind: 'voice' | 'typed',
     interactionId: string | null
   ): void {
     const id = interactionId ?? crypto.randomUUID();
     this.trace('route', text, { route: 'chat-conductor', kind, agent: chat.name }, id);
     if (interactionId !== null) this.captureOver(interactionId);
     const session = chat.session;
-    if (kind === 'dictation') {
-      session.setDraft(joinDraft(session.draft, text));
-      return;
-    }
-    // "Send it" after dictating sends what the composer holds, as it submits a terminal's input.
-    if (isSubmitPhrase(text) && session.draft.trim()) {
-      session.send(session.draft);
-      session.setDraft('');
-      return;
-    }
     // A bare stop ends the chat conductor's running turn; it would only arrive after it otherwise.
     // (Maestro took the stop if it had anything to stop: see `chatFor`.)
     if (session.busy && isPureStop(text)) {
@@ -1206,12 +1196,7 @@ export class ConductorStore {
       this.dictatedTo = null;
       // The window in front, read from the screen: a turn that is answering a call has its
       // caller as "it", and this dictation picked up no call.
-      const front = screenFocus(this.canvas).agentId;
-      await this.typeDictation(
-        text,
-        interactionId,
-        front ? entryForConversation(this.canvas, front) : undefined
-      );
+      await this.typeDictation(text, interactionId, this.dictationEntry());
       // A call that was offered while the microphone was open has waited for it, and so have
       // agent requests.
       if (!this.busy) void this.requests.drain().then(() => this.calls.pump());
@@ -1241,9 +1226,17 @@ export class ConductorStore {
 
   /** The agent in front, which finished dictation is sent to; null when none is open. */
   dictationTarget(): string | null {
-    const front = screenFocus(this.canvas).agentId;
-    const entry = front ? entryForConversation(this.canvas, front) : undefined;
+    const entry = this.dictationEntry();
     return entry ? this.nameOf(entry) : null;
+  }
+
+  /**
+   * The agent dictation types into: the chat whose Conductor view is on screen (its terminal is
+   * hidden behind the thread, but the words are for that agent), else the agent in front.
+   */
+  private dictationEntry(): AgentTileEntry | undefined {
+    const chatId = this.chats?.front?.chatId ?? screenFocus(this.canvas).agentId;
+    return chatId ? entryForConversation(this.canvas, chatId) : undefined;
   }
 
   /**
@@ -1253,14 +1246,14 @@ export class ConductorStore {
   async sendDictation(
     text: string
   ): Promise<{ ok: true; agentName: string } | { ok: false; message: string }> {
-    const front = screenFocus(this.canvas).agentId;
-    const entry = front ? entryForConversation(this.canvas, front) : undefined;
+    const entry = this.dictationEntry();
     if (!entry) return { ok: false, message: 'No agent is open. Open one, then send.' };
     const blocked = this.permissionBlock(entry);
     if (blocked) return { ok: false, message: blocked };
     try {
-      // The developer's own words, which they chose to send now: they do not wait for typing.
-      await sendToAgent(entry, text, true, { waitForTyping: false });
+      // The developer's own words, which they chose to send now: they do not wait for typing,
+      // and once submitted they are recorded as their prompt for the chat's conductor.
+      await sendToAgent(entry, text, true, { waitForTyping: false, dictated: true });
       return { ok: true, agentName: this.nameOf(entry) };
     } catch (error) {
       return {
@@ -1950,14 +1943,15 @@ export class ConductorStore {
   /**
    * Whom a capture is for, from what was in front as it began. The Maestro button, hands-free
    * speech (it is addressed by Maestro's wake phrase) and commands while the voice line is open
-   * (a live conversation with Maestro) are Maestro's whatever is in front. Dictation is nobody's
-   * conversation: it follows what is in front.
+   * (a live conversation with Maestro) are Maestro's whatever is in front. Dictation goes to no
+   * conductor: it types into the agent in front.
    */
   private noteCaptureFront(event: Extract<ConductorCaptureEvent, { type: 'start' }>): void {
     const { interactionId, origin } = event;
+    // Dictation types into the agent in front, never into a conductor.
     const command = event.intent !== 'dictation';
     const maestro =
-      this.toMaestroNext || origin === 'hands-free' || (command && this.talkLine !== null);
+      !command || this.toMaestroNext || origin === 'hands-free' || this.talkLine !== null;
     const front = maestro ? null : (this.chats?.front ?? null);
     this.captureFront.set(interactionId, front);
     this.listeningFor = front;
@@ -2876,7 +2870,10 @@ export class ConductorStore {
           Date.now() - dictated.at < DICTATION_SEND_MS &&
           screenFocus(this.canvas).agentId === dictated.front
             ? entryForConversation(this.canvas, dictated.conversationId)
-            : undefined) ?? this.focusedEntry();
+            : undefined) ??
+          // With a chat's Conductor view on screen, dictation went into that chat's agent.
+          (this.chats?.front ? this.dictationEntry() : undefined) ??
+          this.focusedEntry();
         if (!entry) {
           reply = 'No agent is focused.';
           break;
