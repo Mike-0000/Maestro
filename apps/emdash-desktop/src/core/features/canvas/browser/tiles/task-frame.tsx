@@ -49,8 +49,8 @@ export const TaskFrameNode = observer(function TaskFrameNode({ data }: NodeProps
         title="Drag to move this task's agents"
       >
         <GitBranch className="size-3.5 shrink-0" />
-        <span className="truncate text-foreground-muted">{frame.taskName}</span>
-        <span className="truncate">· {frame.projectName}</span>
+        <span className="min-w-0 truncate text-foreground-muted">{frame.taskName}</span>
+        <span className="min-w-0 truncate">· {frame.projectName}</span>
         {frame.waiting > 0 && (
           <span className="flex shrink-0 items-center gap-1 text-foreground">
             <StateGlyph state="needs-you" size="sm" />
@@ -65,7 +65,7 @@ export const TaskFrameNode = observer(function TaskFrameNode({ data }: NodeProps
           size="xs"
           onClick={() => void openTaskDiffReview(frame.projectId, frame.taskId)}
           title="Review this task's changes"
-          className="nodrag gap-1 px-1.5"
+          className="nodrag shrink-0 gap-1 px-1.5"
         >
           <FileDiff className="size-3.5" />
           {changed ? (
@@ -103,7 +103,8 @@ const AppControls = observer(function AppControls({ frame }: { frame: TaskFrameE
   const starting = host.starting.has(frame.taskId);
   const running = host.appRunning(target);
   const browser = canvas.browserForTask(frame.taskId);
-  const buttonClass = 'nodrag gap-1 px-1.5';
+  // shrink-0: a long task name truncates; the buttons never shrink under their labels.
+  const buttonClass = 'nodrag shrink-0 gap-1 px-1.5';
 
   if (starting) {
     return (
@@ -151,7 +152,7 @@ const AppControls = observer(function AppControls({ frame }: { frame: TaskFrameE
         icon
         aria-label="Stop app"
         title="Stop the app's dev server"
-        className="nodrag"
+        className="nodrag shrink-0"
         onClick={() => void host.stopApp(target)}
       >
         <Square className="size-3" />

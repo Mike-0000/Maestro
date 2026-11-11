@@ -1,10 +1,10 @@
 import '@emdash/theme/theme.css';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ANSI_COLOR_VARS as PHONE_ANSI_COLOR_VARS } from '@/remote-web/lib/terminal-theme';
 import {
   readXtermCssVars,
   XTERM_ANSI_COLOR_VARS,
 } from '@core/features/terminals/api/browser/pty/pty';
+import { ANSI_COLOR_VARS as PHONE_ANSI_COLOR_VARS } from '../../../remote-web/lib/terminal-theme';
 // The 16 ANSI colours, shared with the phone web app; index.css imports it, which a raw style
 // element cannot follow, so it is added the same way.
 import ansiCss from '@/assets/styles/terminal-ansi.css?raw';

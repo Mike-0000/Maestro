@@ -20,7 +20,7 @@ export function TileIconButton({
       aria-label={label}
       title={label}
       onClick={onClick}
-      className="nodrag"
+      className="nodrag shrink-0"
     >
       {children}
     </Button>
