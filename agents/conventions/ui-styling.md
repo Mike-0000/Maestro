@@ -376,7 +376,11 @@ The layer order is: `reset < tokens < base < recipes < utilities`.
 - `reset` / `base` — `globalStyle` rules in `reset.css.ts` and `base.css.ts`
 - `recipes` — component `style()` and `recipe()` output (target destination). The control
   recipe (`controlVariants`: Button, SplitButton, TriggerButton, Toggle, Tabs) lives here, so the
-  app's Tailwind utilities override a kit Button without `!`. The app's Tailwind `utilities`
+  app's Tailwind utilities override a kit Button without `!`. So do the layout groups of
+  `Input` (size, padding, type), `Textarea`, `Collapsible.Trigger`, `Dialog.Body`,
+  `Popover.Content`, the shared menu row (`menuItemBase`: Select, DropdownMenu, ContextMenu and
+  Combobox items), `Select.Trigger appearance="input"` and the scroll-fade viewport's overflow.
+  Field edges, fills and focus rings stay unlayered. The app's Tailwind `utilities`
   layer merges into the kit's `utilities` layer, after `recipes`.
 - `utilities` — `sx()` sprinkles; always overrides component styles
 

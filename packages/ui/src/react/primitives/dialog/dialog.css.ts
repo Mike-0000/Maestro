@@ -1,6 +1,7 @@
 import { globalStyle, style } from '@vanilla-extract/css';
 import { recipe } from '@vanilla-extract/recipes';
 import { kfFadeIn, kfFadeOut, kfPopupIn, kfPopupOut } from '@styles/effects/animations.css';
+import { recipesLayer } from '@styles/layers.css';
 import { vars } from '@theme/core/contract/contract.css';
 import { tokenVars } from '@theme/tokens.css';
 
@@ -144,15 +145,24 @@ globalStyle(`${description} a:hover`, {
   textDecorationColor: vars.link,
 });
 
+/**
+ * In `@layer recipes`, so app utilities (`gap-4`, `p-0`, `px-6`) shape a body
+ * without inline styles. Its scroll and fade come from the unlayered
+ * `.scroll-fade__viewport` class, which sets only overflow and the mask.
+ */
 export const body = style({
-  display: 'flex',
-  width: '100%',
-  flexDirection: 'column',
-  gap: '1.25rem',
-  padding: '1.25rem 1.5rem 1.5rem',
-  outline: 'none',
-  selectors: {
-    '&:focus-visible': { outline: 'none' },
+  '@layer': {
+    [recipesLayer]: {
+      display: 'flex',
+      width: '100%',
+      flexDirection: 'column',
+      gap: '1.25rem',
+      padding: '1.25rem 1.5rem 1.5rem',
+      outline: 'none',
+      selectors: {
+        '&:focus-visible': { outline: 'none' },
+      },
+    },
   },
 });
 

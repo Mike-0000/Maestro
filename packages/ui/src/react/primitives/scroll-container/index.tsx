@@ -17,6 +17,12 @@ export type ScrollContainerProps = {
   padding?: number | string;
   /** Show the top fade when scrolled down. Defaults to true. */
   topFade?: boolean;
+  /**
+   * Show the matching bottom fade while more content sits below the fold (it
+   * clears at the end), so a row cut by the bottom edge dissolves instead of
+   * ending in a hard line. Defaults to false.
+   */
+  bottomFade?: boolean;
   size?: number | string;
   className?: string;
   viewportClassName?: string;
@@ -25,8 +31,8 @@ export type ScrollContainerProps = {
 };
 
 /**
- * ScrollContainer wraps ScrollFade with a top-fade toggle and an optional
- * maxHeight constraint. Fade visibility is handled entirely in CSS via a
+ * ScrollContainer wraps ScrollFade with top- and bottom-fade toggles and an
+ * optional maxHeight constraint. Fade visibility is handled entirely in CSS via a
  * scroll-driven @property animation — no JavaScript overflow detection needed.
  *
  * When content does not overflow the scroll timeline is inactive and the
@@ -35,7 +41,17 @@ export type ScrollContainerProps = {
  */
 const ScrollContainer = React.forwardRef<HTMLDivElement, ScrollContainerProps>(
   function ScrollContainer(
-    { maxHeight, padding, topFade = true, size, className, viewportClassName, style, children },
+    {
+      maxHeight,
+      padding,
+      topFade = true,
+      bottomFade = false,
+      size,
+      className,
+      viewportClassName,
+      style,
+      children,
+    },
     ref
   ) {
     const resolvedMaxHeight =
@@ -57,7 +73,11 @@ const ScrollContainer = React.forwardRef<HTMLDivElement, ScrollContainerProps>(
         size={size}
         padding={padding}
         className={className}
-        viewportClassName={cx(!topFade && 'sf-no-top', viewportClassName)}
+        viewportClassName={cx(
+          !topFade && 'sf-no-top',
+          bottomFade && 'sf-bottom',
+          viewportClassName
+        )}
         viewportStyle={viewportStyle}
         style={style}
       >

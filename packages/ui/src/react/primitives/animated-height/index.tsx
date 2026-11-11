@@ -23,7 +23,9 @@ export function AnimatedHeight({ children, className, onAnimatingChange }: Anima
   const contentRef = useRef<HTMLDivElement>(null);
   // Track the last observed height in a ref so the ResizeObserver callback
   // can seed its change tracker after remounts (React StrictMode re-runs
-  // effects) without re-measuring.
+  // effects) without re-measuring. The tracker compares ResizeObserver's
+  // first callback against this baseline, so content that changes between
+  // the measurement and that callback still moves the row.
   const lastHeightRef = useRef<number | undefined>(undefined);
   const settleTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [height, setHeight] = useState<number | undefined>(undefined);

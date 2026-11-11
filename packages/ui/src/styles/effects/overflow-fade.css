@@ -10,6 +10,11 @@
  *
  * Disable the fade with the sf-no-top class:
  *   <div class="scroll-fade__viewport sf-no-top">…</div>
+ *
+ * Opt into the matching bottom-edge fade with the sf-bottom class. It shows while
+ * more content sits below the fold and clears as the end comes into view, so a row
+ * cut by the bottom edge (above a footer or commit box) dissolves instead:
+ *   <div class="scroll-fade__viewport sf-bottom">…</div>
  */
 
 /*
@@ -23,6 +28,22 @@
   initial-value: 0;
 }
 
+/*
+ * Bottom fade amount, same technique. Not inherited, so a nested viewport whose
+ * own timeline is inactive never picks up its parent's bottom fade.
+ */
+@property --sf-b {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0;
+}
+
+/*
+ * Layer order, restated so this plain stylesheet can never register `recipes`
+ * ahead of the kit's other layers (it matches styles/layers.css.ts).
+ */
+@layer reset, tokens, base, recipes, utilities;
+
 /* ── Wrapper ─────────────────────────────────────────────────────────────────── */
 
 .scroll-fade {
@@ -31,8 +52,18 @@
 
 /* ── Viewport ────────────────────────────────────────────────────────────────── */
 
+/*
+ * The viewport scrolls by default. Overflow sits in `@layer recipes` so an app
+ * utility on the same element (`overflow-x-hidden`, `overflow-y-auto`) refines
+ * it; the mask and animations below stay unlayered.
+ */
+@layer recipes {
+  .scroll-fade__viewport {
+    overflow: auto;
+  }
+}
+
 .scroll-fade__viewport {
-  overflow: auto;
   --fade-size: 24px;
 
   /*
@@ -81,6 +112,51 @@
   100% {
     --sf-t: 1;
   }
+}
+
+/*
+ * Bottom fade: full while more content sits below, gone at the very end. The
+ * mirror image of sf-t-anim (the same 4% of the scroll range to settle).
+ */
+@keyframes sf-b-anim {
+  0% {
+    --sf-b: 1;
+  }
+  96% {
+    --sf-b: 1;
+  }
+  100% {
+    --sf-b: 0;
+  }
+}
+
+/* ── Bottom fade (opt-in) ────────────────────────────────────────────────────── */
+
+/*
+ * Adds an opaque → transparent band at the bottom, sized like the top band. The
+ * second animation runs on the same self timeline; with no overflow both stay
+ * inactive and the mask is fully opaque.
+ */
+.scroll-fade__viewport.sf-bottom {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 calc(var(--sf-t) * var(--fade-size)),
+    #000 calc(100% - var(--sf-b) * var(--fade-size)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 calc(var(--sf-t) * var(--fade-size)),
+    #000 calc(100% - var(--sf-b) * var(--fade-size)),
+    transparent 100%
+  );
+  animation:
+    sf-t-anim auto linear,
+    sf-b-anim auto linear;
+  animation-timeline: scroll(self block), scroll(self block);
+  animation-fill-mode: none, none;
 }
 
 /* ── Disable hook ────────────────────────────────────────────────────────────── */

@@ -2,8 +2,7 @@
 
 import { Collapsible as CollapsiblePrimitive } from '@base-ui/react/collapsible';
 import { cx } from '@styles/utilities/cx';
-import { ChevronDownIcon } from 'lucide-react';
-import * as React from 'react';
+import { ChevronDownIcon, ChevronRightIcon } from 'lucide-react';
 import * as styles from './collapsible.css';
 
 // ── Root ──────────────────────────────────────────────────────────────────────
@@ -15,16 +14,37 @@ function CollapsibleRoot({ ...props }: CollapsiblePrimitive.Root.Props) {
 // ── Trigger ───────────────────────────────────────────────────────────────────
 
 export interface CollapsibleTriggerProps extends CollapsiblePrimitive.Trigger.Props {
-  /** Hide the trailing chevron icon. @default false */
+  /** Hide the chevron icon. @default false */
   hideChevron?: boolean;
+  /**
+   * - `row` (default): a full-width ghost row with a trailing chevron that
+   *   flips when open.
+   * - `text`: a quiet text disclosure — caption-size muted text with a small
+   *   leading chevron that turns down when open; no fill, border or button chrome.
+   */
+  variant?: 'row' | 'text';
 }
 
 function CollapsibleTrigger({
   className,
   hideChevron = false,
+  variant = 'row',
   children,
   ...props
 }: CollapsibleTriggerProps) {
+  if (variant === 'text') {
+    return (
+      <CollapsiblePrimitive.Trigger
+        data-slot="collapsible-trigger"
+        data-variant="text"
+        className={cx(styles.triggerText, className)}
+        {...props}
+      >
+        {!hideChevron && <ChevronRightIcon className={styles.chevronText} aria-hidden />}
+        {children}
+      </CollapsiblePrimitive.Trigger>
+    );
+  }
   return (
     <CollapsiblePrimitive.Trigger
       data-slot="collapsible-trigger"

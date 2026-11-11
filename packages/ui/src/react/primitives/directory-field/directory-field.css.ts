@@ -44,6 +44,21 @@ export const value = style({
   textOverflow: 'ellipsis',
 });
 
+/**
+ * A path truncates at its start, so the folder name (the part that tells two
+ * paths apart) stays visible: `…/repos/emdash` rather than `/Users/da…`.
+ *
+ * The line runs right-to-left, so its overflow (and the ellipsis) falls on the
+ * left edge, while `text-align: left` keeps a path that fits at the left. The
+ * path itself sits in an LTR isolate (`<bdi dir="ltr">`), so its characters,
+ * slashes and drive letters keep their order; the DOM text is untouched, so
+ * the accessible name and any copy of it read the full path in order.
+ */
+export const valuePath = style({
+  direction: 'rtl',
+  textAlign: 'left',
+});
+
 export const placeholder = style({
   color: vars.foregroundPassive,
 });

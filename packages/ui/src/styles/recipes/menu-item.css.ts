@@ -16,19 +16,35 @@
  */
 
 import { globalStyle, style } from '@vanilla-extract/css';
+import type { GlobalStyleRule, StyleRule } from '@vanilla-extract/css';
 import { recipe } from '@vanilla-extract/recipes';
 import type { RecipeVariants } from '@vanilla-extract/recipes';
 import { svgContainer, svgDefaultSize } from '@styles/effects/svg-helpers.css';
+import { recipesLayer } from '@styles/layers.css';
 import { vars } from '@theme/core/contract/contract.css';
 import { tokenVars } from '@theme/tokens.css';
 
 /** Highlight states shared by every popup row. */
 export const MENU_ITEM_HIGHLIGHT = '&:focus, &[data-highlighted], &:hover:not([data-disabled])';
 
+/** Wrap a style rule in the recipes layer. */
+const layered = (rule: StyleRule): StyleRule => ({ '@layer': { [recipesLayer]: rule } });
+/** Wrap a global (child-selector) rule in the recipes layer. */
+const layeredGlobal = (rule: GlobalStyleRule): GlobalStyleRule => ({
+  '@layer': { [recipesLayer]: rule },
+});
+
+/*
+ * The whole row (box, type, colour, highlight) and its leading-icon colour live
+ * in `@layer recipes`, so app utilities on an item (`py-2`, `items-start`,
+ * `pr-3`) apply without inline styles. The per-primitive extensions that
+ * compose this recipe (select, dropdown, context menu, combobox items) are
+ * unlayered and keep winning over it.
+ */
 const menuItemRow = style([
   svgContainer,
   svgDefaultSize,
-  {
+  layered({
     position: 'relative',
     display: 'flex',
     cursor: 'default',
@@ -50,15 +66,18 @@ const menuItemRow = style([
       [MENU_ITEM_HIGHLIGHT]: { backgroundColor: vars.surfaceHover, color: vars.foreground },
       '&[data-disabled]': { pointerEvents: 'none', opacity: 0.5 },
     },
-  },
+  }),
 ]);
 
 // Leading icons sit in the passive tone and come up with the row's text.
 // (`svg` here is the row's own icon; both elements are owned by the row.)
-globalStyle(`${menuItemRow} > svg`, { color: vars.foregroundPassive, transition: 'color 100ms' });
+globalStyle(
+  `${menuItemRow} > svg`,
+  layeredGlobal({ color: vars.foregroundPassive, transition: 'color 100ms' })
+);
 globalStyle(
   `${menuItemRow}:focus > svg, ${menuItemRow}[data-highlighted] > svg, ${menuItemRow}:hover > svg`,
-  { color: 'currentColor' }
+  layeredGlobal({ color: 'currentColor' })
 );
 
 export const menuItemBase = recipe({
@@ -66,16 +85,16 @@ export const menuItemBase = recipe({
 
   variants: {
     trailingIndicator: {
-      true: { paddingRight: '2rem' },
+      true: layered({ paddingRight: '2rem' }),
     },
     fullWidth: {
-      true: { width: '100%' },
+      true: layered({ width: '100%' }),
     },
     inset: {
-      true: { paddingLeft: '2rem' },
+      true: layered({ paddingLeft: '2rem' }),
     },
     muted: {
-      true: { color: vars.foregroundMuted },
+      true: layered({ color: vars.foregroundMuted }),
     },
   },
 

@@ -123,3 +123,45 @@ export const SettingsGroup: Story = {
     </Box>
   ),
 };
+
+/**
+ * variant="text": a quiet text disclosure for secondary detail inside a form
+ * (setup steps, branch options). Muted caption text, a small leading chevron
+ * that turns down when open, no button chrome.
+ */
+export const TextVariant: Story = {
+  render: () => (
+    <Box display="flex" flexDirection="column" gap="4" className={s.w80}>
+      <Collapsible.Root>
+        <Collapsible.Trigger variant="text">Setup steps</Collapsible.Trigger>
+        <Collapsible.Panel>
+          <Box
+            as="ol"
+            display="flex"
+            flexDirection="column"
+            gap="2"
+            style={{ paddingTop: '0.5rem', paddingLeft: '1rem', fontSize: 'var(--em-text-xs)' }}
+          >
+            <li>Create the worktree</li>
+            <li>Copy preserved files</li>
+            <li>Run the setup script</li>
+          </Box>
+        </Collapsible.Panel>
+      </Collapsible.Root>
+      <Collapsible.Root defaultOpen>
+        <Collapsible.Trigger variant="text">Branch and setup</Collapsible.Trigger>
+        <Collapsible.Panel>
+          <Box style={{ paddingTop: '0.5rem', fontSize: 'var(--em-text-sm)' }}>
+            Open by default.
+          </Box>
+        </Collapsible.Panel>
+      </Collapsible.Root>
+      <Collapsible.Root disabled>
+        <Collapsible.Trigger variant="text" hideChevron>
+          Disabled: reads as plain text, no hover
+        </Collapsible.Trigger>
+        <Collapsible.Panel>Never shown.</Collapsible.Panel>
+      </Collapsible.Root>
+    </Box>
+  ),
+};
