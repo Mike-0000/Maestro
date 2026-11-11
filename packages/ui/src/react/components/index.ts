@@ -125,7 +125,18 @@ export {
   CardGridSection,
   type CardGridSectionProps,
 } from './card-grid/card-grid';
-export { EmptyState, type EmptyStateProps } from './empty-state/empty-state';
+export {
+  EmptyState,
+  type EmptyStateProps,
+  type EmptyStateSize,
+  type EmptyStateTone,
+} from './empty-state/empty-state';
+export {
+  StateGlyph,
+  STATE_GLYPH_LABELS,
+  type StateGlyphProps,
+  type StateGlyphState,
+} from './state-glyph/state-glyph';
 export {
   ListPopoverCard,
   type ListPopoverCardProps,

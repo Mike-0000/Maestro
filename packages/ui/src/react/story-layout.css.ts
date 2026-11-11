@@ -30,6 +30,7 @@ export const w40 = style({ width: '10rem' });
 export const w44 = style({ width: '11rem' });
 export const w48 = style({ width: '12rem' });
 export const w52 = style({ width: '13rem' });
+export const w56 = style({ width: '14rem' });
 export const w64 = style({ width: '16rem' });
 export const w72 = style({ width: '18rem' });
 export const w80 = style({ width: '20rem' });
@@ -96,7 +97,7 @@ globalStyle(`${spaceY6} > * + *`, { marginTop: '1.5rem' });
 // ── Effects ───────────────────────────────────────────────────────────────────
 
 export const shadowMd = style({
-  boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -2px rgba(0,0,0,0.1)',
+  boxShadow: `${vars.shadowMd}, 0 0 0 1px ${vars.borderSubtle}`,
 });
 export const backdropBlurSm = style({ backdropFilter: 'blur(4px)' });
 export const transitionAll = style({ transition: 'all 150ms' });

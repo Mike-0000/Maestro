@@ -1,6 +1,7 @@
 import { Box } from '@react/primitives/box';
 import { Button } from '@react/primitives/button';
 import { Dialog } from '@react/primitives/dialog';
+import { Field } from '@react/primitives/field';
 import { Input } from '@react/primitives/input';
 import { Text } from '@react/primitives/typography/Text';
 import type { Meta, StoryObj } from '@storybook/react-vite';
@@ -67,6 +68,40 @@ export const SteppedComposition: Story = {
       <Dialog.Trigger render={<Button variant="ghost">Open stepped modal</Button>} />
       <Dialog.Content>
         <SteppedModalContent />
+      </Dialog.Content>
+    </Dialog.Root>
+  ),
+};
+
+/**
+ * The standard form dialog via the shorthand props (design brief 2.9): title and
+ * one sentence, a `gap-5` body, Cancel as ghost, the one primary rightmost and a
+ * Learn more text action on the left.
+ */
+export const StandardForm: Story = {
+  render: () => (
+    <Dialog.Root>
+      <Dialog.Trigger render={<Button variant="ghost">Open form dialog</Button>} />
+      <Dialog.Content size="md">
+        <ModalLayout
+          title="Rename project"
+          description="The folder on disk keeps its name; only Maestro's label changes."
+          leading={<Button variant="text">Learn more</Button>}
+          actions={
+            <>
+              <Dialog.Close render={<Button variant="ghost">Cancel</Button>} />
+              <Dialog.Close render={<Button variant="primary">Rename</Button>} />
+            </>
+          }
+        >
+          <Dialog.Body>
+            <Field.Root>
+              <Field.Label>Name</Field.Label>
+              <Input defaultValue="chorus" />
+              <Field.Description>Shown in the sidebar and the title bar.</Field.Description>
+            </Field.Root>
+          </Dialog.Body>
+        </ModalLayout>
       </Dialog.Content>
     </Dialog.Root>
   ),

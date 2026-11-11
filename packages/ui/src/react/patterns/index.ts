@@ -9,6 +9,10 @@ export {
 
 export { EntityHeader, type EntityHeaderProps } from './entity-header';
 
+export { FactGrid, type FactGridProps, type FactGridRowProps } from './fact-grid';
+
+export { MetaLine, type MetaLineProps } from './meta-line';
+
 export { CreateTaskModal } from './create-task-modal/create-task-modal';
 export { CreateTaskPrompt } from './create-task-modal/create-task-prompt';
 export type {

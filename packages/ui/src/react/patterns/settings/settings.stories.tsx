@@ -186,7 +186,7 @@ function PageAnatomy() {
           title="Interface"
           description="Customize the appearance and behavior of the app."
         />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem', marginTop: '2rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2.5rem' }}>
           <SettingsSection title="App">
             <SettingsRow
               label="Automatic updates"
@@ -213,10 +213,32 @@ function PageAnatomy() {
             <SettingsRow
               label="Untitled section"
               description="A section without a heading, like General's account card."
+              control={<Button variant="text">Manage</Button>}
+            />
+          </SettingsSection>
+          <SettingsSection
+            title="Worktrees"
+            description="Where new task worktrees go. Existing tasks stay where they are."
+          >
+            <SettingsRow
+              layout="stacked"
+              label="Worktree folder"
+              description="Long values (paths, URLs, keys) sit under the label at full width."
+              control={<Input defaultValue="C:\Users\dev\chorus\wt" />}
+            />
+            <SettingsRow
+              label="Default branch"
+              description="Selects and comboboxes are w-56."
               control={
-                <Button variant="secondary" size="xs">
-                  Manage
-                </Button>
+                <Select.Root defaultValue="main">
+                  <Select.Trigger appearance="input" className={s.w56}>
+                    <Select.Value />
+                  </Select.Trigger>
+                  <Select.Content>
+                    <Select.Item value="main">main</Select.Item>
+                    <Select.Item value="develop">develop</Select.Item>
+                  </Select.Content>
+                </Select.Root>
               }
             />
           </SettingsSection>
