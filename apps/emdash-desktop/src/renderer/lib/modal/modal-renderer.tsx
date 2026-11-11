@@ -27,11 +27,14 @@ type RuntimeModalEntry = {
   readonly ignoreOutsidePressAfterWindowBlur?: boolean;
 };
 
+// Dialog widths (design brief 2.9): sm 400 (confirm), md 520 (default form),
+// lg 680 (create task, integrate, add project), xl 880 (pickers with previews).
 const SIZE_CLASSES: Record<ModalSize, string> = {
   xs: 'sm:max-w-xs',
-  sm: 'sm:max-w-sm',
-  md: 'sm:max-w-lg',
-  lg: 'sm:max-w-2xl',
+  sm: 'sm:max-w-[25rem]',
+  md: 'sm:max-w-[32.5rem]',
+  lg: 'sm:max-w-[42.5rem]',
+  xl: 'sm:max-w-[55rem]',
 };
 
 const POSITION_CLASSES: Record<ModalPosition, string> = {
@@ -201,7 +204,10 @@ const ModalDialog = observer(function ModalDialog({
             }
           }}
           className={cn(
-            'surface-elevated fixed left-1/2 z-50 flex max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100%-2rem)] -translate-x-1/2 flex-col overflow-hidden rounded-xl bg-(--em-surface) text-sm ring-1 ring-foreground/10 duration-100 outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95',
+            // The elevated surface, rounded-xl, one subtle hairline and the theme's overlay
+            // shadow (soft black in dark); a 150ms fade with a 0.98 zoom, none under
+            // reduced motion. The scrim is the kit overlay (the backdrop token).
+            'surface-elevated fixed left-1/2 z-50 flex max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100%-2rem)] -translate-x-1/2 flex-col overflow-hidden rounded-xl bg-(--em-surface) text-sm text-foreground shadow-xl ring-1 ring-border-subtle duration-150 outline-none data-open:animate-in data-open:fade-in-0 data-open:zoom-in-98 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-98 motion-reduce:animate-none',
             POSITION_CLASSES[runtimeEntry.position ?? 'center'],
             SIZE_CLASSES[runtimeEntry.size ?? 'md']
           )}

@@ -116,14 +116,53 @@
   --color-foreground-merged: var(--foreground-merged);
 
   /* Radius scale: the @emdash/theme density tokens, so `rounded-*` here and the
-     @emdash/ui components agree. md 8px (buttons, inputs, rows), lg 12px (cards,
-     the composer, menus), xl 16px (floating panels). */
+     @emdash/ui components agree. xs 4px (kbd, inline code), sm 6px (mini icon
+     buttons), md 8px (buttons, inputs, rows), lg 12px (cards, the composer,
+     menus), xl 16px (dialogs, floating panels), 2xl 20px (the voice bar). */
   --radius-xs: var(--em-radius-xs);
   --radius-sm: var(--em-radius-sm);
   --radius-md: var(--em-radius-md);
   --radius-lg: var(--em-radius-lg);
   --radius-xl: var(--em-radius-xl);
   --radius-2xl: var(--em-radius-2xl);
+
+  /* Surfaces (design brief 2.1). `bg-surface` and its hover / selected / emphasis
+     steps follow the surface cascade: they resolve against the nearest
+     `surface-*` scope class, so a row or card reads one step up from whatever it
+     sits on. The fixed levels name one rung of the ladder directly.
+       sunken    chrome: sidebar, title bar, tab strip
+       paper     content: views, panes, settings pages, threads
+       emphasis  cards, the composer, settings cards, code wells
+       elevated  menus, popovers, tooltips, toasts, dialogs, sheets */
+  --color-surface: var(--em-surface);
+  --color-surface-hover: var(--em-surface-hover);
+  --color-surface-selected: var(--em-surface-selected);
+  --color-surface-emphasis: var(--em-surface-emphasis);
+  --color-surface-emphasis-hover: var(--em-surface-emphasis-hover);
+  --color-surface-sunken: var(--em-surface-sunken);
+  --color-surface-paper: var(--em-surface-paper);
+  --color-surface-elevated: var(--em-surface-elevated);
+  --color-surface-elevated-emphasis: var(--em-surface-elevated-emphasis);
+  /* The modal scrim: black 55% in dark, slate ink 30% in light, no blur. */
+  --color-overlay: var(--em-backdrop);
+
+  /* Shadows come from the theme: soft ink in light, none in dark, where a
+     floating layer reads by its surface step plus one `border-border-subtle`
+     hairline. Feature code should not reach for shadows at all (brief 2.1). */
+  --shadow-sm: var(--em-shadow-sm);
+  --shadow-md: var(--em-shadow-md);
+  --shadow-lg: var(--em-shadow-lg);
+  --shadow-xl: var(--em-shadow-overlay);
+  --shadow-2xl: var(--em-shadow-overlay);
+}
+
+/* The reading column (the conductor thread's measure): 45rem of text with a
+   fluid gutter, centred. For threads, reports and documents (brief 2.5). */
+@utility reading-column {
+  margin-inline: auto;
+  width: 100%;
+  max-width: calc(45rem + 2 * clamp(1rem, 4%, 3rem));
+  padding-inline: clamp(1rem, 4%, 3rem);
 }
 
 ::selection {
