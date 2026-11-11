@@ -51,6 +51,12 @@ const EMPTY_SNAPSHOT: PaletteControllerSnapshot = {
 export class PaletteController {
   private generation = 0;
   private snapshot: PaletteControllerSnapshot = EMPTY_SNAPSHOT;
+  /**
+   * Whether the selection was moved by the user (keys or pointer) since the input last changed.
+   * Until then the first result is the selection, so a slower provider whose results rank above
+   * the ones already shown takes the highlight instead of pushing it to the second row.
+   */
+  private selectionChosen = false;
   private readonly listeners = new Set<() => void>();
 
   constructor(private readonly catalog: PaletteProviderCatalog<readonly PaletteProviderDef[]>) {}
@@ -67,6 +73,7 @@ export class PaletteController {
   select(identity: string): void {
     if (!this.snapshot.results.some((result) => result.identity === identity)) return;
     if (this.snapshot.selectedIdentity === identity) return;
+    this.selectionChosen = true;
     this.snapshot = { ...this.snapshot, selectedIdentity: identity };
     this.emit();
   }
@@ -76,6 +83,7 @@ export class PaletteController {
     const parsed = parseInput(input, this.catalog);
     const { query, mode } = parsed;
     const providers = mode ? [mode.provider] : this.catalog.providers;
+    this.selectionChosen = false;
     this.snapshot = {
       input,
       query,
@@ -160,11 +168,11 @@ export class PaletteController {
       .sort(compareResults)
       .slice(0, TOTAL_RESULT_LIMIT)
       .map(({ identity, provider, match }) => ({ identity, provider, match }));
-    const selectedIdentity = results.some(
-      ({ identity }) => identity === this.snapshot.selectedIdentity
-    )
-      ? this.snapshot.selectedIdentity
-      : results[0]?.identity;
+    const keepChosen =
+      this.selectionChosen &&
+      results.some(({ identity }) => identity === this.snapshot.selectedIdentity);
+    if (!keepChosen) this.selectionChosen = false;
+    const selectedIdentity = keepChosen ? this.snapshot.selectedIdentity : results[0]?.identity;
 
     this.snapshot = {
       input,
