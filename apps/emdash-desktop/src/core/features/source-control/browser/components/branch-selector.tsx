@@ -1,4 +1,4 @@
-import { Badge, Combobox, InputGroup, ToggleGroup, Tooltip } from '@emdash/ui/react/primitives';
+import { Combobox, InputGroup, ToggleGroup, Tooltip } from '@emdash/ui/react/primitives';
 import { GitBranch, RefreshCw } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
 import {
@@ -132,21 +132,20 @@ export function BranchSelector({
       }}
     >
       {trigger ?? (
-        <Combobox.Trigger className="hover:bg-muted/30 flex h-9 items-center justify-between rounded-md border border-border px-2.5 py-1 text-left text-sm outline-none">
-          <div className="text-muted-foreground flex items-center gap-2">
-            <GitBranch />
-            <Combobox.Value placeholder="Select a branch" />
-          </div>
+        <Combobox.Trigger className="flex h-8 min-w-0 items-center justify-between gap-2 rounded-md border border-border px-2.5 text-left text-sm text-foreground transition-colors outline-none hover:border-border-1 focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring emlight:border-border-1">
+          <span className="flex min-w-0 items-center gap-2">
+            <GitBranch aria-hidden className="size-3.5 shrink-0 text-foreground-passive" />
+            <span className="min-w-0 truncate">
+              <Combobox.Value placeholder="Select a branch" />
+            </span>
+          </span>
         </Combobox.Trigger>
       )}
       <Combobox.Content
-        className={cn('min-w-(--anchor-width) border', showRemoteFooter ? 'pb-0' : 'pb-1')}
+        className={cn('min-w-(--anchor-width)', showRemoteFooter ? 'pb-0' : 'pb-1')}
       >
         {observationKind === 'stale' ? (
-          <p
-            role="status"
-            className="border-b border-border px-2.5 py-1.5 text-xs text-foreground-muted"
-          >
+          <p role="status" className="px-2.5 pt-1.5 pb-1 text-tiny text-foreground-passive">
             Showing previously observed branches
           </p>
         ) : null}
@@ -159,23 +158,23 @@ export function BranchSelector({
                 inputRef.current?.focus();
               }
             }}
-            className="flex w-full rounded-b-none border-b border-border bg-transparent"
+            className="m-1 flex"
           >
             <ToggleGroup.Item
               value="local"
-              className="group flex flex-1 items-center gap-1 hover:bg-background-quaternary-1 data-pressed:bg-background-quaternary-2"
+              className="flex flex-1 items-center gap-1.5"
               disabled={localCount === 0}
             >
               Local
-              <Badge>{localCount}</Badge>
+              <span className="text-foreground-passive tabular-nums">{localCount}</span>
             </ToggleGroup.Item>
             <ToggleGroup.Item
               value="remote"
-              className="group flex flex-1 items-center gap-1 hover:bg-background-quaternary-1 data-pressed:bg-background-quaternary-2"
+              className="flex flex-1 items-center gap-1.5"
               disabled={remoteCount === 0}
             >
               Remote
-              <Badge>{remoteCount}</Badge>
+              <span className="text-foreground-passive tabular-nums">{remoteCount}</span>
             </ToggleGroup.Item>
           </ToggleGroup.Root>
         )}
@@ -198,7 +197,9 @@ export function BranchSelector({
                       aria-description={refreshDisabledReason ?? undefined}
                       aria-label="Refresh branches"
                     >
-                      <RefreshCw className={cn('size-3', isRefreshing && 'animate-spin')} />
+                      <RefreshCw
+                        className={cn('size-3.5', isRefreshing && 'motion-safe:animate-spin')}
+                      />
                     </InputGroup.Button>
                   }
                 />
@@ -218,11 +219,11 @@ export function BranchSelector({
           {observationKind === 'unavailable'
             ? 'Branches unavailable'
             : branches.length === 0
-              ? 'no branches exist'
-              : 'no results'}
+              ? 'No branches yet'
+              : 'No matching branches'}
         </Combobox.Empty>
         {footerRemoteName !== undefined && (
-          <div className="border-t border-border">
+          <div className="mt-1 border-t border-border-subtle">
             <RemoteSelector
               remotes={remotes ?? []}
               value={footerRemoteName}
@@ -248,7 +249,7 @@ export function BranchSelector({
                 });
               }}
               appearance="control"
-              className="h-7 w-full rounded-none border-0 bg-transparent px-3 text-sm shadow-none hover:bg-background-quaternary-1 focus-visible:ring-0"
+              className="h-8 w-full rounded-none border-0 bg-transparent px-3 text-sm shadow-none hover:bg-surface-hover focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset"
               renderTrigger={(selected) => (
                 <span className="min-w-0 flex-1 truncate text-left text-foreground-muted">
                   {selected?.label ?? activeRemoteName}

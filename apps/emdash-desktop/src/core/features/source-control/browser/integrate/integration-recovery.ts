@@ -9,7 +9,7 @@ import { resolveTaskBranchName, type CreateTaskParams } from '@core/primitives/t
 
 /**
  * The Chorus self-update coordinator owns this branch; integrating task work straight into it
- * would bypass the candidate/validate/promote pipeline behind "Update Chorus".
+ * would bypass the candidate/validate/promote pipeline behind "Update Maestro".
  */
 export const COORDINATOR_MANAGED_BRANCH = 'refs/heads/chorus/main';
 
@@ -42,12 +42,12 @@ export type ResolutionPlanInput = {
   suffix: string;
 };
 
-/** User-facing blockers, including the Chorus coordinator guard the host runtime does not know. */
+/** User-facing blockers, including the Maestro coordinator guard the host runtime does not know. */
 export function integrationBlockers(preview: IntegrationPreview): string[] {
   const messages = preview.blockers.map((blocker) => describeBlocker(blocker, preview));
   if (preview.target.branch === COORDINATOR_MANAGED_BRANCH) {
     messages.unshift(
-      'The main directory is on chorus/main, which Update Chorus manages. Use Update Chorus to ' +
+      'The main directory is on chorus/main, which Update Maestro manages. Use Update Maestro to ' +
         'deliver this task instead.'
     );
   }
@@ -61,7 +61,7 @@ function describeBlocker(blocker: IntegrationBlocker, preview: IntegrationPrevie
   const target = preview.target.branch ? shortName(preview.target.branch) : 'the main directory';
   return (
     `Uncommitted changes in the main directory (${listed}${more}) would be overwritten. ` +
-    `Commit or discard them in the main directory, then integrate into ${target}.`
+    `Commit or discard them in the main directory, then merge into ${target}.`
   );
 }
 
@@ -86,12 +86,12 @@ export function describeIntegrationPlan(preview: IntegrationPreview): string {
         'main directory; the conflict can be resolved in a separate task.'
       );
     case null:
-      return 'This task cannot be integrated right now.';
+      return 'This task cannot be merged right now.';
   }
 }
 
 export function resolutionTaskName(sourceTaskName: string): string {
-  return `Resolve ${sourceTaskName} integration`.slice(0, 80);
+  return `Resolve ${sourceTaskName} merge`.slice(0, 80);
 }
 
 export function slugForBranch(value: string): string {
@@ -122,14 +122,14 @@ export function buildResolutionPlan(input: ResolutionPlanInput): ResolutionPlan 
     : 'Git did not report specific conflicted files; inspect the merge output.';
 
   const prompt = [
-    `Chorus tried to integrate the task "${input.sourceTaskName}" (${source}) into ` +
+    `Maestro tried to merge the task "${input.sourceTaskName}" (${source}) into ` +
       `\`${fromBranch}\` and could not finish automatically.`,
     `Reason: ${input.failure.reason}`,
     '',
     `You are in a new, isolated worktree on branch \`${branchName}\`, created from ` +
-      `\`${fromBranch}\` (main was at ${input.targetHead} when integration was attempted).`,
+      `\`${fromBranch}\` (main was at ${input.targetHead} when the merge was attempted).`,
     '',
-    'Resolve the integration here:',
+    'Resolve the merge here:',
     `1. Run \`${mergeCommand}\`.`,
     '2. Resolve every conflict, preserving the intent of both sides. If the right resolution is ' +
       'unclear, stop and ask me instead of guessing.',
@@ -144,7 +144,7 @@ export function buildResolutionPlan(input: ResolutionPlanInput): ResolutionPlan 
     '- Do not push, force-push, rebase, or rewrite history, and do not delete branches.',
     '',
     'When you are done, summarize how each conflict was resolved and anything that needs my ' +
-      `review. I will review this task and use Integrate on it to bring the result into ` +
+      `review. I will review this task and use Merge on it to bring the result into ` +
       `\`${fromBranch}\`.`,
   ].join('\n');
 
@@ -177,7 +177,7 @@ export function buildResolutionTaskParams(
         ? {
             id: crypto.randomUUID(),
             provider: RESOLUTION_AGENT_PROVIDER,
-            title: 'Resolve integration',
+            title: 'Resolve merge',
             ...(agent.initialPromptSupported && { initialPrompt: plan.prompt }),
             // The agent must ask before running commands; nothing it does is auto-approved.
             autoApprove: false,

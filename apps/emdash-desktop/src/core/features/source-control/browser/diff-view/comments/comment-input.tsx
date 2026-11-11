@@ -42,31 +42,29 @@ export const CommentInput: React.FC<CommentInputProps> = ({
       <Comment.Header>
         <Comment.Title>
           {existingContent ? 'Edit comment' : 'Add comment'}
-          <Comment.Meta className="ml-2">(Line {lineNumber})</Comment.Meta>
+          <Comment.Meta>Line {lineNumber}</Comment.Meta>
         </Comment.Title>
         <Comment.Actions>
           <Button
             variant="ghost"
             size="xs"
             icon
-            className="h-8 w-8"
             onClick={onCancel}
             title="Cancel (Esc)"
             aria-label="Cancel comment"
           >
-            <X className="h-4 w-4" />
+            <X className="size-3.5" />
           </Button>
           <Button
             variant="ghost"
             size="xs"
             icon
-            className="h-8 w-8"
             onClick={handleSubmit}
             disabled={!content.trim()}
             title="Submit (Cmd/Ctrl+Enter)"
             aria-label="Submit comment"
           >
-            <Check className="h-4 w-4 text-foreground-success" />
+            <Check className="size-3.5" />
           </Button>
         </Comment.Actions>
       </Comment.Header>

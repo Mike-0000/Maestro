@@ -1,7 +1,6 @@
 import type { GitChange } from '@emdash/core/runtimes/git/api';
 import { EmptyState } from '@emdash/ui/react/components';
 import { Button, toast } from '@emdash/ui/react/primitives';
-import { Plus, Undo2 } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { gitCheckoutStoreToken } from '@core/features/source-control/contributions/browser/workspace-store-tokens';
 import { formatErrorType } from '@core/features/tasks/api/browser/utils';
@@ -155,9 +154,15 @@ export const UnstagedSectionBody = observer(function UnstagedSectionBody() {
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+    // When the section is shorter than the action line + a few rows + the commit box, the
+    // body scrolls as a unit (the list keeps a floor) instead of clipping the commit box.
+    <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
       {!hasChanges && (
-        <EmptyState label="Working tree clean" description="No uncommitted file changes." />
+        <EmptyState
+          bare
+          label="No changes"
+          description="Everything in this worktree is committed."
+        />
       )}
       {hasChanges && (
         <ActionCard
@@ -165,22 +170,19 @@ export const UnstagedSectionBody = observer(function UnstagedSectionBody() {
           selectionActions={
             <>
               <Button
-                variant="link"
+                variant="text"
                 size="xs"
                 onClick={handleDiscardSelection}
                 title="Discard selected files"
-                className="text-foreground-destructive"
               >
-                <Undo2 className="size-3" />
                 Discard
               </Button>
               <Button
-                variant="secondary"
+                variant="text"
                 size="xs"
                 onClick={handleStageSelection}
                 title="Stage selected files"
               >
-                <Plus className="size-3" />
                 Stage
               </Button>
             </>
@@ -188,31 +190,28 @@ export const UnstagedSectionBody = observer(function UnstagedSectionBody() {
           generalActions={
             <>
               <Button
-                variant="link"
+                variant="text"
                 size="xs"
                 disabled={!hasChanges}
                 onClick={handleDiscardAll}
                 title="Discard all changes"
-                className="text-foreground-destructive"
               >
-                <Undo2 className="size-3" />
                 Discard all
               </Button>
               <Button
-                variant="secondary"
+                variant="text"
                 size="xs"
                 disabled={!hasChanges}
                 onClick={handleStageAll}
                 title="Stage all changes"
               >
-                <Plus className="size-3" />
                 Stage all
               </Button>
             </>
           }
         />
       )}
-      <div className="min-h-0 flex-1 px-1">
+      <div className="min-h-20 flex-1">
         <ChangesListOrTree
           viewMode={viewMode}
           changes={changes}

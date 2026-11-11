@@ -76,7 +76,7 @@ export const PrFilesList = observer(function PrFilesList({ pr }: { pr: PullReque
   return (
     <ChangesListOrTree
       viewMode={viewMode}
-      className="py-3"
+      className="py-1"
       changes={prFiles}
       rootPath={workspace.path}
       activePath={activePath}

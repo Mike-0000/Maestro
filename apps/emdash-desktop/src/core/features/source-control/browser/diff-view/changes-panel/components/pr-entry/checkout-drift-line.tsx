@@ -1,4 +1,6 @@
+import { Button } from '@emdash/ui/react/primitives';
 import { formatDistanceToNow } from 'date-fns';
+import { cn } from '@core/primitives/styling/browser/cn';
 import type { PrCheckoutDrift } from '@core/services/pull-requests/api';
 
 /**
@@ -33,30 +35,43 @@ export function PrCheckoutDriftLine({
   drift,
   onUpdateNow,
   isUpdating = false,
+  className,
 }: {
   drift: PrCheckoutDrift;
   /** The manual update verb; rendered only while the state is `drifted`. */
   onUpdateNow?: () => void;
   isUpdating?: boolean;
+  className?: string;
 }) {
   const label = checkoutDriftLabel(drift);
   if (!label) return null;
   const syncNote = checkoutDriftSyncNote(drift);
+  const drifted = drift.kind === 'drifted';
+  // A caption: the claim in muted words (a step stronger when the checkout has
+  // drifted, since that is the one worth acting on), the sync stamp passive,
+  // and "Update now" as a text action.
   return (
-    <div className="flex items-center gap-2 text-xs text-foreground-muted">
-      <span className="min-w-0 flex-1 truncate" title={syncNote ? `${label} — ${syncNote}` : label}>
+    <div className={cn('flex min-w-0 items-baseline gap-3 text-xs', className)}>
+      <span
+        className={cn(
+          'min-w-0 flex-1 truncate',
+          drifted ? 'text-foreground-muted' : 'text-foreground-passive'
+        )}
+        title={syncNote ? `${label} — ${syncNote}` : label}
+      >
         {label}
         {syncNote && <span className="text-foreground-passive"> · {syncNote}</span>}
       </span>
-      {drift.kind === 'drifted' && onUpdateNow && (
-        <button
-          type="button"
+      {drifted && onUpdateNow && (
+        <Button
+          variant="text"
+          size="xs"
           disabled={isUpdating}
           onClick={onUpdateNow}
-          className="shrink-0 rounded-md border border-border px-1.5 py-0.5 text-[11px] text-foreground-muted transition-colors hover:text-foreground disabled:opacity-60"
+          className="shrink-0"
         >
           {isUpdating ? 'Updating…' : 'Update now'}
-        </button>
+        </Button>
       )}
     </div>
   );

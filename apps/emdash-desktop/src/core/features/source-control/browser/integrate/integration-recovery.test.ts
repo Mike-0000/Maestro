@@ -61,7 +61,7 @@ describe('integration descriptions', () => {
       })
     );
     expect(blockers).toHaveLength(2);
-    expect(blockers[0]).toContain('Update Chorus');
+    expect(blockers[0]).toContain('Update Maestro');
     expect(blockers[1]).toContain('(a.ts, b.ts)');
     expect(integrationBlockers(preview())).toEqual([]);
   });
@@ -69,7 +69,7 @@ describe('integration descriptions', () => {
 
 describe('resolution plan', () => {
   it('builds an isolated branch from the target branch', () => {
-    expect(plan.taskName).toBe('Resolve Add Login Page! integration');
+    expect(plan.taskName).toBe('Resolve Add Login Page! merge');
     expect(plan.branchName).toBe('emdash/resolve-add-login-page-x1y2z');
     expect(plan.fromBranch).toBe('main');
     expect(plan.manualSteps).toContain('git merge --no-ff --no-edit bbbbbbbb');

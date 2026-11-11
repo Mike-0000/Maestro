@@ -1,10 +1,10 @@
-import { ToggleGroup, toast } from '@emdash/ui/react/primitives';
+import { Tabs, toast } from '@emdash/ui/react/primitives';
 import { ExternalLink } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
+import { computeCheckRunsSummary } from '@core/features/github/api/browser/checks';
 import { useTaskComposition } from '@core/features/workbench/api/browser/task-composition-context';
 import { openExternal } from '@core/primitives/desktop-host/browser/host-client';
-import { cn } from '@core/primitives/styling/browser/cn';
 import { getPrNumber, type PullRequest } from '@root/src/core/services/pull-requests/api';
 import { PrMergeLine } from '@root/src/core/services/pull-requests/browser/components/pr-merge-line';
 import { PrNumberBadge } from '@root/src/core/services/pull-requests/browser/components/pr-number-badge';
@@ -44,6 +44,11 @@ const bypassMergeDescriptions: Record<MergeMode, string> = {
   squash: 'Bypass unmet requirements and combine all commits into one commit.',
   rebase: 'Bypass unmet requirements and rebase all commits onto the base branch.',
 };
+
+/** A tab's count, in the caption tone so the tab word leads. */
+function TabCount({ children }: { children: ReactNode }) {
+  return <span className="ml-1.5 text-foreground-passive tabular-nums">{children}</span>;
+}
 
 export const PullRequestEntry = observer(function PullRequestEntry({
   pr: cachedPr,
@@ -117,61 +122,90 @@ export const PullRequestEntry = observer(function PullRequestEntry({
     action: () => handleMergeClick(strategy),
   }));
 
+  const checkSummary = computeCheckRunsSummary(checks);
+
   return (
-    <div className={cn('flex min-h-0 flex-1 flex-col border-t border-border')}>
-      <div className="flex w-full flex-col gap-2 p-2.5">
-        <div className="group/header flex items-center justify-between gap-2">
-          <button
-            className="group relative flex min-w-0 flex-1 items-center gap-2"
-            onClick={() => openExternal(pr.url)}
-          >
+    // One scroller for the whole entry: when the section is shorter than the brief + tabs +
+    // footer, the entry scrolls as a unit rather than letting the footer paint over the tabs.
+    // The tab body keeps a floor (min-h-40) and scrolls inside itself when there is room.
+    <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
+      {/* The PR in brief: its state and title (opens on GitHub), who wants to
+          merge what, and whether this checkout matches the PR head. */}
+      <div className="flex w-full shrink-0 flex-col gap-2 px-4 pt-1 pb-3">
+        <div className="group/header flex min-w-0 items-start gap-2">
+          <span className="flex h-5 shrink-0 items-center">
             <StatusIcon className="size-4" pr={pr} />
-            <span className="min-w-0 flex-1 truncate text-sm font-normal">{pr.title}</span>
-            <div className="transition-opacity duration-200 group-hover:opacity-0">
-              <PrNumberBadge number={getPrNumber(pr) ?? 0} />
-            </div>
-            <span className="absolute right-0 flex items-center bg-linear-to-r from-transparent to-background pr-0.5 pl-4 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-              <ExternalLink className="size-3.5 text-foreground-muted" />
+          </span>
+          <button
+            type="button"
+            className="group/title flex min-w-0 flex-1 items-start rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={() => openExternal(pr.url)}
+            title="Open on GitHub"
+          >
+            <span className="min-w-0 flex-1 text-sm leading-5 font-medium text-pretty text-foreground decoration-foreground-passive/60 underline-offset-4 group-hover/title:underline">
+              {pr.title}
+              <PrNumberBadge
+                number={getPrNumber(pr) ?? 0}
+                className="ml-1.5 font-normal text-foreground-passive tabular-nums"
+              />
+              <ExternalLink
+                aria-hidden
+                className="ml-1 inline size-3 align-[-1px] text-foreground-passive opacity-0 transition-opacity group-hover/title:opacity-100 group-focus-visible/title:opacity-100"
+              />
             </span>
           </button>
           <PrUrlCopyButton
             url={pr.url}
-            className="opacity-0 group-hover/header:opacity-100 focus-visible:opacity-100"
+            className="-mt-0.5 opacity-0 group-hover/header:opacity-100 focus-visible:opacity-100"
           />
         </div>
-        <PrMergeLine pr={pr} />
+        <PrMergeLine pr={pr} className="pl-6" />
         <PrCheckoutDriftLine
           drift={prStore.checkoutDrift}
           onUpdateNow={() => void updateCheckout()}
           isUpdating={isUpdatingCheckout}
+          className="pl-6"
         />
       </div>
-      <div className="flex min-h-0 flex-1 flex-col px-2.5">
-        <ToggleGroup.Root
-          value={[tab]}
-          className="flex w-full"
-          onValueChange={([value]) => {
-            if (value) {
-              diffView.setPrTab(value as 'files' | 'commits' | 'checks');
-            }
-          }}
-        >
-          <ToggleGroup.Item className="flex-1" value="files" disabled={!isOpen}>
+      <Tabs.Root
+        value={tab}
+        onValueChange={(value) => {
+          if (value) diffView.setPrTab(value as 'files' | 'commits' | 'checks');
+        }}
+        className="flex min-h-40 flex-1 flex-col"
+      >
+        <Tabs.List variant="underline" aria-label="Pull request details" className="shrink-0 px-2">
+          <Tabs.Tab value="files" disabled={!isOpen}>
             Files
-          </ToggleGroup.Item>
-          <ToggleGroup.Item className="flex-1" value="commits">
+            {(pr.changedFiles ?? 0) > 0 && <TabCount>{pr.changedFiles}</TabCount>}
+          </Tabs.Tab>
+          <Tabs.Tab value="commits">
             Commits
-          </ToggleGroup.Item>
-          <ToggleGroup.Item className="flex-1" value="checks">
+            {(pr.commitCount ?? 0) > 0 && <TabCount>{pr.commitCount}</TabCount>}
+          </Tabs.Tab>
+          <Tabs.Tab value="checks">
             Checks
-          </ToggleGroup.Item>
-        </ToggleGroup.Root>
+            {checkSummary.failed > 0 ? (
+              <span className="ml-1.5 flex items-center gap-1 text-foreground-error tabular-nums">
+                <span aria-hidden className="size-1.5 rounded-full bg-foreground-error" />
+                {checkSummary.failed}
+                <span className="sr-only"> failing</span>
+              </span>
+            ) : (
+              checks.length > 0 && <TabCount>{checks.length}</TabCount>
+            )}
+          </Tabs.Tab>
+        </Tabs.List>
         <div className="min-h-0 flex-1 overflow-y-auto">
           {tab === 'files' && <PrFilesList pr={pr} />}
-          {tab === 'commits' && <CommitRangeCommitsList range={commitRangeForPullRequest(pr)} />}
+          {tab === 'commits' && (
+            <div className="h-full px-2">
+              <CommitRangeCommitsList range={commitRangeForPullRequest(pr)} />
+            </div>
+          )}
           {tab === 'checks' && <PrChecksList pr={pr} checks={checks} details={details} />}
         </div>
-      </div>
+      </Tabs.Root>
       {pr.status === 'open' && (
         <MergeFooter
           uiState={uiState}

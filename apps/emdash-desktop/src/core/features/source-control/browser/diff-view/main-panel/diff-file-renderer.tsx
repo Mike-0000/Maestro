@@ -1,5 +1,5 @@
 import type { GitObjectRef } from '@emdash/core/runtimes/git/api';
-import { Markdown } from '@emdash/ui/react/components';
+import { EmptyState, Markdown } from '@emdash/ui/react/components';
 import { Spinner } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
 import type * as monaco from 'monaco-editor';
@@ -63,11 +63,7 @@ export const DiffFileRenderer = observer(function DiffFileRenderer({ tab }: Diff
       );
     }
     case 'binary':
-      return (
-        <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
-          Binary file — no diff available
-        </div>
-      );
+      return <EmptyState bare label="Binary file" description="There is no text diff to show." />;
   }
 });
 
@@ -190,11 +186,7 @@ const DiffContentPreview = observer(function DiffContentPreview({
   const openLink = useMarkdownLinkOpener(openWorkspaceLink);
 
   if (tab.status === 'deleted') {
-    return (
-      <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
-        Deleted file — no preview available
-      </div>
-    );
+    return <EmptyState bare label="Deleted file" description="There is nothing left to preview." />;
   }
 
   const status = sideStatus(side);
@@ -254,12 +246,17 @@ function DiffPreviewStatusOverlay({ status }: { status: ContentStatus }) {
         : 'Could not load file'
       : status.kind === 'orphaned'
         ? 'File was deleted on disk'
-        : 'Loading file...';
+        : 'Loading file…';
 
   return (
-    <div className="absolute inset-0 flex items-center justify-center bg-(--em-surface) text-xs text-foreground-passive">
+    <div
+      role="status"
+      className="absolute inset-0 flex items-center justify-center bg-(--em-surface) text-xs text-foreground-passive"
+    >
       <div className="flex items-center gap-2">
-        {status.kind === 'loading' ? <Spinner size="sm" /> : null}
+        {status.kind === 'loading' ? (
+          <Spinner size="sm" className="text-foreground-passive" />
+        ) : null}
         <span>{message}</span>
       </div>
     </div>

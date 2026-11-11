@@ -40,7 +40,7 @@ export function VirtualizedChangesList({
   return (
     <div
       ref={parentRef}
-      className={cn('h-full overflow-y-auto overflow-x-hidden py-2 px-1', className)}
+      className={cn('h-full overflow-x-hidden overflow-y-auto px-2 py-1', className)}
     >
       <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
         {virtualizer.getVirtualItems().map((virtualItem) => {

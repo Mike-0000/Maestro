@@ -49,7 +49,7 @@ export const DiffTabBarItem = observer(function DiffTabBarItem({
       labelSlot={
         <TabTitle isActive={tab.isActive} isPreview={tab.isPreview}>
           {fileName}
-          <span className="ml-1 text-xs text-foreground-muted">{suffix}</span>
+          <span className="ml-1 text-xs text-foreground-passive">{suffix}</span>
         </TabTitle>
       }
       statusSlot={

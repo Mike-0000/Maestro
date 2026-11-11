@@ -37,9 +37,9 @@ type Side = 'original' | 'modified';
 function unavailableMessage(reason: UnavailableReason): string {
   switch (reason) {
     case 'too-large':
-      return 'Preview unavailable — file is too large';
+      return 'Preview unavailable: the file is too large';
     case 'lfs-pointer':
-      return 'Preview unavailable — Git LFS smudge filter not applied';
+      return 'Preview unavailable: the Git LFS smudge filter was not applied';
     case 'git-error':
       return 'Preview unavailable';
   }
@@ -184,15 +184,15 @@ async function loadModifiedWithTransientRetry(
 function ImageSidePanel({ label, state, side }: { label: string; state: SideState; side: Side }) {
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-baseline gap-2 border-b border-border px-3 py-2">
-        <span className="font-sans text-xs text-foreground-muted">{label}</span>
+      <div className="flex h-9 shrink-0 items-baseline gap-2 px-4 pt-2.5">
+        <span className="text-xs text-foreground-muted">{label}</span>
         {state.status === 'ready' && (
-          <span className="font-sans text-[10px] text-foreground-passive">
+          <span className="text-tiny text-foreground-passive tabular-nums">
             {formatBytes(state.size)}
           </span>
         )}
       </div>
-      <div className="flex flex-1 items-center justify-center overflow-auto p-4">
+      <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4 pt-1">
         <ImageSideContent state={state} side={side} />
       </div>
     </div>
@@ -202,7 +202,11 @@ function ImageSidePanel({ label, state, side }: { label: string; state: SideStat
 function ImageSideContent({ state, side }: { state: SideState; side: Side }) {
   switch (state.status) {
     case 'loading':
-      return <div className="text-xs text-foreground-passive">Loading…</div>;
+      return (
+        <div role="status" className="text-xs text-foreground-passive">
+          Loading…
+        </div>
+      );
     case 'missing':
       return (
         <div className="text-xs text-foreground-passive">
@@ -288,7 +292,7 @@ export const ImageDiffView = observer(function ImageDiffView({
   return (
     <div className="flex h-full min-h-0 w-full">
       <ImageSidePanel label="Original" state={original} side="original" />
-      <div className="w-px shrink-0 bg-border" />
+      <div aria-hidden className="my-3 w-px shrink-0 bg-border-subtle" />
       <ImageSidePanel label="Modified" state={modified} side="modified" />
     </div>
   );

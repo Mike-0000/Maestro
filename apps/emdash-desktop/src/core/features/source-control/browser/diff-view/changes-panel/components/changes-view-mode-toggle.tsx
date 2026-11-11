@@ -2,6 +2,7 @@ import { Button, Tooltip } from '@emdash/ui/react/primitives';
 import { AlignJustify, ListTree } from 'lucide-react';
 import { useState } from 'react';
 import type { ChangesListViewMode } from '@core/primitives/app-settings/api';
+import { cn } from '@core/primitives/styling/browser/cn';
 
 interface ChangesViewModeToggleProps {
   value: ChangesListViewMode;
@@ -25,17 +26,26 @@ export function ChangesViewModeToggle({ value, onChange, label }: ChangesViewMod
         setOpen(nextOpen);
       }}
     >
-      <Tooltip.Trigger>
-        <Button
-          variant="ghost"
-          size="xs"
-          icon
-          onClick={() => onChange(nextMode)}
-          aria-label={`${tooltip} (${label})`}
-        >
-          <Icon className="size-3" />
-        </Button>
-      </Tooltip.Trigger>
+      {/* Rendered as the trigger itself so there is one button, not one nested in another. */}
+      <Tooltip.Trigger
+        render={
+          <Button
+            variant="ghost"
+            size="xs"
+            icon
+            onClick={() => onChange(nextMode)}
+            aria-label={`${tooltip} (${label})`}
+            // A secondary control: quiet until its section header is hovered
+            // or it has keyboard focus.
+            className={cn(
+              'transition-opacity',
+              !open && 'opacity-0 group-hover/section:opacity-100 focus-visible:opacity-100'
+            )}
+          >
+            <Icon className="size-3.5" />
+          </Button>
+        }
+      />
       <Tooltip.Content>{tooltip}</Tooltip.Content>
     </Tooltip.Root>
   );

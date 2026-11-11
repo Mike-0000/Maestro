@@ -3,17 +3,21 @@ import {
   type IntegrateResult,
   type IntegrationPreview,
 } from '@emdash/core/runtimes/git/api';
+import { StateGlyph } from '@emdash/ui/react/components';
+import { FactGrid } from '@emdash/ui/react/patterns';
 import {
   Alert,
   Button,
   Checkbox,
   Dialog,
   Input,
+  ModalLayout,
+  SectionLabel,
   Spinner,
   toast,
 } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { hostRefFromConnectionId } from '@core/features/agents/api/browser/client';
 import { useAgents } from '@core/features/agents/api/browser/use-agents';
 import { getProjectSshConnectionId } from '@core/features/projects/api/browser/stores/project-selectors';
@@ -31,6 +35,7 @@ import { log } from '@core/primitives/logging/browser/logger';
 import { defineModal } from '@core/primitives/modals/react';
 import { useCloseGuard } from '@core/primitives/modals/react/use-close-guard';
 import { useNavigate } from '@core/primitives/navigation/browser/navigation-hooks';
+import { cn } from '@core/primitives/styling/browser/cn';
 import {
   buildResolutionPlan,
   buildResolutionTaskParams,
@@ -166,16 +171,13 @@ export const IntegrateWorktreeModal = observer(function IntegrateWorktreeModal({
           failure,
           recovery: { state: 'started', plan, taskId: params.id, withAgent },
         });
-        toast.info(
-          withAgent ? 'Claude Code is resolving the integration' : 'Resolution task created',
-          {
-            description: `${plan.taskName} runs in its own worktree on ${plan.branchName}.`,
-            action: {
-              label: 'Open task',
-              onClick: () => navigate(taskViewDef({ projectId, taskId: params.id })),
-            },
-          }
-        );
+        toast.info(withAgent ? 'Claude Code is resolving the merge' : 'Resolution task created', {
+          description: `${plan.taskName} runs in its own worktree on ${plan.branchName}.`,
+          action: {
+            label: 'Open task',
+            onClick: () => navigate(taskViewDef({ projectId, taskId: params.id })),
+          },
+        });
       } catch (error) {
         log.error('integration: failed to create resolution task', error);
         setPhase({
@@ -203,7 +205,7 @@ export const IntegrateWorktreeModal = observer(function IntegrateWorktreeModal({
         return;
       }
       setNotice(null);
-      setPhase({ kind: 'working', preview, label: 'Integrating…' });
+      setPhase({ kind: 'working', preview, label: 'Merging…' });
       try {
         const client = await getSourceControlClient();
         const result = await client.checkout.integrate(
@@ -216,7 +218,7 @@ export const IntegrateWorktreeModal = observer(function IntegrateWorktreeModal({
         );
         if (result.success) {
           setPhase({ kind: 'done', result: result.data });
-          toast.success(`Integrated ${taskName} into ${shortName(result.data.branch)}`);
+          toast.success(`Merged ${taskName} into ${shortName(result.data.branch)}`);
           return;
         }
         const error = result.error;
@@ -232,7 +234,7 @@ export const IntegrateWorktreeModal = observer(function IntegrateWorktreeModal({
           case 'source_moved':
             setNotice({
               status: 'warning',
-              message: `${error.message} Review the updated preview before integrating.`,
+              message: `${error.message} Review the updated preview before merging.`,
             });
             await loadPreview();
             return;
@@ -297,30 +299,93 @@ export const IntegrateWorktreeModal = observer(function IntegrateWorktreeModal({
   };
 
   const preview = phase.kind === 'ready' || phase.kind === 'working' ? phase.preview : null;
-  const targetName = preview?.target.branch ? shortName(preview.target.branch) : 'main';
+  const targetName = preview?.target.branch ? shortName(preview.target.branch) : null;
 
   return (
-    <>
-      <Dialog.Header>
-        <Dialog.Title>Integrate into {targetName}</Dialog.Title>
-        <Dialog.Description>
-          Bring the committed work from “{taskName}” into the project’s main directory.
-        </Dialog.Description>
-      </Dialog.Header>
-      <Dialog.Body className="space-y-3 text-sm">
+    <ModalLayout
+      title={targetName ? `Merge into ${targetName}` : `Merge “${taskName}”`}
+      description={
+        <>
+          Brings the committed work from “{taskName}” into the project’s main directory. Nothing is
+          pushed.
+        </>
+      }
+      actions={
+        phase.kind === 'recovery' && phase.recovery.state === 'started' ? (
+          <>
+            <Button variant="ghost" onClick={() => complete()}>
+              Close
+            </Button>
+            <Button variant="primary" onClick={() => openTask(recoveryTaskId(phase.recovery))}>
+              Open resolution task
+            </Button>
+          </>
+        ) : phase.kind === 'recovery' &&
+          (phase.recovery.state === 'declined' || phase.recovery.state === 'failed') ? (
+          <>
+            <Button variant="ghost" onClick={() => dismiss()}>
+              Close
+            </Button>
+            <Button variant="primary" onClick={() => void loadPreview()}>
+              Check again
+            </Button>
+          </>
+        ) : phase.kind === 'done' ? (
+          <Button variant="primary" onClick={() => complete()}>
+            Close
+          </Button>
+        ) : phase.kind === 'load-error' ? (
+          <>
+            <Button variant="ghost" onClick={() => dismiss()}>
+              Close
+            </Button>
+            <Button variant="primary" onClick={() => void loadPreview()}>
+              Try again
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button variant="ghost" onClick={() => dismiss()} disabled={busy}>
+              Cancel
+            </Button>
+            <PrimaryAction
+              preview={preview}
+              targetName={targetName}
+              busy={busy}
+              autoResolve={autoResolve}
+              claudeAvailable={claudeAvailable}
+              label={phase.kind === 'working' ? phase.label : null}
+              onIntegrate={(value) => void integrate(value)}
+              onResolve={(value) =>
+                void startRecovery(
+                  value,
+                  {
+                    reason: integrationBlockers(value).join(' '),
+                    conflictedFiles: [],
+                  },
+                  true
+                )
+              }
+            />
+          </>
+        )
+      }
+    >
+      <Dialog.Body className="flex flex-col gap-5 text-sm">
         {notice && (
           <Alert.Root status={notice.status}>
             <Alert.Description>{notice.message}</Alert.Description>
           </Alert.Root>
         )}
         {phase.kind === 'loading' && (
-          <div className="flex items-center gap-2 text-foreground-muted">
-            <Spinner size="sm" /> Checking what would change…
-          </div>
+          <p role="status" className="flex items-center gap-2 text-foreground-muted">
+            <Spinner size="sm" className="text-foreground-passive" />
+            Checking what would change…
+          </p>
         )}
         {phase.kind === 'load-error' && (
           <Alert.Root status="destructive">
-            <Alert.Title>Could not prepare the integration</Alert.Title>
+            <Alert.Title>Could not prepare the merge</Alert.Title>
             <Alert.Description>{phase.message}</Alert.Description>
           </Alert.Root>
         )}
@@ -351,65 +416,13 @@ export const IntegrateWorktreeModal = observer(function IntegrateWorktreeModal({
           />
         )}
       </Dialog.Body>
-      <Dialog.Footer>
-        {phase.kind === 'recovery' && phase.recovery.state === 'started' ? (
-          <>
-            <Button variant="secondary" onClick={() => complete()}>
-              Close
-            </Button>
-            <Button variant="primary" onClick={() => openTask(recoveryTaskId(phase.recovery))}>
-              Open resolution task
-            </Button>
-          </>
-        ) : phase.kind === 'recovery' &&
-          (phase.recovery.state === 'declined' || phase.recovery.state === 'failed') ? (
-          <>
-            <Button variant="secondary" onClick={() => dismiss()}>
-              Close
-            </Button>
-            <Button variant="primary" onClick={() => void loadPreview()}>
-              Check again
-            </Button>
-          </>
-        ) : phase.kind === 'done' || phase.kind === 'load-error' ? (
-          <Button
-            variant="secondary"
-            onClick={() => (phase.kind === 'done' ? complete() : dismiss())}
-          >
-            Close
-          </Button>
-        ) : (
-          <>
-            <Button variant="secondary" onClick={() => dismiss()} disabled={busy}>
-              Cancel
-            </Button>
-            <PrimaryAction
-              preview={preview}
-              busy={busy}
-              autoResolve={autoResolve}
-              claudeAvailable={claudeAvailable}
-              label={phase.kind === 'working' ? phase.label : null}
-              onIntegrate={(value) => void integrate(value)}
-              onResolve={(value) =>
-                void startRecovery(
-                  value,
-                  {
-                    reason: integrationBlockers(value).join(' '),
-                    conflictedFiles: [],
-                  },
-                  true
-                )
-              }
-            />
-          </>
-        )}
-      </Dialog.Footer>
-    </>
+    </ModalLayout>
   );
 });
 
 function PrimaryAction({
   preview,
+  targetName,
   busy,
   autoResolve,
   claudeAvailable,
@@ -418,6 +431,7 @@ function PrimaryAction({
   onResolve,
 }: {
   preview: IntegrationPreview | null;
+  targetName: string | null;
   busy: boolean;
   autoResolve: boolean;
   claudeAvailable: boolean;
@@ -428,7 +442,7 @@ function PrimaryAction({
   if (!preview) {
     return (
       <Button variant="primary" disabled>
-        Integrate
+        Merge
       </Button>
     );
   }
@@ -454,14 +468,24 @@ function PrimaryAction({
         : claudeAvailable
           ? 'Resolve with Claude Code'
           : 'Create resolution task'
-      : preview.mode === 'merge'
-        ? 'Merge and integrate'
-        : 'Integrate');
+      : targetName
+        ? `Merge into ${targetName}`
+        : 'Merge');
   return (
     <Button variant="primary" disabled={disabled} onClick={() => onIntegrate(preview)}>
       {busy && <Spinner size="sm" />}
       {text}
     </Button>
+  );
+}
+
+/** A quiet group: a group label over its rows. */
+function Group({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <section className="flex flex-col gap-1.5">
+      <SectionLabel as="h3">{label}</SectionLabel>
+      {children}
+    </section>
   );
 }
 
@@ -485,13 +509,39 @@ function PreviewDetails({
   const targetDirty = hasChanges(preview.target.changes);
   const files = preview.mode === 'conflict' ? preview.conflictedFiles : preview.changedFiles;
   const hasOverlapBlocker = preview.blockers.some((blocker) => blocker.kind === 'local-changes');
+  const source = preview.source.branch ? shortName(preview.source.branch) : null;
+  const target = preview.target.branch ? shortName(preview.target.branch) : null;
 
   return (
     <>
-      <p>{describeIntegrationPlan(preview)}</p>
+      {/* What will happen, in one plain sentence, then the facts behind it. */}
+      <div className="flex flex-col gap-3">
+        <p className="text-base text-pretty text-foreground-body">
+          {describeIntegrationPlan(preview)}
+        </p>
+        <FactGrid labelWidth="5rem">
+          {source && (
+            <FactGrid.Row label="From">
+              <BranchName>{source}</BranchName>
+            </FactGrid.Row>
+          )}
+          <FactGrid.Row label="Into">
+            {target ? <BranchName>{target}</BranchName> : 'the main directory'}
+          </FactGrid.Row>
+          <FactGrid.Row label="Brings">
+            {pluralize(preview.ahead, 'commit')}
+            {preview.changedFiles.length > 0 && (
+              <span className="text-foreground-muted">
+                {' · '}
+                {pluralize(preview.changedFiles.length, 'file')} changed
+              </span>
+            )}
+          </FactGrid.Row>
+        </FactGrid>
+      </div>
       {blockers.length > 0 && (
         <Alert.Root status="destructive">
-          <Alert.Title>Can’t integrate right now</Alert.Title>
+          <Alert.Title>Can’t merge right now</Alert.Title>
           <Alert.Description>
             <ul className="list-disc space-y-1 pl-4">
               {blockers.map((message) => (
@@ -505,11 +555,11 @@ function PreviewDetails({
         <Alert.Root status="warning">
           <Alert.Title>This task has uncommitted changes</Alert.Title>
           <Alert.Description>
-            Only committed work is integrated. Commit everything in the task’s worktree to include
-            it.
+            Only committed work is merged. Commit everything in the task’s worktree to include it.
             {canCommit && (
-              <div className="mt-2 flex gap-2">
+              <span className="mt-3 flex gap-2">
                 <Input
+                  aria-label="Commit message"
                   value={commitMessage}
                   placeholder="Commit message"
                   onChange={(event) => onCommitMessageChange(event.target.value)}
@@ -522,7 +572,7 @@ function PreviewDetails({
                 >
                   {committing ? 'Committing…' : 'Commit all'}
                 </Button>
-              </div>
+              </span>
             )}
           </Alert.Description>
         </Alert.Root>
@@ -536,38 +586,59 @@ function PreviewDetails({
         </Alert.Root>
       )}
       {preview.commits.length > 0 && (
-        <section>
-          <h3 className="mb-1 text-xs font-medium text-foreground-muted">
-            Incoming commits ({preview.ahead})
-          </h3>
-          <ul className="max-h-32 space-y-0.5 overflow-auto text-xs">
+        <Group label={`Incoming commits · ${preview.ahead}`}>
+          <ul className="flex max-h-36 flex-col gap-1 overflow-auto text-sm">
             {preview.commits.map((commit) => (
-              <li key={commit.hash} className="flex gap-2">
-                <code className="shrink-0 text-foreground-muted">{commit.hash.slice(0, 8)}</code>
-                <span className="truncate">{commit.subject}</span>
+              <li key={commit.hash} className="flex min-w-0 items-baseline gap-3">
+                <code className="shrink-0 font-mono text-xs text-foreground-passive">
+                  {commit.hash.slice(0, 8)}
+                </code>
+                <span className="min-w-0 truncate text-foreground-body">{commit.subject}</span>
               </li>
             ))}
           </ul>
-        </section>
+        </Group>
       )}
       {files.length > 0 && (
-        <section>
-          <h3 className="mb-1 text-xs font-medium text-foreground-muted">
-            {preview.mode === 'conflict' ? 'Conflicting files' : 'Files changed'} ({files.length})
-          </h3>
-          <ul className="max-h-32 space-y-0.5 overflow-auto font-mono text-xs">
+        <Group
+          label={`${preview.mode === 'conflict' ? 'Conflicting files' : 'Files changed'} · ${files.length}`}
+        >
+          <ul className="flex max-h-36 flex-col gap-0.5 overflow-auto font-mono text-xs">
             {files.slice(0, MAX_LISTED_FILES).map((file) => (
-              <li key={file} className="truncate">
-                {file}
+              <li
+                key={file}
+                className={cn(
+                  'flex min-w-0 items-center gap-2 truncate',
+                  preview.mode === 'conflict' ? 'text-foreground' : 'text-foreground-muted'
+                )}
+              >
+                {preview.mode === 'conflict' && (
+                  <span
+                    aria-hidden
+                    className="size-1.5 shrink-0 rounded-full bg-foreground-warning"
+                  />
+                )}
+                <span className="truncate">{file}</span>
               </li>
             ))}
             {files.length > MAX_LISTED_FILES && (
-              <li className="text-foreground-muted">…and {files.length - MAX_LISTED_FILES} more</li>
+              <li className="font-sans text-foreground-passive">
+                …and {files.length - MAX_LISTED_FILES} more
+              </li>
             )}
           </ul>
-        </section>
+        </Group>
       )}
     </>
+  );
+}
+
+/** A branch name in the inline-code role. */
+function BranchName({ children }: { children: ReactNode }) {
+  return (
+    <code className="rounded-xs bg-surface-emphasis px-1 font-mono text-xs text-foreground">
+      {children}
+    </code>
   );
 }
 
@@ -583,9 +654,13 @@ function ResolveOption({
   agentsLoading: boolean;
 }) {
   return (
-    <div className="space-y-1">
-      <label className="flex cursor-pointer items-center gap-2 text-xs">
-        <Checkbox checked={checked} onCheckedChange={(value) => onChange(value === true)} />
+    <div className="flex flex-col gap-1">
+      <label className="flex cursor-pointer items-start gap-2 text-sm text-foreground">
+        <Checkbox
+          className="mt-0.5"
+          checked={checked}
+          onCheckedChange={(value) => onChange(value === true)}
+        />
         {claudeAvailable
           ? 'If the merge fails, start Claude Code in a new isolated task to resolve it'
           : 'If the merge fails, create a new isolated task for resolving it'}
@@ -600,22 +675,47 @@ function ResolveOption({
   );
 }
 
+/** An outcome: the state mark, a short headline and one sentence. */
+function Outcome({
+  glyph,
+  title,
+  children,
+}: {
+  glyph: ReactNode;
+  title: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div role="status" className="flex items-start gap-2.5">
+      <span className="flex h-5 shrink-0 items-center">{glyph}</span>
+      <div className="flex min-w-0 flex-col gap-1">
+        <p className="text-sm font-semibold text-foreground">{title}</p>
+        <p className="text-sm text-foreground-muted">{children}</p>
+      </div>
+    </div>
+  );
+}
+
 function DoneDetails({ result }: { result: IntegrateResult }) {
   const branch = shortName(result.branch);
   return (
-    <Alert.Root status="success">
-      <Alert.Title>
-        {result.mode === 'up-to-date'
-          ? `${branch} already has this work`
-          : `Integrated into ${branch}`}
-      </Alert.Title>
-      <Alert.Description>
-        {result.mode === 'up-to-date'
-          ? 'Nothing needed to change.'
-          : `The main directory is now at ${result.commit.slice(0, 8)} ` +
-            `(was ${result.previousHead.slice(0, 8)}). Nothing was pushed.`}
-      </Alert.Description>
-    </Alert.Root>
+    <Outcome
+      glyph={<StateGlyph state="done" />}
+      title={
+        result.mode === 'up-to-date' ? `${branch} already has this work` : `Merged into ${branch}`
+      }
+    >
+      {result.mode === 'up-to-date' ? (
+        'Nothing needed to change.'
+      ) : (
+        <>
+          The main directory is now at{' '}
+          <code className="font-mono text-xs text-foreground">{result.commit.slice(0, 8)}</code>{' '}
+          (was <code className="font-mono text-xs">{result.previousHead.slice(0, 8)}</code>).
+          Nothing was pushed.
+        </>
+      )}
+    </Outcome>
   );
 }
 
@@ -632,33 +732,30 @@ function RecoveryDetails({
   return (
     <>
       <Alert.Root status={recovery.state === 'failed' ? 'destructive' : 'warning'}>
-        <Alert.Title>The integration needs attention</Alert.Title>
+        <Alert.Title>The merge needs attention</Alert.Title>
         <Alert.Description>
           {failure.reason} The main directory and this task’s worktree were not changed.
         </Alert.Description>
       </Alert.Root>
       {recovery.state === 'creating' && (
-        <div className="flex items-center gap-2 text-foreground-muted">
-          <Spinner size="sm" />
+        <p role="status" className="flex items-center gap-2 text-foreground-muted">
+          <Spinner size="sm" className="text-foreground-passive" />
           {claudeAvailable
             ? 'Starting Claude Code in a new isolated worktree…'
             : 'Creating a resolution task…'}
-        </div>
+        </p>
       )}
       {recovery.state === 'started' && (
-        <Alert.Root status="info">
-          <Alert.Title>
-            {recovery.withAgent ? 'Claude Code is resolving it' : 'Resolution task created'}
-          </Alert.Title>
-          <Alert.Description>
-            “{plan.taskName}” works on {plan.branchName}, a new branch from {plan.fromBranch}.{' '}
-            {recovery.withAgent
-              ? 'Claude Code asks before running commands and won’t push. '
-              : 'Run the steps below in that task’s terminal. '}
-            When the result looks right, use Integrate on that task to bring it into{' '}
-            {plan.fromBranch}.
-          </Alert.Description>
-        </Alert.Root>
+        <Outcome
+          glyph={<StateGlyph state={recovery.withAgent ? 'working' : 'done'} />}
+          title={recovery.withAgent ? 'Claude Code is resolving it' : 'Resolution task created'}
+        >
+          “{plan.taskName}” works on {plan.branchName}, a new branch from {plan.fromBranch}.{' '}
+          {recovery.withAgent
+            ? 'Claude Code asks before running commands and won’t push. '
+            : 'Run the steps below in that task’s terminal. '}
+          When the result looks right, use Merge on that task to bring it into {plan.fromBranch}.
+        </Outcome>
       )}
       {recovery.state === 'failed' && (
         <Alert.Root status="destructive">
@@ -669,14 +766,11 @@ function RecoveryDetails({
       {(recovery.state === 'failed' ||
         recovery.state === 'declined' ||
         (recovery.state === 'started' && !recovery.withAgent)) && (
-        <section>
-          <h3 className="mb-1 text-xs font-medium text-foreground-muted">
-            Resolve by hand in a separate worktree or branch
-          </h3>
-          <pre className="overflow-auto rounded bg-background-2 p-2 text-xs">
+        <Group label="Resolve by hand in a separate worktree or branch">
+          <pre className="overflow-auto rounded-md bg-surface-emphasis px-3 py-2.5 font-mono text-xs leading-relaxed text-foreground-body">
             {plan.manualSteps.join('\n')}
           </pre>
-        </section>
+        </Group>
       )}
     </>
   );
@@ -691,6 +785,10 @@ function hasChanges(changes: IntegrationPreview['source']['changes']): boolean {
   return changes.staged + changes.unstaged + changes.untracked + changes.conflicted > 0;
 }
 
+function pluralize(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (error && typeof error === 'object' && 'message' in error) {
@@ -702,5 +800,5 @@ function errorMessage(error: unknown): string {
 export const integrateWorktreeModal = defineModal<void>()({
   id: 'integrateWorktreeModal',
   component: IntegrateWorktreeModal,
-  size: 'md',
+  size: 'lg',
 });

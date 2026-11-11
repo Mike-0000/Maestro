@@ -1,5 +1,5 @@
 import { EmptyState } from '@emdash/ui/react/components';
-import { ShowHide } from '@emdash/ui/react/primitives';
+import { Button, ShowHide } from '@emdash/ui/react/primitives';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { reaction } from 'mobx';
 import { observer } from 'mobx-react-lite';
@@ -128,12 +128,16 @@ const StackedDiffPanel = observer(function StackedDiffPanel({ panelStore }: Stac
 
   if (visibleSlots.length === 0) {
     return (
-      <EmptyState label="No changes" description="Select or make changes to files to see diffs." />
+      <EmptyState
+        bare
+        label="No changes"
+        description="Select or make changes to files to see diffs."
+      />
     );
   }
 
   return (
-    <div ref={scrollRef} className="h-full overflow-y-auto p-2 shadow-xs" onScroll={handleScroll}>
+    <div ref={scrollRef} className="h-full overflow-y-auto p-3" onScroll={handleScroll}>
       {visibleSlots.map((slotStore, i) => (
         // key=index is intentional: slots are stable by position; content swaps in-place.
         <StackedFileSlot
@@ -198,32 +202,35 @@ const StackedFileSlot = observer(function StackedFileSlot({
     <div
       ref={sectionRef}
       data-file-path={file.path}
-      className="mb-2 overflow-hidden rounded-lg border border-border"
+      className="mb-3 overflow-hidden rounded-lg border border-border-subtle"
     >
       <div
         className={cn(
-          'flex w-full items-center gap-1.5 px-3 py-2 text-sm hover:bg-background-1',
-          expanded && 'border-b border-border'
+          'flex w-full items-center gap-1.5 px-3 py-2 text-sm transition-colors hover:bg-surface-hover',
+          expanded && 'border-b border-border-subtle'
         )}
       >
         <button
-          className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-foreground-muted"
+          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-sm text-left text-foreground-muted outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-expanded={expanded}
           onClick={() => panelStore.toggleExpanded(file.path)}
         >
           {expanded ? (
-            <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+            <ChevronDown className="size-3.5 shrink-0 text-foreground-passive" />
           ) : (
-            <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+            <ChevronRight className="size-3.5 shrink-0 text-foreground-passive" />
           )}
           <span className="flex items-center gap-1.5">
             <FileIcon filename={fileName} size={12} />
             <span className="text-foreground">{fileName}</span>
           </span>
-          {dirPath && <span className="truncate text-xs text-foreground-muted">{dirPath}</span>}
+          {dirPath && <span className="truncate text-xs text-foreground-passive">{dirPath}</span>}
         </button>
-        <span className="shrink-0 text-xs">
-          <span className="text-foreground-success">+{formatDiffLineCount(file.additions)}</span>{' '}
-          <span className="text-foreground-error">-{formatDiffLineCount(file.deletions)}</span>
+        <span className="shrink-0 text-xs tabular-nums">
+          <span className="text-foreground-diff-added">+{formatDiffLineCount(file.additions)}</span>{' '}
+          <span className="text-foreground-diff-deleted">
+            -{formatDiffLineCount(file.deletions)}
+          </span>
         </span>
       </div>
 
@@ -238,12 +245,9 @@ const StackedFileSlot = observer(function StackedFileSlot({
               <span>
                 Large diff ({formatDiffLineCount(totalDiffLines)} lines). Loading may be slow.
               </span>
-              <button
-                className="rounded-md border border-border px-3 py-1 text-xs font-medium hover:bg-background-1"
-                onClick={() => panelStore.setForceLoad(file.path)}
-              >
+              <Button variant="text" size="xs" onClick={() => panelStore.setForceLoad(file.path)}>
                 Load anyway
-              </button>
+              </Button>
             </div>
           ) : (
             <StickyDiffEditor
