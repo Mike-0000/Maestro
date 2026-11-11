@@ -9,11 +9,12 @@ import {
 
 describe('conductor tools', () => {
   it("appends the conductor's own tools after the others, before the code check", () => {
-    expect(run('canvas_desks', 5)).toEqual([
+    expect(run('canvas_desks', 6)).toEqual([
       'canvas_desks',
       'review_instructions',
       'adjust_instructions',
       'change_setting',
+      'move_agent_account',
       'investigate',
     ]);
     // They run on the developer's own words; reading back changes nothing.
@@ -108,10 +109,10 @@ describe('conductor tools', () => {
   });
 
   it('keeps the code-check and lookup tools last, behind no confirmation', () => {
-    // Last of 47: the tool list without them is then a plain prefix of the list with them. A
+    // Last of 48: the tool list without them is then a plain prefix of the list with them. A
     // tool added later goes just before them, and this moves with it.
     expect(conductorToolNames.slice(-2)).toEqual(['investigate', 'find_in_project']);
-    expect(conductorToolNames).toHaveLength(47);
+    expect(conductorToolNames).toHaveLength(48);
     const lookup = conductorToolSchemas.find_in_project;
     expect(lookup.safeParse({ terms: ['talk line', 'talkLine'], project: 'chorus' }).success).toBe(
       true
@@ -153,6 +154,16 @@ describe('conductor tools', () => {
     expect(DIRECT_TOOLS.has('start_app')).toBe(true);
     expect(DIRECT_TOOLS.has('stop_app')).toBe(true);
     expect(DIRECT_TOOLS.has('look_at_app')).toBe(false);
+  });
+
+  it('moves an agent to another Claude account at once, asking only in a tainted turn', () => {
+    const move = conductorToolSchemas.move_agent_account;
+    expect(move.safeParse({ agent: 'Atlas', claude_account: 'Work 2' }).success).toBe(true);
+    expect(move.safeParse({ agent: 'Atlas' }).success).toBe(false);
+    expect(DIRECT_TOOLS.has('move_agent_account')).toBe(true);
+    expect(CONFIRM_REQUIRED_TOOLS.has('move_agent_account')).toBe(false);
+    // A finished agent's reply can never move an agent between accounts.
+    expect(isFollowUpTool('move_agent_account')).toBe(false);
   });
 
   it('requires explicit confirmation for delivery rollback', () => {

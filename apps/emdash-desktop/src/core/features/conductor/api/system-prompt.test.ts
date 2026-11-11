@@ -26,10 +26,23 @@ describe('CONDUCTOR_SYSTEM_PROMPT', () => {
     expect(CONDUCTOR_RULES).toContain(
       'When your last words offered to show something ("Want to see it?") and the developer answers yes'
     );
+    expect(CONDUCTOR_RULES).toContain(
+      'A short answer ("go", "yes", "yeah", "do it", "approve it") answers what is open'
+    );
+    expect(CONDUCTOR_RULES).toContain('Ask what they mean only when nothing is open');
     expect(CONDUCTOR_REPLY_RULES).toContain('ask so that a yes takes your pick');
     expect(CONDUCTOR_REPLY_RULES).toContain('Give the outcome first.');
     expect(CONDUCTOR_REPLY_RULES).toContain(
       'After a successful spawn, reply in one or two short sentences'
     );
+  });
+
+  it('moves agents between accounts, keeps the asked-for action, and never speaks its reasoning', () => {
+    expect(CONDUCTOR_RULES).toContain('is move_agent_account');
+    expect(CONDUCTOR_RULES).toContain('Never offer to start a fresh agent in place of a move.');
+    expect(CONDUCTOR_RULES).toContain(
+      'Do not turn an action they asked for into a report on it either'
+    );
+    expect(CONDUCTOR_REPLY_RULES).toContain('never your reasoning about what they said');
   });
 });

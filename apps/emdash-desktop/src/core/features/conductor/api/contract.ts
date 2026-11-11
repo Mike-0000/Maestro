@@ -533,7 +533,11 @@ export const conductorContract = defineContract({
    * The renderer runs the tool loop, as it does for `runTurn`.
    */
   runChatTurn: fallible({
-    input: z.object({ messages: z.custom<Anthropic.Beta.BetaMessageParam[]>() }),
+    input: z.object({
+      messages: z.custom<Anthropic.Beta.BetaMessageParam[]>(),
+      /** The task whose conductor is calling, for the log of what conductors did. */
+      taskId: z.string().min(1).max(200).optional(),
+    }),
     data: conductorTurnResultSchema,
     error: conductorErrorSchema,
   }),

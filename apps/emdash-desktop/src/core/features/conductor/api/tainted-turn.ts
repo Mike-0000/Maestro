@@ -98,6 +98,8 @@ export function taintedActionLabel(name: string, input: unknown): string {
       return instructionChangeLabel(input);
     case 'change_setting':
       return `Set ${(field(input, 'setting') ?? 'a setting').replace(/_/g, ' ')} to ${field(input, 'value') ?? '?'}`;
+    case 'move_agent_account':
+      return `Move ${agent ?? 'the agent'} to the ${field(input, 'claude_account') ?? 'other'} Claude account`;
     case 'answer_request':
       return `Answer request ${field(input, 'request_id') ?? ''}: ${field(input, 'decision') ?? 'decide'}`.trim();
     default:

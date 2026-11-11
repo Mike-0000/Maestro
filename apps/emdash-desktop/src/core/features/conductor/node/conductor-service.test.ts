@@ -787,6 +787,63 @@ describe('ConductorService.runChatTurn', () => {
     ]);
   });
 
+  it('logs each chat conductor call with its input, tool calls and results, while history is on', async () => {
+    await withKey();
+    const conductor = service();
+    await conductor.runChatTurn(userTurn, 'task-1');
+    expect(await conductor.readChatTurnLog(10)).toEqual([]);
+
+    await conductor.updateSettings({ diagnosticHistory: true });
+    const key = `sk-ant-api03-${'a'.repeat(40)}`;
+    await conductor.runChatTurn(
+      [{ role: 'user' as const, content: `<context>\n</context>\n\nGo. The key is ${key}` }],
+      'task-1'
+    );
+    await conductor.runChatTurn(
+      [
+        ...userTurn,
+        { role: 'assistant' as const, content: toolUseMessage.content as never },
+        {
+          role: 'user' as const,
+          content: [
+            {
+              type: 'tool_result' as const,
+              tool_use_id: 'toolu_1',
+              content: 'restart_agent was not run',
+              is_error: true,
+            },
+          ],
+        },
+      ],
+      'task-1'
+    );
+    const [first, second] = await conductor.readChatTurnLog(10);
+    expect(first).toMatchObject({
+      taskId: 'task-1',
+      trigger: 'developer',
+      toolCalls: [{ id: 'toolu_1', name: 'focus_agent', input: '{"agent":"Claude 1"}' }],
+      stopReason: 'tool_use',
+      model: 'claude-opus-5',
+    });
+    expect(first?.input).toContain('Go. The key is');
+    expect(first?.input).not.toContain(key);
+    expect(second).toMatchObject({
+      trigger: 'tool-results',
+      input: '',
+      toolResults: [{ toolUseId: 'toolu_1', content: 'restart_agent was not run', isError: true }],
+    });
+
+    respond = json(500, { type: 'error', error: { type: 'api_error', message: 'boom' } });
+    await conductor.runChatTurn(userTurn);
+    const failed = (await conductor.readChatTurnLog(10)).at(-1);
+    expect(failed?.error?.type).toBe('api-error');
+    expect(failed?.taskId).toBeUndefined();
+
+    await conductor.updateSettings({ diagnosticHistory: false });
+    await conductor.updateSettings({ diagnosticHistory: true });
+    expect(await conductor.readChatTurnLog(10)).toEqual([]);
+  });
+
   it('loads a settings file written before chat conductors existed without resetting it', async () => {
     writeFileSync(
       join(dataDir, 'conductor-settings.json'),

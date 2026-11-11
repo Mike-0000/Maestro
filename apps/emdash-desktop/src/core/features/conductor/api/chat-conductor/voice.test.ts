@@ -31,6 +31,32 @@ describe('chat conductor voice', () => {
     expect(CHAT_DIRECTION_KINDS).toContain('do not forward it');
   });
 
+  it('carries a delegation forward and acts on short replies instead of asking again', () => {
+    expect(CHAT_DIRECTION_KINDS).toContain('It covers the choices that come after it');
+    expect(CHAT_DIRECTION_KINDS).toContain(
+      'do not set needs_you to hold a recommendation you already have'
+    );
+    expect(CHAT_DIRECTION_KINDS).toContain('Keep only the gates the developer set.');
+    expect(CHAT_DIRECTION_KINDS).toContain('never describe a rule you made as theirs');
+    expect(CHAT_DIRECTION_KINDS).toContain('A short reply answers what is open.');
+    expect(CHAT_DIRECTION_KINDS).toContain('act on the most likely reading');
+    expect(CHAT_DIRECTION_KINDS).not.toContain('keeps the decision with the developer');
+  });
+
+  it('asks once, takes its own default, and reports refusals and results as they were', () => {
+    const prompt = CHAT_CONDUCTOR_SYSTEM_PROMPT;
+    expect(prompt).toContain('take it now and say so instead of asking');
+    expect(prompt).toContain('is not something to ask about again');
+    expect(prompt).toContain('say that Maestro refused the step and why');
+    expect(prompt).toContain('a restart that stayed on the same account is not a move');
+    expect(prompt).toContain('do not ask the developer to find or paste it');
+    expect(prompt).toContain('needs_you is for what only they can settle');
+    const restart = chatConductorToolDefinitions().find((tool) => tool.name === 'restart_agent');
+    expect(restart?.description).toContain(
+      'call list_accounts and pass the one they most likely mean'
+    );
+  });
+
   it('holds no date or per-user value, so the prompt stays byte-stable', () => {
     const prompt = CHAT_CONDUCTOR_SYSTEM_PROMPT;
     expect(prompt).not.toMatch(/\b20\d\d-\d\d-\d\d\b/);

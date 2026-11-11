@@ -56,6 +56,7 @@ import {
 } from '../api/standing-instructions';
 import { CONDUCTOR_SYSTEM_PROMPT } from '../api/system-prompt';
 import { conductorToolDefinitions } from '../api/tools';
+import { ChatTurnLog, chatTurnLogRecord, type ChatTurnLogRecord } from './chat-turn-log';
 import { InteractionDiagnostics } from './diagnostics';
 import { evaluateWithJev, JevRequestError, type JevVia } from './jev-client';
 
@@ -148,6 +149,8 @@ export class ConductorService {
   private readonly chatTools = withCacheBreakpoint(chatConductorToolDefinitions());
   private client: { key: string; client: Anthropic } | null = null;
   private readonly diagnostics: InteractionDiagnostics;
+  /** Every chat and task conductor model call, while diagnostic history is on. */
+  private readonly chatTurns: ChatTurnLog;
   private logWrites: Promise<void> = Promise.resolve();
   private usageWrites: Promise<void> = Promise.resolve();
   private investigator: ((settings: ConductorSettings) => InvestigatorStatus) | null = null;
@@ -174,6 +177,7 @@ export class ConductorService {
   ) {
     this.credentials = new ChorusCredentials(host.secrets);
     this.diagnostics = new InteractionDiagnostics(host.dataDir);
+    this.chatTurns = new ChatTurnLog(host.dataDir);
     this.settings = JsonSettingsFile.inDir(
       host.dataDir,
       'conductor-settings.json',
@@ -215,6 +219,7 @@ export class ConductorService {
     } else {
       await this.readLog(1);
       await this.diagnostics.read({ limit: 1 }, settings.diagnosticDays);
+      await this.chatTurns.read(1, settings.diagnosticDays);
     }
   }
 
@@ -319,9 +324,44 @@ export class ConductorService {
   /**
    * One model call for a chat's own conductor. It shares the conductor's provider, key, daily
    * budget and usage record, and differs in what it sends: the chat conductor's prompt and tools,
-   * and no standing instructions, which the developer gave to Maestro's conductor.
+   * and no standing instructions, which the developer gave to Maestro's conductor. Each call is
+   * written to the chat conductors' log (see chat-turn-log.ts) while diagnostic history is on.
    */
   async runChatTurn(
+    messages: Anthropic.Beta.BetaMessageParam[],
+    taskId?: string
+  ): Promise<Result<ConductorTurnResult, ConductorError>> {
+    const startedAt = performance.now();
+    const outcome = await this.callChatModel(messages);
+    const settings = await this.settings.read();
+    if (settings.diagnosticHistory) {
+      // Not awaited: the turn does not wait for its own log line.
+      void this.chatTurns
+        .append(
+          chatTurnLogRecord({
+            at: new Date().toISOString(),
+            ...(taskId ? { taskId } : {}),
+            messages,
+            outcome,
+            latencyMs: Math.round(performance.now() - startedAt),
+          }),
+          settings.diagnosticDays
+        )
+        .catch((error: unknown) =>
+          this.logger.warn('conductor: chat turn could not be logged', { error })
+        );
+    }
+    return outcome;
+  }
+
+  /** The newest logged chat conductor calls, oldest first; empty while the history is off. */
+  async readChatTurnLog(limit: number): Promise<ChatTurnLogRecord[]> {
+    const settings = await this.settings.read();
+    if (!settings.diagnosticHistory) return [];
+    return this.chatTurns.read(limit, settings.diagnosticDays);
+  }
+
+  private async callChatModel(
     messages: Anthropic.Beta.BetaMessageParam[]
   ): Promise<Result<ConductorTurnResult, ConductorError>> {
     const settings = await this.settings.read();
@@ -744,6 +784,7 @@ export class ConductorService {
 
   async deleteDiagnostics(): Promise<void> {
     await this.diagnostics.delete();
+    await this.chatTurns.delete();
     await this.enqueueLog(async () => {
       await rm(join(this.host.dataDir, LOG_FILE), { force: true });
       await rm(join(this.host.dataDir, LOG_FILE + '.tmp'), { force: true });

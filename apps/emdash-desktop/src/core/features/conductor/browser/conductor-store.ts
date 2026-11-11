@@ -232,6 +232,7 @@ import {
 } from './agent-requests';
 import { ConductorAppTools, type AppTask } from './app-tools';
 import { CallDesk } from './call-desk';
+import { createTaskAgentPort } from './chat-conductor/agent-port';
 import {
   answersMaestro,
   isSubmitPhrase,
@@ -4926,6 +4927,34 @@ export class ConductorStore {
         if ('error' in entry) return { content: entry.error, isError: true };
         return { content: await this.stopEntry(entry.entry, []) };
       }
+      case 'move_agent_account': {
+        const move = input as ConductorToolInput<'move_agent_account'>;
+        const entry = this.resolveEntry(move.agent);
+        if ('error' in entry) return { content: entry.error, isError: true };
+        const target = this.nameOf(entry.entry);
+        const label = `Move ${target} to the ${truncate(move.claude_account, 40)} Claude account`;
+        if (!(await this.requestPending(label, confirmKind))) {
+          return { content: 'The user cancelled the account move.', cancelled: true };
+        }
+        // An agent cut off mid-turn is told to pick its work up again once it is back.
+        const prompt =
+          entry.entry.status === 'working'
+            ? "Maestro moved this chat to another Claude account at the developer's request, which interrupted your turn. Continue where you left off."
+            : undefined;
+        try {
+          const result = await createTaskAgentPort(this.canvas, entry.entry.taskId).restart(
+            entry.entry.conversationId,
+            { claudeAccount: move.claude_account, ...(prompt ? { prompt } : {}) },
+            (message) => log.warn('conductor: account move follow-up failed', { message })
+          );
+          return {
+            content: `${target}: ${result}`,
+            subject: { conversationId: entry.entry.conversationId },
+          };
+        } catch (error) {
+          return { content: errorMessage(error), isError: true };
+        }
+      }
       case 'start_app':
         return this.appTools().startApp(input as ConductorToolInput<'start_app'>);
       case 'show_app':
@@ -7251,6 +7280,8 @@ function describeTool(name: string): string {
       return 'Updating my instructions…';
     case 'change_setting':
       return 'Changing a setting…';
+    case 'move_agent_account':
+      return 'Moving to another account…';
     case 'rename_agent':
       return 'Renaming…';
     case 'filter_canvas':
