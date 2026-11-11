@@ -1,3 +1,4 @@
+import { EmptyState } from '@emdash/ui/react/components';
 import { Button, Dialog, Field, Input, ModalLayout } from '@emdash/ui/react/primitives';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
@@ -51,14 +52,11 @@ export function DirectorySelectorModal({
 
   return (
     <ModalLayout
-      header={
-        <Dialog.Header>
-          <Dialog.Title>Select Remote Directory</Dialog.Title>
-        </Dialog.Header>
-      }
-      footer={
-        <Dialog.Footer>
-          <Button variant="secondary" onClick={modal.dismiss}>
+      title="Choose a folder on the machine"
+      description="Browse to the folder, or type its path below."
+      actions={
+        <>
+          <Button variant="ghost" onClick={modal.dismiss}>
             Cancel
           </Button>
           <ConfirmButton
@@ -69,15 +67,15 @@ export function DirectorySelectorModal({
           >
             Select
           </ConfirmButton>
-        </Dialog.Footer>
+        </>
       }
     >
-      <Dialog.Body className="gap-4">
+      <Dialog.Body className="gap-5">
         {/* Initial-focus target: keeps the modal from auto-focusing the path input. */}
-        <div data-autofocus tabIndex={-1} className="flex flex-col gap-4 outline-none">
+        <div data-autofocus tabIndex={-1} className="flex min-w-0 flex-col gap-5 outline-none">
           {isPreparingPicker ? (
-            <div className="rounded-md border border-border bg-background-1 p-3 text-sm text-foreground-muted">
-              Preparing folder browser...
+            <div className="flex h-64 flex-col">
+              <EmptyState tone="loading" label="Preparing the folder browser…" />
             </div>
           ) : (
             <ProjectDirectoryPicker
@@ -96,6 +94,7 @@ export function DirectorySelectorModal({
             <Field.Label>Path</Field.Label>
             <Input
               value={selectedPath}
+              className="font-mono text-xs"
               placeholder="/home/user/project"
               spellCheck={false}
               onChange={(event) => setSelectedPathOverride(event.target.value)}

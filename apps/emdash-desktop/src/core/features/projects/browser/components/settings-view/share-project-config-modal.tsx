@@ -1,6 +1,6 @@
 import { err, type Result } from '@emdash/shared';
 import { ComboboxPopover } from '@emdash/ui/react/components';
-import { Button, Checkbox, Dialog, Field } from '@emdash/ui/react/primitives';
+import { Button, Checkbox, Dialog, Field, ModalLayout } from '@emdash/ui/react/primitives';
 import { Check, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 import { useModalController } from '@core/manifests/browser/modal-api';
@@ -118,17 +118,33 @@ export function ShareProjectConfigModal({
   }
 
   return (
-    <>
-      <Dialog.Header showCloseButton={false}>
-        <Dialog.Title>Share settings with your team</Dialog.Title>
-      </Dialog.Header>
-      <Dialog.Body className="pt-0">
-        <Field.Group>
-          <p className="text-sm text-foreground-muted">
-            This copies the selected personal settings from this machine to .emdash.json in the
-            chosen working directory. Commit that file so teammates get the same project defaults
-            after pulling.
-          </p>
+    <ModalLayout
+      title="Share settings with your team"
+      description="Copies the chosen personal settings from this machine into .emdash.json in a working copy. Commit that file so teammates get the same defaults after pulling."
+      showCloseButton={false}
+      actions={
+        <>
+          <Button variant="ghost" onClick={modal.dismiss} disabled={status === 'writing'}>
+            Cancel
+          </Button>
+          <ConfirmButton variant="primary" onClick={() => void handleWrite()} disabled={disabled}>
+            <span className="inline-flex min-w-20 items-center justify-center gap-1.5">
+              {status === 'writing' && (
+                <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden="true" />
+              )}
+              {status === 'written' && <Check className="size-4" aria-hidden="true" />}
+              {status === 'writing'
+                ? 'Writing…'
+                : status === 'written'
+                  ? 'Wrote .emdash.json'
+                  : 'Write .emdash.json'}
+            </span>
+          </ConfirmButton>
+        </>
+      }
+    >
+      <Dialog.Body>
+        <Field.Group className="gap-5">
           <Field.Root>
             <Field.Label>Write to</Field.Label>
             <ComboboxPopover
@@ -163,7 +179,7 @@ export function ShareProjectConfigModal({
                   title={`${target.label} ${target.path}`}
                 >
                   <span className="min-w-0 truncate">{target.label}</span>
-                  <span className="min-w-0 truncate text-xs text-foreground-muted">
+                  <span className="min-w-0 truncate font-mono text-xs text-foreground-muted">
                     {target.path}
                   </span>
                 </div>
@@ -173,9 +189,12 @@ export function ShareProjectConfigModal({
 
           <Field.Root>
             <Field.Label>Settings to share</Field.Label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1">
               {availableFields.map((field) => (
-                <label key={field} className="flex items-center gap-2 rounded-md py-2 text-sm">
+                <label
+                  key={field}
+                  className="flex h-8 cursor-pointer items-center gap-2 text-sm text-foreground"
+                >
                   <Checkbox
                     checked={selectedFields.includes(field)}
                     onCheckedChange={(checked) => toggleField(field, checked === true)}
@@ -186,27 +205,13 @@ export function ShareProjectConfigModal({
             </div>
           </Field.Root>
           {status === 'error' ? (
-            <p className="text-xs text-foreground-error">{errorMessage}</p>
+            <p role="alert" className="text-xs text-foreground-error">
+              {errorMessage}
+            </p>
           ) : null}
         </Field.Group>
       </Dialog.Body>
-      <Dialog.Footer>
-        <Button variant="secondary" onClick={modal.dismiss} disabled={status === 'writing'}>
-          Cancel
-        </Button>
-        <ConfirmButton variant="primary" onClick={() => void handleWrite()} disabled={disabled}>
-          <span className="inline-flex min-w-20 items-center justify-center gap-1.5">
-            {status === 'writing' && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
-            {status === 'written' && <Check className="size-4" aria-hidden="true" />}
-            {status === 'writing'
-              ? 'Writing...'
-              : status === 'written'
-                ? 'Wrote .emdash.json'
-                : 'Write .emdash.json'}
-          </span>
-        </ConfirmButton>
-      </Dialog.Footer>
-    </>
+    </ModalLayout>
   );
 }
 

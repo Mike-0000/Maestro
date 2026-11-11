@@ -1,3 +1,4 @@
+import { EmptyState } from '@emdash/ui/react/components';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { getPullRequestsRuntimeClient } from '@root/src/core/services/pull-requests/api/client';
 import {
@@ -48,14 +49,10 @@ export function ProjectPullRequestsProvider({
   }, [stableRepositoryUrls]);
 
   if (error) {
-    return (
-      <p className="py-4 text-center text-sm text-foreground-error">
-        Could not load pull requests: {error}
-      </p>
-    );
+    return <EmptyState tone="error" label="Could not load pull requests" details={error} />;
   }
   if (!store) {
-    return <p className="text-muted-foreground py-4 text-center text-sm">Loading…</p>;
+    return <EmptyState tone="loading" label="Loading pull requests…" />;
   }
   return <PullRequestsStoreProvider store={store}>{children}</PullRequestsStoreProvider>;
 }

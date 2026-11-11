@@ -98,8 +98,9 @@ describe('ProjectHeader', () => {
     await act(async () => root.render(<ProjectHeader projectId="project-1" />));
 
     expect(host.querySelector('h1')?.textContent).toBe('Emdash');
-    const identityIcon = host.querySelector('[data-severity="neutral"]');
-    expect(identityIcon?.querySelector('.lucide-folder-open')).not.toBeNull();
+    // The identity mark is a quiet inline glyph beside the title (it used to sit in a tile).
+    const identityIcon = host.querySelector('[data-project-identity]');
+    expect(identityIcon?.classList.contains('lucide-folder-open')).toBe(true);
     expect(host.querySelector('.lucide-folder-input')).toBeNull();
 
     const repository = [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
@@ -147,8 +148,8 @@ describe('ProjectHeader', () => {
 
     await act(async () => root.render(<ProjectHeader projectId="project-1" />));
 
-    const identityIcon = host.querySelector('[data-severity="neutral"]');
-    expect(identityIcon?.querySelector('.lucide-folder-input')).not.toBeNull();
+    const identityIcon = host.querySelector('[data-project-identity]');
+    expect(identityIcon?.classList.contains('lucide-folder-input')).toBe(true);
     expect(host.querySelector('.lucide-folder-open')).toBeNull();
     const openIn = host.querySelector<HTMLButtonElement>('[aria-label="Open In"]');
     expect(openIn?.dataset.remote).toBe('true');

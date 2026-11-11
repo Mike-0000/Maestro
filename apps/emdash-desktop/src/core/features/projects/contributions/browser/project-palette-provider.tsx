@@ -10,14 +10,12 @@ import {
   type PaletteProviderQuery,
   type PaletteProviderRenderProps,
 } from '@core/primitives/palette/api';
+import { PALETTE_ITEM_CLASS } from '@core/primitives/palette/browser/palette-item-styles';
 import type { SearchItem } from '@core/primitives/search/api';
 import {
   getIdleProjectPaletteEntities,
   searchProjectPaletteEntities,
 } from './project-palette-source';
-
-const PROJECT_PALETTE_ITEM_CLASS =
-  'flex cursor-pointer items-center gap-2.5 text-foreground-muted aria-selected:text-foreground rounded-md px-2 py-2 text-sm aria-selected:bg-background-2';
 
 interface ProjectPaletteProviderDependencies {
   readonly search?: (input: PaletteProviderQuery) => Promise<readonly SearchItem[]>;
@@ -36,12 +34,14 @@ function ProjectPaletteRow({
   };
 
   return (
-    <Command.Item value={value} onSelect={handleSelect} className={PROJECT_PALETTE_ITEM_CLASS}>
-      <FolderOpen size={14} className="shrink-0 text-foreground/40" />
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate">{match.title}</span>
+    <Command.Item value={value} onSelect={handleSelect} className={PALETTE_ITEM_CLASS}>
+      <FolderOpen size={16} className="shrink-0 text-foreground-passive" aria-hidden />
+      <span className="flex min-w-0 flex-1 items-baseline gap-2">
+        <span className="max-w-[70%] min-w-0 shrink-0 truncate">{match.title}</span>
         {match.subtitle && (
-          <span className="truncate text-xs text-foreground/40">{match.subtitle}</span>
+          <span className="min-w-0 truncate text-tiny text-foreground-passive">
+            {match.subtitle}
+          </span>
         )}
       </span>
     </Command.Item>

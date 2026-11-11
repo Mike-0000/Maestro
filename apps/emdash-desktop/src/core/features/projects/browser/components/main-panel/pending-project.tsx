@@ -1,4 +1,5 @@
 import {
+  StateGlyph,
   SteppedLoader,
   SteppedLoaderProgress,
   type SteppedLoaderProps,
@@ -68,11 +69,18 @@ export const PendingProjectStatus = observer(function PendingProjectStatus({
         />
       </div>
       {isError && (
-        <p className="text-destructive max-w-full text-sm wrap-break-word">
-          {project.creation.kind === 'failed'
-            ? project.creation.message
-            : 'Project creation failed'}
-        </p>
+        // The failure in words under the steps: the error dot, a plain line, then the detail.
+        <div role="alert" className="flex w-full max-w-md min-w-0 flex-col gap-1">
+          <p className="flex items-center gap-2 text-sm text-foreground">
+            <StateGlyph state="error" size="sm" />
+            Could not add the project.
+          </p>
+          <p className="pl-5 font-mono text-xs wrap-break-word text-foreground-muted">
+            {project.creation.kind === 'failed'
+              ? project.creation.message
+              : 'Project creation failed'}
+          </p>
+        </div>
       )}
     </div>
   );

@@ -1,5 +1,5 @@
+import { EmptyState } from '@emdash/ui/react/components';
 import { Button } from '@emdash/ui/react/primitives';
-import { Loader2, TriangleAlert } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import type { ReactNode } from 'react';
 import { isUnregisteredProject } from '@core/features/projects/api/browser/stores/project';
@@ -94,7 +94,7 @@ export function ProjectPageShell({
       <div className="flex min-h-full w-full px-8 py-10">
         <div
           data-project-page-content
-          className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col gap-6"
+          className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col gap-8"
         >
           <ProjectHeader projectId={projectId} />
           {children}
@@ -106,9 +106,8 @@ export function ProjectPageShell({
 
 function ProjectContextHydratingPanel() {
   return (
-    <div className="flex min-h-64 w-full flex-1 flex-col items-center justify-center gap-3">
-      <Loader2 className="h-5 w-5 animate-spin text-foreground-passive" />
-      <p className="font-sans text-xs text-foreground-passive">Loading project…</p>
+    <div className="flex min-h-64 w-full flex-1 flex-col">
+      <EmptyState tone="loading" label="Loading project…" />
     </div>
   );
 }
@@ -128,24 +127,26 @@ export function ProjectContextErrorPanel({
       : error.stage === 'memento'
         ? 'Saved Project view state could not be loaded.'
         : 'Project stores could not be initialized.';
+  // The error-tone empty state: the error dot and a plain title, one sentence, then the moves as
+  // text actions. The raw message stays behind "Error details" (it is redacted there).
   return (
-    <div className="flex min-h-64 w-full flex-1 flex-col items-center justify-center p-8">
-      <div className="flex max-w-sm flex-col items-center gap-3 text-center">
-        <TriangleAlert className="size-6 text-foreground-destructive" aria-hidden="true" />
-        <p className="font-sans text-sm font-medium text-foreground-destructive">
-          Could not load Project
-        </p>
-        <p className="font-sans text-xs text-foreground-muted">{detail}</p>
-        <div className="mt-2 flex items-center gap-2">
-          <Button type="button" size="sm" variant="secondary" onClick={onRetry}>
-            Retry
-          </Button>
-          <Button type="button" size="sm" variant="ghost" onClick={onRemove}>
-            Remove Project
-          </Button>
-        </div>
-        <ProjectErrorDetails message={error.message} />
-      </div>
+    <div className="flex min-h-64 w-full flex-1 flex-col">
+      <EmptyState
+        tone="error"
+        label="Could not load Project"
+        description={detail}
+        action={
+          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
+            <Button type="button" variant="text" onClick={onRetry}>
+              Retry
+            </Button>
+            <Button type="button" variant="text" onClick={onRemove}>
+              Remove Project
+            </Button>
+            <ProjectErrorDetails message={error.message} />
+          </div>
+        }
+      />
     </div>
   );
 }

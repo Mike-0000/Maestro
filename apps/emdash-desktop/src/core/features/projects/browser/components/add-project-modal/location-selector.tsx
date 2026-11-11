@@ -43,10 +43,9 @@ export function LocationSelector({
       <DropdownMenu.Trigger
         render={
           <TriggerButton
-            appearance="input"
-            size="xs"
+            size="sm"
             tone="neutral"
-            className="max-w-34 min-w-1 justify-between"
+            className="max-w-48 min-w-0 shrink-0 justify-between"
             aria-label="Project location"
           >
             <span className="flex min-w-0 items-center gap-2">
@@ -57,7 +56,7 @@ export function LocationSelector({
                 </>
               ) : (
                 <>
-                  <HomeIcon className="size-3" />
+                  <HomeIcon className="size-3.5 text-foreground-passive" />
                   <span>Local</span>
                 </>
               )}
@@ -65,10 +64,10 @@ export function LocationSelector({
           </TriggerButton>
         }
       />
-      <DropdownMenu.Content align="end" sideOffset={6} style={{ minWidth: '20rem' }}>
+      <DropdownMenu.Content align="end" sideOffset={6} className="min-w-80">
         <DropdownMenu.Item className="items-start py-2" onClick={onSelectLocal}>
           <div className="flex min-w-0 flex-col gap-0.5">
-            <span className="font-medium">Local</span>
+            <span className="text-foreground">Local</span>
             <span className="text-xs text-foreground-muted">Add a project from this computer.</span>
           </div>
           {strategy === 'local' && <CheckIcon className="mt-0.5 ml-auto size-4" />}
@@ -81,14 +80,15 @@ export function LocationSelector({
               status={getMachineStatusKind(selectedMachine?.id)}
             />
           </DropdownMenu.SubTrigger>
-          <DropdownMenu.SubContent className="p-1" sideOffset={4} style={{ minWidth: '20rem' }}>
-            <div className="flex items-center gap-2 px-2 py-1.5">
-              <SearchIcon className="size-3.5 shrink-0 text-foreground-muted" />
+          <DropdownMenu.SubContent className="min-w-80 p-1" sideOffset={4}>
+            <div className="flex h-8 items-center gap-2 px-2">
+              <SearchIcon className="size-3.5 shrink-0 text-foreground-passive" />
               <input
                 type="text"
                 value={query}
-                placeholder="Filter machines..."
-                className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-foreground-muted"
+                aria-label="Filter machines"
+                placeholder="Filter machines…"
+                className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-foreground-passive"
                 onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={(event) => {
                   if (
@@ -113,7 +113,9 @@ export function LocationSelector({
                 />
               ))
             ) : (
-              <p className="px-2 py-2 text-xs text-foreground-muted">No machines found.</p>
+              <p className="px-2 py-2 text-xs text-foreground-muted">
+                {machines.length === 0 ? 'No machines added yet.' : 'No machines match.'}
+              </p>
             )}
             <DropdownMenu.Separator />
             <DropdownMenu.Item onClick={onManageMachines}>
@@ -136,7 +138,7 @@ function RemoteLocationSummary({
 }) {
   return (
     <div className="flex min-w-0 flex-col gap-0.5 pr-2">
-      <span className="font-medium">Remote</span>
+      <span className="text-foreground">Remote</span>
       <span className="text-xs text-foreground-muted">Add a project from a remote machine.</span>
       <span className="flex min-w-0 items-center gap-1.5 text-xs text-foreground-muted">
         {machine ? (

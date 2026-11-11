@@ -1,5 +1,5 @@
-import { Button, Field, Input, Separator, Switch, Textarea } from '@emdash/ui/react/primitives';
-import { Fragment } from 'react';
+import { SettingsSection } from '@emdash/ui/react/patterns';
+import { Button, Field, Input, Switch, Textarea } from '@emdash/ui/react/primitives';
 import { openExternal } from '@core/primitives/desktop-host/browser/host-client';
 import { EnvironmentVariableInputs } from '@core/primitives/environment-variables/browser/environment-variable-inputs';
 import type {
@@ -80,12 +80,16 @@ function ShareableField({
       {descriptor.multiline ? (
         <Textarea
           rows={descriptor.id === 'preservePatterns' ? 5 : 3}
+          spellCheck={false}
+          className="font-mono text-xs"
           placeholder={descriptor.placeholder}
           value={value}
           onChange={(e) => onChange(e.target.value)}
         />
       ) : (
         <Input
+          spellCheck={false}
+          className="font-mono text-xs"
           placeholder={descriptor.placeholder}
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -113,14 +117,15 @@ function AutoRunToggle({
 }) {
   return (
     <div className="flex items-center justify-between gap-3">
-      <span className="text-sm text-foreground-muted">{label}</span>
-      <div className="flex items-center gap-2">
+      <span className="text-xs text-foreground-muted">{label}</span>
+      <div className="flex items-center gap-3">
         {value !== undefined ? (
-          <Button type="button" variant="ghost" size="xs" onClick={onReset}>
+          <Button type="button" variant="text" size="xs" onClick={onReset}>
             Reset
           </Button>
         ) : null}
         <Switch
+          aria-label={label}
           checked={effectiveAutoRunToggleValue(value, resolved.value)}
           onCheckedChange={onCheckedChange}
         />
@@ -137,13 +142,9 @@ function ProjectEnvironmentVariables({
   update: FormUpdate<EnvironmentFormState>;
 }) {
   return (
+    // The section above carries the title and the explanation.
     <Field.Root>
-      <Field.Label>Environment variables</Field.Label>
-      <Field.Description className="text-foreground-muted">
-        Host-local variables added to new terminals, lifecycle scripts, and agent processes for this
-        Project. Values remain on this Machine, are not written to .emdash.json, and are passed
-        literally—use absolute paths for config directories.
-      </Field.Description>
+      <Field.Label className="sr-only">Environment variables</Field.Label>
       <EnvironmentVariableInputs
         entries={form.variables}
         onChange={(variables) => update('variables', variables)}
@@ -197,58 +198,53 @@ export function ShareableSettingsSection({
 
   return (
     <fieldset disabled={hostActionReason !== null} className="contents">
-      <Separator />
       {hostActionReason ? (
-        <p role="status" className="text-xs text-foreground-muted">
+        <p role="status" className="px-4 text-xs text-foreground-muted">
           Repository-backed settings are {hostActionReason.toLocaleLowerCase()}
         </p>
       ) : null}
 
-      <ProjectEnvironmentVariables form={environmentForm} update={updateEnvironment} />
+      <SettingsSection
+        title="Environment variables"
+        description="Added to new terminals, lifecycle scripts and agent processes in this Project. Values stay on this Machine, are not written to .emdash.json, and are passed literally: use absolute paths for config directories."
+      >
+        <ProjectEnvironmentVariables form={environmentForm} update={updateEnvironment} />
+      </SettingsSection>
 
-      <Separator />
-
-      {topLevelFields.map((descriptor, index) => (
-        <Fragment key={descriptor.id}>
-          {index > 0 ? <Separator /> : null}
+      <SettingsSection
+        title="Files"
+        description="Shared through .emdash.json when you share settings with your team."
+      >
+        {topLevelFields.map((descriptor) => (
           <ShareableField
+            key={descriptor.id}
             descriptor={descriptor}
             value={valueFor(descriptor)}
             isPersonal={hasPersonalValue(descriptor)}
             onChange={(value) => updateField(descriptor, value)}
             getOverrideSources={getOverrideSources}
           />
-        </Fragment>
-      ))}
+        ))}
+      </SettingsSection>
 
-      <Separator />
-
-      <div className="flex flex-col gap-4">
-        <Field.Root className="gap-1">
-          <Field.Label>Lifecycle scripts</Field.Label>
-          <Field.Description className="text-foreground-muted">
+      <SettingsSection
+        title="Lifecycle scripts"
+        description={
+          <>
             Shell commands run at each stage of the worktree lifecycle. Prepare blocks task startup;
             Setup and Run start after the workspace is ready. When both are set to auto-run, Run
-            waits for Setup to complete.
-            <span> See </span>
+            waits for Setup to complete. See the{' '}
             <Button
               type="button"
-              variant="link"
-              size="sm"
-              className="group text-muted-foreground inline-flex h-auto cursor-pointer items-center gap-1 px-0 text-sm font-normal hover:text-foreground hover:no-underline focus-visible:ring-0 focus-visible:outline-none"
+              variant="text"
+              size="xs"
               onClick={() => openExternal('https://www.emdash.sh/docs/project-config')}
             >
-              <span className="font-sans text-xs transition-colors group-hover:text-foreground">
-                docs
-              </span>
-              <span className="text-muted-foreground text-sm transition-colors group-hover:text-foreground">
-                ↗
-              </span>
+              project config reference ↗
             </Button>
-            <span> for the full project config reference.</span>
-          </Field.Description>
-        </Field.Root>
-
+          </>
+        }
+      >
         {lifecycleFields.map((descriptor) => (
           <ShareableField
             key={descriptor.id}
@@ -288,7 +284,7 @@ export function ShareableSettingsSection({
           disabled={importDisabled}
           onImport={openImportConfigModal}
         />
-      </div>
+      </SettingsSection>
     </fieldset>
   );
 }

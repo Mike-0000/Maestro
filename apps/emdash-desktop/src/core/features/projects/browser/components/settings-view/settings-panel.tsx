@@ -1,4 +1,5 @@
-import { Button, Spinner } from '@emdash/ui/react/primitives';
+import { EmptyState } from '@emdash/ui/react/components';
+import { Button } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
 import {
   asAvailableProject,
@@ -36,27 +37,30 @@ export const SettingsPanel = observer(function SettingsPanel() {
 
   if ((!domains || !configMigrations) && store?.pageData.error) {
     return (
-      <div className="flex flex-col items-center justify-center gap-3 px-6 py-10 text-center">
-        <div className="flex flex-col gap-1">
-          <p className="text-sm font-medium">Could not load project settings</p>
-          <p className="text-sm text-foreground-muted">{store.pageData.error}</p>
-        </div>
-        <Button
-          type="button"
-          variant="secondary"
-          disabled={store.pageData.loading}
-          onClick={() => void store.load()}
-        >
-          {store.pageData.loading ? 'Retrying…' : 'Retry'}
-        </Button>
+      <div className="flex min-h-60 flex-col">
+        <EmptyState
+          tone="error"
+          label="Could not load project settings"
+          description={store.pageData.error}
+          action={
+            <Button
+              type="button"
+              variant="text"
+              disabled={store.pageData.loading}
+              onClick={() => void store.load()}
+            >
+              {store.pageData.loading ? 'Retrying…' : 'Retry'}
+            </Button>
+          }
+        />
       </div>
     );
   }
 
   if (!context || !store || !domains || !configMigrations) {
     return (
-      <div className="flex items-center justify-center py-10">
-        <Spinner />
+      <div className="flex min-h-60 flex-col">
+        <EmptyState tone="loading" label="Loading settings…" />
       </div>
     );
   }

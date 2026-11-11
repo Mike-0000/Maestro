@@ -41,7 +41,7 @@ export function ProvenanceBadge({
 export function ProvenanceSourceLine({ provenance }: { provenance: Provenance }) {
   const text = provenanceSourceText(provenance);
   if (!text) return null;
-  return <span className="text-xs text-foreground-muted">{text}</span>;
+  return <span className="text-tiny text-foreground-passive">{text}</span>;
 }
 
 /** Warning for `broken-setting` provenance: the stale value plus the live fallback. */
@@ -68,8 +68,9 @@ export function ResetProvenanceButton({
   onReset: () => void;
 }) {
   return (
-    <Button type="button" variant="ghost" size="xs" onClick={onReset}>
-      <RotateCcw data-icon="inline-start" className="size-3" />
+    // A text action, not a bordered button (design brief 2.8: reset is a quiet caption-level move).
+    <Button type="button" variant="text" size="xs" className="gap-1" onClick={onReset}>
+      <RotateCcw aria-hidden className="size-3" />
       {flavor === 'inherited' ? 'Reset to inherited' : 'Reset to inferred'}
     </Button>
   );

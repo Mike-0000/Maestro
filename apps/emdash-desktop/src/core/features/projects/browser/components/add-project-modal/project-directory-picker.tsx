@@ -139,16 +139,14 @@ export function ProjectDirectoryPicker({
 
   if (!host) {
     return (
-      <div className="rounded-md border border-border bg-background-1 p-3 text-sm text-foreground-muted">
-        Select a machine connection before browsing remote directories.
-      </div>
+      <p className="text-sm text-foreground-muted">Choose a machine before browsing its folders.</p>
     );
   }
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex min-w-0 flex-col gap-2">
       <form
-        className="flex gap-2"
+        className="flex min-w-0 gap-2"
         onSubmit={(event) => {
           event.preventDefault();
           const target = projectDirectoryLocation(locationInput.trim());
@@ -161,11 +159,12 @@ export function ProjectDirectoryPicker({
       >
         <Input
           aria-label="Directory location"
+          className="min-w-0 flex-1 font-mono text-xs"
           value={locationInput}
           spellCheck={false}
           onChange={(event) => setLocationInput(event.currentTarget.value)}
         />
-        <Button type="submit" variant="secondary">
+        <Button type="submit" variant="ghost" className="shrink-0">
           Go
         </Button>
       </form>

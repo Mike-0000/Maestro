@@ -1,6 +1,10 @@
-import { ListPopoverCard, type ListPopoverCardStatus } from '@emdash/ui/react/components';
+import {
+  ListPopoverCard,
+  StateGlyph,
+  type ListPopoverCardStatus,
+} from '@emdash/ui/react/components';
 import { Button } from '@emdash/ui/react/primitives';
-import { AlertCircle, CheckCircle2, Loader2, X } from 'lucide-react';
+import { Check, Loader2, X } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useEffect, useState, type ReactNode } from 'react';
 import { pullRequestErrorMessage } from '@root/src/core/services/pull-requests/api';
@@ -42,11 +46,10 @@ function SyncErrorStatusCard({
   return (
     <SyncStatusCard
       status="destructive"
-      className="text-foreground-destructive"
-      icon={<AlertCircle className="size-3.5 shrink-0 text-foreground-destructive" />}
-      label={<span className="font-medium text-foreground-destructive">Sync failed</span>}
+      icon={<StateGlyph state="error" size="sm" />}
+      label={<span className="text-foreground">Sync failed</span>}
       content={
-        <span className="block truncate text-foreground-destructive/80" title={error ?? undefined}>
+        <span className="block truncate text-foreground-muted" title={error ?? undefined}>
           {error ?? 'Unknown error'}
         </span>
       }
@@ -86,7 +89,7 @@ export const PrSyncStatusCard = observer(function PrSyncStatusCard({
   if (showSuccess && !canCancelHistory && state?.phase === 'idle' && state.outcome === 'success') {
     return (
       <SyncStatusCard
-        icon={<CheckCircle2 className="size-3.5 shrink-0 text-green-500" />}
+        icon={<Check className="size-3.5 shrink-0 text-foreground" aria-hidden />}
         content="Sync complete"
       />
     );
@@ -105,7 +108,12 @@ export const PrSyncStatusCard = observer(function PrSyncStatusCard({
       (!canCancelHistory || state?.kind === 'history') && state?.total != null && state.total > 0;
     return (
       <SyncStatusCard
-        icon={<Loader2 className="text-muted-foreground size-3.5 shrink-0 animate-spin" />}
+        icon={
+          <Loader2
+            className="size-3.5 shrink-0 text-foreground-passive motion-safe:animate-spin"
+            aria-hidden
+          />
+        }
         label={kindLabel}
         content={
           hasProgress
@@ -115,9 +123,9 @@ export const PrSyncStatusCard = observer(function PrSyncStatusCard({
         actions={
           canCancelHistory ? (
             <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 shrink-0 px-2 text-xs"
+              variant="text"
+              size="xs"
+              className="shrink-0"
               onClick={() => store.cancelHistory(repositoryUrl)}
             >
               Cancel
@@ -136,9 +144,9 @@ export const PrSyncStatusCard = observer(function PrSyncStatusCard({
       actions={
         <>
           <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 px-2 text-xs"
+            variant="text"
+            size="xs"
+            className="mr-2"
             onClick={() =>
               void (
                 state?.kind === 'history'
