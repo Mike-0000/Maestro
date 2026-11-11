@@ -14,15 +14,21 @@ export const mermaidWrapper = style({
   position: 'absolute',
   inset: 0,
   overflow: 'hidden',
-  borderRadius: vars.radiusLg,
-  border: `1px solid ${vars.border}`,
+  borderRadius: vars.radiusMd,
+  border: `1px solid ${vars.borderSubtle}`,
   background: 'transparent',
   cursor: 'pointer',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
+  outline: 'none',
+  transition: 'border-color 150ms',
   ':hover': {
-    borderColor: vars.fgMuted,
+    borderColor: vars.border,
+  },
+  ':focus-visible': {
+    borderColor: vars.focusRing,
+    boxShadow: `inset 0 0 0 1px ${vars.focusRing}`,
   },
 });
 

@@ -1,15 +1,15 @@
 import { useCommands } from '@components/contexts/CommandsContext';
+import { activateOnKey } from '@components/primitives/activate-on-key';
 import { CollapseHeader } from '@components/primitives/CollapseHeader';
-import { IconError, IconShieldAlert } from '@components/primitives/icons';
+import { StatusMark } from '@components/primitives/StatusMark';
 import { basename } from '@lib/path';
 import { assignInlineVars } from '@vanilla-extract/dynamic';
 import { For, Show, createEffect } from 'solid-js';
 import type { ChatFileOpToolCall, FileOp, FileOpKind } from '@/model';
 import {
   chevronSm,
-  fileOpErrorIcon,
+  fileName,
   fileOpHeader,
-  fileOpPermissionIcon,
   fileRow,
   monoRunning,
   singleOpRow,
@@ -34,10 +34,14 @@ function FileRowItem(props: { verb: string; path: string; lineH: number; onClick
       class={fileRow({ clickable: !!props.onClick })}
       style={{ height: `${props.lineH}px` }}
       role={props.onClick ? 'button' : undefined}
+      tabIndex={props.onClick ? 0 : undefined}
       onClick={props.onClick}
+      onKeyDown={props.onClick ? activateOnKey : undefined}
     >
       <span>{props.verb}</span>
-      <span title={props.path}>{basename(props.path)}</span>
+      <span class={fileName} title={props.path}>
+        {basename(props.path)}
+      </span>
     </div>
   );
 }
@@ -87,24 +91,11 @@ export function FileOpRow(props: FileOpRowProps) {
           />
         )}
       </Show>
-      <Show
-        when={props.item.awaitingPermission}
-        fallback={
-          <Show when={props.item.status === 'error'}>
-            <span class={fileOpErrorIcon} title={props.item.error ?? 'Failed'} aria-label="error">
-              <IconError />
-            </span>
-          </Show>
-        }
-      >
-        <span
-          class={fileOpPermissionIcon}
-          title="Awaiting permission"
-          aria-label="awaiting permission"
-        >
-          <IconShieldAlert />
-        </span>
-      </Show>
+      <StatusMark
+        awaitingPermission={props.item.awaitingPermission}
+        error={props.item.status === 'error'}
+        errorTitle={props.item.error}
+      />
     </div>
   );
 }

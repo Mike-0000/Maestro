@@ -1,4 +1,5 @@
 import { style } from '@vanilla-extract/css';
+import { focusUnderline } from '@components/primitives/collapse-header.css';
 import { vars } from '@styles/theme.css';
 import { createVariableThemeContract } from '@styles/variable-theme-contract.css';
 
@@ -48,13 +49,15 @@ export const subagentDot = style({
   borderRadius: vars.radiusFull,
 });
 
+/** Finished: the passive ring of the state language. */
 export const subagentDotCompleted = style([
   subagentDot,
   {
-    background: vars.link,
+    border: `1.5px solid ${vars.fgPassive}`,
   },
 ]);
 
+/** Stopped on an error: the filled error dot. */
 export const subagentDotFailed = style([
   subagentDot,
   {
@@ -85,15 +88,30 @@ export const subagentStatusRow = style({
 
 export const subagentStatusRowCollapsible = style({
   cursor: 'pointer',
+  width: 'fit-content',
+  outline: 'none',
+  transition: 'color 150ms',
   selectors: {
     '&:hover': { color: vars.fgMuted },
+    '&:focus-visible': focusUnderline,
+  },
+});
+
+/** A failed subagent says so in the error tone. */
+export const subagentStatusFailed = style({
+  color: vars.fgError,
+  selectors: {
+    '&:hover, &:focus-visible': { color: vars.fgError },
   },
 });
 
 export const subagentChevron = style({
   display: 'inline-block',
-  fontSize: '10px',
+  fontSize: '0.875rem',
   transition: 'transform 150ms ease-out',
+  '@media': {
+    '(prefers-reduced-motion: reduce)': { transition: 'none' },
+  },
 });
 
 export const subagentChevronExpanded = style({

@@ -1,7 +1,8 @@
 import { ROW_H } from '@components/engine/row-metrics';
 import { defineUnit } from '@core/units';
 import type { WorkingItem } from '@/model';
-import { vars } from '@styles/theme.css';
+import { workingRow } from './working.css';
+import { workingDot } from '@styles/effects.css';
 
 export const workingUnitDef = defineUnit<WorkingItem, { rowH: number }>({
   kind: 'working',
@@ -14,16 +15,9 @@ export const workingUnitDef = defineUnit<WorkingItem, { rowH: number }>({
 
   Render(props) {
     return (
-      <div
-        style={{
-          height: `${props.vars.rowH}px`,
-          display: 'flex',
-          'align-items': 'center',
-          color: vars.fgMuted,
-          'font-size': '13px',
-        }}
-      >
-        Working…
+      <div class={workingRow} style={{ height: `${props.vars.rowH}px` }}>
+        <span class={workingDot} aria-hidden="true" />
+        <span>Working…</span>
       </div>
     );
   },

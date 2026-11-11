@@ -144,9 +144,9 @@ function PlanUnitRender(props: { data: ChatPlan; ctx: RenderCtx; vars: PlanVars 
         active={active()}
         icon={<IconPlanList />}
         header={
-          <>
-            Plan {done()} out of {total()} Tasks done
-          </>
+          <Show when={total() > 0} fallback="Plan">
+            Plan · {done()} of {total()} done
+          </Show>
         }
       >
         <div style={{ 'padding-left': planVars.padX, 'padding-right': planVars.padX }}>

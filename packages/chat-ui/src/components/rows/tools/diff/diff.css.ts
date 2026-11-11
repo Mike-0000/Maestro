@@ -16,42 +16,53 @@ export const diffCardVars = createVariableThemeContract<DiffStyleVars>({
   headerH: null,
 });
 
-export const diffRoot = style({ height: diffCardVars.height });
+/**
+ * A file edit reads as a quiet row ("model.ts +1 −0", opens the file) over a
+ * well with the changed lines. Like a command, the row pulls out by its padding
+ * so the file name lines up with the transcript text and the hover fill has
+ * room; the well takes the pull-out back.
+ */
+export const diffRoot = style({
+  height: diffCardVars.height,
+  marginLeft: '-8px',
+  marginRight: '-8px',
+});
 
 // ── DiffHeader ────────────────────────────────────────────────────────────────
 
 export const diffHeader = recipe({
   base: {
     height: diffCardVars.headerH,
-    border: `1px solid ${vars.border}`,
+    // The edge keeps its measured width but draws nothing.
+    border: '1px solid transparent',
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
-    paddingLeft: '8px',
-    paddingRight: '8px',
+    paddingLeft: '7px',
+    paddingRight: '7px',
     cursor: 'pointer',
     fontSize: '0.75rem',
-    transition: 'background 150ms',
+    borderRadius: vars.radiusMd,
+    color: vars.fgMuted,
+    outline: 'none',
+    transition: 'background-color 150ms, color 150ms',
     selectors: {
-      '&:hover': { background: vars.bg3 },
+      '&:hover': { background: vars.surfaceHover, color: vars.fg },
+      '&:focus-visible': { boxShadow: `inset 0 0 0 1px ${vars.focusRing}` },
     },
   },
   variants: {
     hasBody: {
       true: {
-        borderTopLeftRadius: vars.radiusLg,
-        borderTopRightRadius: vars.radiusLg,
         borderBottom: 'none',
       },
-      false: {
-        borderRadius: vars.radiusLg,
-      },
+      false: {},
     },
   },
 });
 
 export const diffFileName = style({
-  color: vars.fgMuted,
+  color: 'inherit',
   minWidth: 0,
   overflow: 'hidden',
   textOverflow: 'ellipsis',
@@ -70,47 +81,42 @@ export const diffDelsCount = style({
   fontSize: vars.typeBodyFontSize,
 });
 export const diffSpacer = style({ flex: '1 1 0%' });
-export const diffStatusIcon = style({
-  display: 'flex',
+export const diffFileIcon = style({
   flexShrink: 0,
+  fontSize: '12px',
+  lineHeight: 1,
 });
-export const diffPermissionIcon = style([
-  diffStatusIcon,
-  {
-    color: '#eab308',
-  },
-]);
-export const diffErrorIcon = style([
-  diffStatusIcon,
-  {
-    color: vars.fgError,
-  },
-]);
 
 // ── DiffLines body ────────────────────────────────────────────────────────────
 
+/** The changed lines: a well like command output (the edge keeps its measured width). */
 export const diffBodyCard = style({
-  border: `1px solid ${vars.border}`,
-  borderBottomLeftRadius: vars.radiusLg,
-  borderBottomRightRadius: vars.radiusLg,
+  border: `1px solid ${vars.wellBorder}`,
+  borderRadius: vars.radiusMd,
+  background: vars.surfaceEmphasis,
+  marginLeft: '8px',
+  marginRight: '8px',
   overflow: 'hidden',
 });
 
-/** Per-row classes — keyed by DiffRow type. */
+/**
+ * Per-row classes — keyed by DiffRow type. Diffs keep their color (added /
+ * removed tints are what a diff is), drawn as a soft tint plus a thin edge.
+ */
 export const diffRowClasses = {
   add: style({
     display: 'flex',
-    background: `color-mix(in srgb, ${vars.diffAdded} 10%, transparent)`,
-    borderLeft: `3px solid ${vars.diffAdded}`,
+    background: `color-mix(in srgb, ${vars.diffAdded} 12%, transparent)`,
+    borderLeft: `2px solid ${vars.diffAdded}`,
   }),
   remove: style({
     display: 'flex',
-    background: `color-mix(in srgb, ${vars.diffDeleted} 10%, transparent)`,
-    borderLeft: `3px solid ${vars.diffDeleted}`,
+    background: `color-mix(in srgb, ${vars.diffDeleted} 12%, transparent)`,
+    borderLeft: `2px solid ${vars.diffDeleted}`,
   }),
   context: style({
     display: 'flex',
-    borderLeft: '3px solid transparent',
+    borderLeft: '2px solid transparent',
   }),
 } as const;
 
@@ -118,7 +124,7 @@ export const diffLineContent = style({
   color: vars.fg,
   flex: '1 1 0%',
   overflow: 'hidden',
-  paddingLeft: '12px',
+  paddingLeft: '10px',
   paddingRight: '12px',
 });
 

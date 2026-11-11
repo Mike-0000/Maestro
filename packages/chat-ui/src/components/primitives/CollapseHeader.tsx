@@ -14,15 +14,9 @@
  */
 
 import type { JSX } from 'solid-js';
-import { Show } from 'solid-js';
-import { IconError, IconShieldAlert } from './icons';
-import {
-  chevron,
-  chevronExpanded,
-  collapseHeader,
-  collapseStatusError,
-  collapseStatusPermission,
-} from './collapse-header.css';
+import { activateOnKey } from './activate-on-key';
+import { StatusMark } from './StatusMark';
+import { chevron, chevronExpanded, collapseHeader } from './collapse-header.css';
 import { textShimmer } from '@styles/effects.css';
 
 export type CollapseHeaderProps = {
@@ -51,6 +45,8 @@ export function CollapseHeader(props: CollapseHeaderProps) {
       class={collapseHeader}
       style={{ height: `${props.height}px` }}
       role="button"
+      tabIndex={0}
+      onKeyDown={activateOnKey}
       aria-expanded={props.expanded ? 'true' : 'false'}
       data-collapse-id={props.id}
     >
@@ -58,28 +54,11 @@ export function CollapseHeader(props: CollapseHeaderProps) {
       <span class={chevron} classList={{ [chevronExpanded]: props.expanded }} aria-hidden="true">
         ›
       </span>
-      <Show
-        when={props.awaitingPermission}
-        fallback={
-          <Show when={props.error}>
-            <span
-              class={collapseStatusError}
-              title={props.errorTitle ?? 'Failed'}
-              aria-label="error"
-            >
-              <IconError />
-            </span>
-          </Show>
-        }
-      >
-        <span
-          class={collapseStatusPermission}
-          title="Awaiting permission"
-          aria-label="awaiting permission"
-        >
-          <IconShieldAlert />
-        </span>
-      </Show>
+      <StatusMark
+        awaitingPermission={props.awaitingPermission}
+        error={props.error}
+        errorTitle={props.errorTitle}
+      />
     </div>
   );
 }

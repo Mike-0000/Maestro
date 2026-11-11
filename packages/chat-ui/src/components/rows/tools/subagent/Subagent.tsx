@@ -1,3 +1,4 @@
+import { activateOnKey } from '@components/primitives/activate-on-key';
 import { clsx } from 'clsx';
 import { createSignal, onCleanup, onMount, Show } from 'solid-js';
 import type { ChatSubagentToolCall, SubagentPhase } from '@/model';
@@ -10,6 +11,7 @@ import {
   subagentIndicator,
   subagentName,
   subagentNameRow,
+  subagentStatusFailed,
   subagentStatusRow,
   subagentStatusRowCollapsible,
 } from './subagent.css';
@@ -19,10 +21,10 @@ const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', 
 const SPINNER_INTERVAL_MS = 80;
 
 const PHASE_LABELS: Record<SubagentPhase, string> = {
-  spawning: 'Spawning',
-  running: 'Running',
-  completed: 'Completed',
-  failed: 'Failed',
+  spawning: 'Starting',
+  running: 'Working',
+  completed: 'Finished',
+  failed: 'Stopped on an error',
 };
 
 function SubagentProgressIndicator(props: { phase: SubagentPhase }) {
@@ -72,9 +74,15 @@ export function SubagentHeader(props: {
         </span>
       </div>
       <div
-        class={clsx(subagentStatusRow, props.collapsible && subagentStatusRowCollapsible)}
+        class={clsx(
+          subagentStatusRow,
+          props.collapsible && subagentStatusRowCollapsible,
+          props.item.phase === 'failed' && subagentStatusFailed
+        )}
         data-collapse-id={props.collapsible ? props.item.id : undefined}
         role={props.collapsible ? 'button' : undefined}
+        tabIndex={props.collapsible ? 0 : undefined}
+        onKeyDown={props.collapsible ? activateOnKey : undefined}
         aria-expanded={props.collapsible ? Boolean(props.expanded) : undefined}
         title={props.item.phase === 'failed' ? (props.item.error ?? 'Failed') : undefined}
       >

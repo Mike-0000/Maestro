@@ -170,6 +170,7 @@ function ExecuteUnitRender(props: { data: ChatExecute; ctx: RenderCtx; vars: Exe
 
   return (
     <CollapsibleCard
+      appearance="bare"
       id={props.data.id}
       ctx={props.ctx}
       height={totalH()}

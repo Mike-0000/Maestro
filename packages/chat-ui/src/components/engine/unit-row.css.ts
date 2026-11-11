@@ -12,27 +12,27 @@ export const debugOverlay = style({
   outlineWidth: '1px',
 });
 
-/** Debug overlay in OK state — faint green outline. */
+/** Debug overlay in OK state — faint accent outline (development-only overlay). */
 export const debugOk = style({
-  outlineColor: 'rgba(52, 211, 153, 0.5)', // emerald-400/50
+  outlineColor: `color-mix(in srgb, ${vars.accent} 50%, transparent)`,
 });
 
-/** Debug overlay in mismatch state — red outline. */
+/** Debug overlay in mismatch state — error outline. */
 export const debugMismatch = style({
-  outlineColor: 'rgba(239, 68, 68, 0.8)', // red-500/80
+  outlineColor: vars.fgError,
 });
 
-/** Debug label chip — dark background, small monospace text. */
+/** Debug label chip — inverted chip, small text. */
 export const debugLabel = style({
   position: 'absolute',
   top: 0,
   left: 0,
-  background: 'rgba(0,0,0,0.7)',
+  background: vars.fg,
   paddingLeft: '4px',
   paddingRight: '4px',
   fontSize: '9px',
   lineHeight: 'tight',
-  color: '#fff',
+  color: vars.bg,
 });
 
 /** Debug mismatch text — red. */

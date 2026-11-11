@@ -1,8 +1,8 @@
 import { style } from '@vanilla-extract/css';
 import { vars } from '@styles/theme.css';
 
-/** GenericFileIcon: muted color, no flex shrink. */
+/** GenericFileIcon: passive like the rest of a tool row's chrome, no flex shrink. */
 export const genericFileIcon = style({
-  color: vars.fgMuted,
+  color: vars.fgPassive,
   flexShrink: 0,
 });

@@ -11,7 +11,7 @@
  *
  * @example
  * // Custom one-off
- * <ShrinkWrap padX={6} padY={2} radius={4} class="bg-zinc-100">
+ * <ShrinkWrap padX={6} padY={2} radius={4} class={inlineCodeChipVisual}>
  *   {children}
  * </ShrinkWrap>
  *

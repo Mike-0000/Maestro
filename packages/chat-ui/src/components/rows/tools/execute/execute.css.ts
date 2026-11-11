@@ -1,13 +1,25 @@
 import { globalStyle, style } from '@vanilla-extract/css';
+import { fadeSurface } from '@styles/effects.css';
 import { vars } from '@styles/theme.css';
 
 // ── Body ──────────────────────────────────────────────────────────────────────
 
-/** Wrapper: height + overflow set inline (depend on expanded state + bodyH). */
+/**
+ * The command and its output: one well (emphasis surface, a hairline only in
+ * light) under the quiet header. The 8px side margins take back the bare card's
+ * pull-out, so the well lines up with the transcript text and code blocks.
+ * Height + overflow are set inline (they depend on expanded state + bodyH).
+ */
 export const executeBody = style({
   position: 'relative',
   boxSizing: 'content-box',
   scrollbarWidth: 'thin',
+  marginLeft: '8px',
+  marginRight: '8px',
+  borderRadius: vars.radiusMd,
+  background: vars.surfaceEmphasis,
+  boxShadow: `inset 0 0 0 1px ${vars.wellBorder}`,
+  vars: { [fadeSurface]: vars.surfaceEmphasis },
 });
 
 globalStyle(`${executeBody}::-webkit-scrollbar`, {

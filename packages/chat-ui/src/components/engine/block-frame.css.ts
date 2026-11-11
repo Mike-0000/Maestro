@@ -6,6 +6,7 @@
  */
 
 import { style } from '@vanilla-extract/css';
+import { vars } from '@styles/theme.css';
 
 export const pblock = style({
   position: 'absolute',
@@ -32,26 +33,27 @@ export const debugOverlay = style({
   outlineWidth: '1px',
 });
 
+// Development-only layout overlay (Storybook "Debug on"); themed like everything else.
 export const debugOk = style({
-  outlineColor: 'rgba(56, 189, 248, 0.6)', // sky-400/60
+  outlineColor: `color-mix(in srgb, ${vars.link} 60%, transparent)`,
 });
 
 export const debugMismatch = style({
-  outlineColor: 'rgb(239, 68, 68)', // red-500
+  outlineColor: vars.fgError,
 });
 
 export const debugLabel = style({
   position: 'absolute',
   top: 0,
   right: 0,
-  background: 'rgba(0,0,0,0.7)',
+  background: vars.fg,
   paddingLeft: '4px',
   paddingRight: '4px',
   fontSize: '10px',
   lineHeight: 'tight',
-  color: '#fff',
+  color: vars.bg,
 });
 
 export const debugMismatchText = style({
-  color: 'rgb(248, 113, 113)', // red-400
+  color: vars.fgError,
 });
