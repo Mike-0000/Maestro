@@ -46,9 +46,29 @@ export type FrontendPtyConnector = {
   resize?(cols: number, rows: number): void;
 };
 
+/** xterm theme keys for the 16 ANSI colours and the `--xterm-ansi-*` tokens that define them. */
+export const XTERM_ANSI_COLOR_VARS = {
+  black: '--xterm-ansi-black',
+  red: '--xterm-ansi-red',
+  green: '--xterm-ansi-green',
+  yellow: '--xterm-ansi-yellow',
+  blue: '--xterm-ansi-blue',
+  magenta: '--xterm-ansi-magenta',
+  cyan: '--xterm-ansi-cyan',
+  white: '--xterm-ansi-white',
+  brightBlack: '--xterm-ansi-bright-black',
+  brightRed: '--xterm-ansi-bright-red',
+  brightGreen: '--xterm-ansi-bright-green',
+  brightYellow: '--xterm-ansi-bright-yellow',
+  brightBlue: '--xterm-ansi-bright-blue',
+  brightMagenta: '--xterm-ansi-bright-magenta',
+  brightCyan: '--xterm-ansi-bright-cyan',
+  brightWhite: '--xterm-ansi-bright-white',
+} as const satisfies Partial<Record<keyof NonNullable<ITerminalOptions['theme']>, string>>;
+
 export function readXtermCssVars(): ITerminalOptions['theme'] {
   const color = (name: string) => cssColorToHex(cssVar(name));
-  return {
+  const theme: NonNullable<ITerminalOptions['theme']> = {
     background: color('--xterm-bg'),
     foreground: color('--xterm-fg'),
     cursor: color('--xterm-cursor'),
@@ -56,6 +76,12 @@ export function readXtermCssVars(): ITerminalOptions['theme'] {
     selectionBackground: color('--xterm-selection-bg'),
     selectionForeground: color('--xterm-selection-fg'),
   };
+  // The palette follows the app theme; an undefined token keeps xterm's default for that slot.
+  for (const [key, name] of Object.entries(XTERM_ANSI_COLOR_VARS)) {
+    const value = cssVar(name);
+    if (value) theme[key as keyof typeof XTERM_ANSI_COLOR_VARS] = cssColorToHex(value);
+  }
+  return theme;
 }
 
 function resolveOverride(override: NonNullable<ITerminalOptions['theme']>) {

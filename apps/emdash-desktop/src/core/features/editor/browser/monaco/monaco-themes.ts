@@ -32,9 +32,11 @@ const MONACO_TOKENS: Array<[string, string]> = [
   ['--foreground', 'editorCursor.foreground'],
   ['--border-subtle', 'editorIndentGuide.background1'],
   ['--border', 'editorIndentGuide.activeBackground1'],
-  ['--neutral-5', 'scrollbarSlider.background'],
-  ['--neutral-6', 'scrollbarSlider.hoverBackground'],
-  ['--neutral-7', 'scrollbarSlider.activeBackground'],
+  // Translucent, so the diff overview ruler's viewport slider never hides the change marks
+  // under it.
+  ['--monaco-scrollbar-slider', 'scrollbarSlider.background'],
+  ['--monaco-scrollbar-slider-hover', 'scrollbarSlider.hoverBackground'],
+  ['--monaco-scrollbar-slider-active', 'scrollbarSlider.activeBackground'],
   ['--em-surface-elevated', 'editorWidget.background'],
   ['--border-subtle', 'editorWidget.border'],
   ['--em-surface-elevated', 'editorSuggestWidget.background'],

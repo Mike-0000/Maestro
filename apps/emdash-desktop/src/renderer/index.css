@@ -1,6 +1,7 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import '@xterm/xterm/css/xterm.css';
+@import '../assets/styles/terminal-ansi.css';
 
 @source '../core';
 
@@ -179,6 +180,23 @@
 .xterm .xterm-viewport::-webkit-scrollbar {
   width: 0 !important; /* Chrome/Safari */
   height: 0 !important;
+}
+
+/* Monaco's diff overview ruler shows only its change marks at rest. Its viewport slider spans
+   the whole ruler when a diff fits on screen, which read as a solid strip beside the code; it
+   appears while the pointer is over the ruler. Unlayered, and one class more specific than
+   Monaco's own rules, because Monaco's stylesheet loads after this one. */
+.monaco-diff-editor .diffOverview .diffViewport {
+  background: transparent;
+}
+.monaco-diff-editor .diffOverview:hover .diffViewport {
+  background: var(--vscode-scrollbarSlider-background);
+}
+.monaco-diff-editor .diffOverview .diffViewport:hover {
+  background: var(--vscode-scrollbarSlider-hoverBackground);
+}
+.monaco-diff-editor .diffOverview .diffViewport:active {
+  background: var(--vscode-scrollbarSlider-activeBackground);
 }
 
 @layer base {
@@ -441,6 +459,10 @@
     --monaco-selection-bg: color-mix(in oklab, var(--em-accent-9) 22%, transparent);
     --monaco-selection-fg: var(--foreground);
     --monaco-inactive-selection-bg: color-mix(in oklab, var(--em-accent-9) 11%, transparent);
+    /* Scrollbar sliders: ink veils, so the diff ruler's marks show through its viewport. */
+    --monaco-scrollbar-slider: color-mix(in oklab, var(--foreground) 12%, transparent);
+    --monaco-scrollbar-slider-hover: color-mix(in oklab, var(--foreground) 20%, transparent);
+    --monaco-scrollbar-slider-active: color-mix(in oklab, var(--foreground) 28%, transparent);
 
     /* xterm terminals */
     --xterm-bg: var(--em-surface-paper);
@@ -449,6 +471,8 @@
     --xterm-cursor-accent: var(--foreground-inverse);
     --xterm-selection-bg: var(--monaco-selection-bg);
     --xterm-selection-fg: var(--foreground);
+    /* The 16 ANSI colours (--xterm-ansi-*) live in src/assets/styles/terminal-ansi.css, shared
+       with the phone web app. */
 
     --foreground-diff-added: var(--green-9);
     --foreground-diff-modified: var(--amber-9);
@@ -727,6 +751,10 @@
     --monaco-selection-bg: color-mix(in oklab, var(--em-accent-9) 30%, transparent);
     --monaco-selection-fg: var(--foreground);
     --monaco-inactive-selection-bg: color-mix(in oklab, var(--em-accent-9) 15%, transparent);
+    /* Scrollbar sliders: light veils, so the diff ruler's marks show through its viewport. */
+    --monaco-scrollbar-slider: color-mix(in oklab, var(--foreground) 12%, transparent);
+    --monaco-scrollbar-slider-hover: color-mix(in oklab, var(--foreground) 20%, transparent);
+    --monaco-scrollbar-slider-active: color-mix(in oklab, var(--foreground) 28%, transparent);
 
     /* xterm terminals */
     --xterm-bg: var(--em-surface-paper);
@@ -735,6 +763,8 @@
     --xterm-cursor-accent: var(--foreground-inverse);
     --xterm-selection-bg: var(--monaco-selection-bg);
     --xterm-selection-fg: var(--foreground);
+    /* The 16 ANSI colours (--xterm-ansi-*) live in src/assets/styles/terminal-ansi.css, shared
+       with the phone web app. */
 
     --foreground-diff-added: var(--green-10);
     --foreground-diff-modified: var(--amber-9);
