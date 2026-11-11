@@ -2,21 +2,33 @@ import { globalStyle, style } from '@vanilla-extract/css';
 import { vars } from '@theme/core/contract/contract.css';
 import { tokenVars } from '@theme/tokens.css';
 
-// Element styles for the two Markdown variants, ported from the legacy
-// Tailwind component maps onto @emdash/ui tokens. The full variant reads like
-// a document; the compact variant is denser for previews and comment bodies.
+// Element styles for the two Markdown variants. The full variant reads like a
+// document (reading body 14/1.6 in foreground-body, headings by size and weight
+// alone, no rules under them); the compact variant is denser for previews and
+// comment bodies and inherits its size from the host.
+//
+// Structure comes from space and the surface step, not lines: code wells sit
+// on the emphasis surface with one hairline, quotes are a quiet left rule,
+// tables separate rows with a subtle hairline only.
 
-const mutedTint = (percent: number) =>
-  `color-mix(in srgb, ${vars.background2} ${percent}%, transparent)`;
+/** Code wells, inline code and table heads sit one step above the surface. */
+const well = vars.surfaceEmphasis;
+const hairline = `1px solid ${vars.borderSubtle}`;
 
 // ── Shared ────────────────────────────────────────────────────────────────────
 
 export const link = style({
-  color: vars.foregroundInfo,
+  color: vars.link,
   textDecoration: 'underline',
-  textDecorationColor: `color-mix(in srgb, ${vars.foregroundInfo} 50%, transparent)`,
-  ':hover': {
-    textDecorationColor: vars.foregroundInfo,
+  textUnderlineOffset: '3px',
+  textDecorationThickness: '1px',
+  textDecorationColor: `color-mix(in srgb, ${vars.link} 40%, transparent)`,
+  transition: 'text-decoration-color 150ms',
+  borderRadius: tokenVars.radiusXs,
+  outline: 'none',
+  selectors: {
+    '&:hover': { textDecorationColor: vars.link },
+    '&:focus-visible': { boxShadow: `0 0 0 2px ${vars.focusRing}` },
   },
 });
 
@@ -31,12 +43,12 @@ export const taskCheckbox = style({
   pointerEvents: 'none',
   selectors: {
     // readOnly instead of disabled so the checked state keeps full contrast.
-    '&:checked': { accentColor: vars.foregroundInfo },
+    '&:checked': { accentColor: vars.primaryButtonBackground },
   },
 });
 
 export const listItem = style({
-  lineHeight: 1.625,
+  lineHeight: 1.6,
   selectors: {
     '& + &': { marginTop: '0.25rem' },
   },
@@ -47,44 +59,43 @@ export const listItem = style({
 const headingBase = {
   fontWeight: 600,
   color: vars.foreground,
+  textWrap: 'balance',
 } as const;
 
 export const h1Full = style({
   ...headingBase,
-  marginTop: '1.5rem',
-  marginBottom: '1rem',
-  borderBottom: `1px solid ${vars.border}`,
-  paddingBottom: '0.5rem',
-  fontSize: '1.5rem',
-  lineHeight: 1.33,
+  marginTop: '2rem',
+  marginBottom: '0.75rem',
+  fontSize: tokenVars.textXl,
+  lineHeight: tokenVars.textXlLineHeight,
+  letterSpacing: '-0.01em',
   selectors: { '&:first-child': { marginTop: 0 } },
 });
 
 export const h2Full = style({
   ...headingBase,
-  marginTop: '1.5rem',
-  marginBottom: '0.75rem',
-  borderBottom: `1px solid ${vars.border}`,
-  paddingBottom: '0.5rem',
-  fontSize: '1.25rem',
-  lineHeight: 1.4,
+  marginTop: '1.75rem',
+  marginBottom: '0.625rem',
+  fontSize: tokenVars.textLg,
+  lineHeight: tokenVars.textLgLineHeight,
   selectors: { '&:first-child': { marginTop: 0 } },
 });
 
 export const h3Full = style({
   ...headingBase,
-  marginTop: '1rem',
+  marginTop: '1.25rem',
   marginBottom: '0.5rem',
-  fontSize: '1.125rem',
-  lineHeight: 1.55,
+  fontSize: tokenVars.textBase,
+  lineHeight: tokenVars.textBaseLineHeight,
+  selectors: { '&:first-child': { marginTop: 0 } },
 });
 
 export const h4Full = style({
   ...headingBase,
   marginTop: '1rem',
-  marginBottom: '0.5rem',
-  fontSize: '1rem',
-  lineHeight: 1.5,
+  marginBottom: '0.375rem',
+  fontSize: tokenVars.textSm,
+  lineHeight: tokenVars.textSmLineHeight,
 });
 
 export const h5Full = style({
@@ -102,67 +113,71 @@ export const h6Full = style({
   color: vars.foregroundMuted,
 });
 
+const readingBody = {
+  fontSize: tokenVars.textBase,
+  lineHeight: tokenVars.textBaseLineHeight,
+  color: vars.foregroundBody,
+} as const;
+
 export const paragraphFull = style({
-  marginBottom: '0.75rem',
-  fontSize: tokenVars.textSm,
-  lineHeight: 1.625,
-  color: vars.foreground,
+  ...readingBody,
+  marginBottom: '0.875rem',
 });
 
 export const unorderedListFull = style({
-  marginBottom: '0.75rem',
-  marginLeft: '1.5rem',
+  ...readingBody,
+  marginBottom: '0.875rem',
+  marginLeft: '1.25rem',
   listStyleType: 'disc',
-  fontSize: tokenVars.textSm,
-  color: vars.foreground,
 });
 
 export const orderedListFull = style({
-  marginBottom: '0.75rem',
-  marginLeft: '1.5rem',
+  ...readingBody,
+  marginBottom: '0.875rem',
+  marginLeft: '1.25rem',
   listStyleType: 'decimal',
-  fontSize: tokenVars.textSm,
-  color: vars.foreground,
+});
+
+globalStyle(`${unorderedListFull} > li::marker, ${orderedListFull} > li::marker`, {
+  color: vars.foregroundPassive,
 });
 
 export const inlineCodeFull = style({
-  backgroundColor: vars.background2,
-  borderRadius: tokenVars.radiusSm,
-  paddingInline: '0.375rem',
-  paddingBlock: '0.125rem',
+  backgroundColor: well,
+  borderRadius: tokenVars.radiusXs,
+  paddingInline: '0.3em',
+  paddingBlock: '0.1em',
   fontFamily: tokenVars.fontMono,
-  fontSize: tokenVars.textXs,
+  fontSize: '0.86em',
+  color: vars.foreground,
 });
 
 export const preFull = style({
-  marginBottom: '0.75rem',
+  marginBottom: '0.875rem',
   overflowX: 'auto',
-  borderRadius: tokenVars.radiusMd,
-  border: `1px solid ${vars.border}`,
-  backgroundColor: vars.background1,
+  borderRadius: tokenVars.radiusLg,
+  border: hairline,
+  backgroundColor: well,
 });
 
 export const codeBlockFull = style({
   display: 'block',
-  padding: '0.75rem',
+  padding: '0.75rem 1rem',
   fontFamily: tokenVars.fontMono,
   fontSize: tokenVars.textXs,
-  lineHeight: 1.625,
+  lineHeight: 1.6,
 });
 
 export const blockquoteFull = style({
-  marginBottom: '0.75rem',
-  borderLeft: `4px solid ${vars.border}`,
-  backgroundColor: mutedTint(30),
-  paddingBlock: '0.25rem',
+  ...readingBody,
+  marginBottom: '0.875rem',
+  borderLeft: `2px solid ${vars.border}`,
   paddingLeft: '1rem',
-  fontSize: tokenVars.textSm,
-  fontStyle: 'italic',
   color: vars.foregroundMuted,
 });
 
 export const tableWrapperFull = style({
-  marginBottom: '0.75rem',
+  marginBottom: '0.875rem',
   overflowX: 'auto',
 });
 
@@ -170,48 +185,52 @@ export const tableFull = style({
   width: '100%',
   borderCollapse: 'collapse',
   fontSize: tokenVars.textSm,
+  lineHeight: tokenVars.textSmLineHeight,
 });
 
 export const tableHeadFull = style({
-  backgroundColor: mutedTint(30),
-  borderBottom: `1px solid ${vars.border}`,
+  borderBottom: hairline,
 });
 
 export const tableHeaderCellFull = style({
   paddingInline: '0.75rem',
   paddingBlock: '0.5rem',
   textAlign: 'left',
-  fontWeight: 600,
-  color: vars.foreground,
+  fontSize: tokenVars.textXs,
+  fontWeight: 500,
+  color: vars.foregroundMuted,
+  selectors: { '&:first-child': { paddingLeft: 0 } },
 });
 
 export const tableCellFull = style({
-  borderTop: `1px solid ${vars.border}`,
+  borderTop: hairline,
   paddingInline: '0.75rem',
   paddingBlock: '0.5rem',
-  color: vars.foreground,
+  verticalAlign: 'top',
+  color: vars.foregroundBody,
+  selectors: { '&:first-child': { paddingLeft: 0 } },
 });
 
 export const dividerFull = style({
-  marginBlock: '1.5rem',
+  marginBlock: '1.75rem',
   border: 'none',
-  borderTop: `1px solid ${vars.border}`,
+  borderTop: hairline,
 });
 
 export const imageContainerFull = style({
-  marginBlock: '0.75rem',
+  marginBlock: '0.875rem',
 });
 
 export const imageFull = style({
   maxWidth: '100%',
-  borderRadius: tokenVars.radiusSm,
+  borderRadius: tokenVars.radiusMd,
 });
 
 export const imagePlaceholder = style({
   display: 'inline-block',
   marginBlock: '0.75rem',
   fontSize: tokenVars.textXs,
-  color: vars.foregroundMuted,
+  color: vars.foregroundPassive,
 });
 
 // ── Compact variant ───────────────────────────────────────────────────────────
@@ -233,7 +252,7 @@ export const h3Compact = style({
 
 export const paragraphCompact = style({
   marginBottom: '0.5rem',
-  lineHeight: 1.625,
+  lineHeight: 1.6,
 });
 
 export const unorderedListCompact = style({
@@ -251,28 +270,28 @@ export const orderedListCompact = style({
 // List markers live on the li children; both elements are owned by this
 // component, so the descendant globalStyle stays within its boundary.
 globalStyle(`${unorderedListCompact} > li::marker, ${orderedListCompact} > li::marker`, {
-  color: vars.foregroundMuted,
+  color: vars.foregroundPassive,
 });
 
 export const inlineCodeCompact = style({
-  backgroundColor: mutedTint(60),
-  borderRadius: tokenVars.radiusSm,
+  backgroundColor: well,
+  borderRadius: tokenVars.radiusXs,
   paddingInline: '0.25rem',
-  paddingBlock: '0.125rem',
+  paddingBlock: '0.0625rem',
   fontFamily: tokenVars.fontMono,
-  fontSize: '0.92em',
+  fontSize: '0.9em',
 });
 
 export const codeBlockCompact = style({
   display: 'block',
   overflowX: 'auto',
   borderRadius: tokenVars.radiusMd,
-  border: `1px solid ${vars.border}`,
-  backgroundColor: mutedTint(60),
-  padding: '0.5rem',
+  border: hairline,
+  backgroundColor: well,
+  padding: '0.5rem 0.625rem',
   fontFamily: tokenVars.fontMono,
-  fontSize: '11px',
-  lineHeight: 1.625,
+  fontSize: tokenVars.textTiny,
+  lineHeight: 1.6,
 });
 
 export const preCompact = style({
@@ -284,7 +303,6 @@ export const blockquoteCompact = style({
   marginBottom: '0.5rem',
   borderLeft: `2px solid ${vars.border}`,
   paddingLeft: '0.75rem',
-  fontStyle: 'italic',
   color: vars.foregroundMuted,
 });
 
@@ -292,7 +310,7 @@ export const tableWrapperCompact = style({
   marginBlock: '0.75rem',
   overflowX: 'auto',
   borderRadius: tokenVars.radiusMd,
-  border: `1px solid ${vars.border}`,
+  border: hairline,
 });
 
 export const tableCompact = style({
@@ -300,43 +318,41 @@ export const tableCompact = style({
   minWidth: 'max-content',
   borderCollapse: 'collapse',
   textAlign: 'left',
-  fontSize: '11px',
-  lineHeight: 1.375,
+  fontSize: tokenVars.textTiny,
+  lineHeight: 1.4,
 });
 
 export const tableHeadCompact = style({
-  backgroundColor: mutedTint(50),
-  borderBottom: `1px solid ${vars.border}`,
-  color: vars.foreground,
+  backgroundColor: well,
+  borderBottom: hairline,
+  color: vars.foregroundMuted,
 });
 
 export const tableHeaderCellCompact = style({
-  borderRight: `1px solid ${vars.border}`,
   paddingInline: '0.625rem',
   paddingBlock: '0.375rem',
-  fontWeight: 600,
-  selectors: { '&:last-child': { borderRight: 'none' } },
+  fontWeight: 500,
 });
 
 export const tableCellCompact = style({
-  borderTop: `1px solid ${vars.border}`,
-  borderRight: `1px solid ${vars.border}`,
+  borderTop: hairline,
   paddingInline: '0.625rem',
   paddingBlock: '0.375rem',
   verticalAlign: 'top',
-  selectors: { '&:last-child': { borderRight: 'none' } },
 });
 
 export const dividerCompact = style({
   marginBlock: '1rem',
   border: 'none',
-  borderTop: `1px solid ${vars.border}`,
+  borderTop: hairline,
 });
 
-export const linkCompact = style({
-  color: vars.foregroundInfo,
-  textDecoration: 'underline',
-});
+export const linkCompact = style([
+  link,
+  {
+    textUnderlineOffset: '2px',
+  },
+]);
 
 export const imageContainerCompact = style({
   marginBlock: '0.5rem',
@@ -346,7 +362,7 @@ export const imageCompact = style({
   height: 'auto',
   maxHeight: '20rem',
   maxWidth: '100%',
-  borderRadius: tokenVars.radiusSm,
+  borderRadius: tokenVars.radiusMd,
 });
 
 // ── Mermaid ───────────────────────────────────────────────────────────────────
@@ -354,20 +370,20 @@ export const imageCompact = style({
 export const mermaidPreviewContainer = style({
   position: 'relative',
   overflowX: 'auto',
-  borderRadius: tokenVars.radiusMd,
-  border: `1px solid ${vars.border}`,
-  backgroundColor: vars.background,
+  borderRadius: tokenVars.radiusLg,
+  border: hairline,
+  backgroundColor: well,
 });
 
 export const mermaidExpandButton = style({
   position: 'absolute',
-  top: '0.25rem',
-  right: '0.25rem',
+  top: '0.375rem',
+  right: '0.375rem',
   zIndex: 10,
   opacity: 0,
   transition: 'opacity 150ms',
-  backgroundColor: vars.surface,
-  boxShadow: `${vars.shadowSm}, 0 0 0 1px color-mix(in srgb, ${vars.border} 80%, transparent)`,
+  backgroundColor: vars.surfaceElevated,
+  boxShadow: `${vars.shadowSm}, 0 0 0 1px ${vars.borderSubtle}`,
   selectors: {
     [`${mermaidPreviewContainer}:hover &`]: { opacity: 1 },
     '&:focus-visible': { opacity: 1 },
@@ -377,12 +393,12 @@ export const mermaidExpandButton = style({
 export const mermaidPreview = style({
   minWidth: 'fit-content',
   cursor: 'zoom-in',
-  padding: '0.5rem',
+  padding: '0.75rem',
   color: vars.foreground,
 });
 
 export const mermaidPreviewCompact = style({
-  padding: '0.375rem',
+  padding: '0.5rem',
 });
 
 export const mermaidDialogContent = style({
@@ -394,24 +410,27 @@ export const mermaidDialogContent = style({
 globalStyle(`${mermaidPreview} svg`, { display: 'block', height: 'auto', maxWidth: '100%' });
 globalStyle(`${mermaidDialogContent} svg`, { display: 'block', height: 'auto', maxWidth: 'none' });
 
+// A failed diagram reads as a quiet note, not a red panel: the title carries
+// the error tone, the source sits in a mono well under it.
 export const mermaidError = style({
   marginBlock: '0.75rem',
-  borderRadius: tokenVars.radiusMd,
-  border: `1px solid color-mix(in srgb, ${vars.borderDestructive} 30%, transparent)`,
-  backgroundColor: `color-mix(in srgb, ${vars.backgroundDestructive} 40%, transparent)`,
-  padding: '0.75rem',
+  borderRadius: tokenVars.radiusLg,
+  border: hairline,
+  backgroundColor: well,
+  padding: '0.75rem 1rem',
   fontSize: tokenVars.textXs,
-  color: vars.foregroundDestructive,
+  color: vars.foregroundMuted,
 });
 
 export const mermaidErrorCompact = style({
   marginBlock: '0.5rem',
-  padding: '0.5rem',
-  fontSize: '11px',
+  padding: '0.5rem 0.625rem',
+  fontSize: tokenVars.textTiny,
 });
 
 export const mermaidErrorTitle = style({
   fontWeight: 500,
+  color: vars.foregroundError,
 });
 
 export const mermaidErrorMessage = style({
@@ -423,7 +442,7 @@ export const mermaidErrorSource = style({
   marginTop: '0.5rem',
   overflowX: 'auto',
   borderRadius: tokenVars.radiusSm,
-  backgroundColor: mutedTint(60),
+  backgroundColor: vars.surface,
   padding: '0.5rem',
   fontFamily: tokenVars.fontMono,
   color: vars.foregroundMuted,

@@ -319,6 +319,71 @@ describe('Theme generation', () => {
     });
   });
 
+  // 9. Accessibility floors for the default light and dark themes (WCAG 2.1).
+  describe('Contrast floors (light and dark)', () => {
+    const wcag = (fg: string, bg: string) =>
+      parseColor(fg).contrastWCAG21(parseColor(bg)) as number;
+    // Text sits on chrome, content, cards and menus; elevated-emphasis carries
+    // only foreground text (tooltips), so passive text is checked up to elevated.
+    const TEXT_SURFACES = ['sunken', 'base', 'base-emphasis', 'elevated', 'paper'] as const;
+    const ALL_SURFACES = [...TEXT_SURFACES, 'elevated-emphasis'] as const;
+
+    for (const theme of [lightTheme, darkTheme]) {
+      const v = (slot: string) => theme.cssVars[nsName(slot)]!;
+
+      it(`${theme.id}: passive text is ≥ 4.5:1 on every text surface`, () => {
+        for (const s of TEXT_SURFACES) {
+          const ratio = wcag(v('foreground-passive'), v(`surface-${s}`));
+          expect(ratio, `passive on ${s}: ${ratio.toFixed(2)}`).toBeGreaterThanOrEqual(4.5);
+        }
+      });
+
+      it(`${theme.id}: links are ≥ 4.5:1 and the focus ring ≥ 3:1 on every surface`, () => {
+        for (const s of ALL_SURFACES) {
+          const link = wcag(v('link'), v(`surface-${s}`));
+          const ring = wcag(v('focus-ring'), v(`surface-${s}`));
+          expect(link, `link on ${s}: ${link.toFixed(2)}`).toBeGreaterThanOrEqual(4.5);
+          expect(ring, `ring on ${s}: ${ring.toFixed(2)}`).toBeGreaterThanOrEqual(3);
+        }
+      });
+
+      it(`${theme.id}: checkbox / radio edges (border-2) are ≥ 3:1 on base and paper`, () => {
+        for (const s of ['base', 'paper', 'elevated'] as const) {
+          const ratio = wcag(v('border-2'), v(`surface-${s}`));
+          expect(ratio, `border-2 on ${s}: ${ratio.toFixed(2)}`).toBeGreaterThanOrEqual(3);
+        }
+      });
+
+      it(`${theme.id}: primary button text is ≥ 4.5:1 on its solid`, () => {
+        const ratio = wcag(v('primary-button-foreground'), v('primary-button-background'));
+        expect(ratio).toBeGreaterThanOrEqual(4.5);
+      });
+
+      it(`${theme.id}: emits a modal backdrop`, () => {
+        expect(theme.cssVars[nsName('backdrop')]).toMatch(/^color-mix\(/);
+      });
+    }
+
+    it('dark: sm / md / lg shadows draw nothing but stay composable in a list', () => {
+      for (const name of ['shadow-sm', 'shadow-md', 'shadow-lg']) {
+        expect(darkTheme.cssVars[nsName(name)]).toBe('0 0 0 0 transparent');
+      }
+      expect(darkTheme.cssVars[nsName('shadow-overlay')]).toContain('black');
+    });
+
+    it('light and dark share the neutral hue and the accent hue', () => {
+      const hue = (css: string) => new Color(css).to('oklch').coords[2] as number;
+      expect(hue(lightTheme.scales.neutral.steps[8])).toBeCloseTo(
+        hue(darkTheme.scales.neutral.steps[8]),
+        0
+      );
+      expect(hue(lightTheme.scales.accent.steps[8])).toBeCloseTo(
+        hue(darkTheme.scales.accent.steps[8]),
+        0
+      );
+    });
+  });
+
   // 10. Both themes emit syntax CSS vars (--syntax-* / --syntax-editor-*)
   describe('Syntax CSS var generation', () => {
     it('light theme emits --em-syntax-* vars for all roles', () => {

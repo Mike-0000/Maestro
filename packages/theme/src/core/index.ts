@@ -29,6 +29,7 @@ export type {
 
 export {
   allSurfaceVarNames,
+  ELEVATION_COLOR_NAMES,
   SCALE_NAMES,
   SHADOW_NAMES,
   STEPS,

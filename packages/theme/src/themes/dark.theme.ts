@@ -61,10 +61,10 @@ export const darkTheme = defineTheme({
       slate(0.27, 0.016), //  4  hover
       slate(0.29, 0.016), //  5  pressed, subtle border, scrollbar thumb
       slate(0.31, 0.016), //  6  hairline border (quiet)
-      slate(0.45, 0.016), //  7  control border (checkbox, input hover)
-      slate(0.515, 0.016), // 8  strong border, outline button
-      slate(0.6, 0.015), //   9  passive text, glyphs (4.5:1 on step 1)
-      slate(0.66, 0.014), // 10  hovered passive text
+      slate(0.45, 0.016), //  7  control border (input hover)
+      slate(0.55, 0.016), //  8  strong border: checkbox / radio edge (≥ 3:1 on menus)
+      slate(0.635, 0.015), // 9  passive text, glyphs (≥ 4.5:1 up to the elevated menu surface)
+      slate(0.69, 0.014), // 10  hovered passive text
       slate(0.75, 0.011), // 11  muted text, labels
       slate(0.95, 0.004), // 12  text
     ],

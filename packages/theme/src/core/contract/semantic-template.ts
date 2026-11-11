@@ -64,6 +64,15 @@ export const SEMANTIC_TEMPLATE = {
   'background-neutral': 'neutral.12',
   'foreground-neutral': 'neutral.1',
 
+  // ── Accent roles ──────────────────────────────────────────────────────────
+  // The accent is reserved for focus, the primary action, links and the
+  // "working" pulse. Keyboard focus is drawn in accent 8 (≥ 3:1 on every
+  // surface); links read in accent 11 (≥ 4.5:1 on every surface).
+  'focus-ring': 'accent.8',
+  link: 'accent.11',
+  /** The accent solid itself: the "working" pulse dot. */
+  accent: 'accent.9',
+
   // ── Primary button ────────────────────────────────────────────────────────
   'primary-button-background': 'accent.9',
   'primary-button-background-hover': 'accent.10',

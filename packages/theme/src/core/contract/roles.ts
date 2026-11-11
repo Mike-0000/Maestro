@@ -62,6 +62,13 @@ export type ShadowName = 'sm' | 'md' | 'lg' | 'overlay';
 /** Canonical elevation shadow tokens generated per color theme. */
 export const SHADOW_NAMES = ['sm', 'md', 'lg', 'overlay'] as const satisfies readonly ShadowName[];
 
+/**
+ * Polarity-dependent elevation colours generated next to the shadows (not from
+ * the semantic template, because they are not a palette step): `backdrop` is
+ * the modal scrim behind dialogs and sheets.
+ */
+export const ELEVATION_COLOR_NAMES = ['backdrop'] as const;
+
 /** Polarity of a theme — determines APCA target direction and L-curve orientation. */
 export type Polarity = 'light' | 'dark';
 
