@@ -2,7 +2,7 @@ import { hostRefSchema } from '@emdash/core/primitives/host/api';
 import { runtimeResolveErrorSchema } from '@emdash/core/primitives/runtime-resolution/api';
 import { z } from 'zod';
 
-export const PROJECT_LIVE_ACCESS_REQUIRED_MESSAGE = 'This action requires live Project access.';
+export const PROJECT_LIVE_ACCESS_REQUIRED_MESSAGE = 'This action requires live project access.';
 
 const projectAttachmentSpecificErrorSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('project-missing'), projectId: z.string() }),

@@ -721,7 +721,7 @@ describe('createTask', () => {
         expect(result.error).toEqual({
           type: 'project-unavailable',
           reason: 'attachment-unavailable',
-          message: 'This action requires live Project access.',
+          message: 'This action requires live project access.',
         });
       }
       expect(mocks.hostIsReachable).not.toHaveBeenCalled();

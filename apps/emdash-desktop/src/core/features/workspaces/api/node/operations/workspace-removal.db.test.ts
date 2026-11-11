@@ -137,7 +137,7 @@ describe('deleteWorkspaceThroughRegistry', () => {
         success: false,
         error: {
           type: 'project-unavailable',
-          message: 'This action requires live Project access.',
+          message: 'This action requires live project access.',
         },
       });
       const row = createWorkspaceRegistry(fixture.db).getLive('workspace-1');
@@ -178,7 +178,7 @@ describe('deleteWorkspaceThroughRegistry', () => {
         success: false,
         error: {
           type: 'project-unavailable',
-          message: 'This action requires live Project access.',
+          message: 'This action requires live project access.',
         },
       });
       expect(

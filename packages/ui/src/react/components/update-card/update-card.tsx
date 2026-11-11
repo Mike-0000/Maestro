@@ -27,6 +27,12 @@ export interface UpdateCardProps {
   onCheckForUpdates: () => Promise<void>;
   /** A readable summary and, when needed, full sanitized diagnostic details. */
   error?: { message: string; details?: string };
+  /**
+   * Render as a plain settings row (no box of its own) for use inside a
+   * `SettingsCard`. The status glyph only shows when something needs
+   * attention (an update or an error).
+   */
+  bare?: boolean;
 }
 
 export function UpdateCard({
@@ -35,6 +41,7 @@ export function UpdateCard({
   appName = 'app',
   onCheckForUpdates,
   error,
+  bare = false,
 }: UpdateCardProps) {
   const [checkForUpdates, , isCheckingForUpdates] = useAsyncAction(async () => {
     await onCheckForUpdates();
@@ -144,13 +151,16 @@ export function UpdateCard({
     }
   };
 
-  return (
-    <Box surface="sunken" borderRadius="md" padding="2" px="3" className={styles.card}>
-      <div className={styles.row}>
-        <StatusIcon
-          size="lg"
-          severity={error ? 'error' : status.type === 'up-to-date' ? 'success' : 'warning'}
-        />
+  const settled = !error && (status.type === 'up-to-date' || status.type === 'checking');
+  const content = (
+    <>
+      <div className={bare ? styles.rowBare : styles.row}>
+        {!(bare && settled) && (
+          <StatusIcon
+            size="lg"
+            severity={error ? 'error' : status.type === 'up-to-date' ? 'success' : 'warning'}
+          />
+        )}
         <div className={styles.rowBody}>
           <div className={styles.rowTitle}>{renderStatusLabel()}</div>
           <div className={styles.rowDescription}>{renderStatusDescription()}</div>
@@ -158,6 +168,27 @@ export function UpdateCard({
         <div className={styles.rowControls}>{renderActionButton()}</div>
       </div>
       {error && <UpdateError key={error.details ?? error.message} error={error} />}
+    </>
+  );
+
+  if (bare) {
+    return (
+      <div data-slot="update-card" data-bare="" className={styles.card}>
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <Box
+      data-slot="update-card"
+      surface="sunken"
+      borderRadius="md"
+      padding="2"
+      px="3"
+      className={styles.card}
+    >
+      {content}
     </Box>
   );
 }

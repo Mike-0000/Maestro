@@ -29,3 +29,17 @@ export const root = style({
     '&[data-animating]': { overflow: 'hidden' },
   },
 });
+
+/**
+ * `constrain`: a flex item that may shrink below its content (a dialog's
+ * middle between header and footer); when the content no longer fits the box
+ * scrolls instead of letting it run under the footer.
+ */
+export const constrained = style({
+  minHeight: 0,
+  flexShrink: 1,
+  selectors: {
+    '&[data-overflowing]': { overflowY: 'auto', overscrollBehavior: 'contain' },
+    '&[data-overflowing][data-animating]': { overflowY: 'hidden' },
+  },
+});

@@ -16,11 +16,18 @@ export const field = recipe({
       vertical: {
         flexDirection: 'column',
       },
+      // Label block left, control right. The row is a size container: when the
+      // control and a readable label (12rem) no longer fit side by side the
+      // control wraps under the label, and under `fieldStackWidth` the row
+      // stacks (label over a left-aligned, full-width control slot).
       horizontal: {
         flexDirection: 'row',
+        flexWrap: 'wrap',
         alignItems: 'center',
         justifyContent: 'space-between',
-        gap: '1rem',
+        columnGap: '1rem',
+        rowGap: '0.5rem',
+        containerType: 'inline-size',
       },
     },
   },
@@ -31,28 +38,44 @@ export const field = recipe({
 
 export type FieldVariants = NonNullable<RecipeVariants<typeof field>>;
 
+/** Row width under which a horizontal field stacks its label over the control. */
+const fieldStackWidth = '26rem';
+
 // Label + description stacked, used in horizontal mode to occupy the left side.
 export const fieldContent = style({
   display: 'flex',
   flexDirection: 'column',
-  flex: 1,
+  // Grows to fill the row; never squeezed below a readable 12rem beside the
+  // control (the control wraps instead).
+  flex: '1 1 12rem',
   gap: '0.25rem',
   minWidth: 0,
+  '@container': {
+    [`(max-width: ${fieldStackWidth})`]: { flexBasis: '100%' },
+  },
 });
 
-// Constrains the control on the right side of a horizontal field row.
-// Prevents inputs/selects from filling unlimited width; callers override via className.
-// display:flex + justify-content:flex-end right-aligns narrow controls (e.g. Switch).
-// marginLeft:auto pushes the slot to the right edge even when FieldContent is absent.
+// The control on the right side of a horizontal field row. It sizes to its
+// control (switches hug right; selects and inputs bring their width: w-56 /
+// w-64, design brief 2.8), capped at 16rem; callers override via className.
+// marginLeft:auto pushes the slot to the right edge even when FieldContent is
+// absent. In a stacked (narrow) row it starts under the label at full width.
 export const fieldControlSlot = style({
   display: 'flex',
   justifyContent: 'flex-end',
   alignItems: 'center',
   marginLeft: 'auto',
-  flexShrink: 0,
-  // Room for a w-56 select / w-64 input (design brief 2.8); switches hug right.
+  flex: '0 1 auto',
+  minWidth: 0,
   maxWidth: '16rem',
-  width: '100%',
+  '@container': {
+    [`(max-width: ${fieldStackWidth})`]: {
+      marginLeft: 0,
+      justifyContent: 'flex-start',
+      width: '100%',
+      maxWidth: '100%',
+    },
+  },
 });
 
 // Label typography is owned by the standalone Label primitive; Field.Label

@@ -1,5 +1,6 @@
 import { globalStyle, style } from '@vanilla-extract/css';
 import { svgDefaultSize } from '@styles/effects/svg-helpers.css';
+import { recipesLayer } from '@styles/layers.css';
 import { fieldFocusRing } from '@styles/recipes/field-shell.css';
 import { menuGroupLabel, menuItemBase, menuSeparatorLine } from '@styles/recipes/menu-item.css';
 import { popupSurface, popupShadowSm } from '@styles/recipes/popup-surface.css';
@@ -12,6 +13,14 @@ export const positioner = style({
 });
 
 export const comboboxTrigger = style([svgDefaultSize, {}]);
+
+/** `appearance="input"`: the value truncates; the field takes the width its caller gives it. */
+export const comboboxTriggerInput = style({
+  '@layer': { [recipesLayer]: { minWidth: 0 } },
+  selectors: {
+    '&[aria-invalid="true"]': { borderColor: vars.borderDestructive, boxShadow: 'none' },
+  },
+});
 
 export const comboboxContent = style([
   popupSurface,

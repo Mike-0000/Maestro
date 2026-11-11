@@ -32,6 +32,20 @@ describe('FactGrid', () => {
   });
 });
 
+describe('FactGrid stackBelow', () => {
+  it('keys the stacking threshold on data-stack (default, narrow, never)', () => {
+    const grid = (props: { stackBelow?: 'default' | 'narrow' | 'never' }) =>
+      render(
+        <FactGrid {...props}>
+          <FactGrid.Row label="Host">example.com</FactGrid.Row>
+        </FactGrid>
+      ).container.querySelector('dl[data-slot="fact-grid"]');
+    expect(grid({})?.getAttribute('data-stack')).toBe('default');
+    expect(grid({ stackBelow: 'narrow' })?.getAttribute('data-stack')).toBe('narrow');
+    expect(grid({ stackBelow: 'never' })?.getAttribute('data-stack')).toBe('never');
+  });
+});
+
 describe('MetaLine', () => {
   it('joins facts with a middle dot and drops empty ones', () => {
     const { container } = render(

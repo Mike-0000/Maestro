@@ -22,7 +22,7 @@ export const newProjectCommand = defineCommand({
 
 export const newTaskCommand = defineCommand({
   id: 'app.newTask',
-  title: 'New conductor',
+  title: 'New Conductor',
   description: 'Create a new conductor in this project',
   category: 'App',
   icon: 'square-plus',

@@ -3,10 +3,9 @@ import { openDemoProject } from './open-project.mjs';
 
 /** Drives the conductor through typed commands (grammar path only, so no API tokens are spent). */
 async function typeCommand(page, text) {
-  const input = page.getByRole('textbox', { name: 'Command' });
-  if (!(await input.isVisible().catch(() => false))) {
-    await page.getByRole('button', { name: 'Type a command' }).click();
-  }
+  // The voice bar's command box is always shown: a combobox named "Command".
+  const input = page.getByRole('combobox', { name: 'Command' });
+  await input.click();
   await input.fill(text);
   await input.press('Enter');
 }

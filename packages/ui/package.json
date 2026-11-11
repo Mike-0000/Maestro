@@ -10,13 +10,11 @@
   "files": [
     "dist",
     "src/theme",
-    "src/styles",
-    "src/react/chat-ui/chat-theme.css"
+    "src/styles"
   ],
   "type": "module",
   "sideEffects": [
     "./dist/style.css",
-    "./src/react/chat-ui/chat-theme.css",
     "./src/styles/base.css"
   ],
   "exports": {
@@ -44,7 +42,6 @@
       "types": "./dist/src/react/chat-ui/index.d.ts",
       "default": "./dist/react/chat-ui.js"
     },
-    "./react/chat-ui/chat-theme.css": "./src/react/chat-ui/chat-theme.css",
     "./style.css": "./dist/style.css",
     "./styles/utilities": {
       "types": "./dist/src/styles/utilities/index.d.ts",

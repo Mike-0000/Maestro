@@ -265,6 +265,56 @@ export const PageAnatomyStory: Story = {
   render: () => <PageAnatomy />,
 };
 
+function NarrowRows({ width }: { width: string }) {
+  return (
+    <div style={{ width }}>
+      <SettingsSection title={`Card at ${width}`}>
+        <SettingsRow
+          label="Show Maestro in the system tray"
+          description="Quick access to Maestro from the system tray."
+          control={<Switch defaultChecked />}
+        />
+        <SettingsRow
+          label="Default branch"
+          description="Selects bring their own width (w-56)."
+          control={
+            <Select.Root defaultValue="main">
+              <Select.Trigger appearance="input" className={s.w56}>
+                <Select.Value />
+              </Select.Trigger>
+              <Select.Content>
+                <Select.Item value="main">main</Select.Item>
+                <Select.Item value="develop">develop</Select.Item>
+              </Select.Content>
+            </Select.Root>
+          }
+        />
+        <SettingsRow
+          label="Check for updates"
+          description="Buttons hug the right edge."
+          control={<Button variant="secondary">Check now</Button>}
+        />
+      </SettingsSection>
+    </div>
+  );
+}
+
+/**
+ * The control slot sizes to its control. When a readable label (12rem) and
+ * the control no longer fit side by side the control wraps; under 26rem of
+ * row width the row stacks with the control left-aligned under the label.
+ */
+export const NarrowWidths: Story = {
+  parameters: { layout: 'padded' },
+  render: () => (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2rem', alignItems: 'flex-start' }}>
+      <NarrowRows width="16rem" />
+      <NarrowRows width="26rem" />
+      <NarrowRows width="42rem" />
+    </div>
+  ),
+};
+
 export const AcrossSurfaces: Story = {
   render: () => (
     <Box background="surfaceSunken" rounded="xl" padding="4">

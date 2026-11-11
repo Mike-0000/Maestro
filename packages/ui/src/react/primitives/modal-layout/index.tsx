@@ -27,7 +27,9 @@ export interface ModalLayoutProps {
 /**
  * Standard modal composition (design brief 2.9): a static header and footer
  * around a middle section that height-animates as its content changes (e.g.
- * between steps or validation states). Put the form in a `Dialog.Body`.
+ * between steps or validation states). Put the form in a `Dialog.Body`. When
+ * the content outgrows the window (also after the dialog opened, e.g. after a
+ * fetch) the middle scrolls between the header and the footer.
  *
  * Pass `header` / `footer` for full control, or the shorthand props:
  *
@@ -76,7 +78,7 @@ export function ModalLayout({
   return (
     <>
       {resolvedHeader}
-      <AnimatedHeight>{children}</AnimatedHeight>
+      <AnimatedHeight constrain>{children}</AnimatedHeight>
       {resolvedFooter}
     </>
   );

@@ -1,4 +1,5 @@
 import { globalStyle, style } from '@vanilla-extract/css';
+import { recipesLayer } from '@styles/layers.css';
 import {
   menuGroupLabel,
   menuItemBase,
@@ -15,33 +16,41 @@ export const positioner = style({
 });
 
 // Elevated surface, rounded-lg, one hairline, 4px inner padding (brief 2.10).
+// The surface (radius, fill, shadow, z-index, motion) is the shared unlayered
+// popupSurface; the content box (size, overflow, padding and the width modes)
+// lives in `@layer recipes`, so app utilities (`w-64`, `min-w-40`, `p-0`)
+// shape a menu without `!`.
 export const menuContent = style([
   popupSurface,
   popupShadowMd,
   {
     zIndex: 50,
-    maxHeight: 'var(--available-height)',
-    maxWidth: 'var(--available-width)',
-    overflowX: 'hidden',
-    overflowY: 'auto',
-    padding: '0.25rem',
-    selectors: {
-      '&[data-width="trigger"]': {
-        width: 'var(--anchor-width)',
-        minWidth: '12rem',
+    '@layer': {
+      [recipesLayer]: {
+        maxHeight: 'var(--available-height)',
+        maxWidth: 'var(--available-width)',
+        overflowX: 'hidden',
+        overflowY: 'auto',
+        padding: '0.25rem',
+        selectors: {
+          '&[data-width="trigger"]': {
+            width: 'var(--anchor-width)',
+            minWidth: '12rem',
+          },
+          '&[data-width="content"]': {
+            width: 'max-content',
+            minWidth: '12rem',
+          },
+          '&[data-width="content-at-least-trigger"]': {
+            width: 'max-content',
+            minWidth: 'max(12rem, var(--anchor-width))',
+          },
+          '&[data-slot="dropdown-menu-sub-content"][data-width="content"]': {
+            minWidth: '6rem',
+          },
+          '&[data-closed]': { overflow: 'hidden' },
+        },
       },
-      '&[data-width="content"]': {
-        width: 'max-content',
-        minWidth: '12rem',
-      },
-      '&[data-width="content-at-least-trigger"]': {
-        width: 'max-content',
-        minWidth: 'max(12rem, var(--anchor-width))',
-      },
-      '&[data-slot="dropdown-menu-sub-content"][data-width="content"]': {
-        minWidth: '6rem',
-      },
-      '&[data-closed]': { overflow: 'hidden' },
     },
   },
 ]);

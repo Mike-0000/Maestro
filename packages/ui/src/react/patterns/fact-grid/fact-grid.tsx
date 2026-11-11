@@ -11,6 +11,11 @@ export interface FactGridProps extends React.HTMLAttributes<HTMLDListElement> {
   labelWidth?: string;
   /** `ui` (default): 13px values. `reading`: 14px values, for threads and reports. */
   size?: FactGridSize;
+  /**
+   * Width under which each label / value pair stacks: `default` 34rem, `narrow`
+   * 24rem (dialogs and other narrow containers with short values), `never`.
+   */
+  stackBelow?: 'default' | 'narrow' | 'never';
   children: React.ReactNode;
 }
 
@@ -26,7 +31,7 @@ export interface FactGridRowProps {
  * FactGrid — a label / value list (`dl`) for details: machine, workspace,
  * automation, PR and agent facts, or a report's "You asked / Where it is /
  * Your move". Labels are 12px muted in a fixed column; values sit beside them
- * on the first baseline and wrap. Below 34rem of width each pair stacks.
+ * on the first baseline and wrap. Below 34rem of width each pair stacks (see `stackBelow`).
  *
  *   <FactGrid>
  *     <FactGrid.Row label="Branch">fix/hang-up, pushed</FactGrid.Row>
@@ -36,6 +41,7 @@ export interface FactGridRowProps {
 function FactGridRoot({
   labelWidth,
   size = 'ui',
+  stackBelow = 'default',
   className,
   style,
   children,
@@ -45,6 +51,7 @@ function FactGridRoot({
     <div className={styles.container}>
       <dl
         data-slot="fact-grid"
+        data-stack={stackBelow}
         className={cx(styles.grid, className)}
         style={
           labelWidth

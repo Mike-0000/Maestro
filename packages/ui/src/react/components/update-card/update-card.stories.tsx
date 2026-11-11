@@ -1,5 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import * as React from 'react';
+import { SettingsRow } from '../../patterns/settings/settings-row';
+import { SettingsSection } from '../../patterns/settings/settings-section';
+import { Switch } from '../../primitives/switch';
 import { UpdateCard, type UpdateStatus } from './update-card';
 
 const meta = {
@@ -70,6 +73,33 @@ export const CheckError: Story = {
         'Could not connect to the update server. Check your internet connection and try again.',
     },
   },
+};
+
+/** `bare`: a plain settings row inside a settings card (Settings › General › App). */
+export const BareInSettingsCard: Story = {
+  render: (args) => (
+    <div style={{ display: 'grid', gap: '2rem' }}>
+      <SettingsSection title="App">
+        <UpdateCard {...args} bare status={{ type: 'up-to-date' }} />
+        <SettingsRow
+          label="Send anonymous usage data"
+          description="Helps improve the app."
+          control={<Switch defaultChecked />}
+        />
+      </SettingsSection>
+      <SettingsSection title="App, update available">
+        <UpdateCard {...args} bare />
+      </SettingsSection>
+      <SettingsSection title="App, check failed">
+        <UpdateCard
+          {...args}
+          bare
+          status={{ type: 'up-to-date' }}
+          error={{ message: 'Could not connect to the update server.' }}
+        />
+      </SettingsSection>
+    </div>
+  ),
 };
 
 export const AllStates: Story = {

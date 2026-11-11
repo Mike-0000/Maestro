@@ -57,3 +57,16 @@ export const Narrow: Story = {
     </div>
   ),
 };
+
+/** `stackBelow="narrow"`: short values stay side by side down to 24rem (a 30rem dialog here). */
+export const StackBelowNarrow: Story = {
+  render: () => (
+    <div style={{ width: '30rem' }}>
+      <FactGrid stackBelow="narrow" labelWidth="9rem">
+        <FactGrid.Row label="Host">build-box.local</FactGrid.Row>
+        <FactGrid.Row label="Port">22</FactGrid.Row>
+        <FactGrid.Row label="Forward SSH agent">Off</FactGrid.Row>
+      </FactGrid>
+    </div>
+  ),
+};

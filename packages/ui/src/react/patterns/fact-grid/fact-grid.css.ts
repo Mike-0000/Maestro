@@ -7,7 +7,11 @@ import '@styles/layers.css';
 
 // The label / value grid from the conductor's report ("You asked / Where it
 // is / Your move"): small muted labels in a fixed column, values beside them
-// aligned on the first baseline. Under 34rem of width the pairs stack.
+// aligned on the first baseline. Under 34rem of width the pairs stack
+// (`stackBelow`: `narrow` 24rem, `never`), keyed on the dl's `data-stack`.
+
+const stackedGrid = { gridTemplateColumns: 'minmax(0, 1fr)', rowGap: '0.125rem' } as const;
+const stackedValue = { marginBottom: '0.75rem' } as const;
 
 export const container = style({
   '@layer': { recipes: { containerType: 'inline-size', minWidth: 0 } },
@@ -23,10 +27,8 @@ export const grid = style({
       rowGap: '0.625rem',
       margin: 0,
       '@container': {
-        '(max-width: 34rem)': {
-          gridTemplateColumns: 'minmax(0, 1fr)',
-          rowGap: '0.125rem',
-        },
+        '(max-width: 34rem)': { selectors: { '&[data-stack="default"]': stackedGrid } },
+        '(max-width: 24rem)': { selectors: { '&[data-stack="narrow"]': stackedGrid } },
       },
     },
   },
@@ -55,7 +57,10 @@ export const value = style({
       overflowWrap: 'anywhere',
       '@container': {
         '(max-width: 34rem)': {
-          selectors: { '&:not(:last-child)': { marginBottom: '0.75rem' } },
+          selectors: { '[data-stack="default"] > &:not(:last-child)': stackedValue },
+        },
+        '(max-width: 24rem)': {
+          selectors: { '[data-stack="narrow"] > &:not(:last-child)': stackedValue },
         },
       },
     },

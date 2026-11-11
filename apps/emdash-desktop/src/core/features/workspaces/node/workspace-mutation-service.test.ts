@@ -31,7 +31,7 @@ describe('WorkspaceMutationService', () => {
       success: false,
       error: {
         type: 'project-unavailable',
-        message: 'This action requires live Project access.',
+        message: 'This action requires live project access.',
       },
     });
     expect(runtimeClient).not.toHaveBeenCalled();
@@ -67,7 +67,7 @@ describe('WorkspaceMutationService', () => {
       success: false,
       error: {
         type: 'project-unavailable',
-        message: 'This action requires live Project access.',
+        message: 'This action requires live project access.',
       },
     });
     expect(runtimeClient).not.toHaveBeenCalled();

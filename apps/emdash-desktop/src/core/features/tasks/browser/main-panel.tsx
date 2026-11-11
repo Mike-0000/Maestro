@@ -124,7 +124,7 @@ const TaskMainPanelContent = observer(function TaskMainPanelContent() {
     return (
       <MissingWorkspaceState
         title="Workspace is unavailable"
-        description="The Task is still available, but its workspace needs live Project access."
+        description="The task is still available, but its workspace needs live project access."
         actionDisabledReason={hostActionDisabledReason}
         reprovision={async () => {
           await getTaskManagerStore(projectId)?.provisionTask(taskId);

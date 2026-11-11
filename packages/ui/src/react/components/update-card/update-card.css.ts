@@ -18,6 +18,17 @@ export const row = style({
   borderRadius: tokenVars.radiusLg,
 });
 
+/** `bare`: a plain settings row (40px minimum, like `SettingsRow`), wraps when narrow. */
+export const rowBare = style([
+  row,
+  {
+    minHeight: '2.5rem',
+    flexWrap: 'wrap',
+    columnGap: '1rem',
+    rowGap: '0.5rem',
+  },
+]);
+
 export const rowBody = style({
   display: 'flex',
   minWidth: 0,
