@@ -9,6 +9,7 @@ import {
   PlusCircle,
   SendHorizontal,
   Settings2,
+  Sparkles,
   Undo2,
   Volume2,
   VolumeX,
@@ -31,7 +32,8 @@ import {
   type AgentSuggestion,
   type SuggestableProvider,
 } from '../../api/agent-suggestions';
-import { getConductorStore } from '../../contributions/browser/app-stores';
+import { getChatConductorManager, getConductorStore } from '../../contributions/browser/app-stores';
+import { conductorLabel } from '../chat-conductor/front';
 import { AudioDeviceMenu } from './audio-device-menu';
 import { CallCard } from './call-card';
 import { ConductorLogPanel } from './conductor-log-panel';
@@ -60,6 +62,8 @@ export const ConductorHud = observer(function ConductorHud() {
   const conductor = getConductorStore();
   const [showLog, setShowLog] = useState(false);
   const [setupOpen, setSetupOpen] = useState(false);
+  /** The Maestro button armed the typed box: its next message goes to Maestro. */
+  const [typeToMaestro, setTypeToMaestro] = useState(false);
   const [showLocalUpdate, setShowLocalUpdate] = useLocalStorage('chorus:show-local-update', true);
   const needsSetup = voice.settings !== null && !voice.settings.onboarded;
   const replyVisible = useRecentlyChanged(conductor.replyAt, REPLY_VISIBLE_MS);
@@ -123,9 +127,10 @@ export const ConductorHud = observer(function ConductorHud() {
       >
         {/* The resting bar: its height (with the collapsed padding) is the layout's reserve. */}
         <div ref={rowRef} className="flex items-center gap-2">
-          <CommandBox />
+          <CommandBox toMaestro={typeToMaestro} disarmMaestro={() => setTypeToMaestro(false)} />
           <MicButton />
           <DictationButton />
+          <MaestroButton onTypeToMaestro={() => setTypeToMaestro((armed) => !armed)} />
           <LineIndicator />
           <div role="status" aria-live="polite" className="min-w-0 flex-1 overflow-hidden text-sm">
             <StatusLine />
@@ -248,14 +253,16 @@ const MicButton = observer(function MicButton() {
 /** Dictation to the open agent, transcribed on this computer. Separate from the command mic. */
 const DictationButton = observer(function DictationButton() {
   const dictation = getDictationStore();
+  const front = getChatConductorManager().front;
+  const to = front ? conductorLabel(front) : 'the open agent';
   const listening = dictation.phase === 'listening';
   const scale = listening ? 1 + Math.min(0.35, dictation.level * 0.5) : 1;
   return (
     <button
       type="button"
-      aria-label={listening ? 'Finish dictation and send' : 'Dictate to the open agent'}
+      aria-label={listening ? 'Finish dictation and send' : `Dictate to ${to}`}
       aria-pressed={dictation.active}
-      title="Dictate to the open agent. Click, or tap Right Ctrl once; click or tap again to send. Runs on this computer."
+      title={`Dictate to ${to}. Click, or tap Right Ctrl once; click or tap again to send. Runs on this computer.`}
       disabled={dictation.phase === 'finishing'}
       onClick={() => dictation.toggle()}
       className={cn(
@@ -275,6 +282,89 @@ const DictationButton = observer(function DictationButton() {
         />
       )}
       <AudioLines className="relative size-4" />
+    </button>
+  );
+});
+
+/** How long the Maestro button is held before it opens the microphone; shorter is a click. */
+const MAESTRO_HOLD_MS = 250;
+
+/**
+ * Always addresses Maestro, whatever chat conductor is in front: hold it to speak a command to
+ * Maestro (release to send), click it to type the next message to Maestro.
+ */
+const MaestroButton = observer(function MaestroButton({
+  onTypeToMaestro,
+}: {
+  onTypeToMaestro: () => void;
+}) {
+  const voice = getVoiceStore();
+  const conductor = getConductorStore();
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** This button opened the microphone and is still held. */
+  const holdingRef = useRef(false);
+  const [holding, setHolding] = useState(false);
+  useEffect(
+    () => () => {
+      if (holdTimer.current) clearTimeout(holdTimer.current);
+    },
+    []
+  );
+  const listening = holding && voice.phase === 'listening';
+  const scale = listening ? 1 + Math.min(0.35, voice.level * 0.5) : 1;
+
+  /** The press ended: a short one was a click, a long one sends what was said. */
+  const release = (click: boolean) => {
+    if (holdTimer.current) {
+      clearTimeout(holdTimer.current);
+      holdTimer.current = null;
+      if (click) onTypeToMaestro();
+      return;
+    }
+    if (!holdingRef.current) return;
+    holdingRef.current = false;
+    setHolding(false);
+    if (voice.phase === 'listening' && voice.mode === 'hold') void voice.stopListening();
+  };
+
+  return (
+    <button
+      type="button"
+      aria-label="Talk to Maestro"
+      aria-pressed={listening}
+      title="Talk to Maestro, whatever chat is in front. Hold to speak and release to send; click to type your next message to Maestro."
+      onPointerDown={(event) => {
+        if (event.button !== 0) return;
+        event.currentTarget.setPointerCapture(event.pointerId);
+        holdTimer.current = setTimeout(() => {
+          holdTimer.current = null;
+          holdingRef.current = true;
+          setHolding(true);
+          void conductor.listenToMaestro('hold');
+        }, MAESTRO_HOLD_MS);
+      }}
+      onPointerUp={() => release(true)}
+      onPointerCancel={() => release(false)}
+      onLostPointerCapture={() => release(false)}
+      onClick={(event) => {
+        // Pointer presses are handled above; this is Enter or Space on the focused button.
+        if (event.detail === 0) onTypeToMaestro();
+      }}
+      className={cn(
+        'relative flex size-9 shrink-0 items-center justify-center rounded-full transition-colors',
+        listening
+          ? 'bg-red-500 text-white'
+          : 'bg-background-secondary text-foreground hover:bg-background-tertiary'
+      )}
+    >
+      {listening && (
+        <span
+          aria-hidden
+          className="absolute inset-0 rounded-full bg-red-500/40 transition-transform duration-75"
+          style={{ transform: `scale(${scale + 0.25})` }}
+        />
+      )}
+      <Sparkles className="relative size-4" />
     </button>
   );
 });
@@ -359,20 +449,33 @@ const ManualListenControls = observer(function ManualListenControls() {
 const StatusLine = observer(function StatusLine() {
   const voice = getVoiceStore();
   const conductor = getConductorStore();
+  const front = getChatConductorManager().front;
+  // The voice line is a conversation with Maestro: what is said on it is Maestro's.
+  const talkTo = front && getTalkStore().line !== 'open' ? conductorLabel(front) : null;
   if (voice.phase === 'listening') {
+    // With a chat conductor in front, say whom this capture is for; otherwise it is Maestro's.
+    const heardBy = conductor.listeningFor
+      ? conductorLabel(conductor.listeningFor)
+      : front
+        ? 'Maestro'
+        : null;
     return (
       <span className="flex items-center gap-2 text-foreground">
         <LevelMeter level={voice.level} />
         {voice.partial ? (
           <span className="min-w-0 truncate italic">{voice.partial}</span>
         ) : voice.intent === 'dictation' ? (
-          'Dictating into the focused agent…'
+          conductor.listeningFor ? (
+            `Dictating into ${conductorLabel(conductor.listeningFor)}…`
+          ) : (
+            'Dictating into the focused agent…'
+          )
         ) : voice.origin === 'hands-free' ? (
           'Listening (hands-free)…'
         ) : voice.mode === 'hold' ? (
-          'Listening… release to send'
+          `Listening${heardBy ? ` for ${heardBy}` : ''}… release to send`
         ) : (
-          'Listening… click Send when you are done'
+          `Listening${heardBy ? ` for ${heardBy}` : ''}… click Send when you are done`
         )}
       </span>
     );
@@ -402,7 +505,7 @@ const StatusLine = observer(function StatusLine() {
         <>Hands-free: say “{capitalize(voice.settings.wakePhrase || 'Maestro')}, …”</>
       ) : (
         <>
-          Hold <Key>Right Ctrl</Key> to talk
+          Hold <Key>Right Ctrl</Key> to talk{talkTo ? ` to ${talkTo}` : ''}
         </>
       )}
       {voice.lastLatencyMs !== null && (
@@ -476,8 +579,18 @@ const ErrorCard = observer(function ErrorCard() {
  * (or its start, or an abbreviation like "omp") offers to open that agent on the canvas. Arrow
  * keys move through the offers, Enter picks one, and Esc drops them so Enter sends the text.
  */
-const CommandBox = observer(function CommandBox() {
+const CommandBox = observer(function CommandBox({
+  toMaestro,
+  disarmMaestro,
+}: {
+  /** The Maestro button armed the box: the next message goes to Maestro. */
+  toMaestro: boolean;
+  disarmMaestro: () => void;
+}) {
   const conductor = getConductorStore();
+  const front = getChatConductorManager().front;
+  /** The chat conductor the box addresses; null when it addresses Maestro. */
+  const chat = toMaestro ? null : front;
   const [text, setText] = useState('');
   const [providers, setProviders] = useState<SuggestableProvider[]>([]);
   const [highlighted, setHighlighted] = useState(0);
@@ -489,7 +602,8 @@ const CommandBox = observer(function CommandBox() {
   const merger = useMemo(
     () =>
       createTypedSubmitMerger(
-        (message) => void conductor.handleUtterance(message, 'typed'),
+        // The chat conductor in front takes the words unless they answer Maestro.
+        (message) => void conductor.submitTyped(message),
         TYPED_MERGE_WINDOW_MS,
         setHeldLine
       ),
@@ -505,7 +619,12 @@ const CommandBox = observer(function CommandBox() {
     void conductor.suggestableProviders().then(setProviders, () => {});
   }, [conductor]);
 
-  const suggestions = useMemo(() => suggestAgents(text, providers), [text, providers]);
+  // Offers to open an agent are Maestro's; a message to a chat conductor is only a message.
+  const toChat = chat !== null;
+  const suggestions = useMemo(
+    () => (toChat ? [] : suggestAgents(text, providers)),
+    [toChat, text, providers]
+  );
   const open = focused && !dismissed && suggestions.length > 0;
   const active = Math.min(highlighted, suggestions.length - 1);
 
@@ -517,7 +636,19 @@ const CommandBox = observer(function CommandBox() {
   const pick = (suggestion: AgentSuggestion) => {
     reset();
     void conductor.openAgent(suggestion.providerId);
+    if (toMaestro) disarmMaestro();
   };
+
+  // Armed by the Maestro button: the box takes the keyboard for that message.
+  useEffect(() => {
+    if (toMaestro) inputRef.current?.focus();
+  }, [toMaestro]);
+
+  const placeholder = chat
+    ? `Message ${conductorLabel(chat)}`
+    : toMaestro
+      ? 'Message Maestro'
+      : 'Type a command or an agent, e.g. "Claude"';
 
   return (
     <form
@@ -527,7 +658,14 @@ const CommandBox = observer(function CommandBox() {
         const chosen = open ? suggestions[active] : undefined;
         if (chosen) return pick(chosen);
         if (!text.trim()) return;
-        merger.submit(text);
+        if (toMaestro) {
+          // One message, straight to Maestro: anything held for merging goes first.
+          merger.flush();
+          void conductor.handleUtterance(text, 'typed');
+          disarmMaestro();
+        } else {
+          merger.submit(text);
+        }
         reset();
       }}
     >
@@ -564,14 +702,15 @@ const CommandBox = observer(function CommandBox() {
         ref={inputRef}
         value={text}
         role="combobox"
-        aria-label="Command"
+        aria-label={chat ? `Message to ${conductorLabel(chat)}` : 'Command'}
         aria-expanded={open}
         aria-controls="conductor-agent-suggestions"
         aria-autocomplete="list"
         aria-activedescendant={
           open ? `conductor-agent-suggestion-${suggestions[active]?.providerId}` : undefined
         }
-        placeholder='Type a command or an agent, e.g. "Claude"'
+        placeholder={placeholder}
+        title={chat ? `Goes to ${conductorLabel(chat)}` : toMaestro ? 'Goes to Maestro' : undefined}
         className="h-8 w-full rounded-md border border-border bg-background px-2.5 text-sm text-foreground outline-none placeholder:text-foreground-muted focus:border-blue-500"
         onChange={(event) => {
           setText(event.target.value);
@@ -609,7 +748,10 @@ const CommandBox = observer(function CommandBox() {
           } else if (event.key === 'Escape') {
             if (open) setDismissed(true);
             else if (text) reset();
-            else inputRef.current?.blur();
+            else {
+              if (toMaestro) disarmMaestro();
+              inputRef.current?.blur();
+            }
           }
         }}
       />

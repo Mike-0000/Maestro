@@ -121,6 +121,7 @@ describe('claude hooks', () => {
         { id: 'task:a1', kind: 'agent' },
         { id: 'cron:wake', kind: 'wakeup' },
       ],
+      subAgents: [{ agentId: 'a1', description: 'review' }],
     });
   });
 
@@ -155,6 +156,13 @@ describe('claude hooks', () => {
         { id: 'task:a0e74c182008ca32f', kind: 'agent' },
         { id: 'task:byuv79cbh', kind: 'process' },
       ],
+      subAgents: [
+        {
+          agentId: 'a0e74c182008ca32f',
+          agentType: 'general-purpose',
+          description: 'Run sleep 25 and reply',
+        },
+      ],
     });
   });
 
@@ -177,6 +185,7 @@ describe('claude hooks', () => {
       kind: 'status',
       type: 'stop',
       backgroundWork: Object.entries(kinds).map(([type, kind]) => ({ id: `task:${type}`, kind })),
+      subAgents: [{ agentId: 'subagent' }],
     });
   });
 
@@ -322,6 +331,135 @@ describe('claude hooks', () => {
     expect(settings.hooks.StopFailure).toEqual([
       { hooks: [{ type: 'command', command: makeStdinHookCommand('error') }] },
     ]);
+  });
+
+  it('reads SubagentStart as a sub-agent starting, not as the agent starting a turn', () => {
+    // The SubagentStart payload Claude Code 2.1.322 sends.
+    expect(
+      parse('subagent-start', {
+        session_id: RESUMED_SESSION_ID,
+        hook_event_name: 'SubagentStart',
+        agent_id: 'a0e74c182008ca32f',
+        agent_type: 'Explore',
+      })
+    ).toEqual({
+      kind: 'subagent',
+      type: 'start',
+      subAgent: { agentId: 'a0e74c182008ca32f', agentType: 'Explore' },
+    });
+  });
+
+  it('reads SubagentStop as a sub-agent stopping, with the others still in flight', () => {
+    expect(
+      parse('subagent-stop', {
+        session_id: RESUMED_SESSION_ID,
+        hook_event_name: 'SubagentStop',
+        stop_hook_active: false,
+        agent_id: 'a1',
+        agent_type: 'Explore',
+        agent_transcript_path: '/tmp/agent-a1.jsonl',
+        last_assistant_message: 'The sub-agent reply, not the agent reply',
+        background_tasks: [
+          { id: 'a1', type: 'subagent', status: 'running', description: 'stopping now' },
+          {
+            id: 'a2',
+            type: 'subagent',
+            status: 'running',
+            description: 'Review the diff',
+            agent_type: 'general-purpose',
+          },
+          { id: 's1', type: 'shell', status: 'running', description: 'dev server' },
+          { id: 'a3', type: 'subagent', status: 'completed', description: 'done' },
+        ],
+      })
+    ).toEqual({
+      kind: 'subagent',
+      type: 'stop',
+      subAgent: { agentId: 'a1', agentType: 'Explore' },
+      running: [{ agentId: 'a2', agentType: 'general-purpose', description: 'Review the diff' }],
+    });
+  });
+
+  it('ignores a sub-agent event without an agent id', () => {
+    expect(parse('subagent-start', { hook_event_name: 'SubagentStart' })).toEqual({
+      kind: 'ignore',
+    });
+    expect(parse('subagent-stop', { hook_event_name: 'SubagentStop', agent_id: ' ' })).toEqual({
+      kind: 'ignore',
+    });
+  });
+
+  it('lists the background sub-agents still running when a turn ends', () => {
+    const event = parse('stop', {
+      hook_event_name: 'Stop',
+      background_tasks: [
+        {
+          id: 'a0e74c182008ca32f',
+          type: 'subagent',
+          status: 'running',
+          description: 'Run sleep 25 and reply',
+          agent_type: 'general-purpose',
+        },
+        { id: 'w1', type: 'workflow', status: 'running', description: 'release' },
+      ],
+    });
+    expect(event).toMatchObject({
+      subAgents: [
+        {
+          agentId: 'a0e74c182008ca32f',
+          agentType: 'general-purpose',
+          description: 'Run sleep 25 and reply',
+        },
+      ],
+    });
+  });
+
+  it('installs SubagentStart and SubagentStop hooks alongside the existing ones', async () => {
+    const files = new Map<string, string>();
+    const fs = createMemoryFs(files);
+    await provider.behavior.hooks!.writeHooks(fs, []);
+
+    const settings = JSON.parse(files.get(CLAUDE_SETTINGS_PATH)!);
+    expect(settings.hooks.SubagentStart).toEqual([
+      { hooks: [{ type: 'command', command: makeStdinHookCommand('subagent-start') }] },
+    ]);
+    expect(settings.hooks.SubagentStop).toEqual([
+      { hooks: [{ type: 'command', command: makeStdinHookCommand('subagent-stop') }] },
+    ]);
+    expect(await provider.behavior.hooks!.getHooksInstalled(fs)).toBe(true);
+  });
+
+  it('reinstalls hooks written before the sub-agent hooks existed, keeping user hooks', async () => {
+    const userHook = { hooks: [{ type: 'command', command: 'echo mine' }] };
+    const files = new Map<string, string>([
+      [
+        CLAUDE_SETTINGS_PATH,
+        JSON.stringify({
+          hooks: {
+            Stop: [
+              userHook,
+              { hooks: [{ type: 'command', command: makeStdinHookCommand('stop') }] },
+            ],
+            SubagentStop: [userHook],
+          },
+        }),
+      ],
+    ]);
+    const fs = createMemoryFs(files);
+    expect(await provider.behavior.hooks!.getHooksInstalled(fs)).toBe(false);
+
+    await provider.behavior.hooks!.writeHooks(fs, []);
+
+    const settings = JSON.parse(files.get(CLAUDE_SETTINGS_PATH)!);
+    expect(settings.hooks.Stop).toEqual([
+      userHook,
+      { hooks: [{ type: 'command', command: makeStdinHookCommand('stop') }] },
+    ]);
+    expect(settings.hooks.SubagentStop).toEqual([
+      userHook,
+      { hooks: [{ type: 'command', command: makeStdinHookCommand('subagent-stop') }] },
+    ]);
+    expect(await provider.behavior.hooks!.getHooksInstalled(fs)).toBe(true);
   });
 
   it('installs a SessionStart hook that reports the Claude session id', async () => {

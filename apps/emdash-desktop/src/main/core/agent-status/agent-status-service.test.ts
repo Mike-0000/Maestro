@@ -217,6 +217,58 @@ describe('AgentStatusService', () => {
     });
   });
 
+  describe('running sub-agents', () => {
+    const explore = { id: 'a1', label: 'Explore', agentType: 'Explore', startedAt: 5 };
+
+    it('publishes them with a working or asking status, and drops them after', async () => {
+      const service = new AgentStatusService();
+      mocks.updateRows.push(row(), row(), row());
+
+      await service.applySignal(signal('start', { payload: { subAgents: [explore] } }));
+      await service.applySignal(
+        signal('notification', {
+          payload: { notificationType: 'permission_prompt', subAgents: [explore] },
+        })
+      );
+      await service.applySignal(signal('stop', { payload: { subAgents: [explore] } }));
+
+      expect(mocks.emit.mock.calls[0]?.[1]).toMatchObject({
+        status: 'working',
+        subAgents: [explore],
+      });
+      expect(mocks.emit.mock.calls[1]?.[1]).toMatchObject({
+        status: 'awaiting-input',
+        subAgents: [explore],
+      });
+      expect(mocks.emit.mock.calls[2]?.[1]).toMatchObject({ status: 'completed' });
+      expect(mocks.emit.mock.calls[2]?.[1]).not.toHaveProperty('subAgents');
+    });
+
+    it('republishes a change as the same turn, with the count kept', async () => {
+      const service = new AgentStatusService();
+      const handler = vi.fn();
+      service.on('agent:event', handler);
+      mocks.selectRows.push(row({ agentStatus: 'working', agentStatusSeen: 1 }));
+
+      await service.updateBackgroundAgents(
+        signal('start', { payload: { backgroundAgents: 2, subAgents: [explore] } })
+      );
+
+      expect(mocks.update).not.toHaveBeenCalled();
+      expect(handler).not.toHaveBeenCalled();
+      expect(mocks.emit).toHaveBeenCalledWith(undefined, {
+        type: 'agent-status-changed',
+        conversationId: 'conversation-1',
+        taskId: 'task-1',
+        projectId: 'project-1',
+        status: 'working',
+        seen: true,
+        backgroundAgents: 2,
+        subAgents: [explore],
+      });
+    });
+  });
+
   it('ignores a count change for a conversation no longer shown as working', async () => {
     const service = new AgentStatusService();
     mocks.selectRows.push(row({ agentStatus: 'awaiting-input' }));

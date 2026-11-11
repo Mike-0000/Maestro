@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest';
 import {
   eventFromTuiAgentState,
   isBackgroundAgentsOnlyChange,
+  isSubAgentsOnlyChange,
+  MAX_PUBLISHED_SUB_AGENTS,
+  publishableSubAgents,
   shouldApplyAgentStateTransition,
 } from './tui-agent-status-transition';
 
@@ -87,6 +90,62 @@ describe('TUI agent status transition mapping', () => {
     expect(eventFromTuiAgentState(waiting(6))).toMatchObject({
       type: 'start',
       payload: { backgroundAgents: 6 },
+    });
+  });
+
+  describe('running sub-agents', () => {
+    const explore = { id: 'a1', label: 'Explore', agentType: 'Explore', startedAt: 10 };
+    const review = { id: 'a2', label: 'Review the diff', startedAt: 20 };
+
+    it('treats a sub-agent starting or stopping as the same turn, never a transition', () => {
+      const before = state();
+      const after = state({ subAgents: [explore] });
+
+      expect(shouldApplyAgentStateTransition(before, after)).toBe(false);
+      expect(isBackgroundAgentsOnlyChange(before, after)).toBe(false);
+      expect(isSubAgentsOnlyChange(before, after)).toBe(true);
+      expect(isSubAgentsOnlyChange(after, state({ subAgents: [explore, review] }))).toBe(true);
+      expect(isSubAgentsOnlyChange(after, before)).toBe(true);
+      expect(isSubAgentsOnlyChange(after, state({ subAgents: [{ ...explore }] }))).toBe(false);
+      expect(isSubAgentsOnlyChange(undefined, after)).toBe(false);
+      // A status change carries the sub-agents itself.
+      expect(isSubAgentsOnlyChange(after, state({ status: 'completed' }))).toBe(false);
+    });
+
+    it('carries the running sub-agents on the signal', () => {
+      expect(eventFromTuiAgentState(state({ subAgents: [explore, review] }))).toMatchObject({
+        type: 'start',
+        payload: { subAgents: [explore, review] },
+      });
+      expect(eventFromTuiAgentState(state())?.payload).not.toHaveProperty('subAgents');
+    });
+
+    it('bounds and redacts what a host reports before it leaves the main process', () => {
+      const many = Array.from({ length: MAX_PUBLISHED_SUB_AGENTS + 3 }, (_, index) => ({
+        id: `a${index}`,
+        label: 'x'.repeat(300),
+        startedAt: index,
+      }));
+      const published = publishableSubAgents(many)!;
+      expect(published).toHaveLength(MAX_PUBLISHED_SUB_AGENTS);
+      expect(published[0]!.label.length).toBeLessThanOrEqual(80);
+
+      const [secret] = publishableSubAgents([
+        { id: 'a1', label: 'Use ghp_abcdefghijklmnopqrstuvwxyz0123456789\nnow', startedAt: 1 },
+      ])!;
+      expect(secret!.label).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz0123456789');
+      expect(secret!.label).not.toContain('\n');
+    });
+
+    it('labels a sub-agent with a blank label by its type, and drops one with neither', () => {
+      expect(
+        publishableSubAgents([
+          { id: 'a1', label: ' ', agentType: 'Plan', startedAt: 1 },
+          { id: 'a2', label: '', startedAt: 2 },
+        ])
+      ).toEqual([{ id: 'a1', label: 'Plan', agentType: 'Plan', startedAt: 1 }]);
+      expect(publishableSubAgents([])).toBeUndefined();
+      expect(publishableSubAgents(undefined)).toBeUndefined();
     });
   });
 });

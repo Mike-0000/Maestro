@@ -17,6 +17,7 @@ import {
   getProjectStore,
   projectData,
 } from '@core/features/projects/api/browser/stores/project-selectors';
+import { developerSubmissionsSince } from '@core/features/terminals/api/browser/pty/developer-typing';
 import {
   buildCompletionReport,
   terminalTailReport,
@@ -40,7 +41,7 @@ import { entryForConversation, installedProviders, spawnPeers } from '../roster'
 import { resolveProviderId, spawnAgentTask, startAgentSession } from '../spawn';
 import { showsPermissionPrompt, type AgentSnapshot } from './agent-event';
 import { formatChatList } from './chat-list';
-import type { ChatAgentPort, StartAgentInput } from './session';
+import type { ChatAgentPort, ReceivedPrompts, StartAgentInput } from './session';
 import { restartChatAgent, stopChatAgent, type SessionControlDeps } from './session-control';
 
 /** How long a stopped session may take to leave the host's session list. */
@@ -53,6 +54,47 @@ const NO_OUTPUT_NOTE =
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Chat-agent turns read back for the prompts they started with. */
+const PROMPT_TURNS_READ = 8;
+/** Without a cursor, the prompts of this many latest turns: what the agent is working from. */
+const PROMPT_TURNS_FIRST = 2;
+
+/**
+ * The user prompts of a chat (ACP) agent's turns after turn `cursor`. Its transcript cannot say
+ * who wrote a prompt: the developer in the chat's own input, or Maestro passing words on.
+ */
+async function chatAgentPrompts(
+  conversationId: string,
+  cursor: number | null
+): Promise<ReceivedPrompts> {
+  const client = await getConversationsClient();
+  const result = await client.acp.loadHistory({ conversationId, limit: PROMPT_TURNS_READ });
+  if (!result.success || result.data.unavailable) {
+    return {
+      prompts: [],
+      cursor,
+      unreadable: 'the chat transcript is not available while its session is asleep',
+    };
+  }
+  const turns = [...result.data.turns].sort((a, b) => a.seq - b.seq);
+  const fresh =
+    cursor === null ? turns.slice(-PROMPT_TURNS_FIRST) : turns.filter((turn) => turn.seq > cursor);
+  const prompts = fresh
+    .filter((turn) => turn.initiator === 'user')
+    .flatMap((turn) => {
+      const text = turn.items
+        .flatMap((item) =>
+          item.kind === 'message' && item.role === 'user' && typeof item.text === 'string'
+            ? [item.text]
+            : []
+        )
+        .join('\n')
+        .trim();
+      return text ? [{ text, by: 'relayed' as const }] : [];
+    });
+  return { prompts, cursor: turns.at(-1)?.seq ?? cursor };
 }
 
 function snapshotOf(entry: AgentTileEntry): AgentSnapshot {
@@ -290,6 +332,21 @@ export function createChatAgentPort(canvas: CanvasStore, conversationId: string)
 
     listAccounts() {
       return describeClaudeAccountsForChat(conversationOf(need()), Date.now());
+    },
+
+    async receivedPrompts(cursor) {
+      const entry = need();
+      if (entry.type === 'acp') return chatAgentPrompts(conversationId, cursor);
+      // A terminal agent: what the developer submitted with their own keys in this window. The
+      // conductor's and Maestro's sends never go through the keys, so these are the developer's.
+      const now = Date.now();
+      const submitted = developerSubmissionsSince(conversationId, cursor ?? 0).filter(
+        (submission) => submission.at <= now
+      );
+      return {
+        prompts: submitted.map((submission) => ({ text: submission.text, by: 'developer' })),
+        cursor: now,
+      };
     },
 
     listChats() {

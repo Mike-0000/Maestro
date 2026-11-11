@@ -15,6 +15,67 @@ type Message = Anthropic.Beta.BetaMessageParam;
 /** Starts every turn that a chat event began, after its context block. */
 export const CHAT_EVENT_MARK = '[Chat event, not the developer]';
 
+/**
+ * The first line of everything a chat conductor types into an agent. The agent reads it as a
+ * prompt like any other, so without it the conductor's words pass for the developer's own; with
+ * it the agent can weigh them as an assistant's direction, below what the developer types.
+ */
+export const CHAT_CONDUCTOR_MARK =
+  "[From the developer's chat conductor, an assistant acting for them; not typed by the developer. Where it conflicts with what the developer typed to you themselves, follow the developer.]";
+
+/** Text the conductor types into an agent, with its mark as the first line. */
+export function markedForAgent(text: string): string {
+  return `${CHAT_CONDUCTOR_MARK}\n${text}`;
+}
+
+/**
+ * True for text that starts with the conductor's mark, however a terminal or transcript wrapped
+ * or reflowed it: the start of the mark is enough.
+ */
+export function startsWithConductorMark(text: string): boolean {
+  const head = comparable(CHAT_CONDUCTOR_MARK).slice(0, 40);
+  return comparable(text).startsWith(head);
+}
+
+function comparable(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/** How many of its own messages to the agent the conductor remembers, to know them again. */
+export const CHAT_SENT_KEPT = 20;
+/** Of each, this much is kept: the start tells one apart. */
+export const CHAT_SENT_CHARS = 2_000;
+
+/**
+ * Whether `text` (a prompt the agent received) is one this conductor sent: it carries the mark,
+ * or it is one of `sent`, compared by its start since a terminal or transcript can cut it.
+ */
+export function sentByConductor(text: string, sent: readonly string[]): boolean {
+  if (startsWithConductorMark(text)) return true;
+  const said = comparable(text);
+  if (!said) return false;
+  const head = said.slice(0, 60);
+  return sent.some((item) => {
+    const mine = comparable(item);
+    return mine.length > 0 && (mine.startsWith(head) || head.startsWith(mine.slice(0, 60)));
+  });
+}
+
+/**
+ * A prompt the agent received that this conductor did not send. `developer`: the developer typed
+ * it into the agent's terminal themselves, from their own keys. `relayed`: not from this
+ * conductor, but who sent it cannot be told (the developer in the chat's own input, or Maestro
+ * passing on their words or another agent's). `text` is null when it went in but could not be
+ * read (recalled from the input history, or completed).
+ */
+export type SubmittedPrompt = {
+  readonly text: string | null;
+  readonly by: 'developer' | 'relayed';
+};
+
+/** Each prompt shown on an event is cut to this; read_chat shows the rest. */
+export const CHAT_PROMPT_CHARS = 1_500;
+
 /** Actions a conductor may take on chat events before the developer has to write again. */
 export const MAX_UNATTENDED_ACTIONS = 12;
 
@@ -76,19 +137,29 @@ export function chatContextBlock(facts: ChatFacts): string {
   ].join('\n');
 }
 
-export type ChatEvent =
-  /** First open: catch the developer up. `output` is the recent raw output. */
-  | { kind: 'attached'; output: string }
-  | {
-      kind: 'finished';
-      reply: string;
-      truncated: boolean;
-      source?: 'terminal-tail';
-      appUrls: readonly string[];
-    }
-  /** A permission prompt or question on screen. */
-  | { kind: 'awaiting-input'; notification: string | null; output: string }
-  | { kind: 'error'; output: string };
+/** What came into the agent since the conductor's last turn other than from the conductor. */
+export type ChatEventPrompts = {
+  /** Oldest first. */
+  readonly prompts?: readonly SubmittedPrompt[];
+  /** Why the agent's received prompts could not be read this time, when they could not. */
+  readonly promptsUnreadable?: string;
+};
+
+export type ChatEvent = ChatEventPrompts &
+  (
+    | /** First open: catch the developer up. `output` is the recent raw output. */
+      { kind: 'attached'; output: string }
+    | {
+        kind: 'finished';
+        reply: string;
+        truncated: boolean;
+        source?: 'terminal-tail';
+        appUrls: readonly string[];
+      }
+    /** A permission prompt or question on screen. */
+    | { kind: 'awaiting-input'; notification: string | null; output: string }
+    | { kind: 'error'; output: string }
+  );
 
 /** The final reply the model sees; the rest stays one read_chat away. */
 export const CHAT_EVENT_REPLY_CHARS = 8_000;
@@ -176,12 +247,55 @@ function eventBody(event: ChatEvent): string[] {
   }
 }
 
+const PROMPTS_TAG = /<\/?prompts-to-agent\b[^>]*>/gi;
+
+/**
+ * The prompts the agent received since the conductor's last turn that it did not send, as a block
+ * of their own, outside the agent's fenced output: they are the developer's direction to the
+ * agent (or words passed on to it), not the agent's output.
+ */
+export function promptsBlock(event: ChatEventPrompts): string | null {
+  const prompts = event.prompts ?? [];
+  if (prompts.length === 0) {
+    return event.promptsUnreadable
+      ? `What reached the agent since your last turn other than from you could not be read (${oneLine(event.promptsUnreadable)}). The developer may have told it something you have not seen.`
+      : null;
+  }
+  const lines = prompts.map((prompt) => {
+    const who =
+      prompt.by === 'developer'
+        ? 'typed by the developer into the agent themselves'
+        : 'not from you: the developer in the chat, or Maestro passing words on';
+    if (prompt.text === null) {
+      return `- ${who}; its text could not be read (it came from the input history or a completion), read_chat shows it`;
+    }
+    const body = inContext(headAndTail(prompt.text.trim(), CHAT_PROMPT_CHARS).text).replace(
+      PROMPTS_TAG,
+      '[prompts tag removed]'
+    );
+    return `- ${who}:\n${body
+      .split('\n')
+      .map((line) => `  ${line}`)
+      .join('\n')}`;
+  });
+  return [
+    '<prompts-to-agent>',
+    'These prompts reached the agent since your last turn and did not come from you, oldest first. What the developer gives the agent directly is their direction, as much as what they write to you, and the newest direction wins.',
+    ...lines,
+    '</prompts-to-agent>',
+  ].join('\n');
+}
+
 /**
  * The user message for a turn a chat event started: the context block, the mark, then the
- * agent's output, fenced and labeled as data.
+ * prompts the agent received from others, then the agent's output, fenced and labeled as data.
  */
 export function chatEventTurnText(event: ChatEvent, facts: ChatFacts): string {
-  return [chatContextBlock(facts), ...eventBody(event)].join('\n\n');
+  const [lead, ...rest] = eventBody(event);
+  const prompts = promptsBlock(event);
+  return [chatContextBlock(facts), lead, ...(prompts ? [prompts] : []), ...rest]
+    .filter((part): part is string => part !== undefined)
+    .join('\n\n');
 }
 
 /** The user message for a turn the developer started: the context block, then their words. */

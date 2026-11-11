@@ -16,7 +16,11 @@ import type { ProjectHostAccess } from '@core/features/projects/api/browser/stor
 import type { FrontendPtyConnector } from '@core/features/terminals/api/browser/pty/pty';
 import { PtySession } from '@core/features/terminals/api/browser/pty/pty-session';
 import { createXtermLogSink } from '@core/features/terminals/api/browser/pty/xterm-log-sink';
-import { type AgentStatus, type NotificationType } from '@core/primitives/agents/api';
+import {
+  type AgentStatus,
+  type NotificationType,
+  type RunningSubAgent,
+} from '@core/primitives/agents/api';
 import type { CompletionReport } from '@core/primitives/agents/api/completion-report';
 import { Resource } from '@core/primitives/async-resource/browser/resource';
 import {
@@ -274,19 +278,7 @@ export class ConversationManagerStore implements Disposable {
     const conversationStore = this.conversations.get(payload.conversationId);
     if (!conversationStore) return;
 
-    runInAction(() => {
-      conversationStore.status = payload.status;
-      conversationStore.seen = payload.seen;
-      if (payload.status !== 'awaiting-input') {
-        conversationStore.lastNotificationType = null;
-      }
-      // 'awaiting-input' carries them when the turn ended on something the developer must answer.
-      const turnEnded = payload.status === 'completed' || payload.status === 'awaiting-input';
-      conversationStore.completionSummary = turnEnded ? (payload.completionSummary ?? null) : null;
-      conversationStore.completionReport = turnEnded ? (payload.completionReport ?? null) : null;
-      conversationStore.backgroundAgents =
-        payload.status === 'working' ? (payload.backgroundAgents ?? null) : null;
-    });
+    conversationStore.applyAgentStatusChanged(payload);
   }
 
   private applyConversationCreated(event: Extract<ConversationEvent, { type: 'created' }>): void {
@@ -642,6 +634,26 @@ function createTuiAgentsConnector(
   };
 }
 
+const NO_SUB_AGENTS: readonly RunningSubAgent[] = Object.freeze([]);
+
+/** Sub-agents can run while the agent works, and while it asks something mid-turn. */
+function runsSubAgents(status: AgentStatus): boolean {
+  return status === 'working' || status === 'awaiting-input';
+}
+
+function sameSubAgents(a: readonly RunningSubAgent[], b: readonly RunningSubAgent[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every(
+      (item, index) =>
+        item.id === b[index]?.id &&
+        item.label === b[index]?.label &&
+        item.agentType === b[index]?.agentType &&
+        item.startedAt === b[index]?.startedAt
+    )
+  );
+}
+
 export class ConversationStore {
   data: Conversation;
   status: AgentStatus;
@@ -653,6 +665,12 @@ export class ConversationStore {
   completionReport: CompletionReport | null = null;
   /** Subagents the agent is waiting on while working; null for none or once it stops working. */
   backgroundAgents: number | null = null;
+  /**
+   * The sub-agents running inside the agent's session, oldest first, with a label each: empty for
+   * none, once the agent stops working, and for hosts that report only `backgroundAgents`. The
+   * array is replaced only when what it shows changed, and is never mutated.
+   */
+  subAgents: readonly RunningSubAgent[] = NO_SUB_AGENTS;
 
   constructor(conversation: Conversation) {
     this.data = conversation;
@@ -666,7 +684,10 @@ export class ConversationStore {
       completionSummary: observable,
       completionReport: observable.ref,
       backgroundAgents: observable,
+      subAgents: observable.ref,
       setStatus: action,
+      setSubAgents: action,
+      applyAgentStatusChanged: action,
       setAwaitingInput: action,
       setWorking: action,
       clearWorking: action,
@@ -700,6 +721,31 @@ export class ConversationStore {
       this.completionReport = null;
     }
     if (status !== 'working') this.backgroundAgents = null;
+    if (!runsSubAgents(status)) this.subAgents = NO_SUB_AGENTS;
+  }
+
+  /** Takes the status the main process published for this conversation. */
+  applyAgentStatusChanged(payload: Extract<ConversationEvent, { type: 'agent-status-changed' }>) {
+    this.status = payload.status;
+    this.seen = payload.seen;
+    if (payload.status !== 'awaiting-input') {
+      this.lastNotificationType = null;
+    }
+    // 'awaiting-input' carries them when the turn ended on something the developer must answer.
+    const turnEnded = payload.status === 'completed' || payload.status === 'awaiting-input';
+    this.completionSummary = turnEnded ? (payload.completionSummary ?? null) : null;
+    this.completionReport = turnEnded ? (payload.completionReport ?? null) : null;
+    this.backgroundAgents =
+      payload.status === 'working' ? (payload.backgroundAgents ?? null) : null;
+    // A host that does not name its sub-agents sends none: the count above stands for them.
+    this.setSubAgents(
+      runsSubAgents(payload.status) ? (payload.subAgents ?? NO_SUB_AGENTS) : NO_SUB_AGENTS
+    );
+  }
+
+  setSubAgents(subAgents: readonly RunningSubAgent[]) {
+    if (sameSubAgents(this.subAgents, subAgents)) return;
+    this.subAgents = subAgents.length > 0 ? Object.freeze([...subAgents]) : NO_SUB_AGENTS;
   }
 
   setAwaitingInput(notificationType: NotificationType) {

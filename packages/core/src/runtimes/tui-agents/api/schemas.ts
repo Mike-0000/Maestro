@@ -180,6 +180,23 @@ export function isAttentionNotification(
   return nt != null && ATTENTION_NOTIFICATION_TYPES.has(nt);
 }
 
+/**
+ * A sub-agent running inside the agent's session. Lenient on purpose (no length limits): one bad
+ * entry must not fail the parse of every agent's state; producers bound and redact the label.
+ */
+export const tuiSubAgentSchema = z.object({
+  /** The provider's id for the sub-agent, stable while it runs. */
+  id: z.string(),
+  /** What it is doing, in a few words (its task, else its type); redacted and bounded. */
+  label: z.string(),
+  /** Its type, such as "Explore", when the provider reports one. */
+  agentType: z.string().optional(),
+  /** Unix ms when it was first seen running. */
+  startedAt: z.number(),
+});
+
+export type TuiSubAgent = z.infer<typeof tuiSubAgentSchema>;
+
 export const tuiAgentStateSchema = z.object({
   conversationId: z.string(),
   providerId: z.string().optional(),
@@ -199,6 +216,12 @@ export const tuiAgentStateSchema = z.object({
    * `working`; absent for none. Unlike other background work, they hold through any turn.
    */
   backgroundAgents: z.number().int().positive().optional(),
+  /**
+   * The sub-agents running inside the session right now, oldest first: foreground ones within a
+   * turn as well as background ones. Absent for none, and for providers that do not report them.
+   * A change to it alone is the same turn going on: `updatedAt` keeps the last status change.
+   */
+  subAgents: z.array(tuiSubAgentSchema).optional(),
   updatedAt: z.number().int(),
 });
 

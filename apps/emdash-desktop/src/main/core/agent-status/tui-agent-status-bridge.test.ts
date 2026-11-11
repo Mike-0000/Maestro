@@ -133,6 +133,34 @@ describe('TuiAgentStatusBridge', () => {
     expect(mocks.updateBackgroundAgents).toHaveBeenCalledTimes(1);
     await fixture.dispose();
   });
+
+  it('sends sub-agents starting and stopping within a turn as updates, not new turns', async () => {
+    const runtime = createRuntime({ local: state('local', 'working') });
+    const fixture = createBridge(new Map([[formatHostRef(LOCAL_HOST_REF), runtime]]));
+    mocks.loadActiveIds.mockResolvedValue([]);
+    await fixture.bridge.attachHost(LOCAL_HOST_REF);
+    const explore = { id: 'a1', label: 'Explore', agentType: 'Explore', startedAt: 5 };
+
+    runtime.agentStates.model.states.list.set({
+      local: { ...state('local', 'working'), subAgents: [explore] },
+    });
+    await vi.waitFor(() =>
+      expect(mocks.updateBackgroundAgents).toHaveBeenCalledWith(
+        expect.objectContaining({
+          conversationId: 'local',
+          payload: expect.objectContaining({ subAgents: [explore] }),
+        })
+      )
+    );
+
+    runtime.agentStates.model.states.list.set({ local: state('local', 'working') });
+    await vi.waitFor(() => expect(mocks.updateBackgroundAgents).toHaveBeenCalledTimes(2));
+    expect(mocks.updateBackgroundAgents).toHaveBeenLastCalledWith(
+      expect.objectContaining({ payload: expect.not.objectContaining({ subAgents: [explore] }) })
+    );
+    expect(mocks.applySignal).not.toHaveBeenCalled();
+    await fixture.dispose();
+  });
 });
 
 function createBridge(runtimes: Map<string, ReturnType<typeof createRuntime>>) {

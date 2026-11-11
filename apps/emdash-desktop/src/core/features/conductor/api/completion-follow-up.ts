@@ -1,4 +1,5 @@
 import type { CompletionReport } from '@core/primitives/agents/api/completion-report';
+import { startsWithConductorMark } from './chat-conductor/turns';
 import type { ConductorToolName } from './tools';
 
 /**
@@ -52,28 +53,53 @@ function comparable(text: string): string {
   return text.replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
+/** The marks `markInputLines` adds: for the voice conductor's turns unless told otherwise. */
+export type InputLineLabels = {
+  /** Sent by whoever reads the output (the conductor of this chat, or Maestro). */
+  readonly sent: string;
+  /** Sent by Maestro, from its own prefix. */
+  readonly maestro: string;
+  /** Neither: the developer typed it, as far as the terminal can tell. */
+  readonly other: string;
+};
+
+const MAESTRO_LABELS: InputLineLabels = {
+  sent: TYPED_BY_MAESTRO,
+  maestro: TYPED_BY_MAESTRO,
+  other: TYPED_BY_DEVELOPER,
+};
+
+/** A TUI shows a long or multi-line paste as a placeholder: who pasted it cannot be read. */
+const PASTE_PLACEHOLDER = /^\[pasted text\b/i;
+
 /**
  * Says who typed each input line in a terminal tail. The conductor once asked whether to pass on
  * "push it", a line the developer had typed into the agent themselves, as if it were the agent's
- * own words. Lines the conductor or Maestro typed are marked so, and every other is the
- * developer's.
+ * own words. Lines the reader sent (`sentByConductor`, or a chat conductor's mark line) or Maestro
+ * sent are marked so, and every other is the developer's. A paste placeholder is left unmarked.
  */
-export function markInputLines(text: string, sentByConductor: readonly string[] = []): string {
+export function markInputLines(
+  text: string,
+  sentByConductor: readonly string[] = [],
+  labels: InputLineLabels = MAESTRO_LABELS
+): string {
   const sent = sentByConductor.map(comparable).filter(Boolean);
   return text
     .split('\n')
     .map((line) => {
       const match = INPUT_LINE.exec(line);
       const typed = match?.[2];
-      if (!match || !typed) return line;
+      if (!match || !typed || PASTE_PLACEHOLDER.test(typed)) return line;
       const said = comparable(typed);
       // A terminal wraps long input: the visible start is enough to tell a sent text apart.
       const head = said.slice(0, 60);
-      const byMaestro =
-        said.startsWith('[maestro') ||
-        said.startsWith('[reply from agent') ||
+      const byReader =
+        // A chat conductor's message starts with its mark (`CHAT_CONDUCTOR_MARK`).
+        startsWithConductorMark(typed) ||
         sent.some((text) => text.startsWith(head) || head.startsWith(text.slice(0, 60)));
-      return `${line} ${byMaestro ? TYPED_BY_MAESTRO : TYPED_BY_DEVELOPER}`;
+      const byMaestro = said.startsWith('[maestro') || said.startsWith('[reply from agent');
+      const label = byReader ? labels.sent : byMaestro ? labels.maestro : labels.other;
+      return `${line} ${label}`;
     })
     .join('\n');
 }

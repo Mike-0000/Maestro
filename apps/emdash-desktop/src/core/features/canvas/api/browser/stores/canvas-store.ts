@@ -19,7 +19,7 @@ import { asAvailableProject } from '@core/features/projects/api/browser/stores/p
 import type { TaskStore } from '@core/features/tasks/api/browser/stores/task-store';
 import { getTaskManagerStore } from '@core/features/tasks/api/browser/task-state/task-selectors';
 import { taskManagerStoreToken } from '@core/features/tasks/contributions/browser/project-store-tokens';
-import type { AgentStatus, NotificationType } from '@core/primitives/agents/api';
+import type { AgentStatus, NotificationType, RunningSubAgent } from '@core/primitives/agents/api';
 import type { CompletionReport } from '@core/primitives/agents/api/completion-report';
 import { log } from '@core/primitives/logging/browser/logger';
 import type { MementoHandle } from '@core/primitives/mementos/browser';
@@ -161,6 +161,11 @@ export type AgentTileEntry = {
   readonly completionReport: CompletionReport | null;
   /** Subagents the agent is waiting on (status 'working' only); absent for none. */
   readonly backgroundAgents?: number;
+  /**
+   * The sub-agents running inside the agent's session, with a label each (status 'working' or
+   * 'awaiting-input'); absent for none or when the host reports only `backgroundAgents`.
+   */
+  readonly subAgents?: readonly RunningSubAgent[];
   /** True when the task workspace is provisioned (its sessions can attach). */
   readonly taskProvisioned: boolean;
   /** True when the host reports a running session for this conversation. */
@@ -3923,6 +3928,7 @@ function toAgentEntry(
     completionSummary: conversation.completionSummary,
     completionReport: conversation.completionReport,
     ...(conversation.backgroundAgents ? { backgroundAgents: conversation.backgroundAgents } : {}),
+    ...(conversation.subAgents?.length ? { subAgents: conversation.subAgents } : {}),
     taskProvisioned: isProvisioned(task),
     sessionActive: runtime.sessionActive,
     workspaceId: task.workspaceId,

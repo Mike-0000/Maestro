@@ -29,9 +29,15 @@ import { cn } from '@core/primitives/styling/browser/cn';
 import type { ChatConductorEntry } from '../../api/chat-conductor/thread';
 import { withoutImages } from './safe-markdown';
 import type { ChatConductorSession } from './session';
+import { ChatSubAgents } from './sub-agents';
 
-/** The thread reads as a column of text, not a full-width log. */
-const COLUMN = 'mx-auto w-full max-w-[46rem] px-5';
+/**
+ * The thread and the composer span the pane. Each sits in a box that keeps a scrollbar's width
+ * free on both edges, so the thread's scrollbar never moves it off the composer's edges.
+ */
+const GUTTER = '[scrollbar-gutter:stable_both-edges]';
+/** Their shared side padding grows with the pane: 16px in a narrow split, 48px from about 1900px. */
+const COLUMN = 'w-full px-[clamp(1rem,2.5%,3rem)]';
 /** Closer to the end than this and the thread follows new entries. */
 const FOLLOW_SLACK_PX = 64;
 
@@ -51,8 +57,10 @@ function entryTime(at: string): string | undefined {
 
 const ConductorMessage = observer(function ConductorMessage({ text }: { text: string }) {
   const openLink = useMarkdownLinkOpener();
+  // Markdown ends every block with a margin; -mb-2 takes the last one back, so the thread's gap
+  // alone spaces a message from the entry after it.
   return (
-    <div className="min-w-0 text-sm leading-relaxed text-foreground select-text">
+    <div className="-mb-2 min-w-0 text-sm leading-relaxed text-foreground select-text">
       <Markdown content={withoutImages(text)} variant="compact" onOpenLink={openLink} />
     </div>
   );
@@ -246,7 +254,7 @@ export const ChatConductorPanel = observer(function ChatConductorPanel({
     <div className="flex h-full min-h-0 flex-col" onFocus={onFocus}>
       <div
         ref={scrollRef}
-        className="min-h-0 flex-1 overflow-y-auto"
+        className={cn('min-h-0 flex-1 overflow-y-auto', GUTTER)}
         onScroll={(event) => {
           const element = event.currentTarget;
           followingRef.current =
@@ -265,7 +273,7 @@ export const ChatConductorPanel = observer(function ChatConductorPanel({
             }
           />
         ) : (
-          <div className={cn(COLUMN, 'flex flex-col gap-4 py-5')} aria-live="polite">
+          <div className={cn(COLUMN, 'flex flex-col gap-3 py-3')} aria-live="polite">
             {entries.map((entry) => (
               <div key={entry.id} title={entryTime(entry.at)}>
                 <ThreadEntry entry={entry} />
@@ -284,96 +292,104 @@ export const ChatConductorPanel = observer(function ChatConductorPanel({
         )}
       </div>
 
-      <div className={cn(COLUMN, 'shrink-0 pt-1 pb-3')}>
-        {!ready && (
-          <div className="mb-2 flex items-center gap-2 rounded-md border border-border-warning bg-background-warning px-3 py-1.5 text-xs text-foreground-warning">
-            <span className="min-w-0 flex-1">
-              {enabled
-                ? 'The conductor has no API key, so it cannot run.'
-                : 'Chat conductors are turned off, so this one is not following the chat.'}
-            </span>
-            <Button type="button" variant="ghost" size="xs" onClick={openConductorSettings}>
-              Open settings
+      <div className={cn('shrink-0 overflow-hidden', GUTTER)}>
+        <div className={cn(COLUMN, 'pt-1 pb-3')}>
+          {!ready && (
+            <div className="mb-2 flex items-center gap-2 rounded-md border border-border-warning bg-background-warning px-3 py-1.5 text-xs text-foreground-warning">
+              <span className="min-w-0 flex-1">
+                {enabled
+                  ? 'The conductor has no API key, so it cannot run.'
+                  : 'Chat conductors are turned off, so this one is not following the chat.'}
+              </span>
+              <Button type="button" variant="ghost" size="xs" onClick={openConductorSettings}>
+                Open settings
+              </Button>
+            </div>
+          )}
+          <Textarea
+            ref={composerRef}
+            value={draft}
+            rows={2}
+            disabled={!ready}
+            aria-label="Message the conductor"
+            placeholder={
+              busy
+                ? 'Write to the conductor. It is sent when this turn ends.'
+                : 'Tell the conductor what you want from this chat'
+            }
+            className="max-h-60 w-full resize-none text-sm"
+            onChange={(event) => session.setDraft(event.currentTarget.value)}
+            onKeyDown={onKeyDown}
+          />
+          <div className="mt-1.5 flex items-center gap-1">
+            <Tooltip.Root>
+              <Tooltip.Trigger
+                render={
+                  <span className="flex h-6 items-center gap-2 rounded-md px-1 text-xs text-foreground-muted" />
+                }
+              >
+                <Switch
+                  size="sm"
+                  checked={session.autonomy}
+                  onCheckedChange={(on) => session.setAutonomy(on)}
+                  aria-label="Act on my behalf"
+                />
+                <span
+                  className="cursor-pointer select-none"
+                  onClick={() => session.setAutonomy(!session.autonomy)}
+                >
+                  Act on my behalf
+                </span>
+              </Tooltip.Trigger>
+              <Tooltip.Content side="top" align="start" className="max-w-xs">
+                On: when the agent finishes or asks something while you are away, the conductor may
+                prompt it, answer it or interrupt it, within what you asked for. Off: it only tells
+                you what happened and what it would do. What you ask for directly is always done.
+              </Tooltip.Content>
+            </Tooltip.Root>
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              disabled={!ready}
+              onClick={() => {
+                followingRef.current = true;
+                session.catchUp();
+              }}
+            >
+              Catch me up
+            </Button>
+            <ChatSubAgents conversationId={session.conversationId} />
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    icon
+                    aria-label="Thread options"
+                  />
+                }
+              >
+                <Ellipsis aria-hidden />
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Content align="end" side="top" width="content">
+                <DropdownMenu.Item
+                  variant="destructive"
+                  disabled={entries.length === 0 && !busy}
+                  onClick={() => void session.reset()}
+                >
+                  <Trash2 aria-hidden />
+                  Clear thread
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Root>
+            <Button type="button" variant="primary" size="xs" disabled={!canSend} onClick={send}>
+              Send
+              <CornerDownLeft aria-hidden />
             </Button>
           </div>
-        )}
-        <Textarea
-          ref={composerRef}
-          value={draft}
-          rows={2}
-          disabled={!ready}
-          aria-label="Message the conductor"
-          placeholder={
-            busy
-              ? 'Write to the conductor. It is sent when this turn ends.'
-              : 'Tell the conductor what you want from this chat'
-          }
-          className="max-h-60 w-full resize-none text-sm"
-          onChange={(event) => session.setDraft(event.currentTarget.value)}
-          onKeyDown={onKeyDown}
-        />
-        <div className="mt-1.5 flex items-center gap-1">
-          <Tooltip.Root>
-            <Tooltip.Trigger
-              render={
-                <span className="flex h-6 items-center gap-2 rounded-md px-1 text-xs text-foreground-muted" />
-              }
-            >
-              <Switch
-                size="sm"
-                checked={session.autonomy}
-                onCheckedChange={(on) => session.setAutonomy(on)}
-                aria-label="Act on my behalf"
-              />
-              <span
-                className="cursor-pointer select-none"
-                onClick={() => session.setAutonomy(!session.autonomy)}
-              >
-                Act on my behalf
-              </span>
-            </Tooltip.Trigger>
-            <Tooltip.Content side="top" align="start" className="max-w-xs">
-              On: when the agent finishes or asks something while you are away, the conductor may
-              prompt it, answer it or interrupt it, within what you asked for. Off: it only tells
-              you what happened and what it would do. What you ask for directly is always done.
-            </Tooltip.Content>
-          </Tooltip.Root>
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            disabled={!ready}
-            onClick={() => {
-              followingRef.current = true;
-              session.catchUp();
-            }}
-          >
-            Catch me up
-          </Button>
-          <span className="flex-1" />
-          <DropdownMenu.Root>
-            <DropdownMenu.Trigger
-              render={
-                <Button type="button" variant="ghost" size="xs" icon aria-label="Thread options" />
-              }
-            >
-              <Ellipsis aria-hidden />
-            </DropdownMenu.Trigger>
-            <DropdownMenu.Content align="end" side="top" width="content">
-              <DropdownMenu.Item
-                variant="destructive"
-                disabled={entries.length === 0 && !busy}
-                onClick={() => void session.reset()}
-              >
-                <Trash2 aria-hidden />
-                Clear thread
-              </DropdownMenu.Item>
-            </DropdownMenu.Content>
-          </DropdownMenu.Root>
-          <Button type="button" variant="primary" size="xs" disabled={!canSend} onClick={send}>
-            Send
-            <CornerDownLeft aria-hidden />
-          </Button>
         </div>
       </div>
     </div>

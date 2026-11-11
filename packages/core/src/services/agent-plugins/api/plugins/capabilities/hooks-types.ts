@@ -40,6 +40,16 @@ export type BackgroundWork = {
   kind: BackgroundWorkKind;
 };
 
+/** A sub-agent the provider names in a hook payload. */
+export type ReportedSubAgent = {
+  /** The provider's id for the sub-agent, the same one its start and stop events carry. */
+  agentId: string;
+  /** Its type, such as "Explore" or "general-purpose". */
+  agentType?: string;
+  /** What it was asked to do, in the provider's (model-written) words. */
+  description?: string;
+};
+
 /**
  * Normalised hook event produced by a plugin's parseHookEvent method.
  *
@@ -51,7 +61,12 @@ export type BackgroundWork = {
  *   one-shot wakeups — that will wake the session when it settles: the turn ended but the
  *   agent is waiting, not done, unless all of it was acknowledged (see BackgroundWorkKind).
  *   `initiator` (start only) is 'background' when such a wake-up, rather than the user,
- *   opened the turn.
+ *   opened the turn. `subAgents` (stop only) lists the sub-agents still running in the
+ *   background when the turn ended, when the provider reports them.
+ * - kind: 'subagent' — a sub-agent started or stopped inside the agent's session (both
+ *   foreground ones that run within a turn and background ones). It never changes the agent's
+ *   own status. A stop may carry `running`, the other sub-agents the provider still lists as in
+ *   flight, to fill in what a start did not say (a description).
  * - kind: 'session' — carries a provider session id to persist on the conversation
  * - kind: 'ignore'  — event should be silently dropped
  */
@@ -65,7 +80,14 @@ export type CanonicalHookEvent =
       lastAssistantMessage?: string;
       providerSessionId?: string;
       backgroundWork?: BackgroundWork[];
+      subAgents?: ReportedSubAgent[];
       initiator?: 'user' | 'background';
+    }
+  | {
+      kind: 'subagent';
+      type: 'start' | 'stop';
+      subAgent: ReportedSubAgent;
+      running?: ReportedSubAgent[];
     }
   | { kind: 'session'; providerSessionId: string }
   | { kind: 'ignore' };

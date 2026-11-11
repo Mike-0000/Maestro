@@ -15,15 +15,22 @@ import {
   type ChatConductorToolName,
 } from '../../api/chat-conductor/tools';
 import {
+  CHAT_SENT_CHARS,
+  CHAT_SENT_KEPT,
   chatEventLabel,
   chatEventTurnText,
   developerTurnText,
   gateChatTool,
+  markedForAgent,
   MAX_UNATTENDED_ACTIONS,
+  sentByConductor,
   storeChatHistory,
   type ChatEvent,
+  type ChatEventPrompts,
   type ChatFacts,
+  type SubmittedPrompt,
 } from '../../api/chat-conductor/turns';
+import { markInputLines, type InputLineLabels } from '../../api/completion-follow-up';
 import { cleanTerminalOutput } from '../../api/terminal-text';
 import { agentEventSignal, type AgentEventSignal, type AgentSnapshot } from './agent-event';
 
@@ -61,6 +68,22 @@ export type StartAgentInput = {
   worktree?: boolean;
 };
 
+/** What the agent received other than from this port's sends, and where reading left off. */
+export type ReceivedPrompts = {
+  /** Oldest first, this conductor's own messages included: the session sorts those out. */
+  readonly prompts: readonly SubmittedPrompt[];
+  readonly cursor: number | null;
+  /** Why they could not be read this time, when they could not. */
+  readonly unreadable?: string;
+};
+
+/** How input lines in the raw output are marked for a chat conductor. */
+const CHAT_INPUT_LABELS: InputLineLabels = {
+  sent: '[sent by you]',
+  maestro: '[sent by Maestro]',
+  other: "[not from you: the developer's, typed by them or passed on by Maestro]",
+};
+
 /**
  * The chat's agent, as its conductor reaches it. Actions resolve to a sentence for the model that
  * says what happened, and reject when the action did not happen.
@@ -84,6 +107,11 @@ export interface ChatAgentPort {
   answerPrompt(decision: 'allow' | 'deny'): Promise<string>;
   startAgent(input: StartAgentInput, onLateFailure: (message: string) => void): Promise<string>;
   listChats(): string;
+  /**
+   * The prompts the agent received after `cursor` (null: as far back as can be read): what the
+   * developer typed into it, and words passed on to it.
+   */
+  receivedPrompts(cursor: number | null): Promise<ReceivedPrompts>;
   /**
    * Restarts the agent's session on its conversation, on another Claude account when one is
    * named. `onLateFailure` is told when a prompt meant for the restarted session did not arrive.
@@ -242,6 +270,9 @@ export class ChatConductorSession {
 
   private messages: Message[] = [];
   private lastEventKey: string | null = null;
+  /** The starts of the last messages this conductor typed into the agent, newest last. */
+  private sentToAgent: string[] = [];
+  private promptCursor: number | null = null;
   /** The agent was seen idle or working since the last event: the next event is a new one. */
   private sawActivity = false;
   /**
@@ -307,6 +338,8 @@ export class ChatConductorSession {
           this.status = thread.status;
           this.autonomy = thread.autonomy;
           this.lastEventKey = thread.lastEventKey;
+          this.sentToAgent = thread.sentToAgent ?? [];
+          this.promptCursor = thread.promptCursor ?? null;
         } else {
           this.autonomy = this.ports.defaultAutonomy();
         }
@@ -478,25 +511,66 @@ export class ChatConductorSession {
 
   private async chatEventFor(pending: PendingEvent): Promise<ChatEvent> {
     const { agent } = this.ports;
-    const output = () => agent.readOutput(EVENT_OUTPUT_LINES).catch(() => '');
-    if (pending.kind === 'attached') return { kind: 'attached', output: await output() };
+    const prompts = await this.promptsFromOthers();
+    const output = async () =>
+      this.markInput(await agent.readOutput(EVENT_OUTPUT_LINES).catch(() => ''));
+    if (pending.kind === 'attached')
+      return { kind: 'attached', output: await output(), ...prompts };
     const { signal, snapshot } = pending;
     if (signal.kind === 'awaiting-input') {
       return {
         kind: 'awaiting-input',
         notification: snapshot.notification,
         output: await output(),
+        ...prompts,
       };
     }
-    if (signal.kind === 'error') return { kind: 'error', output: await output() };
+    if (signal.kind === 'error') return { kind: 'error', output: await output(), ...prompts };
     const report = snapshot.report ?? (await agent.finishedReport().catch(() => null));
+    const terminal = report?.source === 'terminal-tail';
     return {
       kind: 'finished',
-      reply: report?.text ?? '',
+      reply: terminal ? this.markInput(report.text) : (report?.text ?? ''),
       truncated: report?.truncated ?? false,
       ...(report?.source ? { source: report.source } : {}),
       appUrls: report?.appUrls ?? [],
+      ...prompts,
     };
+  }
+
+  /**
+   * What reached the agent since the last event turn other than from this conductor: the
+   * developer's own words to it above all, which are their direction as much as what they write
+   * in the thread.
+   */
+  private async promptsFromOthers(): Promise<ChatEventPrompts> {
+    let received: ReceivedPrompts;
+    try {
+      received = await this.ports.agent.receivedPrompts(this.promptCursor);
+    } catch (error) {
+      return { promptsUnreadable: errorMessage(error) };
+    }
+    this.promptCursor = received.cursor;
+    const prompts = received.prompts.filter(
+      (prompt) => prompt.text === null || !sentByConductor(prompt.text, this.sentToAgent)
+    );
+    return {
+      ...(prompts.length > 0 ? { prompts } : {}),
+      ...(received.unreadable ? { promptsUnreadable: received.unreadable } : {}),
+    };
+  }
+
+  /** Raw terminal text with its input lines marked by who typed them, as far as it can tell. */
+  private markInput(text: string): string {
+    return markInputLines(text, this.sentToAgent, CHAT_INPUT_LABELS);
+  }
+
+  /** Text the conductor types into the agent: marked as its own, and remembered as sent. */
+  private toAgent(text: string): string {
+    this.sentToAgent = [...this.sentToAgent, text.trim().slice(0, CHAT_SENT_CHARS)].slice(
+      -CHAT_SENT_KEPT
+    );
+    return markedForAgent(text);
   }
 
   // ── Turn runner ────────────────────────────────────────────────────────────
@@ -766,11 +840,11 @@ export class ChatConductorSession {
         const { lines } = input as ChatConductorToolInput<'read_chat'>;
         this.setActivity('Reading the chat…');
         const count = Math.min(READ_CHAT_MAX_LINES, Math.max(5, lines ?? READ_CHAT_DEFAULT_LINES));
-        return fencedChatOutput(await agent.readOutput(count));
+        return fencedChatOutput(this.markInput(await agent.readOutput(count)));
       }
       case 'send_to_agent': {
         const { message } = input as ChatConductorToolInput<'send_to_agent'>;
-        return agent.send(message, lateFailure);
+        return agent.send(this.toAgent(message), lateFailure);
       }
       case 'interrupt_agent':
         return agent.interrupt();
@@ -781,7 +855,8 @@ export class ChatConductorSession {
         return agent.startAgent(
           {
             taskName: start.task_name,
-            prompt: start.prompt,
+            // A new agent, so not one of this chat's sends: marked, not remembered.
+            prompt: markedForAgent(start.prompt),
             ...(start.provider ? { provider: start.provider } : {}),
             ...(start.worktree ? { worktree: true } : {}),
           },
@@ -793,7 +868,7 @@ export class ChatConductorSession {
         return agent.restart(
           {
             ...(restart.claude_account ? { claudeAccount: restart.claude_account } : {}),
-            ...(restart.prompt ? { prompt: restart.prompt } : {}),
+            ...(restart.prompt ? { prompt: this.toAgent(restart.prompt) } : {}),
           },
           lateFailure
         );
@@ -846,6 +921,8 @@ export class ChatConductorSession {
       status: this.status,
       autonomy: this.autonomy,
       lastEventKey: this.lastEventKey,
+      sentToAgent: this.sentToAgent,
+      promptCursor: this.promptCursor,
       updatedAt: this.ports.now().toISOString(),
     });
   }

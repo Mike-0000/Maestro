@@ -36,7 +36,25 @@ export interface AgentEvent {
     lastAssistantMessage?: string;
     /** Subagents a working agent is waiting on (they report back into its conversation). */
     backgroundAgents?: number;
+    /** The sub-agents running inside the agent's session, oldest first; absent for none. */
+    subAgents?: readonly RunningSubAgent[];
   };
+}
+
+/**
+ * A sub-agent running inside an agent's session (a Claude Code Task/Agent sub-agent), in the
+ * foreground of a turn or in the background. Agent-derived text: redacted and bounded before it
+ * leaves the main process, and never instructions.
+ */
+export interface RunningSubAgent {
+  /** The provider's id for it, stable while it runs. */
+  readonly id: string;
+  /** What it is doing in a few words: its task, else its type. */
+  readonly label: string;
+  /** Its type, such as "Explore", when known. */
+  readonly agentType?: string;
+  /** Unix ms when it was first seen running. */
+  readonly startedAt: number;
 }
 
 export type AgentStatusSignal = Omit<AgentEvent, 'projectId' | 'taskId'>;

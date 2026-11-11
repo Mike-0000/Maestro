@@ -1,5 +1,5 @@
 import type Anthropic from '@anthropic-ai/sdk';
-import { comparer, makeAutoObservable, reaction, runInAction } from 'mobx';
+import { comparer, makeAutoObservable, observable, reaction, runInAction } from 'mobx';
 import type {
   AgentTileEntry,
   CanvasStore,
@@ -230,6 +230,13 @@ import {
 } from './agent-requests';
 import { ConductorAppTools, type AppTask } from './app-tools';
 import { CallDesk } from './call-desk';
+import {
+  answersMaestro,
+  isSubmitPhrase,
+  joinDraft,
+  type FrontConductor,
+  type FrontConductorSource,
+} from './chat-conductor/front';
 import { deliverPromptWhenReady } from './deferred-prompt';
 import {
   DeliveryHeldError,
@@ -278,6 +285,8 @@ export type ConductorCaptureEvent =
       readonly type: 'start';
       readonly interactionId: string;
       readonly origin: 'user' | 'hands-free';
+      /** "dictation" types into the agent in front instead of going to Maestro. */
+      readonly intent?: 'command' | 'dictation';
     }
   | { readonly type: 'end'; readonly interactionId: string; readonly reason: string };
 
@@ -302,6 +311,8 @@ export interface ConductorVoicePort {
     options?: { voice?: 'main' | 'system'; attention?: boolean; interactionId?: string }
   ): Promise<'ended' | 'cancelled' | 'failed' | 'suppressed'>;
   setCaptureHandler?(handler: (event: ConductorCaptureEvent) => void): void;
+  /** Opens the command microphone; the Maestro button uses it. */
+  startListening?(mode: 'hold' | 'toggle', intent: 'command'): Promise<void>;
   /** Asked on a tap of the talk key: true when a spoken answer is wanted now. */
   setTapGate?(gate: () => boolean): void;
   setMuted(muted: boolean): void;
@@ -435,6 +446,8 @@ const REPORT_STANDS_MS = 2 * 60_000;
 const REQUEST_LOG_CHARS = 1_000;
 /** How long a clarifying question ("Maple or Maple 2?") waits for its answer. */
 const CLARIFY_TTL_MS = 60_000;
+/** Captures whose addressee is remembered at once; more than a few are never open. */
+const CAPTURE_FRONTS_KEPT = 8;
 /** Previous reports kept per agent, so the completion gate can tell a repeat from news. */
 const PREVIOUS_REPORTS = 50;
 const DIDNT_CATCH = "I didn't catch that.";
@@ -645,6 +658,17 @@ export class ConductorStore {
   private readonly ledger = new ActivityLedger();
   /** Jev's pick of each finished agent's own words, for a follow-up the model could not word. */
   private readonly completionFallbacks = new Map<string, string>();
+  /** The chat conductors: the one in front takes the developer's words instead of Maestro. */
+  private chats: FrontConductorSource | null = null;
+  /** Set only while the Maestro button opens the microphone: that capture is Maestro's. */
+  private toMaestroNext = false;
+  /**
+   * Whom each open capture is for, fixed when it began: the chat conductor in front then, or
+   * null for Maestro. Taken by its transcript, or dropped when it ends without one.
+   */
+  private readonly captureFront = new Map<string, FrontConductor | null>();
+  /** The chat conductor the capture in progress goes to, for the HUD; null when Maestro. */
+  listeningFor: FrontConductor | null = null;
 
   constructor(
     private readonly canvas: CanvasStore,
@@ -795,6 +819,9 @@ export class ConductorStore {
       | 'clarification'
       | 'previousReports'
       | 'ledger'
+      | 'chats'
+      | 'toMaestroNext'
+      | 'captureFront'
     >(this, {
       plans: false,
       requests: false,
@@ -867,6 +894,10 @@ export class ConductorStore {
       clarification: false,
       previousReports: false,
       ledger: false,
+      chats: false,
+      toMaestroNext: false,
+      captureFront: false,
+      listeningFor: observable.ref,
     });
     // Every delivery's holds and submits, traced under the send that started it.
     this.disposers.push(
@@ -892,9 +923,7 @@ export class ConductorStore {
   activate(): void {
     this.voice.setTraceHandler((event) => this.writeTrace(event));
     this.voice.setTranscriptHandler((text, intent, interactionId) =>
-      intent === 'dictation'
-        ? this.dictate(text, interactionId)
-        : this.handleUtterance(text, 'voice', interactionId)
+      this.hearTranscript(text, intent, interactionId)
     );
     this.voice.setVocabularyProvider(() => this.vocabulary());
     this.voice.setCaptureHandler?.((event) => this.onCapture(event));
@@ -1049,6 +1078,123 @@ export class ConductorStore {
   }
 
   // ── Entry points ───────────────────────────────────────────────────────────
+
+  /** Connects the chat conductors, whose view in front takes the developer's words. */
+  setChatConductors(chats: FrontConductorSource | null): void {
+    this.chats = chats;
+  }
+
+  /**
+   * Every transcript from the microphone. With a chat conductor's view in front when the capture
+   * began, the words go to it (see `chatFor`); otherwise a command goes to Maestro and dictation
+   * types into the agent in front, as always.
+   */
+  hearTranscript(
+    text: string,
+    intent: 'command' | 'dictation',
+    interactionId: string
+  ): Promise<void> | void {
+    const kind = intent === 'dictation' ? 'dictation' : 'voice';
+    const chat = this.chatFor(text, kind, interactionId);
+    if (chat) return this.toChat(chat, text, kind, interactionId);
+    return intent === 'dictation'
+      ? this.dictate(text, interactionId)
+      : this.handleUtterance(text, 'voice', interactionId);
+  }
+
+  /** The typed box: the chat conductor in front takes the words, unless they answer Maestro. */
+  submitTyped(text: string): Promise<void> | void {
+    const chat = this.chatFor(text, 'typed', null);
+    if (chat) return this.toChat(chat, text, 'typed', null);
+    return this.handleUtterance(text, 'typed');
+  }
+
+  /** The Maestro button: a spoken command for Maestro, whichever chat conductor is in front. */
+  listenToMaestro(mode: 'hold' | 'toggle'): Promise<void> {
+    // The capture's start is reported before `startListening` first waits, so the flag is read
+    // by this capture and no other.
+    this.toMaestroNext = true;
+    try {
+      return this.voice.startListening?.(mode, 'command') ?? Promise.resolve();
+    } finally {
+      this.toMaestroNext = false;
+    }
+  }
+
+  /**
+   * The one decision of whether the developer's words leave Maestro: the chat conductor they go
+   * to, or null for Maestro's own paths, unchanged. Maestro keeps them when no chat conductor was
+   * in front (for speech: when its capture began; the Maestro button, hands-free speech and the
+   * voice line are Maestro's), when they answer a call picked up for them, or when they answer
+   * what Maestro has open right now (`answersMaestro`). Dictation answers nothing but a call.
+   */
+  private chatFor(
+    text: string,
+    kind: 'voice' | 'dictation' | 'typed',
+    interactionId: string | null
+  ): FrontConductor | null {
+    let front: FrontConductor | null;
+    if (interactionId !== null && this.captureFront.has(interactionId)) {
+      front = this.captureFront.get(interactionId) ?? null;
+      this.captureFront.delete(interactionId);
+      if (this.listeningFor === front) this.listeningFor = null;
+    } else {
+      front = this.chats?.front ?? null;
+    }
+    if (!front || !text.trim()) return null;
+    const pickup = this.pickup;
+    const answersCall =
+      pickup !== null &&
+      (pickup.interactionId === null ? kind === 'typed' : pickup.interactionId === interactionId);
+    if (answersCall) return null;
+    if (kind === 'dictation') return front;
+    const floor = {
+      pending: this.pending !== null,
+      busy: this.busy,
+      clarifying: this.clarifyingNow(),
+    };
+    return answersMaestro(text, floor) ? null : front;
+  }
+
+  /**
+   * Words for a chat conductor: a developer message in its thread, or dictation added to its
+   * composer. Maestro neither answers nor speaks; for a capture, what it held for the developer's
+   * words (a confirmation's clock, calls, agent requests) carries on as after any capture.
+   */
+  private toChat(
+    chat: FrontConductor,
+    text: string,
+    kind: 'voice' | 'dictation' | 'typed',
+    interactionId: string | null
+  ): void {
+    const id = interactionId ?? crypto.randomUUID();
+    this.trace('route', text, { route: 'chat-conductor', kind, agent: chat.name }, id);
+    if (interactionId !== null) this.captureOver(interactionId);
+    const session = chat.session;
+    if (kind === 'dictation') {
+      session.setDraft(joinDraft(session.draft, text));
+      return;
+    }
+    // "Send it" after dictating sends what the composer holds, as it submits a terminal's input.
+    if (isSubmitPhrase(text) && session.draft.trim()) {
+      session.send(session.draft);
+      session.setDraft('');
+      return;
+    }
+    // A bare stop ends the chat conductor's running turn; it would only arrive after it otherwise.
+    // (Maestro took the stop if it had anything to stop: see `chatFor`.)
+    if (session.busy && isPureStop(text)) {
+      session.stop();
+      return;
+    }
+    session.send(text);
+  }
+
+  /** A clarifying question Maestro asked is still open: the next words may answer it. */
+  private clarifyingNow(): boolean {
+    const clarification = this.clarification;
+    return clarification !== null && Date.now() - clarification.at <= CLARIFY_TTL_MS;
+  }
 
   /** Voice dictation: types the text into the focused agent without pressing Enter. */
   async dictate(text: string, interactionId: string = crypto.randomUUID()): Promise<void> {
@@ -1757,6 +1903,7 @@ export class ConductorStore {
   /** The developer opened the microphone, or closed it with nothing to hand on. */
   private onCapture(event: ConductorCaptureEvent): void {
     if (event.type === 'start') {
+      this.noteCaptureFront(event);
       const now = Date.now();
       this.captureStarts.set(event.interactionId, now);
       // A capture whose transcript never came is not kept forever.
@@ -1783,12 +1930,49 @@ export class ConductorStore {
       }
       return;
     }
-    this.captureStarts.delete(event.interactionId);
+    this.forgetCaptureFront(event.interactionId);
+    this.captureOver(event.interactionId);
+  }
+
+  /**
+   * A capture is over for Maestro: it came to nothing, or its words went to a chat conductor.
+   * What waited for the developer's words carries on.
+   */
+  private captureOver(interactionId: string): void {
+    this.captureStarts.delete(interactionId);
     this.resumePending();
-    this.dropPickup(event.interactionId);
+    this.dropPickup(interactionId);
     // A capture that came to nothing held agent requests back; nothing else would release them.
     if (!this.busy) void this.requests.drain().then(() => this.calls.pump());
     else this.calls.pump();
+  }
+
+  /**
+   * Whom a capture is for, from what was in front as it began. The Maestro button, hands-free
+   * speech (it is addressed by Maestro's wake phrase) and commands while the voice line is open
+   * (a live conversation with Maestro) are Maestro's whatever is in front. Dictation is nobody's
+   * conversation: it follows what is in front.
+   */
+  private noteCaptureFront(event: Extract<ConductorCaptureEvent, { type: 'start' }>): void {
+    const { interactionId, origin } = event;
+    const command = event.intent !== 'dictation';
+    const maestro =
+      this.toMaestroNext || origin === 'hands-free' || (command && this.talkLine !== null);
+    const front = maestro ? null : (this.chats?.front ?? null);
+    this.captureFront.set(interactionId, front);
+    this.listeningFor = front;
+    // A capture the voice line took ends without a transcript or an end here.
+    while (this.captureFront.size > CAPTURE_FRONTS_KEPT) {
+      const oldest = this.captureFront.keys().next().value;
+      if (oldest === undefined) break;
+      this.captureFront.delete(oldest);
+    }
+  }
+
+  private forgetCaptureFront(interactionId: string): void {
+    const front = this.captureFront.get(interactionId);
+    this.captureFront.delete(interactionId);
+    if (front !== undefined && this.listeningFor === front) this.listeningFor = null;
   }
 
   /**

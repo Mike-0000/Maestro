@@ -33,6 +33,18 @@ export interface DeveloperTyping {
   unsentText: boolean;
 }
 
+/**
+ * A prompt the developer submitted with their own Enter. `text` is what the keys typed, or null
+ * when they cannot tell (recalled from history, completed, or dictated words).
+ */
+export interface DeveloperSubmission {
+  readonly at: number;
+  readonly text: string | null;
+}
+
+/** Submissions kept per conversation; older ones are dropped. */
+const SUBMISSIONS_KEPT = 20;
+
 /** Fewer typed characters than this are a keypress answer ("1", "y"), not a draft. */
 const DRAFT_MIN_CHARS = 2;
 /** Two Escapes this close together clear the input in Claude Code. */
@@ -53,6 +65,8 @@ interface TypingState {
   /** Inside a bracketed paste, where Enter is a newline, not a submit. */
   inPaste: boolean;
   lastEscapeAt: number | null;
+  /** What the developer's own Enters submitted, oldest first. */
+  submissions: DeveloperSubmission[];
 }
 
 const records = new Map<string, TypingState>();
@@ -224,6 +238,7 @@ function recordFor(conversationId: string): TypingState {
       unsentMessage: false,
       inPaste: false,
       lastEscapeAt: null,
+      submissions: [],
     };
     records.set(conversationId, record);
   }
@@ -245,6 +260,18 @@ function lostTrack(record: TypingState): void {
   record.unsentMessage = false;
 }
 
+/** An Enter of the developer's sent what the input held: their prompt, when there was one. */
+function noteSubmission(record: TypingState, now: number): void {
+  const draft = record.draft;
+  // An empty input (Enter on a menu, or a bare Enter) submits no prompt of theirs; dictated
+  // words with nothing typed are theirs, but the keys never saw them.
+  if (draft !== null && !draft.trim() && !record.dictated) return;
+  // A pasted line break arrives as a carriage return.
+  const text = draft !== null && draft.trim() ? draft.replace(/\r\n?/g, '\n').trim() : null;
+  record.submissions.push({ at: now, text });
+  if (record.submissions.length > SUBMISSIONS_KEPT) record.submissions.shift();
+}
+
 function applyKey(record: TypingState, key: Key, now: number): void {
   switch (key.kind) {
     case 'insert':
@@ -264,6 +291,7 @@ function applyKey(record: TypingState, key: Key, now: number): void {
       break;
     case 'submit':
       record.lastSubmitAt = now;
+      noteSubmission(record, now);
       emptied(record);
       break;
     case 'clear':
@@ -371,6 +399,20 @@ export function lastDeveloperKeystroke(conversationId: string): number | null {
 export function developerTypedSince(conversationId: string, since: number): boolean {
   const at = lastDeveloperKeystroke(conversationId);
   return at !== null && at > since;
+}
+
+/**
+ * The prompts the developer submitted in this conversation's terminal with their own keys after
+ * `since`, oldest first. Only this window's keys are seen: input from before the app started, or
+ * from another computer, is not here.
+ */
+export function developerSubmissionsSince(
+  conversationId: string,
+  since: number
+): DeveloperSubmission[] {
+  return (records.get(conversationId)?.submissions ?? []).filter(
+    (submission) => submission.at > since
+  );
 }
 
 /** Forgets a conversation's record (its session ended, so its input is gone). */

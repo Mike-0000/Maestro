@@ -1,6 +1,6 @@
 import { noopLogger, type Logger } from '@emdash/shared/logger';
 import { peek } from '@emdash/wire/state';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createTuiAgentStatesLiveModel,
   createTuiAgentStatesListModel,
@@ -9,7 +9,7 @@ import {
   produceCell,
 } from '#runtimes/tui-agents/node/state/live-models';
 import type { BackgroundWork } from '#services/agent-plugins/api/plugins';
-import { TuiAgentStates } from './agent-state';
+import { SUB_AGENT_PUBLISH_DELAY_MS, TuiAgentStates } from './agent-state';
 
 function createTracker(logger?: Logger, now: () => number = () => 1_000) {
   const sessionsLiveModel = createTuiSessionsLiveModel();
@@ -438,6 +438,193 @@ describe('TuiAgentStates', () => {
       // A fresh session reusing the id must not inherit the old acknowledgement.
       tracker.applyCanonicalEvent('conv-1', 'claude', stop([shell('dev-server')]));
       expect(peek(agentStates.states.list)['conv-1']?.status).toBe('working');
+    });
+  });
+
+  describe('sub-agents', () => {
+    const hooked = {
+      hooks: { kind: 'config', scope: 'global', supportedEvents: ['start'] },
+    } as never;
+    const start = { kind: 'status', type: 'start' } as const;
+    const subStart = (agentId: string, agentType?: string) =>
+      ({
+        kind: 'subagent',
+        type: 'start',
+        subAgent: agentType ? { agentId, agentType } : { agentId },
+      }) as const;
+    const subStop = (agentId: string, running?: { agentId: string; description?: string }[]) =>
+      ({ kind: 'subagent', type: 'stop', subAgent: { agentId }, running }) as const;
+
+    function setup() {
+      vi.useFakeTimers();
+      let time = 1_000;
+      const created = createTracker(undefined, () => time);
+      const state = () => peek(created.agentStates.states.list)['conv-1'];
+      const labels = () => state()?.subAgents?.map((agent) => agent.label);
+      const flush = () => vi.advanceTimersByTime(SUB_AGENT_PUBLISH_DELAY_MS);
+      return { ...created, state, labels, flush, advance: (ms: number) => (time += ms) };
+    }
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('lists a foreground sub-agent while it runs within a turn, without touching the status', () => {
+      const { tracker, state, labels, flush, onAgentStateChanged } = setup();
+      tracker.applyCanonicalEvent('conv-1', 'claude', start);
+      const working = state();
+      onAgentStateChanged.mockClear();
+
+      tracker.applyCanonicalEvent('conv-1', 'claude', subStart('a1', 'Explore'));
+      flush();
+      expect(labels()).toEqual(['Explore']);
+      expect(state()).toMatchObject({ status: 'working', updatedAt: working?.updatedAt });
+
+      tracker.applyCanonicalEvent('conv-1', 'claude', subStop('a1'));
+      flush();
+      expect(state()?.subAgents).toBeUndefined();
+      expect(state()).toEqual(working);
+      // Sub-agent changes are the same turn going on: nothing is saved for them.
+      expect(onAgentStateChanged).not.toHaveBeenCalled();
+    });
+
+    it('publishes a burst of starts as one update', () => {
+      const { tracker, agentStates, labels, flush } = setup();
+      tracker.applyCanonicalEvent('conv-1', 'claude', start);
+      const writes = vi.spyOn(agentStates.states.list, 'set');
+
+      for (const id of ['a1', 'a2', 'a3', 'a4']) {
+        tracker.applyCanonicalEvent('conv-1', 'claude', subStart(id, 'Explore'));
+      }
+      expect(labels()).toBeUndefined();
+      flush();
+
+      expect(labels()).toEqual(['Explore', 'Explore', 'Explore', 'Explore']);
+      expect(writes).toHaveBeenCalledTimes(1);
+    });
+
+    it('carries the latest sub-agents at once on a status change', () => {
+      const { tracker, state } = setup();
+      tracker.applyCanonicalEvent('conv-1', 'claude', start);
+      tracker.applyCanonicalEvent('conv-1', 'claude', subStart('a1', 'Explore'));
+      tracker.applyCanonicalEvent('conv-1', 'claude', {
+        kind: 'status',
+        type: 'notification',
+        notificationType: 'permission_prompt',
+      });
+
+      expect(state()).toMatchObject({
+        status: 'awaiting-input',
+        subAgents: [{ id: 'a1', label: 'Explore' }],
+      });
+    });
+
+    it('keeps the background sub-agents at the end of a turn, labelled by their task', () => {
+      const { tracker, state } = setup();
+      tracker.applyCanonicalEvent('conv-1', 'claude', start);
+      tracker.applyCanonicalEvent('conv-1', 'claude', subStart('fg', 'Explore'));
+      tracker.applyCanonicalEvent('conv-1', 'claude', subStart('bg', 'general-purpose'));
+      tracker.applyCanonicalEvent('conv-1', 'claude', {
+        kind: 'status',
+        type: 'stop',
+        backgroundWork: [{ id: 'task:bg', kind: 'agent' }],
+        subAgents: [{ agentId: 'bg', agentType: 'general-purpose', description: 'Run the tests' }],
+      });
+
+      expect(state()).toMatchObject({ status: 'working', backgroundAgents: 1 });
+      expect(state()?.subAgents).toEqual([
+        { id: 'bg', label: 'Run the tests', agentType: 'general-purpose', startedAt: 1_000 },
+      ]);
+    });
+
+    it('clears foreground sub-agents when a turn ends without reporting them', () => {
+      const { tracker, state } = setup();
+      tracker.applyCanonicalEvent('conv-1', 'claude', start);
+      tracker.applyCanonicalEvent('conv-1', 'claude', subStart('a1', 'Explore'));
+      tracker.applyCanonicalEvent('conv-1', 'claude', { kind: 'status', type: 'stop' });
+
+      expect(state()?.status).toBe('completed');
+      expect(state()?.subAgents).toBeUndefined();
+    });
+
+    it('drops foreground sub-agents when the turn is interrupted, and keeps background ones', () => {
+      const { tracker, labels, flush } = setup();
+      tracker.applyCanonicalEvent('conv-1', 'claude', start);
+      tracker.applyCanonicalEvent('conv-1', 'claude', subStart('bg', 'general-purpose'));
+      tracker.applyCanonicalEvent('conv-1', 'claude', subStart('fg', 'Explore'));
+      tracker.applyCanonicalEvent('conv-1', 'claude', subStart('done', 'Plan'));
+      tracker.applyCanonicalEvent(
+        'conv-1',
+        'claude',
+        subStop('done', [{ agentId: 'bg', description: 'Watch the build' }])
+      );
+      flush();
+      expect(labels()).toEqual(['Watch the build', 'Explore']);
+
+      tracker.markInputSubmitted('conv-1', hooked, '\x1b');
+      flush();
+      expect(labels()).toEqual(['Watch the build']);
+    });
+
+    it('treats Ctrl+C as an interrupt but not ordinary keys or escape sequences', () => {
+      const { tracker, labels, flush } = setup();
+      tracker.applyCanonicalEvent('conv-1', 'claude', subStart('a1', 'Explore'));
+      flush();
+
+      tracker.markInputSubmitted('conv-1', hooked, '\x1b[A');
+      tracker.markInputSubmitted('conv-1', hooked, 'q');
+      flush();
+      expect(labels()).toEqual(['Explore']);
+
+      tracker.markInputSubmitted('conv-1', hooked, '\x03');
+      flush();
+      expect(labels()).toBeUndefined();
+    });
+
+    it('drops the foreground sub-agents of a turn that ends in an error', () => {
+      const { tracker, state } = setup();
+      tracker.applyCanonicalEvent('conv-1', 'claude', start);
+      tracker.applyCanonicalEvent('conv-1', 'claude', subStart('a1', 'Explore'));
+      tracker.applyCanonicalEvent('conv-1', 'claude', { kind: 'status', type: 'error' });
+
+      expect(state()).toMatchObject({ status: 'error' });
+      expect(state()?.subAgents).toBeUndefined();
+    });
+
+    it('forgets every sub-agent when the session ends or is cleared', () => {
+      const { tracker, state, flush } = setup();
+      tracker.applyCanonicalEvent('conv-1', 'claude', start);
+      tracker.applyCanonicalEvent('conv-1', 'claude', subStart('a1', 'Explore'));
+      tracker.resetToIdle('conv-1');
+      flush();
+      expect(state()).toMatchObject({ status: 'idle' });
+      expect(state()?.subAgents).toBeUndefined();
+
+      tracker.applyCanonicalEvent('conv-1', 'claude', subStart('a2', 'Explore'));
+      tracker.clear('conv-1');
+      flush();
+      expect(state()).toBeUndefined();
+    });
+
+    it('does not restore sub-agents saved before a restart', () => {
+      const { tracker, state } = setup();
+      tracker.restore({
+        conversationId: 'conv-1',
+        status: 'working',
+        subAgents: [{ id: 'a1', label: 'Explore', startedAt: 1 }],
+        updatedAt: 1,
+      });
+      expect(state()).toEqual({ conversationId: 'conv-1', status: 'working', updatedAt: 1 });
+    });
+
+    it('reads a sub-agent heard before any prompt as the agent working', () => {
+      const { tracker, state, flush } = setup();
+      tracker.applyCanonicalEvent('conv-1', 'claude', subStart('a1', 'Explore'));
+      flush();
+      expect(state()).toMatchObject({
+        status: 'working',
+        subAgents: [{ id: 'a1', label: 'Explore' }],
+      });
     });
   });
 

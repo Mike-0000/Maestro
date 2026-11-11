@@ -1,6 +1,6 @@
 import { Badge, ToggleGroup, type BadgeTone } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
-import { useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, type ReactNode } from 'react';
 import { useIsActiveTask } from '@core/features/tasks/api/browser/hooks/use-is-active-task';
 import { useTaskComposition } from '@core/features/workbench/api/browser/task-composition-context';
 import { cn } from '@core/primitives/styling/browser/cn';
@@ -75,7 +75,8 @@ export const ChatConductorLayer = observer(function ChatConductorLayer({
   taskId,
   children,
 }: ChatConductorLayerProps) {
-  const { pane } = usePaneContext();
+  const { pane, isFocusedPane } = usePaneContext();
+  const screenId = useId();
   const taskView = useTaskComposition();
   const isActiveTask = useIsActiveTask(taskId);
   const manager = getChatConductorManager();
@@ -105,6 +106,15 @@ export const ChatConductorLayer = observer(function ChatConductorLayer({
   useEffect(() => {
     if (chosen === 'conductor' && conversationId) manager.session(conversationId);
   }, [chosen, conversationId, manager]);
+
+  // The thread on screen is what the HUD's typed box, voice commands and dictation address.
+  useEffect(() => {
+    manager.showOnScreen(
+      screenId,
+      onScreen && conversationId ? { conversationId, focusedPane: isFocusedPane } : null
+    );
+  }, [manager, screenId, onScreen, conversationId, isFocusedPane]);
+  useEffect(() => () => manager.showOnScreen(screenId, null), [manager, screenId]);
 
   // It starts following the chat the first time the developer actually sees the thread.
   useEffect(() => {
@@ -163,6 +173,7 @@ export const ChatConductorLayer = observer(function ChatConductorLayer({
               autoFocus={onScreen && taskView.focusedRegion === 'main'}
               onFocus={() => {
                 if (isActiveTask) taskView.setFocusedRegion('main');
+                manager.touchScreen(screenId);
               }}
             />
           </div>
