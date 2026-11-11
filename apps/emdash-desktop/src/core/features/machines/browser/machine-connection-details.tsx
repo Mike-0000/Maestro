@@ -1,9 +1,13 @@
+import { FactGrid } from '@emdash/ui/react/patterns';
 import { Button, Tooltip } from '@emdash/ui/react/primitives';
-import { card } from '@emdash/ui/styles/recipes/card';
-import { CheckCircle2, Copy } from 'lucide-react';
+import { CheckIcon, CopyIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { SshConfigHost } from '@core/primitives/ssh/api';
 
+/**
+ * What OpenSSH resolved for the chosen host, read-only: a label / value list in one quiet well
+ * (a step up from the dialog surface) so it reads apart from the fields you can edit.
+ */
 export function MachineConnectionDetails({
   host,
   target,
@@ -12,20 +16,17 @@ export function MachineConnectionDetails({
   target: string;
 }) {
   return (
-    <div className={card({ padding: 'md', radius: 'lg' })}>
-      <dl className="grid gap-2 text-sm">
-        <div className="grid grid-cols-[9rem_minmax(0,1fr)] gap-3">
-          <dt className="text-foreground-muted">Host</dt>
-          <dd className="break-all">{host?.hostname || target}</dd>
-        </div>
-        <div className="grid grid-cols-[9rem_minmax(0,1fr)] gap-3">
-          <dt className="text-foreground-muted">Port</dt>
-          <dd>{host?.port ?? 22}</dd>
-        </div>
-        <div className="grid grid-cols-[9rem_minmax(0,1fr)] gap-3">
-          <dt className="text-foreground-muted">Username</dt>
-          <dd className="break-all">{host?.user || 'Not specified'}</dd>
-        </div>
+    <div className="rounded-lg bg-surface-emphasis px-4 py-3">
+      <FactGrid labelWidth="9rem" stackBelow="narrow">
+        <FactGrid.Row label="Host">
+          <span className="break-all">{host?.hostname || target}</span>
+        </FactGrid.Row>
+        <FactGrid.Row label="Port">
+          <span className="tabular-nums">{host?.port ?? 22}</span>
+        </FactGrid.Row>
+        <FactGrid.Row label="Username">
+          <span className="break-all">{host?.user || 'Not specified'}</span>
+        </FactGrid.Row>
         <CopyableConnectionDetail
           key={`jump-${host?.proxyJump}`}
           label="Jump host"
@@ -39,11 +40,8 @@ export function MachineConnectionDetails({
             copyOnValueClick
           />
         )}
-        <div className="grid grid-cols-[9rem_minmax(0,1fr)] gap-3">
-          <dt className="text-foreground-muted">Forward SSH agent</dt>
-          <dd>{host?.forwardAgent ? 'On' : 'Off'}</dd>
-        </div>
-      </dl>
+        <FactGrid.Row label="Forward SSH agent">{host?.forwardAgent ? 'On' : 'Off'}</FactGrid.Row>
+      </FactGrid>
     </div>
   );
 }
@@ -72,10 +70,10 @@ function CopyableConnectionDetail({
     const timeout = setTimeout(() => setCopyState('idle'), 2000);
     return () => clearTimeout(timeout);
   }, [copyState]);
+  const CopyGlyph = copyState === 'copied' ? CheckIcon : CopyIcon;
   return (
-    <div className="group grid min-w-0 grid-cols-[9rem_minmax(0,1fr)] items-center gap-3">
-      <dt className="text-foreground-muted">{label}</dt>
-      <dd className="min-w-0">
+    <FactGrid.Row label={label}>
+      <div className="group min-w-0">
         {value ? (
           <div className="flex min-w-0 items-center gap-1">
             {copyOnValueClick ? (
@@ -83,13 +81,13 @@ function CopyableConnectionDetail({
                 type="button"
                 variant="ghost"
                 size="xs"
-                className="group/copy relative min-w-0 flex-1 justify-start px-0 text-sm font-normal"
+                className="group/copy relative h-auto min-w-0 flex-1 justify-start px-0 py-0 text-sm font-normal text-foreground hover:bg-transparent"
                 style={{ cursor: 'pointer', userSelect: 'none' }}
                 aria-label={`Copy ${label.toLowerCase()}`}
                 onClick={copyValue}
               >
                 <span
-                  className="pointer-events-none block truncate transition-opacity group-hover/copy:opacity-30 group-focus-visible/copy:opacity-30"
+                  className="pointer-events-none block truncate font-mono text-xs transition-opacity group-hover/copy:opacity-30 group-focus-visible/copy:opacity-30"
                   style={{ userSelect: 'none' }}
                 >
                   {value}
@@ -98,18 +96,21 @@ function CopyableConnectionDetail({
                   aria-hidden="true"
                   className={`pointer-events-none absolute inset-0 flex items-center justify-center transition-opacity group-hover/copy:opacity-100 group-focus-visible/copy:opacity-100 [@media(hover:none)]:opacity-100 ${copyState === 'copied' ? 'opacity-100' : 'opacity-0'}`}
                 >
-                  <span className="bg-surface rounded p-1">
-                    {copyState === 'copied' ? (
-                      <CheckCircle2 className="size-3" />
-                    ) : (
-                      <Copy className="size-3" />
-                    )}
+                  <span className="rounded-sm bg-surface-emphasis p-1 text-foreground-muted">
+                    <CopyGlyph className="size-3" />
                   </span>
                 </span>
               </Button>
             ) : (
               <Tooltip.Root>
-                <Tooltip.Trigger render={<span tabIndex={0} className="min-w-0 flex-1 truncate" />}>
+                <Tooltip.Trigger
+                  render={
+                    <span
+                      tabIndex={0}
+                      className="min-w-0 flex-1 truncate rounded-xs focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                    />
+                  }
+                >
                   {value}
                 </Tooltip.Trigger>
                 <Tooltip.Content>
@@ -132,11 +133,7 @@ function CopyableConnectionDetail({
                     />
                   }
                 >
-                  {copyState === 'copied' ? (
-                    <CheckCircle2 className="size-3" />
-                  ) : (
-                    <Copy className="size-3" />
-                  )}
+                  <CopyGlyph className="size-3" />
                 </Tooltip.Trigger>
                 <Tooltip.Content>
                   {copyState === 'copied' ? 'Copied' : `Copy ${label.toLowerCase()}`}
@@ -145,7 +142,7 @@ function CopyableConnectionDetail({
             )}
           </div>
         ) : (
-          'None'
+          <span className="text-foreground-muted">None</span>
         )}
         <div
           role="status"
@@ -157,7 +154,7 @@ function CopyableConnectionDetail({
               ? `${label} copied to clipboard.`
               : null}
         </div>
-      </dd>
-    </div>
+      </div>
+    </FactGrid.Row>
   );
 }

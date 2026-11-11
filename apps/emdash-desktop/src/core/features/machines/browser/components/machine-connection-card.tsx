@@ -46,7 +46,7 @@ export function MachineConnectionRow({
     <SettingsRow
       label={
         <span className="flex items-center gap-2">
-          {local || wsl ? 'Connection' : maestro ? 'Maestro host' : 'SSH Connection'}
+          {local || wsl ? 'Connection' : maestro ? 'Maestro host' : 'SSH connection'}
           <MachineBadge state={state} />
         </span>
       }
@@ -64,33 +64,39 @@ export function MachineConnectionRow({
                   : `${machine.host} · ${machine.username} · ${authLabel(machine)}`}
           </span>
           {maestro && availability?.kind === 'unavailable' && availability.issue ? (
-            <span className="basis-full text-foreground-destructive">
-              {availability.issue.message}
-            </span>
+            <span className="basis-full text-foreground-error">{availability.issue.message}</span>
           ) : null}
         </span>
       }
       control={
         <span className="flex items-center gap-2">
           {unpaired && onPairAgain ? (
-            <Button type="button" variant="primary" size="xs" onClick={onPairAgain}>
+            <Button type="button" variant="primary" size="sm" onClick={onPairAgain}>
               <KeyRoundIcon />
               Pair again
             </Button>
           ) : availability && !ready && !preparing ? (
-            <Button type="button" variant="primary" size="xs" onClick={retry ? onRetry : onConnect}>
+            <Button type="button" variant="primary" size="sm" onClick={retry ? onRetry : onConnect}>
               <PlugIcon />
               {retry ? 'Retry' : 'Connect'}
             </Button>
           ) : null}
           {transportActive || preparing ? (
-            <Button type="button" variant="destructive" size="xs" onClick={onDisconnect}>
+            <Button type="button" variant="ghost" size="sm" onClick={onDisconnect}>
               Disconnect
             </Button>
           ) : null}
           {local ? null : (
-            <Button type="button" variant="secondary" size="xs" icon onClick={onEdit}>
-              <Cog />
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              icon
+              aria-label="Edit connection settings"
+              title="Edit connection settings"
+              onClick={onEdit}
+            >
+              <Cog aria-hidden />
             </Button>
           )}
         </span>

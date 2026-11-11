@@ -37,7 +37,7 @@ const WORKSPACE_COLUMNS: CollectionViewColumn<WorkspacesListItem>[] = [
     width: '10rem',
     cell: (item) => (
       <CollectionViewCell
-        primary={formatCount(item.worktreeCount, 'Worktree')}
+        primary={formatCount(item.worktreeCount, 'worktree')}
         secondary={formatCount(item.linkedTaskCount, 'linked task')}
       />
     ),
@@ -48,7 +48,7 @@ const WORKSPACE_COLUMNS: CollectionViewColumn<WorkspacesListItem>[] = [
     cell: (item) => (
       <CollectionViewCell
         primary={item.lastActivityAt ? <RelativeTime value={item.lastActivityAt} /> : 'Never'}
-        secondary={formatCount(item.activeTaskCount, 'Task active', 'Tasks active')}
+        secondary={formatCount(item.activeTaskCount, 'task active', 'tasks active')}
       />
     ),
   },
@@ -113,8 +113,9 @@ export const WorkspacesListView = observer(function WorkspacesListView({
         errorSlot={
           <EmptyState
             bare
-            label="Could not load workspaces."
-            description={errorMessage(workspaceQuery.error)}
+            tone="error"
+            label="Could not load workspaces"
+            details={errorMessage(workspaceQuery.error)}
           />
         }
         emptySlot={<WorkspacesEmpty view={view} />}
@@ -140,9 +141,9 @@ const WorkspacesToolbar = observer(function WorkspacesToolbar({
       />
       <CollectionToolbar.Spacer />
       <CollectionToolbar.Group>
-        <Button type="button" variant="primary" onClick={onAddProject}>
+        <Button type="button" variant="primary" size="sm" onClick={onAddProject}>
           <PlusIcon />
-          Add Project
+          Add project
         </Button>
       </CollectionToolbar.Group>
     </CollectionToolbar.Root>
@@ -159,7 +160,7 @@ const WorkspacesEmpty = observer(function WorkspacesEmpty({
     <EmptyState
       bare
       label={
-        search.query.trim().length > 0 ? 'No workspaces match your search.' : 'No workspaces found.'
+        search.query.trim().length > 0 ? 'No workspaces match your search' : 'No workspaces yet'
       }
     />
   );

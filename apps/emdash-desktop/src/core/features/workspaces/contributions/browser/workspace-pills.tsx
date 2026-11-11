@@ -1,4 +1,5 @@
-import { Tooltip } from '@emdash/ui/react/primitives';
+import { Badge, Tooltip, type BadgeTone } from '@emdash/ui/react/primitives';
+import type { ReactNode } from 'react';
 import { cn } from '@core/primitives/styling/browser/cn';
 import {
   workspaceRemovalNeedsAttention,
@@ -7,18 +8,56 @@ import {
 } from '@core/primitives/workspaces/api';
 import { workspaceRowLabel } from './workspace-row-label';
 
-type PillTone = 'warning' | 'destructive';
+/**
+ * Workspace state chips are the kit's quiet `Badge`: caption-role words in sentence case on one
+ * neutral step. Only a failure (error) or something to look at (warning) colours the words; a
+ * removal still on its way reads muted.
+ */
+type ChipTone = Extract<BadgeTone, 'neutral' | 'warning' | 'error'>;
 
-const PILL_BASE = 'shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] tracking-wide uppercase';
+function Chip({
+  tone,
+  className,
+  children,
+}: {
+  tone: ChipTone;
+  className?: string;
+  children: ReactNode;
+}) {
+  // The wrapper lets a chip give way to the name beside it in a narrow row (the kit Badge itself
+  // never shrinks), down to a few letters; the words then truncate inside it.
+  return (
+    <span className="inline-flex max-w-full min-w-10 shrink-4">
+      <Badge tone={tone} className={cn('max-w-full', className)}>
+        <span className="min-w-0 truncate">{children}</span>
+      </Badge>
+    </span>
+  );
+}
 
-function pillClass(tone: PillTone, options: { pulse?: boolean; className?: string } = {}): string {
-  return cn(
-    PILL_BASE,
-    tone === 'warning'
-      ? 'border-border-warning text-foreground-warning'
-      : 'border-border-destructive text-foreground-destructive',
-    options.pulse && 'animate-pulse',
-    options.className
+/** A chip whose detail sits in a tooltip; the trigger is a focusable button so keyboards reach it. */
+export function ChipWithDetail({
+  tone,
+  className,
+  label,
+  detail,
+  detailClassName = 'max-w-80',
+}: {
+  tone: ChipTone;
+  className?: string;
+  label: ReactNode;
+  detail: ReactNode;
+  detailClassName?: string;
+}) {
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger className="inline-flex max-w-full min-w-10 shrink-4 rounded-full focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
+        <Chip tone={tone} className={className}>
+          {label}
+        </Chip>
+      </Tooltip.Trigger>
+      <Tooltip.Content className={cn('text-xs', detailClassName)}>{detail}</Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -37,17 +76,20 @@ export function RemovalPill({
   if (!pendingRemoval) return null;
   if (needsAttention) {
     return (
-      <Tooltip.Root>
-        <Tooltip.Trigger>
-          <span className={pillClass('destructive', { className })}>Removal failed</span>
-        </Tooltip.Trigger>
-        <Tooltip.Content className="max-w-70 text-xs">
-          {message ?? 'The removal stopped after a failure that needs your decision.'}
-        </Tooltip.Content>
-      </Tooltip.Root>
+      <ChipWithDetail
+        tone="error"
+        className={className}
+        label="Removal failed"
+        detailClassName="max-w-70"
+        detail={message ?? 'The removal stopped after a failure that needs your decision.'}
+      />
     );
   }
-  return <span className={pillClass('warning', { pulse: true, className })}>Removing…</span>;
+  return (
+    <Chip tone="neutral" className={className}>
+      Removing…
+    </Chip>
+  );
 }
 
 /** Aggregate pending-removal pill for a whole project; renders nothing while clear. */
@@ -66,14 +108,9 @@ export function RemovalSummaryPill({
       ? `${needsAttention} ${needsAttention === 1 ? 'removal needs' : 'removals need'} attention`
       : `${pendingRows.length} ${pendingRows.length === 1 ? 'removal' : 'removals'} pending`;
   return (
-    <span
-      className={pillClass(needsAttention > 0 ? 'destructive' : 'warning', {
-        pulse: needsAttention === 0,
-        className,
-      })}
-    >
+    <Chip tone={needsAttention > 0 ? 'error' : 'neutral'} className={className}>
       {label}
-    </span>
+    </Chip>
   );
 }
 
@@ -97,20 +134,12 @@ export function PathIssueChip({
   className?: string;
 }) {
   return (
-    <Tooltip.Root>
-      <Tooltip.Trigger>
-        <span
-          className={pillClass(issue.kind === 'prunable' ? 'warning' : 'destructive', {
-            className,
-          })}
-        >
-          {issue.kind === 'prunable' ? 'Stale git record' : 'Missing'}
-        </span>
-      </Tooltip.Trigger>
-      <Tooltip.Content className="max-w-80 text-xs">
-        {pathIssueMessage(issue, path)}
-      </Tooltip.Content>
-    </Tooltip.Root>
+    <ChipWithDetail
+      tone={issue.kind === 'prunable' ? 'warning' : 'error'}
+      className={className}
+      label={issue.kind === 'prunable' ? 'Stale git record' : 'Missing'}
+      detail={pathIssueMessage(issue, path)}
+    />
   );
 }
 
@@ -126,11 +155,12 @@ export function PathIssueSummaryPill({
   const summary = pathIssueSummary(issueRows);
   if (!summary) return null;
   return (
-    <Tooltip.Root>
-      <Tooltip.Trigger>
-        <span className={pillClass('warning', { className })}>{summary}</span>
-      </Tooltip.Trigger>
-      <Tooltip.Content className="max-w-96 text-xs">
+    <ChipWithDetail
+      tone="warning"
+      className={className}
+      label={summary}
+      detailClassName="max-w-96"
+      detail={
         <div className="flex flex-col gap-1">
           {issueRows.map((row) => (
             <div key={`${row.workspaceId ?? row.path}:${row.path}`} className="min-w-0">
@@ -141,8 +171,8 @@ export function PathIssueSummaryPill({
             </div>
           ))}
         </div>
-      </Tooltip.Content>
-    </Tooltip.Root>
+      }
+    />
   );
 }
 

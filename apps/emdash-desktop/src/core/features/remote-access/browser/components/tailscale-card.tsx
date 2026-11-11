@@ -1,4 +1,3 @@
-import { Pill } from '@emdash/ui/react/components';
 import { SettingsSection } from '@emdash/ui/react/patterns';
 import { Button, Input, Spinner, toast } from '@emdash/ui/react/primitives';
 import { ExternalLinkIcon, RefreshCwIcon } from 'lucide-react';
@@ -50,17 +49,20 @@ export function TailscaleCard({ listenerKey }: { listenerKey: string }) {
       variant="ghost"
       size="sm"
       icon
-      className="text-foreground-muted"
       aria-label="Check Tailscale again"
+      title="Check Tailscale again"
       disabled={busy}
       onClick={refresh}
     >
-      <RefreshCwIcon className={cn(isFetching && 'animate-spin')} />
+      <RefreshCwIcon aria-hidden className={cn(isFetching && 'motion-safe:animate-spin')} />
     </Button>
   );
 
   return (
-    <SettingsSection title="Tailscale">
+    <SettingsSection
+      title="Tailscale"
+      description="A private network between your own devices carries remote access beyond this computer."
+    >
       {tailscale === undefined ? (
         error ? (
           <RemoteAccessRow
@@ -70,10 +72,9 @@ export function TailscaleCard({ listenerKey }: { listenerKey: string }) {
           />
         ) : (
           <RemoteAccessRow
-            title="Tailscale"
-            description={
-              <span className="flex items-center gap-2">
-                <Spinner size="sm" />
+            title={
+              <span role="status" className="inline-flex items-center gap-2">
+                <Spinner size="sm" className="text-foreground-passive" />
                 Checking Tailscale…
               </span>
             }
@@ -122,12 +123,11 @@ function TailscaleState({
           <>
             <Button
               type="button"
-              variant="secondary"
-              size="sm"
+              variant="text"
               onClick={() => void openExternal(TAILSCALE_DOWNLOAD_URL)}
             >
-              <ExternalLinkIcon />
               Get Tailscale
+              <ExternalLinkIcon aria-hidden />
             </Button>
             {refresh}
           </>
@@ -164,7 +164,7 @@ function TailscaleState({
           <>
             <Button
               type="button"
-              variant="primary"
+              variant="secondary"
               size="sm"
               disabled={busy}
               onClick={() => onServe(true)}
@@ -181,14 +181,7 @@ function TailscaleState({
   return (
     <div className="flex flex-col gap-3">
       <RemoteAccessRow
-        title={
-          <>
-            Serving over Tailscale HTTPS
-            <Pill variant="success" dot>
-              Serving
-            </Pill>
-          </>
-        }
+        title="Serving over Tailscale HTTPS"
         description={
           <span className="flex flex-col gap-1">
             <label htmlFor={ADDRESS_INPUT_ID}>
@@ -200,13 +193,7 @@ function TailscaleState({
         }
         actions={
           <>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={busy}
-              onClick={() => onServe(false)}
-            >
+            <Button type="button" variant="text" disabled={busy} onClick={() => onServe(false)}>
               Stop serving
             </Button>
             {refresh}

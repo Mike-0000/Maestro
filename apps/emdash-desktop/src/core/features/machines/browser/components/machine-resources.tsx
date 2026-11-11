@@ -1,40 +1,43 @@
 import type { ResourceUsageSample } from '@emdash/core/runtimes/resource-usage/api';
-import { Box, Field } from '@emdash/ui/react/primitives';
+import { SettingsSection } from '@emdash/ui/react/patterns';
 
+/**
+ * CPU, memory and disk as three figures in one settings card: a muted label, the figure, and a
+ * caption with the amounts. No boxed tiles; the figures and their alignment do the work.
+ */
 export function ResourceUtilizationRow({ metrics }: { metrics: ResourceUsageSample | null }) {
   return (
-    <Field.Root className="flex flex-col gap-3">
-      <Field.Label>Resource Utilization</Field.Label>
-      <div className="mt-1 grid grid-cols-3 gap-2">
-        <ResourceCard
+    <SettingsSection title="Resources">
+      <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-3">
+        <ResourceFigure
           label="CPU"
           value={metrics ? formatPercent(metrics.cpu.usedPercent) : '—'}
-          description="Utilization"
+          description={metrics ? 'In use now' : 'Not measured yet'}
         />
-        <ResourceCard
+        <ResourceFigure
           label="Memory"
           value={metrics ? formatPercent(metrics.memory.usedPercent) : '—'}
           description={
             metrics
-              ? `${formatBytes(metrics.memory.usedBytes)} / ${formatBytes(metrics.memory.totalBytes)}`
-              : 'Unavailable'
+              ? `${formatBytes(metrics.memory.usedBytes)} of ${formatBytes(metrics.memory.totalBytes)}`
+              : 'Not measured yet'
           }
         />
-        <ResourceCard
+        <ResourceFigure
           label="Disk"
           value={metrics ? formatPercent(metrics.disk.usedPercent) : '—'}
           description={
             metrics
-              ? `${formatBytes(metrics.disk.usedBytes)} / ${formatBytes(metrics.disk.totalBytes)}`
-              : 'Unavailable'
+              ? `${formatBytes(metrics.disk.usedBytes)} of ${formatBytes(metrics.disk.totalBytes)}`
+              : 'Not measured yet'
           }
         />
-      </div>
-    </Field.Root>
+      </dl>
+    </SettingsSection>
   );
 }
 
-function ResourceCard({
+function ResourceFigure({
   label,
   value,
   description,
@@ -44,13 +47,13 @@ function ResourceCard({
   description: string;
 }) {
   return (
-    <Box surface="sunken" borderRadius="md" padding="2" px="3" className="min-w-0">
-      <div className="text-xs text-foreground-muted">{label}</div>
-      <div className="mt-1 text-lg font-medium text-foreground tabular-nums">{value}</div>
-      <div className="mt-0.5 truncate text-[11px] text-foreground-passive tabular-nums">
+    <div className="flex min-w-0 flex-col">
+      <dt className="text-xs text-foreground-muted">{label}</dt>
+      <dd className="mt-1 text-xl text-foreground tabular-nums">{value}</dd>
+      <dd className="mt-0.5 truncate text-tiny text-foreground-passive tabular-nums">
         {description}
-      </div>
-    </Box>
+      </dd>
+    </div>
   );
 }
 

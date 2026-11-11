@@ -1,5 +1,4 @@
-import { Button, RelativeTime, Spinner, toast } from '@emdash/ui/react/primitives';
-import { AlertTriangleIcon } from 'lucide-react';
+import { Alert, Button, RelativeTime, Spinner, toast } from '@emdash/ui/react/primitives';
 import { useState } from 'react';
 import { getWorkspaceRegistryWireClient } from '@core/features/workspaces/api/browser/client';
 import { cn } from '@core/primitives/styling/browser/cn';
@@ -18,10 +17,11 @@ function needsRemovalAttention(row: ProjectWorkspaceRow): row is AttentionRow {
 }
 
 /**
- * Needs-attention cards for pending deletions stopped by a terminal removal failure
- * (ADR 0006): one card per tombstoned row carrying an active durable `removalStop`,
+ * Needs-attention notices for pending deletions stopped by a terminal removal failure
+ * (ADR 0006): one quiet notice per tombstoned row carrying an active durable `removalStop`,
  * with the Retry and Untrack-anyway affordances wired to the workspace registry verbs.
- * Renders nothing while every removal is converging on its own.
+ * The error glyph carries the state; no red panel. Renders nothing while every removal is
+ * converging on its own.
  */
 export function WorkspaceRemovalAttentionPanel({
   rows,
@@ -59,28 +59,16 @@ export function WorkspaceRemovalAttentionPanel({
   return (
     <div className={cn('flex flex-col gap-2', className)}>
       {attentionRows.map((row) => (
-        <div
-          key={row.workspaceId}
-          className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border-destructive bg-background-secondary/40 px-3 py-2"
-        >
-          <div className="flex min-w-0 items-start gap-2">
-            <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0 text-foreground-destructive" />
-            <div className="min-w-0 text-xs">
-              <div className="font-medium text-foreground">
-                Couldn't remove {workspaceRowLabel(row)}
-              </div>
-              <div className="truncate text-foreground-muted">
-                {row.removalStop && (
-                  <>
-                    {row.removalStop.message}
-                    {' · '}
-                    <RelativeTime value={row.removalStop.at} />
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
+        <Alert.Root key={row.workspaceId} status="destructive" role="status">
+          <Alert.Title>Couldn&apos;t remove {workspaceRowLabel(row)}</Alert.Title>
+          {row.removalStop && (
+            <Alert.Description className="break-words">
+              {row.removalStop.message}
+              {' · '}
+              <RelativeTime value={row.removalStop.at} />
+            </Alert.Description>
+          )}
+          <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1">
             <RemovalActionButton
               label="Retry"
               pending={pendingAction === `retry:${row.workspaceId}`}
@@ -94,7 +82,7 @@ export function WorkspaceRemovalAttentionPanel({
               onClick={() => void runAction('untrack', row.workspaceId)}
             />
           </div>
-        </div>
+        </Alert.Root>
       ))}
     </div>
   );
@@ -112,7 +100,7 @@ function RemovalActionButton({
   onClick: () => void;
 }) {
   return (
-    <Button variant="secondary" size="sm" disabled={disabled} onClick={onClick}>
+    <Button variant="text" disabled={disabled} onClick={onClick}>
       {pending && <Spinner size="sm" />}
       {label}
     </Button>

@@ -32,9 +32,11 @@ export function WindowsHostSetupHelp({ defaultOpen = false }: { defaultOpen?: bo
   return (
     <Collapsible.Root defaultOpen={defaultOpen}>
       <div className="w-fit">
-        <Collapsible.Trigger type="button">Connecting to a Windows machine?</Collapsible.Trigger>
+        <Collapsible.Trigger type="button" variant="text">
+          Connecting to a Windows machine?
+        </Collapsible.Trigger>
       </div>
-      <Collapsible.Panel className="grid gap-3 pt-2 text-sm">
+      <Collapsible.Panel className="grid gap-5 pt-3 text-sm">
         <p className="text-foreground-muted">
           Maestro connects to Windows 10 1809, Windows Server 2019, or later through the built-in
           OpenSSH Server. It does not install or configure SSH on the remote machine for you.
@@ -58,7 +60,7 @@ export function WindowsHostSetupHelp({ defaultOpen = false }: { defaultOpen?: bo
           </Step>
         </Section>
         <Section title="3. In Maestro">
-          <Step text="Add the host with the same user and key, then choose Test Connection. Maestro detects Windows and lists anything missing. On first connect it installs its workspace server under %USERPROFILE%\.emdash on that machine; no administrator rights are needed." />
+          <Step text="Add the host with the same user and key, then choose Test connection. Maestro detects Windows and lists anything missing. On first connect it installs its workspace server under %USERPROFILE%\.emdash on that machine; no administrator rights are needed." />
         </Section>
       </Collapsible.Panel>
     </Collapsible.Root>
@@ -68,15 +70,15 @@ export function WindowsHostSetupHelp({ defaultOpen = false }: { defaultOpen?: bo
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="grid gap-2">
-      <h4 className="font-medium">{title}</h4>
-      <ul className="grid gap-2 pl-0">{children}</ul>
+      <h4 className="text-sm font-medium text-foreground">{title}</h4>
+      <ol className="grid gap-3 pl-0">{children}</ol>
     </section>
   );
 }
 
 function Step({ text, children }: { text: string; children?: ReactNode }) {
   return (
-    <li className="grid list-none gap-1">
+    <li className="grid list-none gap-1.5">
       <span className="text-foreground-muted">{text}</span>
       {children}
     </li>
@@ -85,7 +87,7 @@ function Step({ text, children }: { text: string; children?: ReactNode }) {
 
 function Code({ children }: { children: string }) {
   return (
-    <pre className="bg-muted overflow-x-auto rounded px-2 py-1.5 text-xs whitespace-pre select-text">
+    <pre className="overflow-x-auto rounded-md bg-surface-emphasis px-3 py-2 font-mono text-xs whitespace-pre text-foreground select-text">
       {children}
     </pre>
   );

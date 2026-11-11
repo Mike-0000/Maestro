@@ -1,4 +1,4 @@
-import { PageLayout, SettingsCard } from '@emdash/ui/react/patterns';
+import { PageLayout } from '@emdash/ui/react/patterns';
 import { useMemo } from 'react';
 import { HostSettingsCard } from '../components/host-settings-card';
 import { ResourceUtilizationRow } from '../components/machine-resources';
@@ -11,17 +11,17 @@ export function SystemSettingsPage() {
   const systemDependenciesStore = useMemo(() => createSystemDependenciesStore(), []);
 
   return (
-    <div className="space-y-8 pb-4">
+    <div className="pb-16">
       <PageLayout.Header
         sticky
         title="System"
-        description="Monitor local host resources and required system dependencies."
+        description="This computer's resources, its defaults for workspaces, and the tools agents need."
       />
-      <SettingsCard>
+      <div className="flex flex-col gap-10">
         <ResourceUtilizationRow metrics={metrics} />
-      </SettingsCard>
-      <HostSettingsCard />
-      <MachineSystemDependenciesCard machinesStore={systemDependenciesStore} />
+        <HostSettingsCard />
+        <MachineSystemDependenciesCard machinesStore={systemDependenciesStore} />
+      </div>
     </div>
   );
 }

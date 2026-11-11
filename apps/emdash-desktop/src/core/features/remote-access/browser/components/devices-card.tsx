@@ -1,5 +1,6 @@
-import { SettingsCard, SettingsSection } from '@emdash/ui/react/patterns';
-import { AbsoluteTime, Button, RelativeTime, Spinner, toast } from '@emdash/ui/react/primitives';
+import { EmptyState } from '@emdash/ui/react/components';
+import { SettingsSection } from '@emdash/ui/react/patterns';
+import { AbsoluteTime, Button, RelativeTime, toast } from '@emdash/ui/react/primitives';
 import { MonitorIcon, SmartphoneIcon } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { RemoteAccessDevice, RemoteAccessStatus } from '@core/features/remote-access/api';
@@ -37,58 +38,50 @@ export function DevicesCard({ status }: { status: RemoteAccessStatus | undefined
   };
 
   return (
-    <SettingsSection title="Paired devices" bare>
-      <SettingsCard>
-        {status === undefined ? (
-          <div className="flex h-10 items-center gap-2 text-sm text-foreground-muted">
-            <Spinner size="sm" />
-            Loading devices…
-          </div>
-        ) : devices.length === 0 ? (
-          <div className="flex h-10 items-center text-sm text-foreground-muted">
-            No devices paired yet.
-          </div>
-        ) : (
-          <ul className="flex flex-col divide-y divide-border/40">
-            {devices.map((device) => (
-              <li key={device.id} className="flex items-center gap-3 py-2 first:pt-0 last:pb-0">
-                <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-background-1 text-foreground-muted">
-                  {device.kind === 'desktop' ? (
-                    <MonitorIcon className="size-4" aria-hidden />
-                  ) : (
-                    <SmartphoneIcon className="size-4" aria-hidden />
-                  )}
+    <SettingsSection title="Paired devices">
+      {status === undefined ? (
+        <EmptyState bare tone="loading" label="Loading devices…" className="py-2" />
+      ) : devices.length === 0 ? (
+        <p className="text-sm text-foreground-muted">
+          No devices yet. Pair one above to reach this computer from it.
+        </p>
+      ) : (
+        <ul className="flex flex-col gap-4">
+          {devices.map((device) => (
+            <li key={device.id} className="flex items-center gap-3">
+              <span className="flex size-8 shrink-0 items-center justify-center text-foreground-passive">
+                {device.kind === 'desktop' ? (
+                  <MonitorIcon className="size-4" aria-hidden />
+                ) : (
+                  <SmartphoneIcon className="size-4" aria-hidden />
+                )}
+              </span>
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate text-sm text-foreground">{device.name}</span>
+                <span className="flex flex-wrap items-center gap-x-1.5 text-xs text-foreground-muted">
+                  <span>{deviceKindLabel(device.kind)}</span>
+                  <span aria-hidden>·</span>
+                  <DeviceActivityLabel device={device} />
+                  <span aria-hidden>·</span>
+                  <span>
+                    Paired <AbsoluteTime value={device.createdAt} />
+                  </span>
                 </span>
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-sm font-medium text-foreground">
-                    {device.name}
-                  </span>
-                  <span className="flex flex-wrap items-center gap-x-1.5 text-xs text-foreground-muted">
-                    <span>{deviceKindLabel(device.kind)}</span>
-                    <span aria-hidden>·</span>
-                    <DeviceActivityLabel device={device} />
-                    <span aria-hidden>·</span>
-                    <span>
-                      Paired <AbsoluteTime value={device.createdAt} />
-                    </span>
-                  </span>
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="shrink-0 text-foreground-muted"
-                  disabled={removingId === device.id}
-                  aria-label={`Remove ${device.name}`}
-                  onClick={() => void remove(device)}
-                >
-                  Remove
-                </Button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </SettingsCard>
+              </div>
+              <Button
+                type="button"
+                variant="text"
+                className="shrink-0"
+                disabled={removingId === device.id}
+                aria-label={`Remove ${device.name}`}
+                onClick={() => void remove(device)}
+              >
+                Remove
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
     </SettingsSection>
   );
 }
@@ -96,7 +89,8 @@ export function DevicesCard({ status }: { status: RemoteAccessStatus | undefined
 function DeviceActivityLabel({ device }: { device: RemoteAccessDevice }) {
   const activity = deviceActivity(device);
   if (activity.kind === 'connected') {
-    return <span className="text-foreground-success">Connected now</span>;
+    // Full-strength words carry "connected"; no green.
+    return <span className="text-foreground">Connected now</span>;
   }
   if (activity.kind === 'never') return <span>Never connected</span>;
   return (

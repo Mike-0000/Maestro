@@ -1,14 +1,9 @@
-import { Spinner } from '@emdash/ui/react/primitives';
-import { WifiOffIcon } from 'lucide-react';
+import { EmptyState } from '@emdash/ui/react/components';
 import { cn } from '@core/primitives/styling/browser/cn';
 
+/** Workspace empty, loading, error and offline states: the kit's one `EmptyState` pattern. */
 export function WorkspacesLoadingState({ label = 'Loading workspaces' }: { label?: string }) {
-  return (
-    <div className="flex h-40 items-center justify-center gap-2 text-sm text-foreground-muted">
-      <Spinner size="sm" />
-      {label}
-    </div>
-  );
+  return <EmptyState bare tone="loading" label={`${label}…`} className="h-40" />;
 }
 
 export function WorkspacesErrorState({
@@ -20,29 +15,32 @@ export function WorkspacesErrorState({
 }) {
   const message = error instanceof Error ? error.message : String(error);
   return (
-    <div className="flex h-40 flex-col items-center justify-center gap-1 text-sm">
-      <div className="text-foreground-destructive">{title}</div>
-      <div className="max-w-md text-center text-xs text-foreground-muted">{message}</div>
-    </div>
+    <EmptyState
+      bare
+      tone="error"
+      label={title.replace(/\.$/, '')}
+      details={message}
+      className="min-h-40"
+    />
   );
 }
 
 export function WorkspacesEmptyState({
   message,
+  description,
   className,
 }: {
   message: string;
+  description?: string;
   className?: string;
 }) {
   return (
-    <div
-      className={cn(
-        'flex h-40 items-center justify-center text-sm text-foreground-muted',
-        className
-      )}
-    >
-      {message}
-    </div>
+    <EmptyState
+      bare
+      label={message.replace(/\.$/, '')}
+      description={description}
+      className={cn('min-h-40', className)}
+    />
   );
 }
 
@@ -53,13 +51,5 @@ export function WorkspacesOfflineState({
   title?: string;
   description: string;
 }) {
-  return (
-    <div className="flex h-40 flex-col items-center justify-center gap-1 text-sm text-foreground-muted">
-      <div className="inline-flex items-center gap-2">
-        <WifiOffIcon className="size-4" />
-        {title}
-      </div>
-      <p className="max-w-sm text-center text-xs text-foreground-passive">{description}</p>
-    </div>
-  );
+  return <EmptyState bare label={title} description={description} className="min-h-40" />;
 }

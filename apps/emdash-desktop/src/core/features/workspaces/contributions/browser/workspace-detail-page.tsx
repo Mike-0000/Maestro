@@ -10,11 +10,18 @@ import {
   createTextMatcher,
   type CollectionViewColumn,
 } from '@emdash/ui/react/patterns';
-import { Button, DropdownMenu, RelativeTime, toast, Tooltip } from '@emdash/ui/react/primitives';
+import {
+  Alert,
+  Button,
+  DropdownMenu,
+  RelativeTime,
+  toast,
+  Tooltip,
+} from '@emdash/ui/react/primitives';
 import { useQueryClient } from '@tanstack/react-query';
 import { BrushCleaningIcon, EllipsisIcon, FolderOpenIcon, Trash2Icon } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
-import { useCallback, useId, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useId, useMemo, useState } from 'react';
 import type { ProjectHostAccess } from '@core/features/projects/api/browser/stores/project-context';
 import { useOpenModal } from '@core/manifests/browser/modal-api';
 import { projectAvailabilityUi } from '@core/manifests/browser/project-availability-ui';
@@ -41,7 +48,7 @@ import { aggregateWorkspaceStatus } from '../../api/browser/workspace-runtime-st
 import { GitStatsCell } from './git-stats-cell';
 import { WorkspaceRemovalAttentionPanel } from './removal-attention-panel';
 import { RepositoryHeader } from './repository-header';
-import { PathIssueChip, RemovalPill } from './workspace-pills';
+import { ChipWithDetail, PathIssueChip, RemovalPill } from './workspace-pills';
 import { workspaceRowLabel } from './workspace-row-label';
 import {
   WorkspacesEmptyState,
@@ -123,8 +130,8 @@ const DETAIL_COLUMNS: CollectionViewColumn<WorkspaceDetailListItem>[] = [
     cell: (item) => (
       <CollectionViewCell
         primary={
-          <span className="inline-flex min-w-0 items-center gap-2">
-            <span className="truncate">{item.name}</span>
+          <span className="inline-flex max-w-full min-w-0 items-center gap-2">
+            <span className="min-w-0 truncate">{item.name}</span>
             {item.pathIssue && <PathIssueChip issue={item.pathIssue} path={item.path} />}
             <RemovalPill
               pendingRemoval={item.pendingRemoval}
@@ -156,14 +163,14 @@ const DETAIL_COLUMNS: CollectionViewColumn<WorkspaceDetailListItem>[] = [
     cell: (item) => (
       <CollectionViewCell
         primary={
-          item.usage ? formatBytes(item.usage.totalBytes) : item.loadingUsage ? 'Loading...' : '-'
+          item.usage ? formatBytes(item.usage.totalBytes) : item.loadingUsage ? 'Measuring…' : '—'
         }
         secondary={
           item.usage
             ? `${formatBytes(item.usage.artifactBytes)} artifacts`
             : item.loadingUsage
-              ? 'Scanning artifacts'
-              : '-'
+              ? 'Scanning artifacts…'
+              : '—'
         }
       />
     ),
@@ -173,7 +180,7 @@ const DETAIL_COLUMNS: CollectionViewColumn<WorkspaceDetailListItem>[] = [
     width: '10rem',
     cell: (item) => (
       <CollectionViewCell
-        primary={formatCount(item.linkedTaskCount, 'Linked task')}
+        primary={formatCount(item.linkedTaskCount, 'linked task')}
         secondary={formatCount(item.activeTaskCount, 'task active', 'tasks active')}
       />
     ),
@@ -207,6 +214,7 @@ export const WorkspaceDetailPage = observer(function WorkspaceDetailPage({
     ? undefined
     : projectAvailabilityUi.defaultLiveActionDisabledReason;
   const [worktreeQuery, setWorktreeQuery] = useState('');
+  const worktreesHeadingId = useId();
   const workspaceRows = useWorkspaceRows({ scope, projectId, enabled: liveActionsEnabled });
   const { workspaceQuery, group, rows, usageQuery } = workspaceRows;
   const observation =
@@ -302,7 +310,7 @@ export const WorkspaceDetailPage = observer(function WorkspaceDetailPage({
         description: row.hasActiveSessions
           ? 'This stops active sessions, runs teardown scripts, and removes gitignored artifacts. Tasks remain restorable, but dependencies may need to be restored.'
           : 'This runs teardown scripts and removes gitignored dependencies, build output, and caches. The worktree and its tasks stay intact.',
-        confirmLabel: 'Clean Artifacts',
+        confirmLabel: 'Clean artifacts',
       });
       if (!outcome.success) return;
 
@@ -394,10 +402,10 @@ export const WorkspaceDetailPage = observer(function WorkspaceDetailPage({
           liveActionsEnabled
             ? scope.kind === 'local'
               ? 'Workspace data has not been loaded from the Local runtime yet.'
-              : `${machineName?.trim() || 'This Machine'} has not provided workspace data yet.`
+              : `${machineName?.trim() || 'This machine'} has not provided workspace data yet.`
             : machineName
               ? `${machineName} has not provided a workspace observation yet.`
-              : 'Workspace data will appear after live Project access returns.'
+              : 'Workspace data will appear once the project can be reached again.'
         }
       />
     );
@@ -408,15 +416,14 @@ export const WorkspaceDetailPage = observer(function WorkspaceDetailPage({
 
   return (
     <Tooltip.Provider delay={150}>
-      <div className="flex min-h-0 flex-col gap-6 pb-4">
+      <div className="flex min-h-0 flex-col gap-8 pb-4">
         {observation.kind === 'stale' && (
-          <div
-            role="status"
-            className="rounded-md border border-border-warning bg-background-warning px-3 py-2 text-xs text-foreground-warning"
-          >
-            Showing the last observed workspace data.{' '}
-            {projectAvailabilityUi.defaultLiveActionDisabledReason}
-          </div>
+          <Alert.Root status="warning" role="status">
+            <Alert.Title>Showing the last observed workspace data</Alert.Title>
+            <Alert.Description>
+              {projectAvailabilityUi.defaultLiveActionDisabledReason}
+            </Alert.Description>
+          </Alert.Root>
         )}
         <RepositoryHeader
           project={group.project}
@@ -436,7 +443,18 @@ export const WorkspaceDetailPage = observer(function WorkspaceDetailPage({
 
         <WorkspaceRemovalAttentionPanel rows={rows.map((joined) => joined.row)} />
 
-        <WorkspaceSection>
+        <section aria-labelledby={worktreesHeadingId} className="flex min-h-0 flex-col gap-3">
+          <h3
+            id={worktreesHeadingId}
+            className="flex items-baseline gap-2 text-sm font-semibold text-foreground"
+          >
+            Worktrees
+            {worktreeItems.length > 0 && (
+              <span className="text-tiny font-normal text-foreground-passive tabular-nums">
+                {worktreeItems.length}
+              </span>
+            )}
+          </h3>
           <CollectionView
             items={visibleWorktreeItems}
             columns={columns}
@@ -455,21 +473,22 @@ export const WorkspaceDetailPage = observer(function WorkspaceDetailPage({
             emptySlot={
               <WorkspacesEmptyState
                 message={
-                  trimmedWorktreeQuery ? 'No worktrees match your search.' : 'No worktrees found.'
+                  trimmedWorktreeQuery ? 'No worktrees match your search' : 'No worktrees yet'
                 }
-                className="h-32"
+                description={
+                  trimmedWorktreeQuery
+                    ? undefined
+                    : 'Tasks that run in their own worktree show up here.'
+                }
+                className="min-h-32"
               />
             }
           />
-        </WorkspaceSection>
+        </section>
       </div>
     </Tooltip.Provider>
   );
 });
-
-function WorkspaceSection({ children }: { children: ReactNode }) {
-  return <section className="flex min-h-0 flex-col gap-2">{children}</section>;
-}
 
 function buildWorktreeItem({
   joined,
@@ -534,7 +553,7 @@ function RowActionsMenu({
           onClick={() => handlers.onOpenInTask(item)}
         >
           <FolderOpenIcon aria-hidden />
-          Open in Task
+          Open in task
         </DropdownMenu.Item>
         <DropdownMenu.Separator />
         <DropdownMenu.Item
@@ -543,7 +562,7 @@ function RowActionsMenu({
           onClick={() => handlers.onCleanArtifacts(item)}
         >
           <BrushCleaningIcon aria-hidden />
-          Clean Artifacts
+          Clean artifacts
         </DropdownMenu.Item>
         <DropdownMenu.Separator />
         <DropdownMenu.Item
@@ -599,17 +618,16 @@ function workspaceScriptIssues(row: ProjectWorkspaceRow): WorkspaceScriptIssue[]
 
 function ScriptIssueChip({ issue }: { issue: WorkspaceScriptIssue }) {
   return (
-    <Tooltip.Root>
-      <Tooltip.Trigger>
-        <span className="shrink-0 rounded-full border border-border-warning px-1.5 py-0.5 text-[10px] tracking-wide text-foreground-warning uppercase">
-          {scriptIssueLabel(issue)}
-        </span>
-      </Tooltip.Trigger>
-      <Tooltip.Content className="max-w-80 text-xs">
-        {scriptIssueLabel(issue)} <RelativeTime value={issue.at} />
-        {issue.message ? `: ${issue.message}` : ''}
-      </Tooltip.Content>
-    </Tooltip.Root>
+    <ChipWithDetail
+      tone={issue.outcome === 'timed-out' ? 'warning' : 'error'}
+      label={scriptIssueLabel(issue)}
+      detail={
+        <>
+          {scriptIssueLabel(issue)} <RelativeTime value={issue.at} />
+          {issue.message ? `: ${issue.message}` : ''}
+        </>
+      }
+    />
   );
 }
 

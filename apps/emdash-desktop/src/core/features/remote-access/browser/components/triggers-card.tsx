@@ -1,6 +1,5 @@
-import { Pill } from '@emdash/ui/react/components';
 import { SettingsSection } from '@emdash/ui/react/patterns';
-import { Button, Field, Input, toast } from '@emdash/ui/react/primitives';
+import { Button, Field, Input, SectionLabel, toast } from '@emdash/ui/react/primitives';
 import { useState, type FormEvent } from 'react';
 import type { RemoteAccessStatus, RemoteAccessTrigger } from '@core/features/remote-access/api';
 import { getRemoteAccessClient } from '@core/features/remote-access/api/browser/client';
@@ -15,6 +14,7 @@ const NAME_INPUT_ID = 'remote-access-trigger-name';
 const AUTOMATION_INPUT_ID = 'remote-access-trigger-automation';
 const FORM_HINT_ID = 'remote-access-trigger-hint';
 const FORM_ERROR_ID = 'remote-access-trigger-error';
+const CODE = 'rounded-xs bg-surface-emphasis px-1 font-mono text-tiny text-foreground';
 
 /**
  * The on-demand agent HTTP API: its bearer token and the trigger names callers may use.
@@ -32,25 +32,18 @@ export function TriggersCard({
   const { tokenSet, routes } = status.triggers;
 
   return (
-    <SettingsSection title="Request triggers">
-      <div className="flex flex-col gap-4">
-        <p className="text-sm text-foreground-muted">
-          Let another service start agents on this computer over HTTP. Each request runs an
-          on-demand automation and ends as a pull request.
-        </p>
-        <TokenRow tokenSet={tokenSet} />
-      </div>
+    <SettingsSection
+      title="Request triggers"
+      description="Let another service start agents on this computer over HTTP. Each request runs an on-demand automation and ends as a pull request."
+    >
+      <TokenRow tokenSet={tokenSet} />
       <TriggerRoutes routes={routes} />
-      <p className="text-sm text-foreground-muted">
+      <p className="text-xs leading-relaxed text-foreground-muted">
         Send{' '}
-        <code className="font-mono text-xs break-all text-foreground select-all">
+        <code className={`${CODE} break-all select-all`}>
           POST {requestsEndpoint(status, tailscale)}
         </code>{' '}
-        with the header{' '}
-        <code className="font-mono text-xs text-foreground">
-          Authorization: Bearer &lt;token&gt;
-        </code>
-        .
+        with the header <code className={CODE}>Authorization: Bearer &lt;token&gt;</code>.
       </p>
     </SettingsSection>
   );
@@ -88,28 +81,28 @@ function TokenRow({ tokenSet }: { tokenSet: boolean }) {
   return (
     <div className="flex flex-col gap-3">
       <RemoteAccessRow
-        title={
-          <>
-            Access token
-            {tokenSet ? <Pill variant="neutral">Token set</Pill> : null}
-          </>
-        }
+        title="Access token"
         description={
           tokenSet
-            ? 'Callers send this token with every request.'
+            ? 'A token is set. Callers send it with every request.'
             : 'Callers send this token with every request. Requests are refused until one exists.'
         }
         actions={
-          <Button
-            type="button"
-            variant={tokenSet ? 'ghost' : 'secondary'}
-            size="sm"
-            className={tokenSet ? 'text-foreground-muted' : undefined}
-            disabled={busy}
-            onClick={() => void rotate()}
-          >
-            {tokenSet ? 'Replace token' : 'Generate token'}
-          </Button>
+          tokenSet ? (
+            <Button type="button" variant="text" disabled={busy} onClick={() => void rotate()}>
+              Replace token
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={busy}
+              onClick={() => void rotate()}
+            >
+              Generate token
+            </Button>
+          )
         }
       />
       {token !== null ? (
@@ -129,7 +122,7 @@ function TokenRow({ tokenSet }: { tokenSet: boolean }) {
               Done
             </Button>
           </div>
-          <label htmlFor={TOKEN_INPUT_ID} role="status" className="text-sm text-foreground-warning">
+          <label htmlFor={TOKEN_INPUT_ID} role="status" className="text-xs text-foreground-warning">
             Copy this token now. It will not be shown again.
           </label>
         </div>
@@ -184,13 +177,13 @@ function TriggerRoutes({ routes }: { routes: readonly RemoteAccessTrigger[] }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="text-sm font-medium text-foreground">Triggers</div>
+      <SectionLabel as="h4">Triggers</SectionLabel>
       {routes.length === 0 ? (
-        <p className="text-sm text-foreground-muted">No triggers yet.</p>
+        <p className="text-xs text-foreground-muted">No triggers yet.</p>
       ) : (
-        <ul className="flex flex-col divide-y divide-border/40">
+        <ul className="flex flex-col">
           {routes.map((route) => (
-            <li key={route.name} className="flex min-h-9 items-center gap-2">
+            <li key={route.name} className="flex min-h-9 items-center gap-3">
               <span className="flex min-w-0 flex-1 items-center gap-2 font-mono text-xs">
                 <span className="truncate text-foreground">{route.name}</span>
                 <span aria-hidden className="shrink-0 text-foreground-passive">
@@ -201,9 +194,8 @@ function TriggerRoutes({ routes }: { routes: readonly RemoteAccessTrigger[] }) {
               </span>
               <Button
                 type="button"
-                variant="ghost"
-                size="sm"
-                className="shrink-0 text-foreground-muted"
+                variant="text"
+                className="shrink-0"
                 disabled={removingName === route.name}
                 aria-label={`Remove trigger ${route.name}`}
                 onClick={() => void remove(route)}
@@ -261,11 +253,11 @@ function TriggerRoutes({ routes }: { routes: readonly RemoteAccessTrigger[] }) {
           </Button>
         </div>
         {error ? (
-          <p id={FORM_ERROR_ID} role="alert" className="text-sm text-foreground-destructive">
+          <p id={FORM_ERROR_ID} role="alert" className="text-xs text-foreground-error">
             {error}
           </p>
         ) : null}
-        <p id={FORM_HINT_ID} className="text-sm text-foreground-muted">
+        <p id={FORM_HINT_ID} className="text-xs text-foreground-muted">
           The automation id is shown under Trigger on an automation with On demand turned on.
         </p>
       </form>

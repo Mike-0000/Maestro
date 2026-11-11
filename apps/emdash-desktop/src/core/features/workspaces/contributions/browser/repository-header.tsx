@@ -1,6 +1,7 @@
 import { WorkspaceIcon, type WorkspaceIconStatus } from '@emdash/ui/react/components';
-import { Button, DropdownMenu } from '@emdash/ui/react/primitives';
-import { AlertTriangleIcon, EllipsisIcon, Trash2Icon } from 'lucide-react';
+import { MetaLine } from '@emdash/ui/react/patterns';
+import { Alert, Button, DropdownMenu } from '@emdash/ui/react/primitives';
+import { EllipsisIcon, Trash2Icon } from 'lucide-react';
 import { useId } from 'react';
 import { formatBytes } from '@core/primitives/formatting/browser/formatBytes';
 import type {
@@ -11,6 +12,11 @@ import type {
 import { GitStatsCell } from './git-stats-cell';
 import { PathIssueSummaryPill, RemovalSummaryPill } from './workspace-pills';
 
+/**
+ * The repository root above its worktrees: identity (icon, name, path) and one caption line of
+ * facts, with no card around it. Runtime state is words (only an error is coloured); the icon's
+ * corner dot repeats it as the kit's mark.
+ */
 export function RepositoryHeader({
   project,
   rootRow,
@@ -36,40 +42,47 @@ export function RepositoryHeader({
   onDelete(): void;
   actionDisabledReason?: string;
 }) {
-  const healthStatus = status;
   const disabledReasonId = useId();
+  const headingId = useId();
 
   return (
-    <section className="rounded-lg border border-border bg-background-secondary/40 px-4 py-3">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex min-w-0 items-start gap-3">
-          <WorkspaceIcon type="repository" status={healthStatus} size="2.75rem" />
-          <div className="min-w-0">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <h2 className="truncate text-base font-semibold text-foreground">{project.name}</h2>
-              {healthStatus !== 'idle' && (
-                <span className={runtimeStatusPillClass(healthStatus)}>
-                  {runtimeStatusLabel(healthStatus)}
-                </span>
-              )}
-              <PathIssueSummaryPill rows={rows} className="px-2" />
-              <RemovalSummaryPill rows={rows} className="px-2" />
-            </div>
-            <div className="mt-0.5 truncate text-xs text-foreground-muted">{rootRow.path}</div>
-            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-foreground-muted">
-              <span>{rootRow.branch ?? 'No branch'}</span>
-              <span>
-                <GitStatsCell stats={gitStats} loading={loadingGitStats} />
-              </span>
-              <span>{usageLabel(usage, loadingUsage)}</span>
-              {usage && <span>{formatBytes(usage.artifactBytes)} artifacts</span>}
-              <span>{syncLabel(rootRow.lastObservedAt)}</span>
-            </div>
+    <section aria-labelledby={headingId} className="flex flex-col gap-4">
+      <div className="flex min-w-0 items-start gap-3">
+        <WorkspaceIcon type="repository" status={status} />
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <h2 id={headingId} className="min-w-0 truncate text-sm font-semibold text-foreground">
+              {project.name}
+            </h2>
+            <PathIssueSummaryPill rows={rows} />
+            <RemovalSummaryPill rows={rows} />
           </div>
+          <div className="truncate text-xs text-foreground-muted" title={rootRow.path}>
+            {rootRow.path}
+          </div>
+          <MetaLine
+            className="mt-1.5"
+            keepEndWhenNarrow
+            start={[
+              status !== 'idle' ? (
+                <span
+                  key="status"
+                  className={status === 'error' ? 'text-foreground-error' : 'text-foreground-muted'}
+                >
+                  {runtimeStatusLabel(status)}
+                </span>
+              ) : null,
+              rootRow.branch ?? 'No branch',
+              <GitStatsCell key="git" stats={gitStats} loading={loadingGitStats} />,
+              usageLabel(usage, loadingUsage),
+              usage ? `${formatBytes(usage.artifactBytes)} artifacts` : null,
+            ]}
+            end={syncLabel(rootRow.lastObservedAt)}
+          />
         </div>
         <DropdownMenu.Root>
           <DropdownMenu.Trigger>
-            <Button type="button" variant="ghost" size="xs" icon aria-label="Workspace actions">
+            <Button type="button" variant="ghost" size="sm" icon aria-label="Workspace actions">
               <EllipsisIcon aria-hidden />
             </Button>
           </DropdownMenu.Trigger>
@@ -98,7 +111,7 @@ export function RepositoryHeader({
 
 function usageLabel(usage: ProjectWorkspaceUsage | undefined, loading: boolean): string {
   if (usage) return formatBytes(usage.totalBytes);
-  return loading ? 'Loading usage...' : 'Usage unavailable';
+  return loading ? 'Measuring size…' : 'Size unknown';
 }
 
 function syncLabel(lastObservedAt: string | undefined): string {
@@ -130,31 +143,13 @@ function runtimeStatusLabel(status: WorkspaceIconStatus): string {
   }
 }
 
+/** A quiet notice: the warning glyph carries the state, the words stay readable. */
 function WorkspaceScanWarnings({ warnings }: { warnings: readonly string[] }) {
   if (warnings.length === 0) return null;
   return (
-    <div className="mt-3 flex items-start gap-2 rounded-md border border-border-warning bg-background-warning px-3 py-2 text-xs text-foreground-warning">
-      <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
-      <div className="min-w-0 flex-1">
-        <div className="font-medium">Workspace scan completed with warnings</div>
-        <div className="truncate text-foreground-warning/80">{warnings.join(' ')}</div>
-      </div>
-    </div>
+    <Alert.Root status="warning" role="status">
+      <Alert.Title>The workspace scan finished with warnings</Alert.Title>
+      <Alert.Description className="break-words">{warnings.join(' ')}</Alert.Description>
+    </Alert.Root>
   );
-}
-
-function runtimeStatusPillClass(status: WorkspaceIconStatus): string {
-  const base = 'rounded-full border px-2 py-0.5 text-[10px] tracking-wide uppercase';
-  switch (status) {
-    case 'active':
-      return `${base} border-border-success text-foreground-success`;
-    case 'setting-up':
-      return `${base} border-border-info text-foreground-info`;
-    case 'tearing-down':
-      return `${base} border-border-warning text-foreground-warning`;
-    case 'error':
-      return `${base} border-border-destructive text-foreground-destructive`;
-    case 'idle':
-      return base;
-  }
 }

@@ -14,26 +14,28 @@ export function RemoteAccessSettingsPage() {
   const listenerKey = status ? `${status.listening}:${status.port}` : 'unknown';
 
   return (
-    <div className="space-y-8 pb-4">
+    <div className="pb-16">
       <PageLayout.Header
         sticky
         title="Remote access"
         description="Reach this computer's agents from your phone or another computer running Maestro."
       />
-      {isError && status === undefined ? (
-        <Alert.Root status="destructive">
-          <Alert.Title>Remote access is unavailable</Alert.Title>
-          <Alert.Description>
-            Its status could not be loaded. Restart Maestro and try again.
-          </Alert.Description>
-        </Alert.Root>
-      ) : null}
-      <ListenerCard status={status} />
-      {status?.enabled ? <TailscaleCard listenerKey={listenerKey} /> : null}
-      <PairingCard status={status} />
-      <DevicesCard status={status} />
-      {status?.enabled ? <TriggersCard status={status} listenerKey={listenerKey} /> : null}
-      <AdvancedCard status={status} />
+      <div className="flex flex-col gap-10">
+        {isError && status === undefined ? (
+          <Alert.Root status="destructive">
+            <Alert.Title>Remote access is unavailable</Alert.Title>
+            <Alert.Description>
+              Its status could not be loaded. Restart Maestro and try again.
+            </Alert.Description>
+          </Alert.Root>
+        ) : null}
+        <ListenerCard status={status} />
+        {status?.enabled ? <TailscaleCard listenerKey={listenerKey} /> : null}
+        <PairingCard status={status} />
+        <DevicesCard status={status} />
+        {status?.enabled ? <TriggersCard status={status} listenerKey={listenerKey} /> : null}
+        <AdvancedCard status={status} />
+      </div>
     </div>
   );
 }

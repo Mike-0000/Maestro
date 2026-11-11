@@ -1,7 +1,8 @@
 import type { InstallMethod } from '@emdash/core/services/host-dependencies/api';
-import { SettingsCard } from '@emdash/ui/react/patterns';
-import { Box, Button, Field, Heading } from '@emdash/ui/react/primitives';
-import { CheckCircle2, Loader2 } from 'lucide-react';
+import { EmptyState } from '@emdash/ui/react/components';
+import { SettingsRow, SettingsSection } from '@emdash/ui/react/patterns';
+import { Button, SectionLabel, Spinner } from '@emdash/ui/react/primitives';
+import { CheckIcon } from 'lucide-react';
 import { useMemo } from 'react';
 import type { MachineSystemDependencyStatus } from '@core/features/machines/api';
 import { SudoRetryPanel } from '@core/primitives/agents/browser/SudoRetryPanel';
@@ -14,6 +15,11 @@ type MachineSystemDependenciesCardProps = {
   machinesStore: SystemDependenciesStore;
 };
 
+/**
+ * The host tools Maestro and the agents rely on, in two groups (required, recommended). Each
+ * row says plainly whether the tool is installed; a missing required tool reads as a warning,
+ * a missing recommended one stays quiet. One row on top installs everything installable.
+ */
 export function MachineSystemDependenciesCard({
   machineId,
   machinesStore,
@@ -54,60 +60,78 @@ export function MachineSystemDependenciesCard({
   );
 
   const canInstallAll = installableMissingDependencies.length > 0 && !isInstalling;
+  const missingCount = installableMissingDependencies.length;
 
   return (
-    <SettingsCard>
-      <div className="flex items-center gap-2">
-        <Field.Root>
-          <Field.Label>System dependencies</Field.Label>
-          <Field.Description>
-            Host tools used by Maestro and coding-agent workflows.
-          </Field.Description>
-        </Field.Root>
-        <Button
-          type="button"
-          variant="primary"
-          size="xs"
-          disabled={!canInstallAll}
-          onClick={() => void installAll(installableMissingDependencies)}
-        >
-          {isInstalling ? <Loader2 className="size-3.5 animate-spin" /> : 'Install all'}
-        </Button>
-      </div>
-      <div className="mt-4">
-        {isLoading ? (
-          <div className="p-4 text-sm text-foreground-muted">Checking system dependencies...</div>
-        ) : error ? (
-          <div className="text-destructive p-4 text-sm">
-            Failed to load system dependencies: {error.message}
-          </div>
-        ) : (
-          <div className="flex flex-col gap-4">
-            <DependencySection
-              title="Required"
-              dependencies={requiredDependencies}
-              installingIds={installingIds}
-              installFailures={installFailures}
-              onInstall={install}
-              onDismissFailure={dismissInstallFailure}
-            />
-            <DependencySection
-              title="Recommended"
-              dependencies={recommendedDependencies}
-              installingIds={installingIds}
-              installFailures={installFailures}
-              onInstall={install}
-              onDismissFailure={dismissInstallFailure}
-            />
-          </div>
-        )}
-      </div>
-    </SettingsCard>
+    <SettingsSection
+      title="System dependencies"
+      description="Tools on this host that Maestro and coding agents use."
+    >
+      {isLoading ? (
+        <EmptyState bare tone="loading" label="Checking system dependencies…" className="py-6" />
+      ) : error ? (
+        <EmptyState
+          bare
+          tone="error"
+          label="Could not check system dependencies"
+          details={error.message}
+          className="py-6"
+        />
+      ) : (
+        <>
+          <SettingsRow
+            label="Install missing tools"
+            description={
+              missingCount === 0
+                ? 'Everything Maestro can install here is installed.'
+                : `${missingCount} ${missingCount === 1 ? 'tool' : 'tools'} can be installed on this host.`
+            }
+            control={
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                disabled={!canInstallAll}
+                onClick={() => void installAll(installableMissingDependencies)}
+              >
+                {isInstalling ? (
+                  <>
+                    <Spinner size="sm" />
+                    Installing…
+                  </>
+                ) : (
+                  'Install all'
+                )}
+              </Button>
+            }
+          />
+          <DependencySection
+            title="Required"
+            tier="required"
+            dependencies={requiredDependencies}
+            installingIds={installingIds}
+            installFailures={installFailures}
+            onInstall={install}
+            onDismissFailure={dismissInstallFailure}
+          />
+          <DependencySection
+            title="Recommended"
+            tier="recommended"
+            dependencies={recommendedDependencies}
+            installingIds={installingIds}
+            installFailures={installFailures}
+            onInstall={install}
+            onDismissFailure={dismissInstallFailure}
+          />
+        </>
+      )}
+    </SettingsSection>
   );
 }
 
 function DependencySection({
   title,
+  tier,
   dependencies,
   installingIds,
   installFailures,
@@ -115,6 +139,7 @@ function DependencySection({
   onDismissFailure,
 }: {
   title: string;
+  tier: 'required' | 'recommended';
   dependencies: MachineSystemDependencyStatus[];
   installingIds: Set<string>;
   installFailures: Record<string, DependencyOperationFailure>;
@@ -122,35 +147,30 @@ function DependencySection({
   onDismissFailure: (dependencyId: string) => void;
 }) {
   return (
-    <div className="flex flex-col gap-2">
-      <Heading level={4} tone="muted">
-        {title}
-      </Heading>
+    <div className="flex flex-col gap-1">
+      <SectionLabel as="h4">{title}</SectionLabel>
       {dependencies.length === 0 ? (
-        <div className="p-4 text-sm text-foreground-muted">
-          No {title.toLowerCase()} dependencies.
-        </div>
+        <p className="py-1.5 text-xs text-foreground-muted">No {title.toLowerCase()} tools.</p>
       ) : (
-        <Box surface="sunken" borderRadius="md" padding="3">
-          <div className="divide-y divide-border">
-            {dependencies.map((dependency) => (
-              <SystemDependencyRow
-                key={dependency.id}
-                dependency={dependency}
-                installing={installingIds.has(dependency.id)}
-                failure={installFailures[dependency.id] ?? null}
-                onInstall={() => {
-                  const option =
-                    dependency.installOptions.find((candidate) => candidate.recommended) ??
-                    dependency.installOptions[0];
-                  onInstall(dependency.id, option?.method);
-                }}
-                onRetry={(method) => onInstall(dependency.id, method, true)}
-                onDismissFailure={() => onDismissFailure(dependency.id)}
-              />
-            ))}
-          </div>
-        </Box>
+        <ul className="flex flex-col">
+          {dependencies.map((dependency) => (
+            <SystemDependencyRow
+              key={dependency.id}
+              dependency={dependency}
+              tier={tier}
+              installing={installingIds.has(dependency.id)}
+              failure={installFailures[dependency.id] ?? null}
+              onInstall={() => {
+                const option =
+                  dependency.installOptions.find((candidate) => candidate.recommended) ??
+                  dependency.installOptions[0];
+                onInstall(dependency.id, option?.method);
+              }}
+              onRetry={(method) => onInstall(dependency.id, method, true)}
+              onDismissFailure={() => onDismissFailure(dependency.id)}
+            />
+          ))}
+        </ul>
       )}
     </div>
   );
@@ -158,6 +178,7 @@ function DependencySection({
 
 function SystemDependencyRow({
   dependency,
+  tier,
   installing,
   failure,
   onInstall,
@@ -165,6 +186,7 @@ function SystemDependencyRow({
   onDismissFailure,
 }: {
   dependency: MachineSystemDependencyStatus;
+  tier: 'required' | 'recommended';
   installing: boolean;
   failure: DependencyOperationFailure | null;
   onInstall: () => void;
@@ -173,27 +195,33 @@ function SystemDependencyRow({
 }) {
   const available = dependency.status === 'available';
   const canInstall = !available && dependency.installOptions.length > 0;
+  const missingTone = tier === 'required' ? 'text-foreground-warning' : 'text-foreground-passive';
 
   return (
-    <div className="space-y-2 py-1.5">
-      <div className="flex h-10 min-w-0 items-center gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-xs">{dependency.name}</div>
-        </div>
+    <li className="flex flex-col gap-2">
+      <div className="flex h-9 min-w-0 items-center gap-3">
+        <span className="min-w-0 flex-1 truncate text-sm text-foreground">{dependency.name}</span>
         {available ? (
-          <CheckCircle2 className="size-4 shrink-0 text-foreground-success" />
+          <span className="inline-flex shrink-0 items-center gap-1.5 text-xs text-foreground-muted">
+            <CheckIcon aria-hidden className="size-3.5 text-foreground-passive" />
+            Installed
+          </span>
         ) : canInstall ? (
-          <Button
-            type="button"
-            variant="secondary"
-            size="xs"
-            disabled={installing}
-            onClick={onInstall}
-          >
-            {installing ? <Loader2 className="size-3.5 animate-spin" /> : 'Install'}
-          </Button>
+          <span className="flex shrink-0 items-center gap-3">
+            <span className={`text-xs ${missingTone}`}>Not installed</span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={installing}
+              aria-label={`Install ${dependency.name}`}
+              onClick={onInstall}
+            >
+              {installing ? <Spinner size="sm" /> : 'Install'}
+            </Button>
+          </span>
         ) : (
-          <span className="shrink-0 text-xs text-foreground-muted">Not found</span>
+          <span className={`shrink-0 text-xs ${missingTone}`}>Not found</span>
         )}
       </div>
       {failure ? (
@@ -205,6 +233,6 @@ function SystemDependencyRow({
           onDismiss={onDismissFailure}
         />
       ) : null}
-    </div>
+    </li>
   );
 }

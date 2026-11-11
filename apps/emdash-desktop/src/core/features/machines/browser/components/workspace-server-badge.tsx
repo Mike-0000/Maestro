@@ -2,12 +2,12 @@ import { Pill } from '@emdash/ui/react/components';
 import type { HostServerState, HostServerStatus } from '@core/services/hosts/api';
 
 const statusLabels: Record<HostServerStatus, string> = {
-  'not-installed': 'Not found',
+  'not-installed': 'Not installed',
   stopped: 'Stopped',
-  booting: 'Booting',
-  'shutting-down': 'Shutting Down',
-  healthy: 'Healthy',
-  failed: 'Error',
+  booting: 'Starting',
+  'shutting-down': 'Shutting down',
+  healthy: 'Running',
+  failed: 'Failed',
 };
 
 function variantForStatus(status: HostServerStatus): {

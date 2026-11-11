@@ -1,6 +1,7 @@
+import { EmptyState } from '@emdash/ui/react/components';
 import { CollectionToolbar, CollectionView, PageLayout } from '@emdash/ui/react/patterns';
-import { Button, toast } from '@emdash/ui/react/primitives';
-import { MonitorIcon, PlusIcon, RadioTowerIcon, ServerIcon, TerminalIcon } from 'lucide-react';
+import { SplitButton, toast, type SplitButtonOption } from '@emdash/ui/react/primitives';
+import { PlusIcon } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useState } from 'react';
 import { getMachinesStore } from '@core/features/machines/contributions/app-stores';
@@ -62,11 +63,11 @@ export const MachinesSettingsPage = observer(function MachinesSettingsPage({
   };
 
   return (
-    <div className="flex min-h-0 flex-col gap-8">
+    <div className="flex min-h-0 flex-col pb-16">
       <PageLayout.Header
         sticky
         title="Machines"
-        description="Manage reusable machines for remote projects."
+        description="The computers your projects and agents can run on, over SSH or another Maestro."
       />
       <view.Root>
         <CollectionView
@@ -108,6 +109,43 @@ const MachinesToolbar = observer(function MachinesToolbar({
   onAddWslDistro?: () => void;
 }) {
   const search = view.useSearch();
+  // One primary move (an SSH machine); the other ways to add one sit in its menu.
+  const addOptions: (SplitButtonOption & { run: () => void })[] = [
+    {
+      id: 'ssh',
+      label: 'Add machine',
+      description: 'A computer you reach over SSH',
+      run: onAdd,
+    },
+    {
+      id: 'maestro',
+      label: 'Add Maestro host',
+      description: 'The Maestro app on another computer, without SSH',
+      run: onAddMaestroHost,
+    },
+    ...(onAddThisComputer
+      ? [
+          {
+            id: 'this-computer',
+            label: 'Add this computer',
+            description:
+              "Run conversations on this computer's workspace server, shared with computers that connect to it over SSH",
+            run: onAddThisComputer,
+          },
+        ]
+      : []),
+    ...(onAddWslDistro
+      ? [
+          {
+            id: 'wsl',
+            label: 'Add WSL distro',
+            description:
+              'Run projects and agents in the next WSL2 distro on this computer that is not a machine yet',
+            run: onAddWslDistro,
+          },
+        ]
+      : []),
+  ];
   return (
     <CollectionToolbar.Root>
       <CollectionToolbar.Search
@@ -117,41 +155,14 @@ const MachinesToolbar = observer(function MachinesToolbar({
       />
       <CollectionToolbar.Spacer />
       <CollectionToolbar.Group>
-        {onAddThisComputer ? (
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={onAddThisComputer}
-            title="Run conversations on this computer's workspace server, shared with computers that connect to it over SSH"
-          >
-            <MonitorIcon />
-            Add this computer
-          </Button>
-        ) : null}
-        {onAddWslDistro ? (
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={onAddWslDistro}
-            title="Run projects and agents inside a WSL2 distro on this computer, on its Linux filesystem. Adds the next distro that is not a machine yet."
-          >
-            <TerminalIcon />
-            Add WSL distro
-          </Button>
-        ) : null}
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={onAddMaestroHost}
-          title="Use the Maestro app running on another computer as a machine, without SSH"
-        >
-          <RadioTowerIcon />
-          Add Maestro host
-        </Button>
-        <Button type="button" variant="primary" onClick={onAdd}>
-          <PlusIcon />
-          Add machine
-        </Button>
+        <SplitButton
+          size="sm"
+          variant="primary"
+          options={addOptions}
+          selectedId="ssh"
+          icon={<PlusIcon />}
+          onAction={(id) => addOptions.find((option) => option.id === id)?.run()}
+        />
       </CollectionToolbar.Group>
     </CollectionToolbar.Root>
   );
@@ -159,16 +170,15 @@ const MachinesToolbar = observer(function MachinesToolbar({
 
 function MachinesEmptyState({ hasMachines }: { hasMachines: boolean }) {
   return (
-    <div className="flex min-h-48 flex-col items-center justify-center p-8 text-center">
-      <ServerIcon className="mb-3 size-8 text-foreground-passive" />
-      <div className="text-sm text-foreground">
-        {hasMachines ? 'No machines match your search' : 'No machines'}
-      </div>
-      <p className="mt-1 max-w-sm text-xs text-foreground-passive">
-        {hasMachines
-          ? 'Try a different name, host, or username.'
-          : 'Add a machine to create and manage remote projects.'}
-      </p>
-    </div>
+    <EmptyState
+      bare
+      className="min-h-48"
+      label={hasMachines ? 'No machines match your search' : 'No machines yet'}
+      description={
+        hasMachines
+          ? 'Try a different name, host or username.'
+          : 'Add a machine to run projects and agents on another computer.'
+      }
+    />
   );
 }

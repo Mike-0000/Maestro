@@ -2,6 +2,7 @@ import { MachineStatus, type MachineStatusKind } from '@emdash/ui/react/componen
 import { CollectionViewCell } from '@emdash/ui/react/patterns';
 import { observer } from 'mobx-react-lite';
 import type { SshConfig } from '@core/primitives/ssh/api';
+import { cn } from '@core/primitives/styling/browser/cn';
 import { maestroHostEndpointLabel } from '../maestro-host-form-model';
 import { useMachineStatusKind } from '../use-machine-status-kind';
 
@@ -31,17 +32,28 @@ export const MachineListRow = observer(function MachineListRow({
     machineId: machine.id,
   });
 
+  // The machine mark carries the state's dot; the words beside it say it, and only a
+  // connection problem is coloured.
   return (
-    <div className="group flex w-full min-w-0 items-center gap-3">
-      <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-background-1 group-hover:bg-background-2">
-        <MachineStatus status={machineStatus} size="1.25rem" />
-      </div>
+    <div className="flex w-full min-w-0 items-center gap-3">
+      <MachineStatus status={machineStatus} size="1.5rem" className="shrink-0" />
       <CollectionViewCell
         className="min-w-0 flex-1"
         primary={machine.name}
         secondary={machineEndpoint(machine)}
       />
-      <span className="shrink-0 text-xs text-foreground-muted">{STATUS_TEXT[machineStatus]}</span>
+      <span
+        className={cn(
+          'shrink-0 text-xs',
+          machineStatus === 'error'
+            ? 'text-foreground-error'
+            : machineStatus === 'successful'
+              ? 'text-foreground-muted'
+              : 'text-foreground-passive'
+        )}
+      >
+        {STATUS_TEXT[machineStatus]}
+      </span>
     </div>
   );
 });

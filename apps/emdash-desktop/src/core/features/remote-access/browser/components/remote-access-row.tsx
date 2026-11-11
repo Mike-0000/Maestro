@@ -3,7 +3,8 @@ import type { ReactNode } from 'react';
 
 /**
  * A settings row whose right side holds actions rather than a single form control, so it
- * is not held to the control slot's narrow column.
+ * is not held to the control slot's narrow column. Same type roles as the kit `SettingsRow`:
+ * the label in the field-label role, helper text muted under it.
  */
 export function RemoteAccessRow({
   title,
@@ -17,10 +18,14 @@ export function RemoteAccessRow({
   return (
     <Field.Root orientation="horizontal">
       <Field.Content>
-        <div className="flex items-center gap-2 text-sm font-medium text-foreground">{title}</div>
+        <div className="flex flex-wrap items-center gap-2 text-sm text-foreground">{title}</div>
         {description != null && <Field.Description>{description}</Field.Description>}
       </Field.Content>
-      {actions != null && <div className="ml-auto flex shrink-0 items-center gap-1">{actions}</div>}
+      {actions != null && (
+        <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">
+          {actions}
+        </div>
+      )}
     </Field.Root>
   );
 }

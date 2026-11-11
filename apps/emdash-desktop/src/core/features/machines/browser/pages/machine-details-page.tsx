@@ -1,33 +1,14 @@
-import { MachineStatus, McpIcon } from '@emdash/ui/react/components';
+import { EmptyState, MachineStatus } from '@emdash/ui/react/components';
 import {
   EntityHeader,
   getPillTabId,
-  PillTabs,
-  SettingsCard,
   SettingsRow,
-  type PillTab,
+  SettingsSection,
 } from '@emdash/ui/react/patterns';
-import {
-  Button,
-  DropdownMenu,
-  Heading,
-  Input,
-  SeparatedList,
-  toast,
-} from '@emdash/ui/react/primitives';
-import {
-  Activity,
-  Brain,
-  EllipsisIcon,
-  Folder,
-  KeyRoundIcon,
-  MessageSquare,
-  PencilIcon,
-  Trash2Icon,
-  User,
-} from 'lucide-react';
+import { Button, DropdownMenu, Heading, Input, Tabs, toast } from '@emdash/ui/react/primitives';
+import { EllipsisIcon, KeyRoundIcon, PencilIcon, Trash2Icon } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { hostRefFromConnectionId } from '@core/features/agents/api/browser/client';
 import { getMachinesClient } from '@core/features/machines/api/browser/client';
 import { getMachinesStore } from '@core/features/machines/contributions/app-stores';
@@ -66,17 +47,14 @@ type MachineDetailsSection =
 
 const MACHINE_DETAILS_PANEL_ID = 'machine-details-panel';
 
-const machineDetailsTabs: readonly PillTab<MachineDetailsSection>[] = [
-  { value: 'system', label: 'System', icon: <Activity className="size-3.5" /> },
-  { value: 'workspaces', label: 'Workspaces', icon: <Folder className="size-3.5" /> },
-  {
-    value: 'conversations',
-    label: 'Conversations',
-    icon: <MessageSquare className="size-3.5" />,
-  },
-  { value: 'agents', label: 'Agents', icon: <User className="size-3.5" /> },
-  { value: 'mcp', label: 'MCP', icon: <McpIcon size={14} /> },
-  { value: 'skills', label: 'Skills', icon: <Brain className="size-3.5" /> },
+/** Plain words with an underline under the one on screen, like the project page's sections. */
+const machineDetailsTabs: readonly { value: MachineDetailsSection; label: string }[] = [
+  { value: 'system', label: 'System' },
+  { value: 'workspaces', label: 'Workspaces' },
+  { value: 'conversations', label: 'Conversations' },
+  { value: 'agents', label: 'Agents' },
+  { value: 'mcp', label: 'MCP' },
+  { value: 'skills', label: 'Skills' },
 ];
 
 /**
@@ -229,7 +207,7 @@ export const MachineDetailsPage = observer(function MachineDetailsPage({
   };
 
   return (
-    <div className="flex flex-col gap-6 pb-10">
+    <div className="flex flex-col gap-6 pb-16">
       <EntityHeader
         icon={<MachineStatus size="2rem" status={machineStatus} />}
         title={
@@ -238,7 +216,8 @@ export const MachineDetailsPage = observer(function MachineDetailsPage({
               bare
               ref={renameFieldRef}
               value={name}
-              className="min-w-0 flex-1 px-0 text-lg!"
+              aria-label="Machine name"
+              className="h-auto min-w-0 flex-1 px-0 text-xl"
               onChange={(e) => setName(e.target.value)}
               onBlur={(event) => void commitName(event.currentTarget.value)}
               onKeyDown={(event) => {
@@ -263,13 +242,7 @@ export const MachineDetailsPage = observer(function MachineDetailsPage({
           <DropdownMenu.Root>
             <DropdownMenu.Trigger
               render={
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="xs"
-                  icon
-                  aria-label="Machine actions"
-                />
+                <Button type="button" variant="ghost" size="sm" icon aria-label="Machine actions" />
               }
             >
               <EllipsisIcon />
@@ -299,67 +272,77 @@ export const MachineDetailsPage = observer(function MachineDetailsPage({
         }
       />
 
-      <PillTabs
-        items={machineDetailsTabs}
+      <Tabs.Root
         value={section}
-        onValueChange={setSection}
-        ariaLabel="Machine details sections"
-        panelId={MACHINE_DETAILS_PANEL_ID}
-        labelVisibility="active-only"
-      />
+        onValueChange={(next) => {
+          if (next != null) setSection(next as MachineDetailsSection);
+        }}
+      >
+        <Tabs.List
+          variant="underline"
+          aria-label="Machine details sections"
+          activateOnFocus
+          className="-ml-2 flex-wrap"
+        >
+          {machineDetailsTabs.map((tab) => (
+            <Tabs.Tab
+              key={tab.value}
+              value={tab.value}
+              size="sm"
+              id={getPillTabId(MACHINE_DETAILS_PANEL_ID, tab.value)}
+              aria-controls={MACHINE_DETAILS_PANEL_ID}
+            >
+              {tab.label}
+            </Tabs.Tab>
+          ))}
+        </Tabs.List>
+      </Tabs.Root>
 
       <section
         role="tabpanel"
         id={MACHINE_DETAILS_PANEL_ID}
         aria-labelledby={getPillTabId(MACHINE_DETAILS_PANEL_ID, section)}
-        className="flex flex-col gap-6"
+        className="flex flex-col gap-10"
       >
         {section === 'system' && (
           <>
-            <SettingsCard>
-              <SeparatedList gap="1rem" direction="column">
-                <MachineConnectionRow
-                  machine={machine}
-                  state={state}
-                  availability={availability}
-                  onEdit={editConnectionSettings}
-                  onConnect={connectMachine}
-                  onRetry={retryMachine}
-                  onDisconnect={disconnectMachine}
-                  onPairAgain={maestro ? pairAgain : undefined}
-                />
-                <div
-                  aria-disabled={!connected}
-                  className={cn(!connected && 'pointer-events-none opacity-33')}
-                >
-                  {maestro ? (
-                    <SettingsRow
-                      label="Workspace Runtime"
-                      description={
-                        workspaceServer.state?.version
-                          ? `${maestroHostUnsupportedMessage('workspace-server-control')} · Maestro v${workspaceServer.state.version}`
-                          : maestroHostUnsupportedMessage('workspace-server-control')
-                      }
-                      control={null}
-                    />
-                  ) : (
-                    <WorkspaceRuntimeRow
-                      availability={availability}
-                      connected={connected}
-                      loading={workspaceServer.loading}
-                      state={workspaceServer.state}
-                      actions={workspaceServer}
-                    />
-                  )}
-                </div>
-                <div
-                  aria-disabled={!connected}
-                  className={cn(!connected && 'pointer-events-none opacity-33')}
-                >
-                  <ResourceUtilizationRow metrics={metrics} />
-                </div>
-              </SeparatedList>
-            </SettingsCard>
+            <SettingsSection title="Connection">
+              <MachineConnectionRow
+                machine={machine}
+                state={state}
+                availability={availability}
+                onEdit={editConnectionSettings}
+                onConnect={connectMachine}
+                onRetry={retryMachine}
+                onDisconnect={disconnectMachine}
+                onPairAgain={maestro ? pairAgain : undefined}
+              />
+              <NeedsConnection connected={connected}>
+                {maestro ? (
+                  <SettingsRow
+                    label="Workspace runtime"
+                    description={
+                      workspaceServer.state?.version
+                        ? `${maestroHostUnsupportedMessage('workspace-server-control')} · Maestro v${workspaceServer.state.version}`
+                        : maestroHostUnsupportedMessage('workspace-server-control')
+                    }
+                    control={null}
+                  />
+                ) : (
+                  <WorkspaceRuntimeRow
+                    availability={availability}
+                    connected={connected}
+                    loading={workspaceServer.loading}
+                    state={workspaceServer.state}
+                    actions={workspaceServer}
+                  />
+                )}
+              </NeedsConnection>
+            </SettingsSection>
+
+            <NeedsConnection connected={connected}>
+              <ResourceUtilizationRow metrics={metrics} />
+            </NeedsConnection>
 
             {serverUsable ? (
               <>
@@ -370,12 +353,9 @@ export const MachineDetailsPage = observer(function MachineDetailsPage({
                 />
               </>
             ) : (
-              <SettingsCard>
-                <div className="p-4 text-sm text-foreground-muted">
-                  Host settings and system dependency detection are available when the workspace
-                  server is healthy.
-                </div>
-              </SettingsCard>
+              <SettingsSection title="Host defaults and tools">
+                <ServerRequired description="Host defaults and system dependency checks appear once this machine is connected and its workspace server is running." />
+              </SettingsSection>
             )}
           </>
         )}
@@ -400,35 +380,44 @@ export const MachineDetailsPage = observer(function MachineDetailsPage({
           (serverUsable ? (
             <AgentsPanel connectionId={machine.id} onManageMcp={() => setSection('mcp')} />
           ) : (
-            <SettingsCard>
-              <div className="p-4 text-sm text-foreground-muted">
-                Agent detection is available when the workspace server is healthy.
-              </div>
-            </SettingsCard>
+            <ServerRequired description="Agents on this machine are detected once it is connected and its workspace server is running." />
           ))}
 
         {section === 'mcp' &&
           (serverUsable ? (
             <McpPanel host={hostRefFromConnectionId(machine.id)} />
           ) : (
-            <SettingsCard>
-              <div className="p-4 text-sm text-foreground-muted">
-                MCP servers are available when the workspace server is healthy.
-              </div>
-            </SettingsCard>
+            <ServerRequired description="MCP servers on this machine appear once it is connected and its workspace server is running." />
           ))}
 
         {section === 'skills' &&
           (serverUsable ? (
             <SkillsPanel host={hostRefFromConnectionId(machine.id)} />
           ) : (
-            <SettingsCard>
-              <div className="p-4 text-sm text-foreground-muted">
-                Skills are available when the workspace server is healthy.
-              </div>
-            </SettingsCard>
+            <ServerRequired description="Skills on this machine appear once it is connected and its workspace server is running." />
           ))}
       </section>
     </div>
   );
 });
+
+/** Dims what only works over a live connection, and keeps it out of reach until then. */
+function NeedsConnection({ connected, children }: { connected: boolean; children: ReactNode }) {
+  return (
+    <div aria-disabled={!connected} className={cn(!connected && 'pointer-events-none opacity-40')}>
+      {children}
+    </div>
+  );
+}
+
+/** The quiet panel shown where a feature waits on this machine's workspace server. */
+function ServerRequired({ description }: { description: string }) {
+  return (
+    <EmptyState
+      bare
+      className="min-h-40"
+      label="Waiting for the workspace server"
+      description={description}
+    />
+  );
+}

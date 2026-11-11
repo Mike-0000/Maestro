@@ -21,25 +21,25 @@ export function AddMachineModal({ initialConfig, dismissControl = 'back' }: AddM
     initialConfig,
     onSaved: (connectionId) => modal.complete({ connectionId }),
   });
+  const title = controller.isEditing ? 'Edit SSH connection' : 'Add SSH connection';
 
   return (
     <ModalLayout
       header={
-        <Dialog.Header
-          showCloseButton={!showBackButton}
-          className="w-full flex-row items-center justify-between gap-2"
-        >
-          <div className={`flex items-center gap-2 ${showBackButton ? '-ml-2' : ''}`}>
-            {showBackButton && (
-              <Button variant="ghost" size="xs" icon onClick={modal.dismiss}>
-                <ArrowLeftIcon className="h-4 w-4" />
+        showBackButton ? (
+          <Dialog.Header showCloseButton={false}>
+            <div className="-ml-2 flex items-center gap-1">
+              <Button variant="ghost" size="sm" icon aria-label="Back" onClick={modal.dismiss}>
+                <ArrowLeftIcon aria-hidden />
               </Button>
-            )}
-            <Dialog.Title>
-              {controller.isEditing ? 'Edit SSH Connection' : 'Add SSH Connection'}
-            </Dialog.Title>
-          </div>
-        </Dialog.Header>
+              <Dialog.Title>{title}</Dialog.Title>
+            </div>
+          </Dialog.Header>
+        ) : (
+          <Dialog.Header showCloseButton>
+            <Dialog.Title>{title}</Dialog.Title>
+          </Dialog.Header>
+        )
       }
       footer={
         <Dialog.Footer>
@@ -52,7 +52,7 @@ export function AddMachineModal({ initialConfig, dismissControl = 'back' }: AddM
               !showBackButton ? (
                 <Button
                   type="button"
-                  variant="secondary"
+                  variant="ghost"
                   onClick={modal.dismiss}
                   disabled={controller.isSaving}
                 >
@@ -64,14 +64,17 @@ export function AddMachineModal({ initialConfig, dismissControl = 'back' }: AddM
         </Dialog.Footer>
       }
     >
-      <Dialog.Body className="max-h-[calc(100dvh-10rem)] overflow-y-auto">
+      <Dialog.Body className="max-h-[calc(100dvh-12rem)] overflow-y-auto">
         <MachineFormFields controller={controller} formId={MACHINE_MODAL_FORM_ID} />
       </Dialog.Body>
     </ModalLayout>
   );
 }
 
+// lg (680): room for the resolved settings to sit label-beside-value and for the Windows setup
+// commands to read without wrapping.
 export const addMachineModal = defineModal<{ connectionId: string }>()({
   id: 'addSshConnModal',
   component: AddMachineModal,
+  size: 'lg',
 });

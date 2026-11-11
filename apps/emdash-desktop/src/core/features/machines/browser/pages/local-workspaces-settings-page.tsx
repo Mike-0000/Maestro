@@ -4,11 +4,11 @@ import { WorkspacesListView } from '../components/workspaces-list-view';
 
 export function LocalWorkspacesSettingsPage({ openDetail }: SettingsPageProps) {
   return (
-    <div className="space-y-8 pb-4">
+    <div className="flex min-h-0 flex-col pb-16">
       <PageLayout.Header
         sticky
         title="Workspaces"
-        description="Review local project workspaces and remove stale task worktrees."
+        description="Each project's folders on this computer: review their size and remove stale task worktrees."
       />
       <WorkspacesListView scope={{ kind: 'local' }} openDetail={openDetail} />
     </div>

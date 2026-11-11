@@ -1,8 +1,7 @@
 import { EmptyState } from '@emdash/ui/react/components';
-import { Button, Combobox, Dialog, ModalLayout } from '@emdash/ui/react/primitives';
+import { Button, Combobox, Dialog, Label, ModalLayout } from '@emdash/ui/react/primitives';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronsUpDown } from 'lucide-react';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { getMachinesClient } from '@core/features/machines/api/browser/client';
 import { getProjectsWireClient } from '@core/features/projects/api/browser/client';
 import { getTasksWireClient } from '@core/features/tasks/api/browser/client';
@@ -58,12 +57,14 @@ function useProjectTasks(projectId: string | null) {
 }
 
 function OptionCombobox({
+  id,
   options,
   value,
   onChange,
   placeholder,
   disabled,
 }: {
+  id: string;
   options: PickerOption[];
   value: PickerOption | null;
   onChange: (option: PickerOption | null) => void;
@@ -85,30 +86,27 @@ function OptionCombobox({
       isItemEqualToValue={(a: PickerOption, b: PickerOption) => a.id === b.id}
       disabled={disabled}
     >
-      <Combobox.Trigger className="data-popup-open:border-ring flex w-full items-center justify-between gap-2 rounded-lg border border-border px-2.5 py-2 text-sm transition-colors outline-none hover:bg-background-2 disabled:opacity-50">
+      <Combobox.Trigger id={id} appearance="input">
         {value ? (
           <span className="truncate">{value.name}</span>
         ) : (
-          <span className="text-foreground-muted">{placeholder}</span>
+          <span className="truncate text-foreground-passive">{placeholder}</span>
         )}
-        <ChevronsUpDown className="size-4 shrink-0 text-foreground-passive" />
       </Combobox.Trigger>
-      <Combobox.Content>
+      <Combobox.Content width="trigger">
         <Combobox.Input
           value={query}
           onChange={(event) => setQuery((event.target as HTMLInputElement).value)}
           placeholder="Search…"
           showTrigger={false}
         />
-        <Combobox.List className="max-h-52 overflow-y-auto p-1!">
+        <Combobox.List>
           {filtered.map((option) => (
-            <Combobox.Item key={option.id} value={option} showCheck={false} className="py-2 pr-3">
-              <span className="truncate text-sm">{option.name}</span>
+            <Combobox.Item key={option.id} value={option} showCheck={false}>
+              <span className="truncate">{option.name}</span>
             </Combobox.Item>
           ))}
-          {filtered.length === 0 && (
-            <EmptyState label="No matches" className="border-none bg-transparent" />
-          )}
+          {filtered.length === 0 && <EmptyState bare label="No matches" className="py-4" />}
         </Combobox.List>
       </Combobox.Content>
     </Combobox.Root>
@@ -125,16 +123,23 @@ export function LinkConversationModal({
   const projects = useHostProjects(connectionId);
   const tasks = useProjectTasks(project?.id ?? null);
 
+  const fieldId = useId();
+  const projectFieldId = `${fieldId}-project`;
+  const taskFieldId = `${fieldId}-task`;
+
   return (
     <ModalLayout
-      header={
-        <Dialog.Header showCloseButton>
-          <Dialog.Title>Link conversation to a task</Dialog.Title>
-        </Dialog.Header>
+      title="Link conversation to a task"
+      description={
+        <>
+          Choose the task <span className="text-foreground">“{conversationTitle}”</span> should
+          appear under. Linking only annotates this device&apos;s registry; the conversation itself
+          stays on its machine.
+        </>
       }
-      footer={
-        <Dialog.Footer>
-          <Button type="button" variant="secondary" onClick={modal.dismiss}>
+      actions={
+        <>
+          <Button type="button" variant="ghost" onClick={modal.dismiss}>
             Cancel
           </Button>
           <Button
@@ -149,18 +154,14 @@ export function LinkConversationModal({
           >
             Link
           </Button>
-        </Dialog.Footer>
+        </>
       }
     >
-      <Dialog.Body className="flex flex-col gap-4">
-        <p className="text-sm text-foreground-muted">
-          Choose the task that <span className="text-foreground">“{conversationTitle}”</span> should
-          appear under. Linking only annotates this device's registry; the conversation itself stays
-          on its machine.
-        </p>
+      <Dialog.Body className="flex flex-col gap-5">
         <div className="flex flex-col gap-1.5">
-          <span className="text-xs font-medium text-foreground-muted">Project</span>
+          <Label htmlFor={projectFieldId}>Project</Label>
           <OptionCombobox
+            id={projectFieldId}
             options={projects.data ?? []}
             value={project}
             onChange={(next) => {
@@ -171,8 +172,9 @@ export function LinkConversationModal({
           />
         </div>
         <div className="flex flex-col gap-1.5">
-          <span className="text-xs font-medium text-foreground-muted">Task</span>
+          <Label htmlFor={taskFieldId}>Task</Label>
           <OptionCombobox
+            id={taskFieldId}
             options={tasks.data ?? []}
             value={task}
             onChange={setTask}

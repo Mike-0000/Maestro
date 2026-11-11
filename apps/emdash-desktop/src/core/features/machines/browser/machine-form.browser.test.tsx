@@ -87,7 +87,7 @@ it('keeps an accessible host name without a visible label and does not open on f
   input.element().focus();
   await expect.element(input).toHaveFocus();
   await expect.element(input).toHaveAttribute('aria-expanded', 'false');
-  const title = page.getByText('Add SSH Connection', { exact: true });
+  const title = page.getByText('Add SSH connection', { exact: true });
   await title.click();
   await expect.element(input).not.toHaveFocus();
   await expect.element(input).toHaveAttribute('aria-expanded', 'false');
@@ -146,7 +146,7 @@ it('offers aliases on click, resolves only on Resolve, and saves an inherited ke
   await expect
     .element(page.getByRole('textbox', { name: 'Private key', exact: true }))
     .toBeEnabled();
-  await page.getByRole('button', { name: 'Test Connection', exact: true }).click();
+  await page.getByRole('button', { name: 'Test connection', exact: true }).click();
   await expect.poll(() => store.testConnection.mock.calls.length).toBe(1);
   await page.getByRole('button', { name: 'Add host', exact: true }).click();
   await expect.poll(() => store.saveConnection.mock.calls.length).toBe(1);
@@ -246,7 +246,7 @@ it('shows resolved settings in the shared form with editable credentials and inh
   } finally {
     copy.mockRestore();
   }
-  await page.getByRole('button', { name: 'Test Connection', exact: true }).click();
+  await page.getByRole('button', { name: 'Test connection', exact: true }).click();
   await expect.poll(() => store.testConnection.mock.calls.length).toBe(1);
   expect(store.testConnection).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -309,7 +309,7 @@ it('keeps independent connection drafts across tabs, sharing only the name', asy
   await expect
     .element(page.getByRole('textbox', { name: 'Private key', exact: true }))
     .toHaveValue('/keys/config');
-  await page.getByRole('button', { name: 'Test Connection', exact: true }).click();
+  await page.getByRole('button', { name: 'Test connection', exact: true }).click();
   await expect.poll(() => store.testConnection.mock.calls.length).toBe(1);
   expect(store.testConnection).toHaveBeenLastCalledWith(
     expect.objectContaining({
@@ -379,7 +379,7 @@ it('keeps a saved manual draft and its validation errors out of SSH config', asy
   await expect
     .element(page.getByRole('textbox', { name: 'Private key', exact: true }))
     .toHaveValue(resolvedHost.identityFile);
-  await page.getByRole('button', { name: 'Test Connection', exact: true }).click();
+  await page.getByRole('button', { name: 'Test connection', exact: true }).click();
   await expect.poll(() => store.testConnection.mock.calls.length).toBe(1);
   await page.getByRole('button', { name: 'Manual', exact: true }).click();
   await expect
@@ -409,7 +409,7 @@ it('does not show a previous tab’s late connection test result', async () => {
   store.testConnection.mockImplementationOnce(() => pendingTest);
   await render();
   await resolveTarget();
-  await page.getByRole('button', { name: 'Test Connection', exact: true }).click();
+  await page.getByRole('button', { name: 'Test connection', exact: true }).click();
   await expect.poll(() => store.testConnection.mock.calls.length).toBe(1);
   await page.getByRole('button', { name: 'Manual', exact: true }).click();
   completeTest({ success: true });
@@ -419,7 +419,7 @@ it('does not show a previous tab’s late connection test result', async () => {
   await page.getByRole('button', { name: 'SSH config', exact: true }).click();
   await expect.element(page.getByText('Connected', { exact: true })).not.toBeInTheDocument();
   await expect
-    .element(page.getByRole('button', { name: 'Test Connection', exact: true }))
+    .element(page.getByRole('button', { name: 'Test connection', exact: true }))
     .toBeEnabled();
 });
 
@@ -427,7 +427,7 @@ it('does not carry a key override or an automatic name into a new modal', async 
   await render();
   await resolveTarget('first.internal');
   await page.getByRole('textbox', { name: 'Private key', exact: true }).fill('/keys/first_ed25519');
-  await page.getByRole('button', { name: 'Test Connection', exact: true }).click();
+  await page.getByRole('button', { name: 'Test connection', exact: true }).click();
   await expect.poll(() => store.testConnection.mock.calls.length).toBe(1);
   flushSync(() => root.render(null));
   await render();
@@ -530,7 +530,7 @@ it('refreshes the resolved preview and submitted settings without changing eithe
   await expect.element(page.getByText('updated.internal', { exact: true })).toBeVisible();
   await expect.element(page.getByText('updated-user', { exact: true })).toBeVisible();
   await expect.element(page.getByText('2223', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Test Connection', exact: true }).click();
+  await page.getByRole('button', { name: 'Test connection', exact: true }).click();
   await expect.poll(() => store.testConnection.mock.calls.length).toBe(1);
   await page.getByRole('button', { name: 'Add host', exact: true }).click();
   await expect.poll(() => store.saveConnection.mock.calls.length).toBe(1);
@@ -567,7 +567,7 @@ it('keeps a successful Test separate from a failed Save and allows retry', async
   store.saveConnection.mockRejectedValueOnce(new Error('Storage unavailable'));
   await render();
   await resolveTarget();
-  await page.getByRole('button', { name: 'Test Connection', exact: true }).click();
+  await page.getByRole('button', { name: 'Test connection', exact: true }).click();
   await expect.element(page.getByText('Connected', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Add host', exact: true }).click();
   await expect
@@ -613,7 +613,7 @@ it('resolves a typed target without suggestions and preserves overrides through 
   await key.fill('C:/Users/alice/.ssh/id_ed25519');
   await queryClient.invalidateQueries({ queryKey: ['ssh-config-host', 'build.internal'] });
   await expect.element(key).toHaveValue('C:/Users/alice/.ssh/id_ed25519');
-  await page.getByRole('button', { name: 'Test Connection', exact: true }).click();
+  await page.getByRole('button', { name: 'Test connection', exact: true }).click();
   await expect.poll(() => store.testConnection.mock.calls.length).toBe(1);
   await page.getByRole('button', { name: 'Add host', exact: true }).click();
   await expect.poll(() => store.saveConnection.mock.calls.length).toBe(1);
@@ -660,7 +660,7 @@ it('tests edits with the saved ID and only offers password retention for the sam
   const password = page.getByLabelText('Password', { exact: true });
   await expect.element(password).toHaveValue('');
   await expect.element(password).toHaveAttribute('placeholder', 'Leave blank to keep existing');
-  await page.getByRole('button', { name: 'Test Connection', exact: true }).click();
+  await page.getByRole('button', { name: 'Test connection', exact: true }).click();
   await expect.poll(() => store.testConnection.mock.calls.length).toBe(1);
   expect(store.testConnection).toHaveBeenLastCalledWith(
     expect.objectContaining({ id: 'saved-password', host: 'work.internal', password: '' })
@@ -671,7 +671,7 @@ it('tests edits with the saved ID and only offers password retention for the sam
   await expect.element(password).toHaveAttribute('aria-invalid', 'true');
   expect(store.saveConnection).not.toHaveBeenCalled();
   await password.fill('new secret');
-  await page.getByRole('button', { name: 'Test Connection', exact: true }).click();
+  await page.getByRole('button', { name: 'Test connection', exact: true }).click();
   await expect.poll(() => store.testConnection.mock.calls.length).toBe(2);
   await page.getByRole('button', { name: 'Save', exact: true }).click();
   await expect.poll(() => store.saveConnection.mock.calls.length).toBe(1);
@@ -786,7 +786,7 @@ it.each(['config', 'manual'] as const)(
       await resolveTarget('config.internal');
     }
     await expect.element(name).toHaveValue('My workstation');
-    await page.getByRole('button', { name: 'Test Connection', exact: true }).click();
+    await page.getByRole('button', { name: 'Test connection', exact: true }).click();
     await expect.poll(() => store.testConnection.mock.calls.length).toBe(1);
     expect(store.testConnection).toHaveBeenCalledWith(
       expect.objectContaining({ name: 'My workstation' })
@@ -831,7 +831,7 @@ it('shows the detected Windows platform and what blocks it', async () => {
   });
   await render();
   await resolveTarget();
-  await page.getByRole('button', { name: 'Test Connection', exact: true }).click();
+  await page.getByRole('button', { name: 'Test connection', exact: true }).click();
   await expect
     .element(
       page.getByText(
@@ -847,7 +847,7 @@ it('reports a platform check failure after a successful connection', async () =>
   store.testConnection.mockResolvedValueOnce({ success: true, platformError: 'probe timed out' });
   await render();
   await resolveTarget();
-  await page.getByRole('button', { name: 'Test Connection', exact: true }).click();
+  await page.getByRole('button', { name: 'Test connection', exact: true }).click();
   await expect
     .element(page.getByText('Could not check the remote platform: probe timed out'))
     .toBeVisible();

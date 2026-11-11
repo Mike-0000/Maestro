@@ -1,4 +1,4 @@
-import { SettingsCard, SettingsSection } from '@emdash/ui/react/patterns';
+import { SettingsSection } from '@emdash/ui/react/patterns';
 import { Button, Collapsible, Field, Input } from '@emdash/ui/react/primitives';
 import { useEffect, useState, type FormEvent } from 'react';
 import type { RemoteAccessStatus } from '@core/features/remote-access/api';
@@ -51,62 +51,56 @@ export function AdvancedCard({ status }: { status: RemoteAccessStatus | undefine
   };
 
   return (
-    <SettingsSection bare>
-      <SettingsCard>
-        <Collapsible.Root>
-          <Collapsible.Trigger>Advanced</Collapsible.Trigger>
-          <Collapsible.Panel>
-            <form className="flex flex-col gap-2 px-2 pt-3 pb-1" onSubmit={(e) => void apply(e)}>
-              <Field.Root invalid={error !== null}>
-                <Field.Label htmlFor={PORT_INPUT_ID}>Port</Field.Label>
-                <Field.Description id={PORT_HINT_ID}>
-                  The local port the listener uses, from {REMOTE_ACCESS_MIN_PORT} to{' '}
-                  {REMOTE_ACCESS_MAX_PORT}. Change it if another program already uses this one.
-                </Field.Description>
-                <div className="flex items-center gap-2">
-                  <Input
-                    id={PORT_INPUT_ID}
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="off"
-                    spellCheck={false}
-                    className="w-28 tabular-nums"
-                    value={text}
-                    disabled={status === undefined || applying}
-                    aria-invalid={error !== null}
-                    aria-describedby={error ? `${PORT_HINT_ID} ${PORT_ERROR_ID}` : PORT_HINT_ID}
-                    onChange={(event) => {
-                      setEditing(true);
-                      setError(null);
-                      setText(event.target.value);
-                    }}
-                    onBlur={() => {
-                      if (unchanged) setEditing(false);
-                    }}
-                  />
-                  <Button
-                    type="submit"
-                    variant="secondary"
-                    size="sm"
-                    disabled={status === undefined || applying || unchanged}
-                  >
-                    Apply
-                  </Button>
-                </div>
-                {error ? (
-                  <p
-                    id={PORT_ERROR_ID}
-                    role="alert"
-                    className="text-sm text-foreground-destructive"
-                  >
-                    {error}
-                  </p>
-                ) : null}
-              </Field.Root>
-            </form>
-          </Collapsible.Panel>
-        </Collapsible.Root>
-      </SettingsCard>
+    <SettingsSection>
+      <Collapsible.Root>
+        <Collapsible.Trigger>Advanced</Collapsible.Trigger>
+        <Collapsible.Panel>
+          <form className="flex flex-col gap-2 pt-4" onSubmit={(e) => void apply(e)}>
+            <Field.Root invalid={error !== null}>
+              <Field.Label htmlFor={PORT_INPUT_ID}>Port</Field.Label>
+              <Field.Description id={PORT_HINT_ID}>
+                The local port the listener uses, from {REMOTE_ACCESS_MIN_PORT} to{' '}
+                {REMOTE_ACCESS_MAX_PORT}. Change it if another program already uses this one.
+              </Field.Description>
+              <div className="flex items-center gap-2">
+                <Input
+                  id={PORT_INPUT_ID}
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="w-28 tabular-nums"
+                  value={text}
+                  disabled={status === undefined || applying}
+                  aria-invalid={error !== null}
+                  aria-describedby={error ? `${PORT_HINT_ID} ${PORT_ERROR_ID}` : PORT_HINT_ID}
+                  onChange={(event) => {
+                    setEditing(true);
+                    setError(null);
+                    setText(event.target.value);
+                  }}
+                  onBlur={() => {
+                    if (unchanged) setEditing(false);
+                  }}
+                />
+                <Button
+                  type="submit"
+                  variant="secondary"
+                  size="sm"
+                  disabled={status === undefined || applying || unchanged}
+                >
+                  Apply
+                </Button>
+              </div>
+              {error ? (
+                <p id={PORT_ERROR_ID} role="alert" className="text-xs text-foreground-error">
+                  {error}
+                </p>
+              ) : null}
+            </Field.Root>
+          </form>
+        </Collapsible.Panel>
+      </Collapsible.Root>
     </SettingsSection>
   );
 }
