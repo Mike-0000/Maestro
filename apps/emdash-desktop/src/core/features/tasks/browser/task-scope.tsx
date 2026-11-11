@@ -318,7 +318,7 @@ const taskScopeImplementation = {
     execute: () => {
       void getTaskManagerStore(params.projectId)
         ?.archiveTask(params.taskId)
-        .catch(() => toast.error('Could not archive task'));
+        .catch(() => toast.error('Could not archive conductor'));
     },
   }),
   'task.convertAutomation': (params) => ({

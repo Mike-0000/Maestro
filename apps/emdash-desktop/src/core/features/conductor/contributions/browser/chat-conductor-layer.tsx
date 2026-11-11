@@ -100,20 +100,25 @@ export const ChatConductorLayer = observer(function ChatConductorLayer({
   const showsConductor = view === 'conductor' && conversationId !== undefined;
   /** The developer is looking at this chat's thread right now. */
   const onScreen = chosen === 'conductor' && kindActive && isActiveTask;
-  const session = conversationId ? manager.peek(conversationId) : undefined;
+  // One conductor per task: every chat tab of the task shows the same thread.
+  const session = conversationId ? manager.peek(taskId) : undefined;
 
-  // A conductor exists once its view was shown; a chat never opened this way costs nothing.
+  // A conductor exists once its view was shown; a task never opened this way costs nothing.
   useEffect(() => {
-    if (chosen === 'conductor' && conversationId) manager.session(conversationId);
-  }, [chosen, conversationId, manager]);
+    if (chosen === 'conductor' && conversationId) manager.session(taskId);
+  }, [chosen, conversationId, manager, taskId]);
 
-  // The thread on screen is what the HUD's typed box, voice commands and dictation address.
+  // The chat tab on screen: the conductor's default chat, and with its Conductor view in front,
+  // what the HUD's typed box and voice commands address (dictation goes to its agent).
+  const tabOnScreen = kindActive && isActiveTask && conversationId !== undefined;
   useEffect(() => {
     manager.showOnScreen(
       screenId,
-      onScreen && conversationId ? { conversationId, focusedPane: isFocusedPane } : null
+      tabOnScreen && conversationId
+        ? { conversationId, taskId, focusedPane: isFocusedPane, conductor: chosen === 'conductor' }
+        : null
     );
-  }, [manager, screenId, onScreen, conversationId, isFocusedPane]);
+  }, [manager, screenId, tabOnScreen, conversationId, taskId, isFocusedPane, chosen]);
   useEffect(() => () => manager.showOnScreen(screenId, null), [manager, screenId]);
 
   // It starts following the chat the first time the developer actually sees the thread.

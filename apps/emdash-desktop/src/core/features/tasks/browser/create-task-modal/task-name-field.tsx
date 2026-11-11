@@ -10,18 +10,18 @@ export function TaskNameField({ state }: TaskNameFieldProps) {
 
   return (
     <Field.Root className="flex flex-col gap-1">
-      <Field.Label>Task name</Field.Label>
+      <Field.Label>Conductor name</Field.Label>
       <Input
         bare
         autoFocus
         value={taskName}
-        placeholder={placeholder || 'Task name...'}
+        placeholder={placeholder || 'Conductor name...'}
         className="px-0 text-lg!"
         onChange={(e) => handleTaskNameChange(e.target.value)}
       />
       {showSlugHint && (
         <p className="text-muted-foreground mt-1 text-xs">
-          Task names only allow letters, numbers, and hyphens.
+          Conductor names only allow letters, numbers, and hyphens.
         </p>
       )}
     </Field.Root>

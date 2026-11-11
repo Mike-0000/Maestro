@@ -53,6 +53,8 @@ export class NotificationService {
   private readonly sinks = new Map<string, NotificationSink>();
   private readonly pendingBatches = new Map<string, PendingBatch>();
   private readonly seenDedupeKeys = new Map<string, string>();
+  /** Notifications a chat's conductor decided on, until their batch is delivered. */
+  private readonly decided = new Set<string>();
   private initializePromise: Promise<void> | undefined;
 
   constructor(private readonly deps: NotificationServiceDeps) {
@@ -132,7 +134,11 @@ export class NotificationService {
     return () => this.disposers.delete(disposer);
   }
 
-  publish(input: PublishNotification): string {
+  /**
+   * `decided`: a chat's conductor decided this notification goes out, so the quiet-completions
+   * policy (which stands for rules and verdicts) does not drop it. Kept in memory only.
+   */
+  publish(input: PublishNotification, options: { decided?: boolean } = {}): string {
     const deduped = input.dedupeKey ? this.seenDedupeKeys.get(input.dedupeKey) : undefined;
     if (deduped) return deduped;
 
@@ -144,6 +150,7 @@ export class NotificationService {
       readAt: null,
     };
     if (input.dedupeKey) this.seenDedupeKeys.set(input.dedupeKey, notification.id);
+    if (options.decided) this.decided.add(notification.id);
 
     const supersededIds: string[] = [];
     this.updateList((draft) => {
@@ -220,8 +227,13 @@ export class NotificationService {
     const notification = batch.items[batch.items.length - 1];
     if (!notification) return;
 
+    const decided = this.decided.has(notification.id);
+    for (const item of batch.items) this.decided.delete(item.id);
     const context = await this.deps.routingContext();
-    const decision = this.routingPolicy(notification, context);
+    const decision = this.routingPolicy(
+      notification,
+      decided ? { ...context, quietCompletions: false } : context
+    );
     const summary = summarize(batch.items);
     const deliveryBatch = { notification, items: batch.items, summary };
 

@@ -70,12 +70,12 @@ export function TaskContextMenu({
           (isPinned ? (
             <ContextMenu.Item onClick={onUnpin}>
               <PinOff className="size-4" />
-              Unpin task
+              Unpin conductor
             </ContextMenu.Item>
           ) : (
             <ContextMenu.Item onClick={onPin}>
               <Pin className="size-4" />
-              Pin task
+              Pin conductor
             </ContextMenu.Item>
           ))}
         <ContextMenu.Item onClick={onRename}>

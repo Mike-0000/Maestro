@@ -28,6 +28,7 @@ import type { TaskService } from '@core/features/tasks/api/node/task-service';
 import { desktopWireContract } from '@core/manifests/shared/desktop-wire-contract';
 import type { AppDb } from '@core/services/app-db/node/db';
 import type { NotificationSink } from '@core/services/notifications/api/ports';
+import { agentStatusService } from '@main/core/agent-status/agent-status-service';
 import { tuiAgentStatusBridge } from '@main/core/agent-status/tui-agent-status-bridge';
 import type { DesktopRuntimeClients } from '@main/gateway/desktop-workers';
 import {
@@ -439,6 +440,7 @@ function remoteControlPorts(
     sessions: {
       describe: (conversationId) => tuiAgentStatusBridge.describe(conversationId),
       onChanged: (listener) => tuiAgentStatusBridge.onChanged(listener),
+      held: (conversationId) => agentStatusService.decisions.isHeld(conversationId),
     },
   };
 }

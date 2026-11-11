@@ -2,14 +2,20 @@ import { chmod, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'no
 import { join } from 'node:path';
 import type Anthropic from '@anthropic-ai/sdk';
 import { redactSecrets, type Logger } from '@emdash/shared/logger';
+import type { z } from 'zod';
 import {
   boundThread,
   chatConductorThreadSchema,
+  conductorTaskThreadSchema,
   type ChatConductorEntry,
   type ChatConductorThread,
+  type ConductorTaskThread,
 } from '../api/chat-conductor/thread';
 
+/** Version 1: one thread per conversation, kept only to be adopted by its task's thread. */
 const THREADS_DIR = 'chat-conductors';
+/** One thread per task. */
+const TASK_THREADS_DIR = 'task-conductors';
 const EXTENSION = '.json';
 /** A thread file larger than this is not read, and a thread that would be is saved without history. */
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
@@ -67,7 +73,9 @@ function redactMessage(message: Message): Message {
 }
 
 /** Secrets (keys, tokens) leave the thread before it is written; paths and addresses stay. */
-function redactThread(thread: ChatConductorThread): ChatConductorThread {
+function redactThread<Thread extends ChatConductorThread | ConductorTaskThread>(
+  thread: Thread
+): Thread {
   return {
     ...thread,
     entries: thread.entries.map(redactEntry),
@@ -79,69 +87,72 @@ function redactThread(thread: ChatConductorThread): ChatConductorThread {
   };
 }
 
+type StoredThread = ChatConductorThread | ConductorTaskThread;
+
 /**
- * The chat conductors' threads on disk: one JSON file per conversation under
- * `<dataDir>/chat-conductors/`. The renderer owns a thread's content and saves the whole of it;
- * this class only keeps it safely: a checked file name, bounded and redacted content, and
- * atomic writes, one at a time per conversation.
+ * Conductor threads on disk: one JSON file per key under a folder of `<dataDir>`. The renderer
+ * owns a thread's content and saves the whole of it; this class only keeps it safely: a checked
+ * file name, bounded and redacted content, and atomic writes, one at a time per key.
  */
-export class ChatConductorThreads {
+class ThreadFiles<Thread extends StoredThread> {
   private readonly dir: string;
-  /** The last write (save or delete) queued per conversation. */
+  /** The last write (save or delete) queued per key. */
   private readonly writes = new Map<string, Promise<void>>();
 
   constructor(
     dataDir: string,
+    folder: string,
+    private readonly schema: z.ZodType<Thread>,
+    private readonly keyOf: (thread: Thread) => string,
     private readonly logger: Logger
   ) {
-    this.dir = join(dataDir, THREADS_DIR);
+    this.dir = join(dataDir, folder);
   }
 
-  private pathFor(conversationId: string): string | null {
-    const name = chatThreadFileName(conversationId);
+  private pathFor(key: string): string | null {
+    const name = chatThreadFileName(key);
     return name ? join(this.dir, name) : null;
   }
 
-  /** Runs after the conversation's earlier writes, whether they succeeded or not. */
-  private enqueue(conversationId: string, work: () => Promise<void>): Promise<void> {
-    const next = (this.writes.get(conversationId) ?? Promise.resolve()).then(work, work);
+  /** Runs after the key's earlier writes, whether they succeeded or not. */
+  private enqueue(key: string, work: () => Promise<void>): Promise<void> {
+    const next = (this.writes.get(key) ?? Promise.resolve()).then(work, work);
     const settled = next.then(
       () => {},
       () => {}
     );
-    this.writes.set(conversationId, settled);
+    this.writes.set(key, settled);
     void settled.then(() => {
-      if (this.writes.get(conversationId) === settled) this.writes.delete(conversationId);
+      if (this.writes.get(key) === settled) this.writes.delete(key);
     });
     return next;
   }
 
-  /** The saved thread, or null when there is none, the id is refused, or the file is unreadable. */
-  async read(conversationId: string): Promise<ChatConductorThread | null> {
-    const path = this.pathFor(conversationId);
+  /** The saved thread, or null when there is none, the key is refused, or the file is unreadable. */
+  async read(key: string): Promise<Thread | null> {
+    const path = this.pathFor(key);
     if (!path) return null;
     try {
       if ((await stat(path)).size > MAX_FILE_BYTES) return null;
-      const parsed = chatConductorThreadSchema.safeParse(JSON.parse(await readFile(path, 'utf8')));
-      if (!parsed.success || parsed.data.conversationId !== conversationId) return null;
+      const parsed = this.schema.safeParse(JSON.parse(await readFile(path, 'utf8')));
+      if (!parsed.success || this.keyOf(parsed.data) !== key) return null;
       return parsed.data;
     } catch {
       return null;
     }
   }
 
-  /** Saves the whole thread. Rejects when the conversation id cannot be a file name. */
-  save(thread: ChatConductorThread): Promise<void> {
-    const path = this.pathFor(thread.conversationId);
-    if (!path) return Promise.reject(new Error('That conversation id cannot name a thread file.'));
-    return this.enqueue(thread.conversationId, async () => {
-      const bounded = redactThread(boundThread(chatConductorThreadSchema.parse(thread)));
+  /** Saves the whole thread. Rejects when its key cannot be a file name. */
+  save(thread: Thread): Promise<void> {
+    const key = this.keyOf(thread);
+    const path = this.pathFor(key);
+    if (!path) return Promise.reject(new Error('That id cannot name a thread file.'));
+    return this.enqueue(key, async () => {
+      const bounded = redactThread(boundThread(this.schema.parse(thread)));
       let text = JSON.stringify(bounded);
       if (Buffer.byteLength(text) > MAX_FILE_BYTES) {
         // What the developer reads and the notes outlive the model history.
-        this.logger.warn('chat conductor: thread too large, saved without model history', {
-          conversationId: thread.conversationId,
-        });
+        this.logger.warn('chat conductor: thread too large, saved without model history', { key });
         text = JSON.stringify({ ...bounded, messages: [] });
       }
       await mkdir(this.dir, { recursive: true, mode: 0o700 });
@@ -152,17 +163,17 @@ export class ChatConductorThreads {
     });
   }
 
-  /** Removes a conversation's thread. Nothing happens for a refused id or a missing file. */
-  delete(conversationId: string): Promise<void> {
-    const path = this.pathFor(conversationId);
+  /** Removes a thread. Nothing happens for a refused key or a missing file. */
+  delete(key: string): Promise<void> {
+    const path = this.pathFor(key);
     if (!path) return Promise.resolve();
-    return this.enqueue(conversationId, async () => {
+    return this.enqueue(key, async () => {
       await rm(path, { force: true });
       await rm(`${path}.tmp`, { force: true });
     });
   }
 
-  /** The ids of the conversations that have a saved thread. */
+  /** The keys that have a saved thread. */
   async list(): Promise<string[]> {
     const names = await readdir(this.dir).catch(() => [] as string[]);
     return names.flatMap((name) => {
@@ -170,5 +181,28 @@ export class ChatConductorThreads {
       const id = name.slice(0, -EXTENSION.length);
       return chatThreadFileName(id) === name ? [id] : [];
     });
+  }
+}
+
+/**
+ * The threads from when each conversation had its own conductor, under
+ * `<dataDir>/chat-conductors/`: read and deleted as their task's thread adopts them.
+ */
+export class ChatConductorThreads extends ThreadFiles<ChatConductorThread> {
+  constructor(dataDir: string, logger: Logger) {
+    super(
+      dataDir,
+      THREADS_DIR,
+      chatConductorThreadSchema,
+      (thread) => thread.conversationId,
+      logger
+    );
+  }
+}
+
+/** One conductor thread per task, under `<dataDir>/task-conductors/`. */
+export class TaskConductorThreads extends ThreadFiles<ConductorTaskThread> {
+  constructor(dataDir: string, logger: Logger) {
+    super(dataDir, TASK_THREADS_DIR, conductorTaskThreadSchema, (thread) => thread.taskId, logger);
   }
 }

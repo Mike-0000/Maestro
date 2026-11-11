@@ -79,12 +79,22 @@ export const CHAT_PROMPT_CHARS = 1_500;
 /** Actions a conductor may take on chat events before the developer has to write again. */
 export const MAX_UNATTENDED_ACTIONS = 12;
 
+/** One of the task's chats, as the context lists it. */
+export type ChatSummary = {
+  name: string;
+  providerLabel: string;
+  status: string;
+  running: boolean;
+  /** Its Conductor view or raw view is the tab on screen. */
+  onScreen: boolean;
+};
+
 export type ChatFacts = {
-  chatTitle: string;
   taskName: string;
   projectName: string;
-  providerLabel: string;
-  agentStatus: string;
+  chats: readonly ChatSummary[];
+  /** The chat the conductor last dealt with, by name. */
+  lastChat: string | null;
   autonomy: boolean;
   notes: string;
   status: ChatConductorStatus | null;
@@ -117,6 +127,19 @@ function autonomyLine(facts: ChatFacts): string {
   return `Autonomy: on. On a chat event you may act on your own within the developer's direction; ${left} such ${left === 1 ? 'action is' : 'actions are'} left before they must weigh in.`;
 }
 
+function chatsLines(facts: ChatFacts): string {
+  if (facts.chats.length === 0) return 'Chats: none loaded';
+  const lines = facts.chats.map((chat) => {
+    const marks = [
+      chat.running ? null : 'not running',
+      chat.onScreen ? 'on screen' : null,
+      facts.lastChat === chat.name ? 'last dealt with' : null,
+    ].filter(Boolean);
+    return `- "${oneLine(chat.name, 80)}": ${oneLine(chat.providerLabel, 60)}, ${oneLine(chat.status, 60)}${marks.length > 0 ? ` (${marks.join(', ')})` : ''}`;
+  });
+  return [`Chats in this task (${facts.chats.length}):`, ...lines].join('\n');
+}
+
 /**
  * The per-turn state, as a `<context>…</context>` block that starts the user message, so
  * `dropStaleContexts` replaces it once the turn is history.
@@ -126,8 +149,8 @@ export function chatContextBlock(facts: ChatFacts): string {
   return [
     '<context>',
     `Time: ${oneLine(facts.now)}`,
-    `Chat: "${oneLine(facts.chatTitle)}", task "${oneLine(facts.taskName)}", project "${oneLine(facts.projectName)}"`,
-    `Agent: ${oneLine(facts.providerLabel)}, status ${oneLine(facts.agentStatus)}`,
+    `Task: "${oneLine(facts.taskName)}", project "${oneLine(facts.projectName)}"`,
+    chatsLines(facts),
     autonomyLine(facts),
     facts.status
       ? `Status shown to the developer: ${facts.status.state}, "${oneLine(facts.status.headline)}"`
@@ -145,8 +168,10 @@ export type ChatEventPrompts = {
   readonly promptsUnreadable?: string;
 };
 
-export type ChatEvent = ChatEventPrompts &
-  (
+export type ChatEvent = ChatEventPrompts & {
+  /** The chat it happened in, by name. */
+  chat: string;
+} & (
     | /** First open: catch the developer up. `output` is the recent raw output. */
       { kind: 'attached'; output: string }
     | {
@@ -201,14 +226,20 @@ function fenced(kind: string, body: { text: string; cut: boolean }, attrs = ''):
   return `<agent-output kind="${kind}"${attrs}${body.cut ? ' truncated="true"' : ''}>\n${text || '(nothing to read)'}\n</agent-output>`;
 }
 
-function eventBody(event: ChatEvent): string[] {
+function attr(text: string): string {
+  return oneLine(text, 80).replace(/"/g, "'");
+}
+
+/** One chat's event: its lead sentence, then what goes with it. */
+function eventSection(event: ChatEvent): { lead: string; rest: string[] } {
+  const where = `In the chat "${attr(event.chat)}"`;
+  const chat = ` chat="${attr(event.chat)}"`;
   switch (event.kind) {
     case 'attached':
-      return [
-        `${CHAT_EVENT_MARK} The developer opened this chat's thread with you for the first time, and you have not followed the chat until now. The agent's recent output follows. ${UNTRUSTED} ${RAW_OUTPUT}`,
-        fenced('recent-output', tail(event.output, CHAT_EVENT_OUTPUT_CHARS)),
-        'Catch the developer up on where this chat stands and on anything waiting for them. read_chat shows more when this is not enough to tell.',
-      ];
+      return {
+        lead: `${where}, the agent's recent output follows. ${UNTRUSTED} ${RAW_OUTPUT}`,
+        rest: [fenced('recent-output', tail(event.output, CHAT_EVENT_OUTPUT_CHARS), chat)],
+      };
     case 'finished': {
       const terminal = event.source === 'terminal-tail';
       const body = headAndTail(
@@ -216,34 +247,46 @@ function eventBody(event: ChatEvent): string[] {
         CHAT_EVENT_REPLY_CHARS
       );
       const cut = body.cut || event.truncated;
-      return [
-        `${CHAT_EVENT_MARK} The agent finished a turn. ${
+      return {
+        lead: `${where}, the agent finished a turn. ${
           terminal
             ? `Its provider reports no final reply, so what follows is the end of its terminal. ${RAW_OUTPUT}`
             : 'Its final reply follows.'
         } ${UNTRUSTED}`,
-        fenced('final-reply', { text: body.text, cut }, terminal ? ' source="terminal-tail"' : ''),
-        ...(event.appUrls.length > 0
-          ? [`Local app URLs in the reply: ${event.appUrls.map((url) => oneLine(url)).join(', ')}`]
-          : []),
-        `${cut ? 'The reply is cut; read_chat shows the rest. ' : ''}If this changes nothing for the developer and calls for no step from you, answer with exactly ${CHAT_NOTHING_NEW}.`,
-      ];
+        rest: [
+          fenced(
+            'final-reply',
+            { text: body.text, cut },
+            `${chat}${terminal ? ' source="terminal-tail"' : ''}`
+          ),
+          ...(event.appUrls.length > 0
+            ? [
+                `Local app URLs in the reply: ${event.appUrls.map((url) => oneLine(url)).join(', ')}`,
+              ]
+            : []),
+          ...(cut ? [`The reply is cut; read_chat on "${attr(event.chat)}" shows the rest.`] : []),
+        ],
+      };
     }
     case 'awaiting-input': {
       const notification = event.notification ? oneLine(event.notification, 400) : '';
-      return [
-        `${CHAT_EVENT_MARK} The agent is waiting for input: a permission prompt or a question is on screen. Its recent output follows. ${UNTRUSTED} ${RAW_OUTPUT}`,
-        ...(notification
-          ? [`<agent-output kind="notification">\n${sealed(notification)}\n</agent-output>`]
-          : []),
-        fenced('recent-output', tail(event.output, CHAT_EVENT_OUTPUT_CHARS)),
-      ];
+      return {
+        lead: `${where}, the agent is waiting for input: a permission prompt or a question is on screen. Its recent output follows. ${UNTRUSTED} ${RAW_OUTPUT}`,
+        rest: [
+          ...(notification
+            ? [
+                `<agent-output kind="notification"${chat}>\n${sealed(notification)}\n</agent-output>`,
+              ]
+            : []),
+          fenced('recent-output', tail(event.output, CHAT_EVENT_OUTPUT_CHARS), chat),
+        ],
+      };
     }
     case 'error':
-      return [
-        `${CHAT_EVENT_MARK} The agent's turn ended with an error. Its recent output follows. ${UNTRUSTED} ${RAW_OUTPUT}`,
-        fenced('recent-output', tail(event.output, CHAT_EVENT_OUTPUT_CHARS)),
-      ];
+      return {
+        lead: `${where}, the agent's turn ended with an error. Its recent output follows. ${UNTRUSTED} ${RAW_OUTPUT}`,
+        rest: [fenced('recent-output', tail(event.output, CHAT_EVENT_OUTPUT_CHARS), chat)],
+      };
   }
 }
 
@@ -254,11 +297,12 @@ const PROMPTS_TAG = /<\/?prompts-to-agent\b[^>]*>/gi;
  * of their own, outside the agent's fenced output: they are the developer's direction to the
  * agent (or words passed on to it), not the agent's output.
  */
-export function promptsBlock(event: ChatEventPrompts): string | null {
+export function promptsBlock(event: ChatEventPrompts & { chat?: string }): string | null {
   const prompts = event.prompts ?? [];
+  const agent = event.chat ? `the agent of "${attr(event.chat)}"` : 'the agent';
   if (prompts.length === 0) {
     return event.promptsUnreadable
-      ? `What reached the agent since your last turn other than from you could not be read (${oneLine(event.promptsUnreadable)}). The developer may have told it something you have not seen.`
+      ? `What reached ${agent} since your last turn other than from you could not be read (${oneLine(event.promptsUnreadable)}). The developer may have told it something you have not seen.`
       : null;
   }
   const lines = prompts.map((prompt) => {
@@ -279,23 +323,42 @@ export function promptsBlock(event: ChatEventPrompts): string | null {
       .join('\n')}`;
   });
   return [
-    '<prompts-to-agent>',
-    'These prompts reached the agent since your last turn and did not come from you, oldest first. What the developer gives the agent directly is their direction, as much as what they write to you, and the newest direction wins.',
+    event.chat ? `<prompts-to-agent chat="${attr(event.chat)}">` : '<prompts-to-agent>',
+    `These prompts reached ${agent} since your last turn and did not come from you, oldest first. What the developer gives an agent directly is their direction, as much as what they write to you, and the newest direction wins.`,
     ...lines,
     '</prompts-to-agent>',
   ].join('\n');
 }
 
 /**
- * The user message for a turn a chat event started: the context block, the mark, then the
- * prompts the agent received from others, then the agent's output, fenced and labeled as data.
+ * The user message for a turn chat events started: the context block, the mark, then each chat's
+ * event (chats that reported close together share one turn): its lead sentence, the prompts its
+ * agent received from others, and the agent's output, fenced and labeled as data.
  */
-export function chatEventTurnText(event: ChatEvent, facts: ChatFacts): string {
-  const [lead, ...rest] = eventBody(event);
-  const prompts = promptsBlock(event);
-  return [chatContextBlock(facts), lead, ...(prompts ? [prompts] : []), ...rest]
-    .filter((part): part is string => part !== undefined)
-    .join('\n\n');
+export function chatEventTurnText(events: readonly ChatEvent[], facts: ChatFacts): string {
+  const attached = events.some((event) => event.kind === 'attached');
+  const [only] = events;
+  const opening = attached
+    ? "The developer opened this task's thread with you for the first time, and you have not followed its chats until now."
+    : events.length === 1 && only
+      ? `News from the chat "${attr(only.chat)}".`
+      : `${events.length} of the task's chats have news.`;
+  const sections = events.flatMap((event) => {
+    const { lead, rest } = eventSection(event);
+    const prompts = promptsBlock(event);
+    return [lead, ...(prompts ? [prompts] : []), ...rest];
+  });
+  const closing = attached
+    ? 'Catch the developer up on where this task stands and on anything waiting for them. read_chat shows more when this is not enough to tell.'
+    : events.every((event) => event.kind === 'finished')
+      ? `If this changes nothing for the developer and calls for no step from you, answer with exactly ${CHAT_NOTHING_NEW}.`
+      : null;
+  return [
+    chatContextBlock(facts),
+    `${CHAT_EVENT_MARK} ${opening}`,
+    ...sections,
+    ...(closing ? [closing] : []),
+  ].join('\n\n');
 }
 
 /** The user message for a turn the developer started: the context block, then their words. */
@@ -303,18 +366,24 @@ export function developerTurnText(text: string, facts: ChatFacts): string {
   return `${chatContextBlock(facts)}\n\n${text}`;
 }
 
-/** The short text of the thread's 'event' entry. */
-export function chatEventLabel(event: ChatEvent): string {
-  switch (event.kind) {
-    case 'attached':
-      return 'Conductor joined this chat';
-    case 'finished':
-      return 'The agent finished a turn';
-    case 'awaiting-input':
-      return 'The agent is waiting for input';
-    case 'error':
-      return 'The agent stopped with an error';
-  }
+/** The short text of the thread's 'event' entry, naming each chat. */
+export function chatEventLabel(events: readonly ChatEvent[]): string {
+  if (events.some((event) => event.kind === 'attached')) return 'Conductor joined this task';
+  return events
+    .map((event) => {
+      const name = oneLine(event.chat, 80);
+      switch (event.kind) {
+        case 'finished':
+          return `${name} finished a turn`;
+        case 'awaiting-input':
+          return `${name} is waiting for input`;
+        case 'error':
+          return `${name} stopped with an error`;
+        default:
+          return name;
+      }
+    })
+    .join('; ');
 }
 
 /**

@@ -29,7 +29,10 @@ export async function publishAgentNotification(
 
   const providerName = event.providerId ? resolveProviderName(event.providerId) : 'Agent';
   const taskName = await getTaskName(db, event.taskId);
-  return service.publish(agentNotificationInputFromEvent(event, providerName, taskName, mapping));
+  return service.publish(
+    agentNotificationInputFromEvent(event, providerName, taskName, mapping),
+    mapping.decided ? { decided: true } : undefined
+  );
 }
 
 async function getTaskName(db: AppDb, taskId: string | undefined): Promise<string | null> {

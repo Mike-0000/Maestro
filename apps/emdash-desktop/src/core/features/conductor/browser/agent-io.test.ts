@@ -7,7 +7,10 @@ import {
   resetDeveloperTyping,
 } from '@core/features/terminals/api/browser/pty/developer-typing';
 import {
+  codexComposerHolds,
+  codexIngestBudgetMs,
   CodexNotStartedError,
+  codexShowsMenu,
   DeliveryLeftUnsentError,
   sendToAgent,
   sendToLiveSession,
@@ -84,6 +87,64 @@ beforeEach(() => {
 
 const enters = () => mocks.sendInput.mock.calls.filter(([input]) => input.data === '\r').length;
 
+function recordDeliveries(): DeliveryEvent[] & { stop: () => void } {
+  const events: DeliveryEvent[] = [];
+  return Object.assign(events, { stop: onAgentDelivery((event) => events.push(event)) });
+}
+
+function submitEvent(events: DeliveryEvent[]) {
+  const event = events.find((candidate) => candidate.type === 'submit');
+  return event?.type === 'submit' ? event : undefined;
+}
+
+/**
+ * A Codex screen that behaves as measured on Windows: a paste shows in the composer only once
+ * Codex has read it (`readMs` after it was typed), and an Enter before then is swallowed, as are
+ * the first `swallowEnters` after it. A taken Enter empties the composer and shows the working
+ * status. `menu` puts up a selection popup.
+ */
+function fakeCodex(options: { readMs: number; swallowEnters?: number; workingBefore?: boolean }) {
+  const state = {
+    menu: false,
+    working: options.workingBefore ?? false,
+    composer: null as string | null,
+    pastedAt: 0,
+    swallow: options.swallowEnters ?? 0,
+  };
+  mocks.sendInput.mockImplementation(async ({ data }: { data: string }) => {
+    if (data !== '\r') {
+      state.composer = data.replace('\x1b[200~', '').replace('\x1b[201~', '');
+      state.pastedAt = Date.now();
+    } else if (state.composer !== null && Date.now() - state.pastedAt >= options.readMs) {
+      if (state.swallow > 0) state.swallow -= 1;
+      else {
+        state.composer = null;
+        state.working = true;
+      }
+    }
+    return ok;
+  });
+  mocks.readTerminalTail.mockImplementation(() => {
+    if (state.menu)
+      return ['  Approaching rate limits', '› 1. Switch model', '  enter select · esc back'];
+    const text = Date.now() - state.pastedAt >= options.readMs ? state.composer : null;
+    const composer =
+      text === null
+        ? ['› Ask Codex to do anything']
+        : text.length > 1_000
+          ? [`› [Pasted Content ${text.length} chars]`]
+          : text.split('\n').map((line, index) => `${index ? '  ' : '› '}${line}`);
+    return [
+      '› an earlier message',
+      'history',
+      ...(state.working ? ['• Working (3s • esc to interrupt)'] : []),
+      ...composer,
+      '  GPT-6 · ~/repo',
+    ];
+  });
+  return state;
+}
+
 describe('sendToLiveSession', () => {
   it('pastes and submits when the host still has the session', async () => {
     await expect(sendToLiveSession(entry(), 'hello')).resolves.toBe(true);
@@ -93,20 +154,41 @@ describe('sendToLiveSession', () => {
     expect(mocks.sendInput.mock.calls[1]?.[0]).toEqual({ conversationId: 'conv-1', data: '\r' });
   });
 
-  it('presses Enter again when Codex read the first one as part of the paste', async () => {
+  it('presses Enter for Codex only once it has read the paste, and reports the start', async () => {
+    const events = recordDeliveries();
     vi.useFakeTimers();
     try {
+      fakeCodex({ readMs: 1_000 });
       const sent = sendToLiveSession(entry({ providerId: 'codex' }), 'hello');
-      await vi.advanceTimersByTimeAsync(150);
+      // The old fixed 500 ms pause would have pressed Enter into the paste here.
+      await vi.advanceTimersByTimeAsync(1_100);
       expect(enters()).toBe(0);
-
       await vi.advanceTimersByTimeAsync(400);
       expect(enters()).toBe(1);
-
-      mocks.readTerminalTail.mockReturnValue(['• Working (0s • esc to interrupt)']);
-      await vi.advanceTimersByTimeAsync(1_500);
+      await vi.advanceTimersByTimeAsync(200);
+      await expect(sent).resolves.toBe(true);
       expect(enters()).toBe(1);
-      await vi.advanceTimersByTimeAsync(0);
+      expect(submitEvent(events)).toMatchObject({
+        providerId: 'codex',
+        detail: { attempts: 1, outcome: 'working', startedOn: 1, chars: 5, workingBefore: false },
+      });
+      expect(submitEvent(events)?.detail.landedMs).toBeGreaterThanOrEqual(1_000);
+    } finally {
+      vi.useRealTimers();
+      events.stop();
+    }
+  });
+
+  it('waits as long as a long multi-line paste takes Codex to read, then submits once', async () => {
+    vi.useFakeTimers();
+    try {
+      // About what 6,000 characters took on Windows (Nov 10), shown as a pasted-content placeholder.
+      fakeCodex({ readMs: 3_400 });
+      const text = `[From the developer's chat conductor, about a test]\n${'Padding line.\n'.repeat(430)}Reply ok.`;
+      const sent = sendToLiveSession(entry({ providerId: 'codex' }), text);
+      await vi.advanceTimersByTimeAsync(3_300);
+      expect(enters()).toBe(0);
+      await vi.advanceTimersByTimeAsync(1_000);
       await expect(sent).resolves.toBe(true);
       expect(enters()).toBe(1);
     } finally {
@@ -114,69 +196,83 @@ describe('sendToLiveSession', () => {
     }
   });
 
-  it('retries Enter for Codex at most three times, then says the turn never started', async () => {
-    const events: DeliveryEvent[] = [];
-    const stop = onAgentDelivery((event) => events.push(event));
+  it('presses Enter again when the composer still holds the message', async () => {
+    const events = recordDeliveries();
     vi.useFakeTimers();
     try {
+      fakeCodex({ readMs: 200, swallowEnters: 1 });
+      const sent = sendToLiveSession(entry({ providerId: 'codex' }), 'hello');
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(sent).resolves.toBe(true);
+      expect(enters()).toBe(2);
+      expect(submitEvent(events)).toMatchObject({
+        detail: { attempts: 2, outcome: 'working', startedOn: 2 },
+      });
+    } finally {
+      vi.useRealTimers();
+      events.stop();
+    }
+  });
+
+  it('does not take a turn that was already running as the start of this one', async () => {
+    const events = recordDeliveries();
+    vi.useFakeTimers();
+    try {
+      // Codex is mid-turn and swallows every Enter: its status line is stale evidence.
+      fakeCodex({ readMs: 200, workingBefore: true, swallowEnters: 99 });
+      const sent = sendToLiveSession(entry({ providerId: 'codex' }), 'and then the tests');
+      const failed = expect(sent).rejects.toBeInstanceOf(CodexNotStartedError);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await failed;
+      expect(enters()).toBe(3);
+      expect(submitEvent(events)).toMatchObject({
+        detail: { attempts: 3, outcome: 'not-started', workingBefore: true },
+      });
+    } finally {
+      vi.useRealTimers();
+      events.stop();
+    }
+  });
+
+  it('counts the composer emptying as taken while an earlier turn runs', async () => {
+    const events = recordDeliveries();
+    vi.useFakeTimers();
+    try {
+      fakeCodex({ readMs: 200, workingBefore: true });
+      const sent = sendToLiveSession(entry({ providerId: 'codex' }), 'and then the tests');
+      await vi.advanceTimersByTimeAsync(2_000);
+      await expect(sent).resolves.toBe(true);
+      expect(enters()).toBe(1);
+      expect(submitEvent(events)).toMatchObject({ detail: { attempts: 1, outcome: 'sent' } });
+    } finally {
+      vi.useRealTimers();
+      events.stop();
+    }
+  });
+
+  it('retries Enter at most three times when nothing shows, then says the turn never started', async () => {
+    const events = recordDeliveries();
+    vi.useFakeTimers();
+    try {
+      // A readable screen with no composer Codex can be recognized by: Enter goes after the
+      // whole reading budget, never sooner.
       const sent = sendToLiveSession(entry({ providerId: 'codex' }), 'hello');
       const failed = expect(sent).rejects.toBeInstanceOf(CodexNotStartedError);
-      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(1_900);
+      expect(enters()).toBe(0);
+      await vi.advanceTimersByTimeAsync(15_000);
       await failed;
       await expect(sent).rejects.toThrow(
         "Pasted into echo task, but Codex didn't start; press Enter in its window."
       );
       expect(enters()).toBe(3);
-      expect(events.find((event) => event.type === 'submit')).toMatchObject({
+      expect(submitEvent(events)).toMatchObject({
         providerId: 'codex',
-        detail: { attempts: 3, outcome: 'not-started', startedOn: null },
+        detail: { attempts: 3, outcome: 'not-started', startedOn: null, landedMs: null },
       });
     } finally {
       vi.useRealTimers();
-      stop();
-    }
-  });
-
-  it('reports the attempt that started the turn when the first Enter was only a newline', async () => {
-    const events: DeliveryEvent[] = [];
-    const stop = onAgentDelivery((event) => events.push(event));
-    vi.useFakeTimers();
-    try {
-      const sent = sendToLiveSession(entry({ providerId: 'codex' }), 'hello');
-      await vi.advanceTimersByTimeAsync(2_100);
-      expect(enters()).toBe(2);
-      mocks.readTerminalTail.mockReturnValue(['• Working (0s • esc to interrupt)']);
-      await vi.advanceTimersByTimeAsync(5_000);
-      await expect(sent).resolves.toBe(true);
-      expect(enters()).toBe(2);
-      expect(events.find((event) => event.type === 'submit')).toMatchObject({
-        detail: { attempts: 2, outcome: 'working', startedOn: 2 },
-      });
-    } finally {
-      vi.useRealTimers();
-      stop();
-    }
-  });
-
-  it('sees the working line as soon as it shows, and reports the attempt', async () => {
-    const events: DeliveryEvent[] = [];
-    const stop = onAgentDelivery((event) => events.push(event));
-    vi.useFakeTimers();
-    try {
-      const sent = sendToLiveSession(entry({ providerId: 'codex' }), 'hello');
-      await vi.advanceTimersByTimeAsync(550);
-      expect(enters()).toBe(1);
-      mocks.readTerminalTail.mockReturnValue(['› hello', '', '• Working (0s • esc to interrupt)']);
-      // Read within a poll, not after the whole check window.
-      await vi.advanceTimersByTimeAsync(200);
-      await expect(sent).resolves.toBe(true);
-      expect(enters()).toBe(1);
-      expect(events.find((event) => event.type === 'submit')).toMatchObject({
-        detail: { attempts: 1, outcome: 'working', startedOn: 1 },
-      });
-    } finally {
-      vi.useRealTimers();
-      stop();
+      events.stop();
     }
   });
 
@@ -185,15 +281,20 @@ describe('sendToLiveSession', () => {
     try {
       // Fresh Codex draws inline from the top; the rows under its composer are blank (and the
       // tail reader drops them), so the status line is far from the screen's last row.
-      const drawn = [
-        '╭ OpenAI Codex ╮',
-        ...Array(20).fill('history'),
-        '• Working (1s • esc to interrupt)',
-        '› ',
-        '  ⏎ send',
-      ];
+      let typed = false;
+      mocks.sendInput.mockImplementation(async ({ data }: { data: string }) => {
+        if (data === '\r') typed = true;
+        return ok;
+      });
       mocks.readTerminalTail.mockImplementation(((_terminal: unknown, rows: number) =>
-        rows >= 40 ? drawn : []) as never);
+        rows >= 40
+          ? [
+              '╭ OpenAI Codex ╮',
+              ...Array(20).fill('history'),
+              ...(typed ? ['• Working (1s • esc to interrupt)', '› '] : ['› hello']),
+              '  ⏎ send',
+            ]
+          : []) as never);
       const sent = sendToLiveSession(entry({ providerId: 'codex' }), 'hello');
       await vi.advanceTimersByTimeAsync(5_000);
       await expect(sent).resolves.toBe(true);
@@ -204,13 +305,37 @@ describe('sendToLiveSession', () => {
   });
 
   it('stops pressing Enter once Codex raised a permission prompt', async () => {
+    const events = recordDeliveries();
     vi.useFakeTimers();
     try {
+      fakeCodex({ readMs: 200, swallowEnters: 99 });
       const sent = sendToLiveSession(entry({ providerId: 'codex' }), 'run the tests');
-      await vi.advanceTimersByTimeAsync(550);
+      await vi.advanceTimersByTimeAsync(450);
       expect(enters()).toBe(1);
       hookStatus('awaiting-input', 'permission_prompt');
       await vi.advanceTimersByTimeAsync(5_000);
+      await expect(sent).resolves.toBe(true);
+      expect(enters()).toBe(1);
+      expect(submitEvent(events)).toMatchObject({ detail: { outcome: 'prompt' } });
+    } finally {
+      vi.useRealTimers();
+      events.stop();
+    }
+  });
+
+  it('holds a message while Codex shows a popup, and sends it once the popup is gone', async () => {
+    vi.useFakeTimers();
+    try {
+      const codex = fakeCodex({ readMs: 200 });
+      codex.menu = true;
+      const onHold = vi.fn();
+      const sent = sendToLiveSession(entry({ providerId: 'codex' }), 'hello', true, { onHold });
+      await vi.advanceTimersByTimeAsync(5_000);
+      // Pasted keys would move its selection, and Enter would pick an option.
+      expect(mocks.sendInput).not.toHaveBeenCalled();
+      expect(onHold).toHaveBeenCalledWith(expect.objectContaining({ reason: 'prompt' }));
+      codex.menu = false;
+      await vi.advanceTimersByTimeAsync(2_000);
       await expect(sent).resolves.toBe(true);
       expect(enters()).toBe(1);
     } finally {
@@ -218,9 +343,29 @@ describe('sendToLiveSession', () => {
     }
   });
 
-  it('never presses Enter again once the developer typed in Codex after the paste', async () => {
+  it('never presses Enter into a popup that came up after the paste', async () => {
+    const events = recordDeliveries();
     vi.useFakeTimers();
     try {
+      const codex = fakeCodex({ readMs: 1_000 });
+      const sent = sendToLiveSession(entry({ providerId: 'codex' }), 'hello');
+      const failed = expect(sent).rejects.toBeInstanceOf(CodexNotStartedError);
+      await vi.advanceTimersByTimeAsync(300);
+      codex.menu = true;
+      await vi.advanceTimersByTimeAsync(5_000);
+      await failed;
+      expect(enters()).toBe(0);
+      expect(submitEvent(events)).toMatchObject({ detail: { attempts: 0, outcome: 'menu' } });
+    } finally {
+      vi.useRealTimers();
+      events.stop();
+    }
+  });
+
+  it('never presses Enter once the developer typed in Codex after the paste', async () => {
+    vi.useFakeTimers();
+    try {
+      fakeCodex({ readMs: 1_000 });
       const sent = sendToLiveSession(entry({ providerId: 'codex' }), 'hello');
       const failed = expect(sent).rejects.toBeInstanceOf(DeliveryLeftUnsentError);
       await vi.advanceTimersByTimeAsync(600);
@@ -231,22 +376,28 @@ describe('sendToLiveSession', () => {
       await expect(sent).rejects.toThrow(
         "Left in echo task's input because you were typing there; press Enter when ready."
       );
-      expect(enters()).toBe(1);
+      expect(enters()).toBe(0);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('presses Enter once for Codex when its screen cannot be read', async () => {
+  it('with no screen to read, presses Enter once after a pause scaled to the paste', async () => {
+    const events = recordDeliveries();
     mocks.registryGet.mockReturnValue(undefined);
     vi.useFakeTimers();
     try {
-      const sent = sendToLiveSession(entry({ providerId: 'codex' }), 'hello');
+      const text = 'x'.repeat(2_000);
+      const sent = sendToLiveSession(entry({ providerId: 'codex' }), text);
+      await vi.advanceTimersByTimeAsync(2_400);
+      expect(enters()).toBe(0);
       await vi.advanceTimersByTimeAsync(10_000);
       await expect(sent).resolves.toBe(true);
       expect(enters()).toBe(1);
+      expect(submitEvent(events)).toMatchObject({ detail: { outcome: 'unverified' } });
     } finally {
       vi.useRealTimers();
+      events.stop();
     }
   });
 
@@ -459,6 +610,7 @@ describe('holding a message while the developer types in that terminal', () => {
 
   it('does not let a queued message answer a prompt the message before it raised', async () => {
     const codex = running({ providerId: 'codex' });
+    fakeCodex({ readMs: 200 });
     const onSecond = vi.fn();
     const first = sendToAgent(codex, 'run the migration');
     const second = sendToAgent(codex, 'and then the tests', true, { onHold: onSecond });
@@ -475,8 +627,7 @@ describe('holding a message while the developer types in that terminal', () => {
     expect(onSecond).toHaveBeenCalledWith(expect.objectContaining({ reason: 'prompt' }));
 
     hookStatus('working'); // the developer answered it
-    mocks.readTerminalTail.mockReturnValue(['• Working (3s • esc to interrupt)']);
-    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(3_000);
     await expect(second).resolves.toBeUndefined();
     expect(pastes()).toHaveLength(2);
   });
@@ -523,9 +674,10 @@ describe('holding a message while the developer types in that terminal', () => {
 
   it('holds the next message after Codex did not start, until it shows it took the first', async () => {
     const codex = running({ providerId: 'codex' });
+    fakeCodex({ readMs: 200, swallowEnters: 3 });
     const first = sendToAgent(codex, 'first');
     const failed = expect(first).rejects.toBeInstanceOf(CodexNotStartedError);
-    await vi.advanceTimersByTimeAsync(6_000);
+    await vi.advanceTimersByTimeAsync(10_000);
     await failed;
 
     const onHold = vi.fn();
@@ -535,27 +687,26 @@ describe('holding a message while the developer types in that terminal', () => {
     expect(pastes()).toHaveLength(1);
 
     // Detection was wrong: Codex ran the turn after all, and its Stop hook reports it.
-    mocks.readTerminalTail.mockReturnValue(['• Working (0s • esc to interrupt)']);
     hookStatus('working');
     hookStatus('completed');
-    await vi.advanceTimersByTimeAsync(2_000);
+    await vi.advanceTimersByTimeAsync(3_000);
     await expect(second).resolves.toBeUndefined();
     expect(pastes()).toHaveLength(2);
   });
 
   it('sends the next message once the developer presses Enter on the one Codex left', async () => {
     const codex = running({ providerId: 'codex' });
+    fakeCodex({ readMs: 200, swallowEnters: 3 });
     const first = sendToAgent(codex, 'first');
     const failed = expect(first).rejects.toBeInstanceOf(CodexNotStartedError);
-    await vi.advanceTimersByTimeAsync(6_000);
+    await vi.advanceTimersByTimeAsync(10_000);
     await failed;
 
     const second = sendToAgent(codex, 'second');
     await vi.advanceTimersByTimeAsync(30_000);
     expect(pastes()).toHaveLength(1);
     noteDeveloperInput(SESSION, '\r');
-    mocks.readTerminalTail.mockReturnValue(['• Working (0s • esc to interrupt)']);
-    await vi.advanceTimersByTimeAsync(4_000);
+    await vi.advanceTimersByTimeAsync(6_000);
     await expect(second).resolves.toBeUndefined();
     expect(pastes()).toHaveLength(2);
   });
@@ -606,5 +757,58 @@ describe("dictation, recorded as the developer's prompt once it is submitted", (
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("reading Codex's screen", () => {
+  const message =
+    "[From the developer's chat conductor, about a test]\nReply with only the word ok.";
+
+  it('finds a multi-line message in the composer, wrapped and indented', () => {
+    const screen = [
+      '› an earlier message',
+      "› [From the developer's chat conductor, about",
+      '  a test]',
+      '  Reply with only the word',
+      '  ok.',
+      '  GPT-6 · ~/repo',
+    ];
+    expect(codexComposerHolds(screen, message)).toBe(true);
+  });
+
+  it('finds a long paste by its placeholder', () => {
+    expect(codexComposerHolds(['› [Pasted Content 1541 chars]', '  GPT-6'], message)).toBe(true);
+  });
+
+  it('does not take the submitted message echoed above the composer for one still in it', () => {
+    const screen = [
+      "› [From the developer's chat conductor, about a test]",
+      '  Reply with only the word ok.',
+      '• Working (0s • esc to interrupt)',
+      '› Ask Codex to do anything',
+      '  ? for shortcuts',
+    ];
+    expect(codexComposerHolds(screen, message)).toBe(false);
+  });
+
+  it('cannot tell without a composer', () => {
+    expect(codexComposerHolds(['loading'], message)).toBeNull();
+  });
+
+  it("recognizes Codex's popups by their key hint, not by words in the history", () => {
+    expect(codexShowsMenu(['  2. Keep current model', '  enter select · esc back'])).toBe(true);
+    expect(
+      codexShowsMenu(['› 1. Trust and continue', '  2. Quit', '  enter continue · esc quit'])
+    ).toBe(true);
+    expect(
+      codexShowsMenu(['press enter to continue the migration', 'more', '› ', '  ? for shortcuts'])
+    ).toBe(false);
+  });
+
+  it('gives a long paste more time to be read than it took on Windows', () => {
+    // Measured Nov 10: 1,541 chars in 0.97 s, 11,972 in 7.4 s.
+    expect(codexIngestBudgetMs(1_541)).toBeGreaterThan(2 * 970);
+    expect(codexIngestBudgetMs(11_972)).toBeGreaterThan(2 * 7_400);
+    expect(codexIngestBudgetMs(1_000_000)).toBe(60_000);
   });
 });

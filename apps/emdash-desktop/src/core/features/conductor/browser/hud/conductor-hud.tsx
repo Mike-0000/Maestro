@@ -38,6 +38,7 @@ import { AudioDeviceMenu } from './audio-device-menu';
 import { CallCard } from './call-card';
 import { ConductorLogPanel } from './conductor-log-panel';
 import { DictationPanel } from './dictation-panel';
+import { useHudFootprint } from './hud-clearance';
 import { useHudLayoutReserve } from './hud-reserve';
 import { InvestigationCard } from './investigation-card';
 import { LocalUpdateCard } from './local-update-card';
@@ -110,6 +111,9 @@ export const ConductorHud = observer(function ConductorHud() {
     dictation.sentTo !== null ||
     showLog;
   useHudLayoutReserve(rootRef, rowRef, expanded);
+  // Views with controls at their bottom edge (a chat's Conductor composer) stay clear of the
+  // cards and panels raised here, which the reserve above deliberately does not follow.
+  useHudFootprint(rootRef);
 
   return (
     <div
@@ -128,9 +132,13 @@ export const ConductorHud = observer(function ConductorHud() {
         {/* The resting bar: its height (with the collapsed padding) is the layout's reserve. */}
         <div ref={rowRef} className="flex items-center gap-2">
           <CommandBox toMaestro={typeToMaestro} disarmMaestro={() => setTypeToMaestro(false)} />
+          {/* Left to right: Maestro (always Maestro), the conductor in front, dictation. */}
+          <MaestroButton
+            armed={typeToMaestro}
+            onTypeToMaestro={() => setTypeToMaestro((armed) => !armed)}
+          />
           <MicButton />
           <DictationButton />
-          <MaestroButton onTypeToMaestro={() => setTypeToMaestro((armed) => !armed)} />
           <LineIndicator />
           <div role="status" aria-live="polite" className="min-w-0 flex-1 overflow-hidden text-sm">
             <StatusLine />
@@ -292,8 +300,11 @@ const MAESTRO_HOLD_MS = 250;
  * Maestro (release to send), click it to type the next message to Maestro.
  */
 const MaestroButton = observer(function MaestroButton({
+  armed,
   onTypeToMaestro,
 }: {
+  /** The typed box is waiting for a message to Maestro. */
+  armed: boolean;
   onTypeToMaestro: () => void;
 }) {
   const voice = getVoiceStore();
@@ -329,7 +340,7 @@ const MaestroButton = observer(function MaestroButton({
     <button
       type="button"
       aria-label="Talk to Maestro"
-      aria-pressed={listening}
+      aria-pressed={listening || armed}
       title="Talk to Maestro, whatever chat is in front. Hold to speak and release to send; click to type your next message to Maestro."
       onPointerDown={(event) => {
         if (event.button !== 0) return;
@@ -348,11 +359,15 @@ const MaestroButton = observer(function MaestroButton({
         // Pointer presses are handled above; this is Enter or Space on the focused button.
         if (event.detail === 0) onTypeToMaestro();
       }}
+      // The hairline ring sets it apart from the two microphones beside it: its target never
+      // changes with what is in front. The ring firms up while the typed box is armed for it.
       className={cn(
         'relative flex size-9 shrink-0 items-center justify-center rounded-full transition-colors',
         listening
           ? 'bg-red-500 text-white'
-          : 'bg-background-secondary text-foreground hover:bg-background-tertiary'
+          : armed
+            ? 'bg-background-tertiary text-foreground ring-1 ring-foreground/60 ring-inset'
+            : 'bg-background-secondary text-foreground ring-1 ring-foreground/15 ring-inset hover:bg-background-tertiary'
       )}
     >
       {listening && (
@@ -457,20 +472,25 @@ const StatusLine = observer(function StatusLine() {
       : front
         ? 'Maestro'
         : null;
+    const line =
+      voice.intent === 'dictation'
+        ? // Into the agent in front, even with its chat's Conductor view on screen.
+          `Dictating into ${conductor.dictationTarget() ?? 'the focused agent'}…`
+        : voice.origin === 'hands-free'
+          ? 'Listening (hands-free)…'
+          : voice.mode === 'hold'
+            ? `Listening${heardBy ? ` for ${heardBy}` : ''}… release to send`
+            : `Listening${heardBy ? ` for ${heardBy}` : ''}… click Send when you are done`;
     return (
       <span className="flex items-center gap-2 text-foreground">
         <LevelMeter level={voice.level} />
         {voice.partial ? (
           <span className="min-w-0 truncate italic">{voice.partial}</span>
-        ) : voice.intent === 'dictation' ? (
-          // Into the agent in front, even with its chat's Conductor view on screen.
-          `Dictating into ${conductor.dictationTarget() ?? 'the focused agent'}…`
-        ) : voice.origin === 'hands-free' ? (
-          'Listening (hands-free)…'
-        ) : voice.mode === 'hold' ? (
-          `Listening${heardBy ? ` for ${heardBy}` : ''}… release to send`
         ) : (
-          `Listening${heardBy ? ` for ${heardBy}` : ''}… click Send when you are done`
+          // One line, whoever it is for: a long name shortens the tail, never grows the bar.
+          <span className="min-w-0 truncate" title={line}>
+            {line}
+          </span>
         )}
       </span>
     );
@@ -489,22 +509,32 @@ const StatusLine = observer(function StatusLine() {
   if (conductor.busy) {
     return (
       <span className="flex items-center gap-2 text-foreground-muted">
-        <Loader2 className="size-3.5 animate-spin" />
-        {conductor.activity || 'Working…'}
+        <Loader2 className="size-3.5 shrink-0 animate-spin" />
+        <span className="min-w-0 truncate">{conductor.activity || 'Working…'}</span>
       </span>
     );
   }
+  // One fixed-height line. The hint comes first and shortens with an ellipsis only when the bar
+  // itself is narrow; the readouts after it wrap onto a line that is cut off, so each shows whole
+  // or not at all. The hint's wording does not change with who is in front: the typed box names
+  // them, and the tooltip and screen readers get the full sentence.
   return (
-    <span className="px-1 text-xs whitespace-nowrap text-foreground-muted">
+    <span className="flex h-6 flex-wrap items-center gap-x-2 overflow-hidden px-1 text-xs/6 whitespace-nowrap text-foreground-muted">
       {voice.settings?.handsFree ? (
-        <>Hands-free: say “{capitalize(voice.settings.wakePhrase || 'Maestro')}, …”</>
+        <span className="max-w-full min-w-0 truncate">
+          Hands-free: say “{capitalize(voice.settings.wakePhrase || 'Maestro')}, …”
+        </span>
       ) : (
-        <>
-          Hold <Key>Right Ctrl</Key> to talk{talkTo ? ` to ${talkTo}` : ''}
-        </>
+        <span
+          className="max-w-full min-w-0 truncate"
+          title={`Hold Right Ctrl to talk${talkTo ? ` to ${talkTo}` : ''}`}
+        >
+          Hold <Key>Right Ctrl</Key> to talk
+          {talkTo && <span className="sr-only"> to {talkTo}</span>}
+        </span>
       )}
       {voice.lastLatencyMs !== null && (
-        <span className="ml-2 tabular-nums opacity-70">STT {voice.lastLatencyMs} ms</span>
+        <span className="shrink-0 tabular-nums opacity-70">STT {voice.lastLatencyMs} ms</span>
       )}
       <UsageReadout />
     </span>
@@ -846,7 +876,10 @@ const UsageReadout = observer(function UsageReadout() {
   const share = budget > 0 ? used / budget : 0;
   return (
     <span
-      className={cn('ml-2 tabular-nums opacity-70', share > 0.8 && 'text-amber-600 opacity-100')}
+      className={cn(
+        'shrink-0 tabular-nums opacity-70',
+        share > 0.8 && 'text-amber-600 opacity-100'
+      )}
       title={
         budget > 0
           ? `${used.toLocaleString()} of ${budget.toLocaleString()} tokens today`

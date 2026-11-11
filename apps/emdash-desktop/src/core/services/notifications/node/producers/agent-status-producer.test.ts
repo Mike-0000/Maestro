@@ -98,4 +98,42 @@ describe('agent status notification producer', () => {
       notificationMapping(event({ payload: { notificationType: 'auth_success' } }))
     ).toBeNull();
   });
+
+  describe('decided by the chat conductor', () => {
+    const decided = (state: 'needs_you' | 'done' | 'quiet', notify: boolean, detail?: string) =>
+      event({
+        type: state === 'needs_you' ? 'notification' : 'stop',
+        payload: {
+          notificationType: 'idle_prompt',
+          lastAssistantMessage: 'Implemented the parser and the tests pass.',
+          conductor: {
+            state,
+            ...(state === 'quiet' ? {} : { headline: 'Pick SQLite or Postgres' }),
+            ...(detail ? { detail } : {}),
+            notify,
+          },
+        },
+      });
+
+    it('says what the conductor wrote, and is not quieted by routing', () => {
+      expect(notificationMapping(decided('needs_you', true, 'It asks which database.'))).toEqual({
+        kind: 'agent-attention',
+        body: 'Pick SQLite or Postgres \u2014 It asks which database.',
+        sound: 'needs_attention',
+        decided: true,
+      });
+      expect(notificationMapping(decided('done', true))).toEqual({
+        kind: 'agent-complete',
+        body: 'Pick SQLite or Postgres',
+        sound: 'task_complete',
+        decided: true,
+      });
+    });
+
+    it('sends nothing the conductor did not decide to send', () => {
+      expect(notificationMapping(decided('needs_you', false))).toBeNull();
+      expect(notificationMapping(decided('done', false))).toBeNull();
+      expect(notificationMapping(decided('quiet', false))).toBeNull();
+    });
+  });
 });

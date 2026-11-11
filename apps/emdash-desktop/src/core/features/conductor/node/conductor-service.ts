@@ -435,6 +435,21 @@ export class ConductorService {
   }
 
   /**
+   * True when chat conductors may decide needs-you and done: both settings are on, the model has
+   * a key, and today's budget has room. Main checks it on every event it would hold.
+   */
+  async decisionsEnabled(): Promise<boolean> {
+    const settings = await this.settings.read();
+    if (!settings.chatConductors || !settings.conductorDecidesAttention) return false;
+    if ((await this.credentials.get(await this.providerCredential())) === null) return false;
+    const usage = await this.usageToday();
+    return (
+      settings.dailyTokenBudget <= 0 ||
+      usage.inputTokens + usage.outputTokens < settings.dailyTokenBudget
+    );
+  }
+
+  /**
    * True when a finished agent with nothing for the developer makes no sound or alert: they asked
    * for attention_only, and attention verdicts run, so a finished turn that needs them arrives as
    * an attention notification instead.

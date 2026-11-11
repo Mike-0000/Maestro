@@ -18,15 +18,28 @@ import { type DeliveryHold, emitDelivery, queueDelivery, writeToInput } from './
 /** Pause between a bracketed paste and Enter so TUIs finish ingesting the paste first. */
 const SUBMIT_DELAY_MS = 80;
 /**
- * Codex turns an Enter that arrives while it is still reading a paste into a newline instead of a
- * submit. On Windows the paste reaches it as a keystroke burst, and a long one can take longer to
- * read than any fixed pause, so Codex gets a longer pause and then a check that the turn started.
+ * Codex swallows an Enter that arrives while it is still reading a paste: on Windows the paste
+ * reaches it through ConPTY as a keystroke burst, which it buffers and draws only once the burst
+ * ends, and an Enter inside the burst does not submit. Reading takes about 0.6 ms a character
+ * (measured Nov 10 on Windows, codex-cli 0.164, idle machine: 80 chars drawn after 0.19 s, 561
+ * after 0.42 s, 1,541 after 0.97 s, 2,962 after 1.75 s, 5,972 after 3.4 s, 11,972 after 7.4 s), so
+ * no fixed pause fits: Enter waits until the composer shows the paste and has been still a moment.
  */
-const CODEX_SUBMIT_DELAY_MS = 500;
-/** How long Codex gets to show its working status after Enter before Enter is pressed again. */
-const CODEX_SUBMIT_CHECK_MS = 1_500;
-/** How often its screen is read in that time, so a started turn ends the wait early. */
-const CODEX_SUBMIT_POLL_MS = 150;
+const CODEX_PASTE_QUIET_MS = 200;
+/**
+ * The longest Codex gets to show the paste: well over the measured rate, for a loaded machine.
+ * When it never shows (an unrecognized screen), Enter goes after this anyway, by then safely late.
+ */
+const CODEX_INGEST_BASE_MS = 2_000;
+const CODEX_INGEST_MS_PER_CHAR = 1.5;
+const CODEX_INGEST_MAX_MS = 60_000;
+/** With no screen to read, the pause before Enter: the measured rate with a margin. */
+const CODEX_BLIND_BASE_MS = 500;
+const CODEX_BLIND_MS_PER_CHAR = 1;
+/** How long Codex gets to take the message after Enter before Enter is pressed again. */
+const CODEX_SUBMIT_CHECK_MS = 2_000;
+/** How often its screen is read while waiting. */
+const CODEX_POLL_MS = 50;
 const CODEX_SUBMIT_ATTEMPTS = 3;
 /**
  * Codex's status line reads "• Working (0s • esc to interrupt)" while a turn runs (newer builds
@@ -35,6 +48,18 @@ const CODEX_SUBMIT_ATTEMPTS = 3;
 const CODEX_WORKING = /to interrupt/i;
 /** Rows read above the bottom of what Codex drew: its status line sits over the composer. */
 const CODEX_STATUS_ROWS = 12;
+/**
+ * Codex's selection popups (update offer, folder trust, "approaching rate limits", approvals) end
+ * with a key hint such as "enter select · esc back" or "enter continue · esc skip". Pasted text
+ * moves their selection (it arrives as keys) and Enter picks an option, so nothing is typed while
+ * one is up.
+ */
+const CODEX_MENU_HINT = /\benter (?:to )?(?:select|continue|confirm)\b/i;
+/** The composer's first row starts with this glyph (as does a popup's selected row). */
+const CODEX_COMPOSER_GLYPH = '›';
+/** Non-space characters from the end of a message that identify it in Codex's composer. */
+const CODEX_FINGERPRINT_CHARS = 24;
+const CODEX_PASTED_PLACEHOLDER = /\[Pasted Content \d+ chars\]/;
 const ESC = '\x1b';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -135,9 +160,14 @@ function pastePayload(entry: AgentTileEntry, text: string): string {
   });
 }
 
-async function pressEnterAfterPaste(entry: AgentTileEntry, pastedAt: number): Promise<void> {
+async function pressEnterAfterPaste(
+  entry: AgentTileEntry,
+  pastedAt: number,
+  text: string,
+  before: CodexBefore | null
+): Promise<void> {
   if (entry.providerId === 'codex') {
-    await submitCodexPaste(entry, pastedAt);
+    await submitCodexPaste(entry, pastedAt, text, before ?? { workingBefore: false });
     return;
   }
   await sleep(SUBMIT_DELAY_MS);
@@ -159,101 +189,274 @@ function atPromptNow(entry: AgentTileEntry): boolean {
   );
 }
 
-type CodexTurn = 'working' | 'prompt' | 'idle';
-
-/**
- * Whether Codex started the turn: its status line shows, or its permission hook reported a
- * prompt that was not up before the paste. Null when its terminal cannot be read.
- *
- * The bottom of what Codex drew is read, not the bottom of the screen: Codex draws inline from
- * where the cursor was, so in a fresh session its status and composer sit near the top with blank
- * rows under them, and the screen's last rows hold nothing.
- */
-async function codexTurn(entry: AgentTileEntry, promptBefore: boolean): Promise<CodexTurn | null> {
-  if (!promptBefore && atPromptNow(entry)) return 'prompt';
+/** Connects the agent's terminal so its screen can be read; it never starts the agent. */
+async function connectTerminal(entry: AgentTileEntry): Promise<void> {
   const session = conversationRegistry.get(entry.taskId)?.sessions.get(entry.conversationId);
-  if (!session) return null;
-  await session.connect().catch(() => {});
-  const terminal = session.pty?.terminal;
-  if (!terminal) return null;
-  const drawn = readTerminalTail(terminal, terminal.rows).slice(-CODEX_STATUS_ROWS);
-  return CODEX_WORKING.test(drawn.join('\n')) ? 'working' : 'idle';
+  await session?.connect().catch(() => {});
 }
 
-/** Reads Codex's screen until the turn shows or `CODEX_SUBMIT_CHECK_MS` passes. */
-async function awaitCodexTurn(
+/**
+ * What Codex drew, top to bottom, without the blank rows under it. Codex draws inline from where
+ * the cursor was, so in a fresh session its status and composer sit near the top with blank rows
+ * under them: the bottom of what it drew is read, not the bottom of the screen. Null when its
+ * terminal cannot be read.
+ */
+function codexScreen(entry: AgentTileEntry): string[] | null {
+  const terminal = conversationRegistry.get(entry.taskId)?.sessions.get(entry.conversationId)
+    ?.pty?.terminal;
+  return terminal ? readTerminalTail(terminal, terminal.rows) : null;
+}
+
+/** Whether Codex's status line shows a running turn. */
+export function codexShowsWorking(screen: string[]): boolean {
+  return CODEX_WORKING.test(screen.slice(-CODEX_STATUS_ROWS).join('\n'));
+}
+
+/** Whether Codex shows a selection popup that pasted keys would move and Enter would answer. */
+export function codexShowsMenu(screen: string[]): boolean {
+  return screen.slice(-2).some((row) => CODEX_MENU_HINT.test(row));
+}
+
+/**
+ * Codex's composer: the rows from the last one starting with its glyph to the bottom, so a
+ * submitted message echoed in the history above is not in it. Null when no composer shows.
+ */
+export function codexComposer(screen: string[]): string | null {
+  for (let index = screen.length - 1; index >= 0; index--) {
+    if (screen[index]?.startsWith(CODEX_COMPOSER_GLYPH)) return screen.slice(index).join('\n');
+  }
+  return null;
+}
+
+const squash = (value: string) => value.replace(/\s+/g, '');
+
+/**
+ * Whether Codex's composer holds `text`: its placeholder for a long paste, or the end of the text
+ * (spaces ignored, since the composer wraps and indents it). Null when no composer shows.
+ */
+export function codexComposerHolds(screen: string[], text: string): boolean | null {
+  const composer = codexComposer(screen);
+  if (composer === null) return null;
+  if (CODEX_PASTED_PLACEHOLDER.test(composer)) return true;
+  const fingerprint = squash(text.trim()).slice(-CODEX_FINGERPRINT_CHARS);
+  return fingerprint.length > 0 && squash(composer).includes(fingerprint);
+}
+
+/** How long Codex may take to show a paste of `chars` characters. */
+export function codexIngestBudgetMs(chars: number): number {
+  return Math.min(CODEX_INGEST_MAX_MS, CODEX_INGEST_BASE_MS + chars * CODEX_INGEST_MS_PER_CHAR);
+}
+
+/** What Codex showed right before the paste. */
+interface CodexBefore {
+  /**
+   * A turn was already running: its status line is then no sign that this message started one,
+   * and only the composer emptying is.
+   */
+  workingBefore: boolean;
+}
+
+function codexBefore(entry: AgentTileEntry): CodexBefore {
+  const screen = codexScreen(entry);
+  return { workingBefore: screen ? codexShowsWorking(screen) : false };
+}
+
+/**
+ * Waits until Codex's composer shows the paste and has stayed the same for
+ * `CODEX_PASTE_QUIET_MS`, so it has read the whole burst. Resolves when it landed (ms after the
+ * paste), 'unseen' when the budget ran out without the composer showing it, or null when the
+ * screen cannot be read.
+ */
+async function awaitCodexPaste(
   entry: AgentTileEntry,
-  promptBefore: boolean
-): Promise<CodexTurn | null> {
-  const deadline = Date.now() + CODEX_SUBMIT_CHECK_MS;
+  text: string,
+  pastedAt: number,
+  budgetMs: number
+): Promise<number | 'unseen' | null> {
+  const deadline = pastedAt + budgetMs;
+  let landedAt: number | null = null;
+  let composer: string | null = null;
+  let stillSince = Date.now();
   for (;;) {
-    await sleep(Math.min(CODEX_SUBMIT_POLL_MS, Math.max(0, deadline - Date.now())));
-    const turn = await codexTurn(entry, promptBefore);
-    if (turn !== 'idle' || Date.now() >= deadline) return turn;
+    const screen = codexScreen(entry);
+    if (!screen) return null;
+    const now = Date.now();
+    const current = codexComposer(screen);
+    if (current !== composer) {
+      composer = current;
+      stillSince = now;
+    }
+    if (landedAt === null && codexComposerHolds(screen, text)) landedAt = now;
+    // A popup is up: waiting longer changes nothing, and the caller must not press Enter.
+    if (codexShowsMenu(screen)) return landedAt === null ? 'unseen' : landedAt - pastedAt;
+    if (landedAt !== null && now - stillSince >= CODEX_PASTE_QUIET_MS) return landedAt - pastedAt;
+    if (now >= deadline) return landedAt === null ? 'unseen' : landedAt - pastedAt;
+    await sleep(Math.min(CODEX_POLL_MS, Math.max(0, deadline - now)));
+  }
+}
+
+type CodexSubmit = 'working' | 'sent' | 'prompt';
+
+/**
+ * Reads Codex's screen after Enter until it shows it took the message, or `CODEX_SUBMIT_CHECK_MS`
+ * passes ('pending'). Taken means: its hook reported a prompt that was not up before; a turn's
+ * status line that was not showing before the paste; or (when the paste was seen in the composer)
+ * a composer that no longer holds it, on two reads in a row so a half-drawn frame does not count.
+ * Null when the screen cannot be read.
+ */
+async function awaitCodexSubmit(
+  entry: AgentTileEntry,
+  text: string,
+  promptBefore: boolean,
+  before: CodexBefore,
+  landed: boolean
+): Promise<CodexSubmit | 'pending' | null> {
+  const deadline = Date.now() + CODEX_SUBMIT_CHECK_MS;
+  let emptied = 0;
+  for (;;) {
+    await sleep(Math.min(CODEX_POLL_MS, Math.max(0, deadline - Date.now())));
+    if (!promptBefore && atPromptNow(entry)) return 'prompt';
+    const screen = codexScreen(entry);
+    if (!screen) return null;
+    if (!before.workingBefore && codexShowsWorking(screen)) return 'working';
+    emptied = landed && codexComposerHolds(screen, text) === false ? emptied + 1 : 0;
+    if (emptied >= 2) return 'sent';
+    if (Date.now() >= deadline) return 'pending';
   }
 }
 
 /**
- * Presses Enter until Codex starts the turn. An Enter it read as part of the paste only added a
- * newline, so another one submits. Enter is pressed again only while no turn runs, so it can never
- * answer a permission prompt the turn raised, and never once the developer typed there since the
- * paste: it would submit their keys with the message (`DeliveryLeftUnsentError`). Each attempt is
- * reported (see `onAgentDelivery`); when the last one still started nothing, it throws
- * `CodexNotStartedError`.
+ * Presses Enter once Codex has read the whole paste, and confirms it took the message: its turn
+ * started (status line or a new prompt) or its composer emptied. Without that it presses Enter
+ * again, at most `CODEX_SUBMIT_ATTEMPTS` times in all, and never into a prompt or popup, and never
+ * once the developer typed there since the paste: it would submit their keys with the message
+ * (`DeliveryLeftUnsentError`). When the last attempt still showed nothing it throws
+ * `CodexNotStartedError`. Each delivery is reported (see `onAgentDelivery`).
+ *
+ * With no screen to read it waits a pause scaled to the paste and presses Enter once, reported as
+ * 'unverified': nothing can confirm it, and nothing safe can be done about it either.
  */
-async function submitCodexPaste(entry: AgentTileEntry, pastedAt: number): Promise<void> {
+async function submitCodexPaste(
+  entry: AgentTileEntry,
+  pastedAt: number,
+  text: string,
+  before: CodexBefore
+): Promise<void> {
   const promptBefore = atPromptNow(entry);
+  const chars = text.trim().length;
+  let landedMs: number | null = null;
   const report = (attempts: number, outcome: string, startedOn: number | null) =>
     emitDelivery({
       type: 'submit',
       conversationId: entry.conversationId,
       providerId: entry.providerId,
-      detail: { attempts, outcome, startedOn, ms: Date.now() - pastedAt },
+      detail: {
+        attempts,
+        outcome,
+        startedOn,
+        ms: Date.now() - pastedAt,
+        chars,
+        landedMs,
+        workingBefore: before.workingBefore,
+      },
     });
-  await sleep(CODEX_SUBMIT_DELAY_MS);
-  for (let attempt = 1; attempt <= CODEX_SUBMIT_ATTEMPTS; attempt++) {
+  const blind = (attempts: number) => {
+    noteConductorSubmit(entry.conversationId);
+    report(attempts, 'unverified', null);
+  };
+  /** The message waits in the composer; another one must not be pasted and submitted with it. */
+  const leftUnsent = (attempts: number, outcome: string, error: Error, inComposer = true) => {
+    report(attempts, outcome, null);
+    if (inComposer) markUnsent(entry);
+    return error;
+  };
+
+  const landed = await awaitCodexPaste(entry, text, pastedAt, codexIngestBudgetMs(chars));
+  if (landed === null) {
+    await sleep(Math.max(0, pastedAt + codexBlindWaitMs(chars) - Date.now()));
     await sendRaw(entry.conversationId, '\r');
-    const turn = await awaitCodexTurn(entry, promptBefore);
-    if (turn !== 'idle') {
-      // An unreadable screen is taken as a submit, as it always was: Enter is not pressed again.
-      noteConductorSubmit(entry.conversationId);
-      report(attempt, turn ?? 'unreadable', turn ? attempt : null);
+    blind(1);
+    return;
+  }
+  if (typeof landed === 'number') landedMs = landed;
+  for (let attempt = 1; attempt <= CODEX_SUBMIT_ATTEMPTS; attempt++) {
+    if (attempt > 1 && landedMs !== null) {
+      // Still in the composer: the last Enter was read with the paste. Let it settle again.
+      await awaitCodexPaste(entry, text, Date.now(), CODEX_PASTE_QUIET_MS * 4);
+    }
+    // Checked before every Enter: their keys, a prompt or a popup would take it instead.
+    if (developerTypedSince(entry.conversationId, pastedAt)) {
+      throw leftUnsent(attempt - 1, 'developer-typed', new DeliveryLeftUnsentError(entry.taskName));
+    }
+    if (atPromptNow(entry) || codexMenuNow(entry)) {
+      // A popup up before the message showed took its keys: nothing waits in the composer.
+      const error = new CodexNotStartedError(entry.taskName);
+      throw leftUnsent(attempt - 1, 'menu', error, landedMs !== null);
+    }
+    await sendRaw(entry.conversationId, '\r');
+    const taken = await awaitCodexSubmit(entry, text, promptBefore, before, landedMs !== null);
+    if (taken === null) {
+      blind(attempt);
       return;
     }
-    if (developerTypedSince(entry.conversationId, pastedAt)) {
-      // Their keys and the message share the composer now; the developer sends them.
-      report(attempt, 'developer-typed', null);
-      markUnsent(entry);
-      throw new DeliveryLeftUnsentError(entry.taskName);
+    if (taken !== 'pending') {
+      noteConductorSubmit(entry.conversationId);
+      report(attempt, taken, attempt);
+      return;
     }
   }
-  report(CODEX_SUBMIT_ATTEMPTS, 'not-started', null);
-  // The message waits in the composer; another one must not be pasted and submitted with it.
-  markUnsent(entry);
-  throw new CodexNotStartedError(entry.taskName);
+  if (developerTypedSince(entry.conversationId, pastedAt)) {
+    throw leftUnsent(
+      CODEX_SUBMIT_ATTEMPTS,
+      'developer-typed',
+      new DeliveryLeftUnsentError(entry.taskName)
+    );
+  }
+  throw leftUnsent(CODEX_SUBMIT_ATTEMPTS, 'not-started', new CodexNotStartedError(entry.taskName));
 }
 
-/** Pastes `text` and presses Enter, queued behind other messages to the agent (`delivery-lane`). */
+/** With no screen to read, how long after the paste Enter is pressed. */
+export function codexBlindWaitMs(chars: number): number {
+  return Math.min(CODEX_INGEST_MAX_MS, CODEX_BLIND_BASE_MS + chars * CODEX_BLIND_MS_PER_CHAR);
+}
+
+/**
+ * Pastes `text` and presses Enter, queued behind other messages to the agent (`delivery-lane`).
+ * For Codex its terminal is connected first so the paste can be watched, and the message is held
+ * while Codex shows a popup, like a prompt.
+ */
 function pasteAndSubmit<T>(
   entry: AgentTileEntry,
   options: SendOptions,
+  text: string,
   paste: () => Promise<T>,
   pasted: (result: T) => boolean
 ): Promise<T> {
+  const codex = entry.providerId === 'codex';
+  // Started now, awaited under the lock: the queue must see holds synchronously.
+  const connected = codex ? connectTerminal(entry) : Promise.resolve();
   return queueDelivery(
     entry.conversationId,
     async () => {
+      await connected;
+      const before = codex ? codexBefore(entry) : null;
       const result = await paste();
-      if (pasted(result)) await pressEnterAfterPaste(entry, Date.now());
+      if (pasted(result)) await pressEnterAfterPaste(entry, Date.now(), text, before);
       return result;
     },
     {
       agentName: entry.taskName,
       waitForTyping: options.waitForTyping,
       onHold: options.onHold,
-      blockedNow: () => (atPromptNow(entry) ? 'prompt' : null),
+      blockedNow: () => (atPromptNow(entry) || (codex && codexMenuNow(entry)) ? 'prompt' : null),
     }
   );
+}
+
+/** Whether Codex shows a popup now (false when its screen cannot be read). */
+function codexMenuNow(entry: AgentTileEntry): boolean {
+  const screen = codexScreen(entry);
+  return screen !== null && codexShowsMenu(screen);
 }
 
 /**
@@ -280,7 +483,7 @@ export async function sendToLiveSession(
     if (typed) noteDictatedText(entry.conversationId, text);
     return typed;
   }
-  return pasteAndSubmit(entry, options, paste, (typed) => typed);
+  return pasteAndSubmit(entry, options, text, paste, (typed) => typed);
 }
 
 /**
@@ -324,7 +527,7 @@ export async function sendToAgent(
     // In the input with whatever the developer typed there: the Enter submits both as theirs.
     if (options.dictated) noteDictatedText(entry.conversationId, text);
   };
-  await pasteAndSubmit(entry, options, pasteWords, () => true);
+  await pasteAndSubmit(entry, options, text, pasteWords, () => true);
 }
 
 /** Presses Enter in an agent (submits dictated text). */

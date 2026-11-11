@@ -3,10 +3,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentStatusSignal } from '@core/primitives/agents/api';
 import { setAttentionJudge } from '@core/primitives/agents/api/attention-judge';
 import {
+  setConductorDecisionPolicy,
+  type ConductorDecisionEvent,
+  type ConductorDecisionRequest,
+} from '@core/primitives/agents/api/conductor-decisions';
+import {
   AgentStatusService,
   endsInQuestion,
   setAgentStatusConversationEventPublisher,
 } from './agent-status-service';
+import type { DecisionClock } from './conductor-decision-gate';
 
 type TestConversationRow = {
   projectId: string;
@@ -55,7 +61,7 @@ mocks.update.mockImplementation(() => ({
 }));
 installAppDbTestInstance(() => ({ select: mocks.select, update: mocks.update }) as never);
 
-vi.mock('@main/lib/logger', () => ({ log: { error: vi.fn() } }));
+vi.mock('@main/lib/logger', () => ({ log: { error: vi.fn(), warn: vi.fn() } }));
 
 function row(overrides: Partial<TestConversationRow> = {}): TestConversationRow {
   return {
@@ -665,6 +671,294 @@ describe('AgentStatusService', () => {
       await Promise.all([stopped, counted]);
 
       expect(mocks.updateCalls.map((call) => call.agentStatus)).toEqual(['awaiting-input']);
+    });
+  });
+
+  describe('with the chat conductor deciding', () => {
+    /** Timers that only run when a test fires them. */
+    const timers: Array<() => void> = [];
+    const clock: DecisionClock = {
+      now: () => 1_000,
+      setTimeout: (callback) => timers.push(callback),
+      clearTimeout: (handle) => {
+        timers[(handle as number) - 1] = () => {};
+      },
+    };
+    const events: ConductorDecisionEvent[] = [];
+    let enabled = true;
+
+    beforeEach(() => {
+      timers.length = 0;
+      events.length = 0;
+      enabled = true;
+      setConductorDecisionPolicy({
+        enabled: async () => enabled,
+        emit: (event) => events.push(event),
+      });
+    });
+    afterEach(() => setConductorDecisionPolicy(null));
+
+    function claimed() {
+      const service = new AgentStatusService(clock);
+      const handler = vi.fn();
+      service.on('agent:event', handler);
+      service.decisions.claim(['conversation-1']);
+      return { service, handler };
+    }
+
+    const stop = () =>
+      signal('stop', { payload: { lastAssistantMessage: 'Which database should I use?' } });
+    const request = () =>
+      events.find(
+        (event): event is ConductorDecisionRequest & { type: 'requested' } =>
+          event.type === 'requested'
+      )!;
+
+    it('shows and notifies nothing for a held turn end, and asks the conductor', async () => {
+      const { service, handler } = claimed();
+      await service.applySignal(stop());
+
+      expect(mocks.update).not.toHaveBeenCalled();
+      expect(mocks.emit).not.toHaveBeenCalled();
+      expect(handler).not.toHaveBeenCalled();
+      expect(service.decisions.isHeld('conversation-1')).toBe(true);
+      expect(request()).toMatchObject({
+        conversationId: 'conversation-1',
+        kind: 'finished',
+        completionReport: { text: 'Which database should I use?' },
+      });
+    });
+
+    it('holds a permission prompt, but never a turn start or an error', async () => {
+      const { service } = claimed();
+      await service.applySignal(
+        signal('notification', { payload: { notificationType: 'permission_prompt' } })
+      );
+      expect(request()).toMatchObject({
+        kind: 'awaiting-input',
+        notificationType: 'permission_prompt',
+      });
+
+      mocks.updateRows.push(row(), row());
+      await service.applySignal(signal('error', { payload: { message: 'rate limit' } }));
+      expect(mocks.emit.mock.calls[0]?.[1]).toMatchObject({ status: 'error' });
+      // The error replaced what was held.
+      expect(events.at(-1)).toMatchObject({ type: 'closed', reason: 'superseded' });
+      await service.applySignal(signal('start'));
+      expect(mocks.emit.mock.calls[1]?.[1]).toMatchObject({ status: 'working' });
+    });
+
+    it('behaves as before for a chat nobody claimed, or with decisions off', async () => {
+      const service = new AgentStatusService(clock);
+      mocks.updateRows.push(row());
+      await service.applySignal(stop());
+      expect(mocks.emit.mock.calls[0]?.[1]).toMatchObject({ status: 'completed' });
+      expect(mocks.emit.mock.calls[0]?.[1]).not.toHaveProperty('conductor');
+
+      enabled = false;
+      const { service: off } = claimed();
+      mocks.updateRows.push(row());
+      await off.applySignal(stop());
+      expect(mocks.emit).toHaveBeenCalledTimes(2);
+      expect(events).toEqual([]);
+    });
+
+    it('shows a needs-you decision with its headline, and lets it notify', async () => {
+      const { service, handler } = claimed();
+      await service.applySignal(stop());
+      mocks.updateRows.push(row());
+
+      expect(
+        service.decisions.resolve(request().holdId, 'conversation-1', {
+          kind: 'surface',
+          state: 'needs_you',
+          headline: 'Pick SQLite or Postgres',
+          detail: 'It asks which database to use.',
+          notify: true,
+        })
+      ).toBe('decision');
+      await vi.waitFor(() => expect(mocks.emit).toHaveBeenCalledTimes(1));
+
+      const conductor = {
+        state: 'needs_you',
+        headline: 'Pick SQLite or Postgres',
+        detail: 'It asks which database to use.',
+        notify: true,
+      };
+      expect(mocks.updateCalls[0]).toEqual({ agentStatus: 'awaiting-input', agentStatusSeen: 0 });
+      expect(mocks.emit.mock.calls[0]?.[1]).toMatchObject({
+        type: 'agent-status-changed',
+        status: 'awaiting-input',
+        seen: false,
+        completionSummary: 'Pick SQLite or Postgres',
+        completionReport: { text: 'Which database should I use?' },
+        conductor,
+      });
+      await vi.waitFor(() => expect(handler).toHaveBeenCalledTimes(1));
+      expect(handler.mock.calls[0]?.[0]).toMatchObject({
+        type: 'notification',
+        payload: { notificationType: 'idle_prompt', conductor },
+      });
+      expect(service.decisions.isHeld('conversation-1')).toBe(false);
+    });
+
+    it('shows a quiet turn end as done and seen, without a notification', async () => {
+      const { service, handler } = claimed();
+      await service.applySignal(stop());
+      mocks.updateRows.push(row());
+      service.decisions.resolve(request().holdId, 'conversation-1', { kind: 'quiet' });
+      await vi.waitFor(() => expect(handler).toHaveBeenCalledTimes(1));
+
+      expect(mocks.updateCalls[0]).toEqual({ agentStatus: 'completed', agentStatusSeen: 1 });
+      expect(mocks.emit.mock.calls[0]?.[1]).toMatchObject({
+        status: 'completed',
+        seen: true,
+        conductor: { state: 'quiet', notify: false },
+      });
+      expect(handler.mock.calls[0]?.[0]).toMatchObject({ type: 'stop' });
+    });
+
+    it('keeps a silent dot on a prompt nobody answered, and none on one the conductor answered', async () => {
+      const { service, handler } = claimed();
+      const prompt = () =>
+        service.applySignal(
+          signal('notification', { payload: { notificationType: 'permission_prompt' } })
+        );
+      await prompt();
+      mocks.updateRows.push(row(), row());
+      service.decisions.resolve(request().holdId, 'conversation-1', { kind: 'quiet' });
+      await vi.waitFor(() => expect(mocks.emit).toHaveBeenCalledTimes(1));
+      expect(mocks.emit.mock.calls[0]?.[1]).toMatchObject({
+        status: 'awaiting-input',
+        seen: false,
+        conductor: { state: 'quiet', notify: false },
+      });
+
+      events.length = 0;
+      await prompt();
+      service.decisions.resolve(request().holdId, 'conversation-1', {
+        kind: 'quiet',
+        answered: true,
+      });
+      await vi.waitFor(() => expect(mocks.emit).toHaveBeenCalledTimes(2));
+      expect(mocks.emit.mock.calls[1]?.[1]).toMatchObject({ status: 'working', seen: true });
+      await vi.waitFor(() => expect(handler).toHaveBeenCalledTimes(2));
+      expect(handler.mock.calls[1]?.[0]).toMatchObject({ type: 'start' });
+    });
+
+    it('falls back to the status the event would have had when the conductor cannot decide', async () => {
+      const { service, handler } = claimed();
+      await service.applySignal(stop());
+      mocks.updateRows.push(row());
+      service.decisions.resolve(request().holdId, 'conversation-1', {
+        kind: 'fallback',
+        reason: 'budget',
+      });
+      await vi.waitFor(() => expect(mocks.emit).toHaveBeenCalledTimes(1));
+      expect(mocks.updateCalls[0]).toEqual({ agentStatus: 'completed', agentStatusSeen: 0 });
+      expect(mocks.emit.mock.calls[0]?.[1]).toMatchObject({ status: 'completed' });
+      expect(mocks.emit.mock.calls[0]?.[1]).not.toHaveProperty('conductor');
+      await vi.waitFor(() => expect(handler).toHaveBeenCalledTimes(1));
+      expect(handler.mock.calls[0]?.[0].payload).not.toHaveProperty('conductor');
+    });
+
+    it('falls back when the renderer does not acknowledge the request', async () => {
+      const { service } = claimed();
+      await service.applySignal(stop());
+      mocks.updateRows.push(row());
+      // The acknowledgement timer is the first one the hold set.
+      timers[1]!();
+      await vi.waitFor(() => expect(mocks.emit).toHaveBeenCalledTimes(1));
+      expect(mocks.emit.mock.calls[0]?.[1]).toMatchObject({ status: 'completed' });
+      expect(events.at(-1)).toMatchObject({ type: 'closed', reason: 'fallback' });
+    });
+
+    it('lets a turn start supersede the hold, so nothing of it is ever shown', async () => {
+      const { service, handler } = claimed();
+      await service.applySignal(stop());
+      const { holdId } = request();
+      mocks.updateRows.push(row());
+      await service.applySignal(signal('start'));
+
+      expect(events.at(-1)).toMatchObject({ type: 'closed', holdId, reason: 'superseded' });
+      expect(service.decisions.resolve(holdId, 'conversation-1', { kind: 'quiet' })).toBe('stale');
+      expect(mocks.emit).toHaveBeenCalledTimes(1);
+      expect(mocks.emit.mock.calls[0]?.[1]).toMatchObject({ status: 'working' });
+      expect(handler).toHaveBeenCalledTimes(1);
+    });
+
+    it('drops the idle reminder and snapshots while a decision is pending', async () => {
+      const { service } = claimed();
+      await service.applySignal(stop());
+      await service.applySignal(
+        signal('notification', { payload: { notificationType: 'idle_prompt' } })
+      );
+      await service.cacheSignal(stop());
+      expect(mocks.update).not.toHaveBeenCalled();
+      expect(service.decisions.isHeld('conversation-1')).toBe(true);
+    });
+
+    it('drops the idle reminder after a decided turn', async () => {
+      const { service } = claimed();
+      await service.applySignal(stop());
+      mocks.updateRows.push(row());
+      service.decisions.resolve(request().holdId, 'conversation-1', { kind: 'quiet' });
+      await vi.waitFor(() => expect(mocks.emit).toHaveBeenCalledTimes(1));
+      await service.applySignal(
+        signal('notification', { payload: { notificationType: 'idle_prompt' } })
+      );
+      expect(mocks.emit).toHaveBeenCalledTimes(1);
+    });
+
+    it('takes a late needs-you after a fallback, notifying only what the fallback did not', async () => {
+      const { service, handler } = claimed();
+      await service.applySignal(stop());
+      mocks.updateRows.push(row());
+      const { holdId } = request();
+      service.decisions.resolve(holdId, 'conversation-1', { kind: 'fallback', reason: 'error' });
+      await vi.waitFor(() => expect(mocks.emit).toHaveBeenCalledTimes(1));
+
+      mocks.selectRows.push(row({ agentStatus: 'completed' }));
+      mocks.updateRows.push(row());
+      const late = {
+        kind: 'surface',
+        state: 'needs_you',
+        headline: 'It needs a decision',
+        notify: true,
+      } as const;
+      expect(service.decisions.resolve(holdId, 'conversation-1', late)).toBe('late');
+      await vi.waitFor(() => expect(mocks.emit).toHaveBeenCalledTimes(2));
+      expect(mocks.emit.mock.calls[1]?.[1]).toMatchObject({
+        status: 'awaiting-input',
+        conductor: { state: 'needs_you', notify: true },
+      });
+      await vi.waitFor(() => expect(handler).toHaveBeenCalledTimes(2));
+    });
+
+    it('drops a late decision once the agent is working again', async () => {
+      const { service } = claimed();
+      await service.applySignal(stop());
+      mocks.updateRows.push(row());
+      const { holdId } = request();
+      service.decisions.resolve(holdId, 'conversation-1', { kind: 'fallback', reason: 'error' });
+      await vi.waitFor(() => expect(mocks.emit).toHaveBeenCalledTimes(1));
+
+      mocks.selectRows.push(row({ agentStatus: 'working' }));
+      expect(service.decisions.resolve(holdId, 'conversation-1', { kind: 'quiet' })).toBe('late');
+      // Queued after the late decision on the same conversation: once it ran, so did that.
+      await service.updateBackgroundAgents(signal('start'));
+      // The late decision read the row, found the agent working, and wrote nothing.
+      expect(mocks.select).toHaveBeenCalledTimes(2);
+      expect(mocks.update).toHaveBeenCalledTimes(1);
+      expect(mocks.emit).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets go of a held event when the session ends', async () => {
+      const { service } = claimed();
+      await service.applySignal(stop());
+      await service.resetToIdle({ conversationId: 'conversation-1' });
+      expect(service.decisions.isHeld('conversation-1')).toBe(false);
+      expect(events.at(-1)).toMatchObject({ type: 'closed', reason: 'superseded' });
     });
   });
 });

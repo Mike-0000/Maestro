@@ -1,4 +1,5 @@
 import { isAttentionNotification } from '@emdash/core/runtimes/tui-agents/api';
+import { redactSecrets } from '@emdash/shared/logger';
 import { and, eq, inArray } from 'drizzle-orm';
 import {
   type AgentEvent,
@@ -11,11 +12,22 @@ import {
 } from '@core/primitives/agents/api/attention-judge';
 import { buildCompletionReport } from '@core/primitives/agents/api/completion-report';
 import { summarizeCompletionMessage } from '@core/primitives/agents/api/completion-summary';
+import {
+  DECISION_DETAIL_CHARS,
+  DECISION_HEADLINE_CHARS,
+  type ConductorDecisionMark,
+} from '@core/primitives/agents/api/conductor-decisions';
 import type { ConversationEvent } from '@core/primitives/conversations/api';
 import { HookCore, type Hookable } from '@core/primitives/hooks/api/hookable';
 import { conversations } from '@core/services/app-db/node/schema';
 import { getAppDb } from '@main/db/instance';
 import { log } from '@main/lib/logger';
+import {
+  ConductorDecisionGate,
+  type AppliedDecision,
+  type DecisionClock,
+  type HeldEvent,
+} from './conductor-decision-gate';
 
 export type AgentStatusServiceHooks = {
   'agent:event': (event: AgentEvent) => void | Promise<void>;
@@ -26,6 +38,8 @@ export type ApplyAgentStatusSignalOptions = {
   preserveSeen?: boolean;
   /** Fetches the turn's final reply when a stop carries none (chat agents keep it in a transcript). */
   loadReply?: () => Promise<string | null>;
+  /** Internal: the chat's conductor had its chance at this event and fell back. */
+  skipConductor?: boolean;
 };
 
 /** The conductor's decision about a conversation's latest finished turn. */
@@ -49,6 +63,8 @@ type TurnEnd = {
 
 /** A verdict holds the status at 'working' while it runs; past this the stop is just a stop. */
 const VERDICT_TIMEOUT_MS = 10_000;
+/** How long a held chat reply may take to load before the request goes out without it. */
+const HELD_REPLY_TIMEOUT_MS = 2_000;
 
 function replyKey(text: string): string {
   let hash = 0;
@@ -93,6 +109,11 @@ function deriveAgentStatus(event: AgentStatusSignal): AgentStatus | null {
 }
 
 export class AgentStatusService implements Hookable<AgentStatusServiceHooks> {
+  /**
+   * Turn ends and prompts held for the chats whose conductor decides them (see
+   * `conductor-decisions.ts`). Without claims from the renderer it holds nothing.
+   */
+  readonly decisions: ConductorDecisionGate<ApplyAgentStatusSignalOptions>;
   private readonly queues = new Map<string, Promise<void>>();
   private readonly verdicts = new Map<string, TurnVerdict>();
   private readonly turnEnds = new Map<string, TurnEnd>();
@@ -101,6 +122,27 @@ export class AgentStatusService implements Hookable<AgentStatusServiceHooks> {
   private readonly hooks = new HookCore<AgentStatusServiceHooks>((name, error) =>
     log.error(`AgentStatusService: ${String(name)} hook error`, error)
   );
+
+  constructor(clock?: DecisionClock) {
+    this.decisions = new ConductorDecisionGate<ApplyAgentStatusSignalOptions>(
+      {
+        // What the event would have shown without a conductor, as a fresh live signal.
+        fallback: (_conversationId, held) =>
+          void this.applySignal(held.signal, { ...held.options, skipConductor: true }).catch(
+            (error: unknown) =>
+              log.warn('AgentStatusService: fallback failed', { error: String(error) })
+          ),
+        decide: (conversationId, held, decision, late) =>
+          void this.enqueue(conversationId, () =>
+            this.applyDecisionQueued(conversationId, held, decision, late)
+          ).catch((error: unknown) =>
+            log.warn('AgentStatusService: decision failed', { error: String(error) })
+          ),
+        warn: (message, context) => log.warn(message, context),
+      },
+      clock
+    );
+  }
 
   on<K extends keyof AgentStatusServiceHooks>(name: K, handler: AgentStatusServiceHooks[K]) {
     return this.hooks.on(name, handler);
@@ -149,6 +191,7 @@ export class AgentStatusService implements Hookable<AgentStatusServiceHooks> {
     const turnEnded = signal.type === 'stop';
     const idleReminder =
       signal.type === 'notification' && signal.payload.notificationType === 'idle_prompt';
+    if (await this.holdForConductor(signal, options)) return;
     let preserveSeen = options.preserveSeen ?? false;
     // A reminder that is kept stands for the turn it follows, and reports that turn's reply.
     let carriesReply = turnEnded;
@@ -270,6 +313,173 @@ export class AgentStatusService implements Hookable<AgentStatusServiceHooks> {
   }
 
   /**
+   * For a chat whose conductor decides (see `conductor-decisions.ts`): keeps a turn end or an
+   * attention prompt from being shown or notified, and asks the conductor instead. Returns true
+   * when the signal was held, or dropped because it only repeats a held one. Anything newer in
+   * the chat supersedes an open hold first. Errors and turn starts are never held.
+   */
+  private async holdForConductor(
+    signal: AgentStatusSignal,
+    options: ApplyAgentStatusSignalOptions
+  ): Promise<boolean> {
+    const id = signal.conversationId;
+    const deliver = options.deliver ?? true;
+    const notificationType = signal.payload.notificationType;
+    const idleReminder = signal.type === 'notification' && notificationType === 'idle_prompt';
+    if (!deliver) {
+      // A restored snapshot repeats the state that is held: showing it would give the decision
+      // away. The hold ends soon, by a decision or a fallback.
+      return this.decisions.isHeld(id);
+    }
+    if (idleReminder && this.decisions.isHeld(id)) return true;
+    if (options.skipConductor) return false;
+    const reminderEndsTurn =
+      idleReminder && !this.verdicts.get(id)?.current && !this.turnEnds.has(id);
+    const blocking =
+      signal.type === 'notification' &&
+      (notificationType === 'permission_prompt' || notificationType === 'elicitation_dialog');
+    const holdable = signal.type === 'stop' || blocking || reminderEndsTurn;
+    // Anything the status would show replaces what was held: the agent moved on.
+    if (!idleReminder && deriveAgentStatus(signal) !== null) this.decisions.supersede(id);
+    if (!holdable || !(await this.decisions.shouldHold(id))) return false;
+
+    let reply = signal.payload.lastAssistantMessage;
+    if (signal.type === 'stop' && !reply?.trim() && options.loadReply) {
+      reply =
+        (await withTimeout(options.loadReply(), HELD_REPLY_TIMEOUT_MS).catch(() => null)) ??
+        undefined;
+    }
+    const finished = signal.type === 'stop';
+    this.retireVerdict(id);
+    this.decisions.hold(id, {
+      signal:
+        reply === signal.payload.lastAssistantMessage
+          ? signal
+          : { ...signal, payload: { ...signal.payload, lastAssistantMessage: reply } },
+      options,
+      kind: finished ? 'finished' : 'awaiting-input',
+      ...(finished || !notificationType ? {} : { notificationType }),
+      blocking,
+      reply,
+      report: finished ? buildCompletionReport(reply) : null,
+      summary: finished ? summarizeCompletionMessage(reply) : null,
+    });
+    return true;
+  }
+
+  /**
+   * Shows what the chat's conductor decided about a held event, with its headline, and fires the
+   * agent event that notifications follow: they go out only when the conductor said so. A late
+   * decision (main already fell back) corrects the indicator while the agent has not moved on,
+   * and notifies only to ask for attention the fallback did not ask for.
+   */
+  private async applyDecisionQueued(
+    conversationId: string,
+    held: HeldEvent<ApplyAgentStatusSignalOptions>,
+    decision: AppliedDecision,
+    late: boolean
+  ): Promise<void> {
+    const surfaced = decision.kind === 'surface' ? decision : null;
+    // A prompt nobody answered keeps its dot whatever was decided: the agent cannot go on alone.
+    // Answering one emits no hook, so only the conductor can say it did (or a 'done' implies it).
+    const answered =
+      decision.kind === 'surface' ? decision.state === 'done' : decision.answered === true;
+    const stillBlocked = held.blocking && !answered;
+    const needsYou = surfaced?.state === 'needs_you' || stillBlocked;
+    const status: AgentStatus = needsYou
+      ? 'awaiting-input'
+      : held.blocking
+        ? 'working'
+        : 'completed';
+    const seen = surfaced || stillBlocked ? 0 : 1;
+    let notify = surfaced?.notify ?? false;
+    if (late) {
+      const [row] = await getAppDb()
+        .select({ agentStatus: conversations.agentStatus })
+        .from(conversations)
+        .where(eq(conversations.id, conversationId))
+        .limit(1);
+      // The agent is at work again, or the conversation is gone: the decision is history.
+      if (!row || row.agentStatus === 'working') return;
+      if (row.agentStatus === 'awaiting-input') notify = false;
+      if (!needsYou) notify = false;
+    }
+    const headline = surfaced ? boundedText(surfaced.headline, DECISION_HEADLINE_CHARS) : undefined;
+    const detail = surfaced?.detail
+      ? boundedText(surfaced.detail, DECISION_DETAIL_CHARS)
+      : undefined;
+    const mark: ConductorDecisionMark = {
+      state: surfaced ? surfaced.state : 'quiet',
+      ...(headline ? { headline } : {}),
+      ...(detail ? { detail } : {}),
+      notify,
+    };
+
+    const finished = held.kind === 'finished';
+    if (finished) {
+      const report = buildCompletionReport(held.reply);
+      this.verdicts.set(conversationId, {
+        replyKey: report ? replyKey(report.text) : '',
+        needsDeveloper: needsYou,
+        current: true,
+      });
+      this.turnEnds.set(conversationId, {
+        reply: held.reply,
+        loadReply: held.options.loadReply,
+      });
+    }
+    const signal: AgentStatusSignal = needsYou
+      ? {
+          ...held.signal,
+          type: 'notification',
+          payload: {
+            ...held.signal.payload,
+            notificationType: held.notificationType ?? 'idle_prompt',
+            lastAssistantMessage: held.reply,
+            conductor: mark,
+          },
+        }
+      : {
+          ...held.signal,
+          // An answered prompt: the agent goes on with its turn.
+          type: status === 'working' ? 'start' : 'stop',
+          payload: { ...held.signal.payload, lastAssistantMessage: held.reply, conductor: mark },
+        };
+
+    const [row] = await getAppDb()
+      .update(conversations)
+      .set({ agentStatus: status, agentStatusSeen: seen })
+      .where(eq(conversations.id, conversationId))
+      .returning(conversationContextSelection());
+    if (!row || row.projectId === null || row.taskId === null) return;
+    const { subAgents } = held.signal.payload;
+    publishConversationEvent({
+      type: 'agent-status-changed',
+      conversationId,
+      taskId: row.taskId,
+      projectId: row.projectId,
+      status,
+      seen: seen === 1,
+      ...(status === 'awaiting-input' && subAgents?.length ? { subAgents } : {}),
+      // The same report the request carried, so the conductor knows this state for the one it
+      // decided; the headline stands in for the synopsis.
+      ...(finished
+        ? {
+            completionSummary: headline ?? held.summary,
+            completionReport: held.report,
+          }
+        : {}),
+      conductor: mark,
+    });
+    this.hooks.callHookBackground('agent:event', {
+      ...signal,
+      providerId: signal.providerId ?? row.providerId ?? undefined,
+      projectId: row.projectId,
+      taskId: row.taskId,
+    });
+  }
+
+  /**
    * Asks the conductor whether the turn that just ended needs the developer. A yes turns the stop
    * into an attention notification, so the conversation goes to awaiting-input instead of
    * completed; a no, or no answer, leaves the stop as it is. The status stays where it was
@@ -347,6 +557,8 @@ export class AgentStatusService implements Hookable<AgentStatusServiceHooks> {
   }
 
   private async resetToIdleQueued(conversationId: string): Promise<void> {
+    // The session ended: what was held for its conductor has nothing left to decide.
+    this.decisions.supersede(conversationId);
     this.verdicts.delete(conversationId);
     this.turnEnds.delete(conversationId);
     const [row] = await getAppDb()
@@ -390,6 +602,8 @@ export class AgentStatusService implements Hookable<AgentStatusServiceHooks> {
   }
 
   async dispose(): Promise<void> {
+    // Whatever is still held is shown as it would have been, before the queues drain.
+    this.decisions.dispose();
     while (this.queues.size > 0) {
       await Promise.allSettled(this.queues.values());
     }
@@ -443,3 +657,10 @@ function withTimeout<T>(work: Promise<T>, ms: number): Promise<T | null> {
 }
 
 export const agentStatusService = new AgentStatusService();
+
+/** The conductor's own text as it is published: redacted, on one line, bounded. */
+function boundedText(text: string, maxChars: number): string | undefined {
+  const clean = redactSecrets(text).replace(/\s+/g, ' ').trim();
+  if (!clean) return undefined;
+  return clean.length <= maxChars ? clean : `${clean.slice(0, maxChars - 1).trimEnd()}…`;
+}

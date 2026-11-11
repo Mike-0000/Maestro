@@ -47,8 +47,8 @@ export const TaskListEmptyState = observer(function TaskListEmptyState({
 
   const actions: TaskAction[] = [
     {
-      label: 'Create a Task from a Branch',
-      description: 'Create a task from an existing branch',
+      label: 'Create a Conductor from a Branch',
+      description: 'Create a conductor from an existing branch',
       icon: GitBranch,
       disabled: !!createDisabledReason,
       disabledReason: createDisabledReason,
@@ -57,7 +57,7 @@ export const TaskListEmptyState = observer(function TaskListEmptyState({
     {
       label: 'Create from Issue',
       description: hasAnyIntegration
-        ? 'Link and create a task from an issue'
+        ? 'Link and create a conductor from an issue'
         : 'Configure issue integrations',
       icon: CircleDot,
       disabled: !!createDisabledReason,
@@ -69,7 +69,7 @@ export const TaskListEmptyState = observer(function TaskListEmptyState({
     },
     {
       label: 'Create from Pull Request',
-      description: 'Create a task from a pull request',
+      description: 'Create a conductor from a pull request',
       icon: GitPullRequest,
       disabled: !!createDisabledReason || !supportsPullRequests,
       disabledReason: createDisabledReason ?? 'No remote repository connected',

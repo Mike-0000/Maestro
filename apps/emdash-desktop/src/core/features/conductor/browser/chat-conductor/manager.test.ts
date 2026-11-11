@@ -4,22 +4,28 @@ import type { CanvasStore } from '@core/features/canvas/api/browser/stores/canva
 import type { ConductorStatus } from '../../api/contract';
 import { ChatConductorManager } from './manager';
 
-// Which chat conductor is in front: the one whose Conductor view the developer is looking at.
+// Which conductor is in front, and which of its task's chats is on screen.
 
 vi.mock('../../api/browser/client', () => ({
   getConductorClient: async () => ({
-    readChatThread: async () => null,
+    readTaskThread: async () => null,
+    listTaskThreads: async () => [],
     listChatThreads: async () => [],
   }),
 }));
 vi.mock('./agent-port', () => ({
-  createChatAgentPort: () => ({ snapshot: () => null, watch: () => () => {} }),
+  chatName: () => 'Chat',
+  createTaskAgentPort: () => ({ chats: () => [], snapshot: () => null, watch: () => () => {} }),
 }));
 vi.mock('@core/primitives/logging/browser/logger', () => ({
   log: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
 
-const NAMES: Record<string, string> = { 'conv-atlas': 'Atlas', 'conv-bravo': 'Bravo' };
+const ENTRIES = [
+  { conversationId: 'conv-atlas', taskId: 'task-login', taskName: 'Fix login' },
+  { conversationId: 'conv-bravo', taskId: 'task-login', taskName: 'Fix login' },
+  { conversationId: 'conv-cid', taskId: 'task-docs', taskName: 'Docs' },
+];
 
 function setup() {
   const conductor = observable(
@@ -27,80 +33,99 @@ function setup() {
     { status: observable.ref }
   );
   const canvas = {
-    agentEntries: [],
-    spokenName: (conversationId: string) => NAMES[conversationId] ?? 'Agent',
+    agentEntries: ENTRIES,
+    spokenName: () => 'Agent',
   } as unknown as CanvasStore;
   const manager = new ChatConductorManager(canvas, conductor);
-  const atlas = manager.session('conv-atlas');
-  const bravo = manager.session('conv-bravo');
+  const login = manager.session('task-login');
+  const docs = manager.session('task-docs');
   const setReady = (ready: boolean) =>
     runInAction(() => {
       conductor.status = { chatConductorReady: ready } as unknown as ConductorStatus;
     });
-  return { manager, atlas, bravo, setReady };
+  return { manager, login, docs, setReady };
 }
 
-describe('the chat conductor in front', () => {
-  it('is the conversation whose Conductor view is on screen, with its name', () => {
-    const { manager, atlas } = setup();
+const screen = (
+  conversationId: string,
+  taskId: string,
+  options: { focusedPane?: boolean; conductor?: boolean } = {}
+) => ({
+  conversationId,
+  taskId,
+  focusedPane: options.focusedPane ?? true,
+  conductor: options.conductor ?? true,
+});
+
+describe('the conductor in front', () => {
+  it("is the task's conductor, named for the task, with the chat tab that shows it", () => {
+    const { manager, login } = setup();
     expect(manager.front).toBeNull();
 
-    manager.showOnScreen('pane-1', { conversationId: 'conv-atlas', focusedPane: true });
-    expect(manager.front?.session).toBe(atlas);
-    expect(manager.front?.name).toBe('Atlas');
+    manager.showOnScreen('pane-1', screen('conv-atlas', 'task-login'));
+    expect(manager.front?.session).toBe(login);
+    expect(manager.front?.name).toBe('Fix login');
+    expect(manager.front?.chatId).toBe('conv-atlas');
 
-    // Switched to Raw, left the task, or the pane went away.
+    // Another chat of the same task: the same conductor, the chat on screen follows.
+    manager.showOnScreen('pane-1', screen('conv-bravo', 'task-login'));
+    expect(manager.front?.session).toBe(login);
+    expect(manager.front?.chatId).toBe('conv-bravo');
+
+    // Switched to Raw: no conductor in front, but the chat on screen is still known.
+    manager.showOnScreen('pane-1', screen('conv-bravo', 'task-login', { conductor: false }));
+    expect(manager.front).toBeNull();
+    expect(manager.chatOnScreen('task-login')).toBe('conv-bravo');
+
     manager.showOnScreen('pane-1', null);
-    expect(manager.front).toBeNull();
+    expect(manager.chatOnScreen('task-login')).toBeNull();
     manager.dispose();
   });
 
-  it('follows a switch to another chat in the same pane', () => {
-    const { manager, bravo } = setup();
-    manager.showOnScreen('pane-1', { conversationId: 'conv-atlas', focusedPane: true });
-    manager.showOnScreen('pane-1', { conversationId: 'conv-bravo', focusedPane: true });
-    expect(manager.front?.session).toBe(bravo);
-    manager.dispose();
-  });
-
-  it('is nobody while chat conductors cannot run', () => {
-    const { manager, atlas, setReady } = setup();
-    manager.showOnScreen('pane-1', { conversationId: 'conv-atlas', focusedPane: true });
+  it('is nobody while conductors cannot run', () => {
+    const { manager, login, setReady } = setup();
+    manager.showOnScreen('pane-1', screen('conv-atlas', 'task-login'));
     setReady(false);
     expect(manager.front).toBeNull();
     setReady(true);
-    expect(manager.front?.session).toBe(atlas);
+    expect(manager.front?.session).toBe(login);
     manager.dispose();
   });
 
-  it('is nobody for a conversation that has no conductor yet', () => {
+  it('is nobody for a task that has no conductor yet', () => {
     const { manager } = setup();
-    manager.showOnScreen('pane-1', { conversationId: 'conv-other', focusedPane: true });
+    manager.showOnScreen('pane-1', screen('conv-x', 'task-other'));
     expect(manager.front).toBeNull();
     manager.dispose();
   });
 
   it('is the focused pane of two split panes, then the one used last', () => {
-    const { manager, atlas, bravo } = setup();
-    manager.showOnScreen('pane-1', { conversationId: 'conv-atlas', focusedPane: true });
-    manager.showOnScreen('pane-2', { conversationId: 'conv-bravo', focusedPane: false });
-    expect(manager.front?.session).toBe(atlas);
+    const { manager, login, docs } = setup();
+    manager.showOnScreen('pane-1', screen('conv-atlas', 'task-login'));
+    manager.showOnScreen('pane-2', screen('conv-cid', 'task-docs', { focusedPane: false }));
+    expect(manager.front?.session).toBe(login);
 
-    // Focus moves to the second pane.
-    manager.showOnScreen('pane-1', { conversationId: 'conv-atlas', focusedPane: false });
-    manager.showOnScreen('pane-2', { conversationId: 'conv-bravo', focusedPane: true });
-    expect(manager.front?.session).toBe(bravo);
+    manager.showOnScreen('pane-1', screen('conv-atlas', 'task-login', { focusedPane: false }));
+    manager.showOnScreen('pane-2', screen('conv-cid', 'task-docs'));
+    expect(manager.front?.session).toBe(docs);
 
-    // Neither pane has focus (the focus is elsewhere in the task): the one worked in last.
-    manager.showOnScreen('pane-2', { conversationId: 'conv-bravo', focusedPane: false });
+    manager.showOnScreen('pane-2', screen('conv-cid', 'task-docs', { focusedPane: false }));
     manager.touchScreen('pane-1');
-    expect(manager.front?.session).toBe(atlas);
+    expect(manager.front?.session).toBe(login);
     manager.touchScreen('pane-2');
-    expect(manager.front?.session).toBe(bravo);
+    expect(manager.front?.session).toBe(docs);
 
-    // The second pane closes.
     manager.showOnScreen('pane-2', null);
-    expect(manager.front?.session).toBe(atlas);
+    expect(manager.front?.session).toBe(login);
+    manager.dispose();
+  });
+
+  it("knows each task's chat on screen apart", () => {
+    const { manager } = setup();
+    manager.showOnScreen('pane-1', screen('conv-bravo', 'task-login', { conductor: false }));
+    manager.showOnScreen('pane-2', screen('conv-cid', 'task-docs', { focusedPane: false }));
+    expect(manager.chatOnScreen('task-login')).toBe('conv-bravo');
+    expect(manager.chatOnScreen('task-docs')).toBe('conv-cid');
     manager.dispose();
   });
 });

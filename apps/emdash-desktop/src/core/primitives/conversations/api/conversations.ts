@@ -1,6 +1,7 @@
 import type { AgentProviderId } from '@emdash/plugins/agents/types';
 import type { AgentStatus, RunningSubAgent } from '@core/primitives/agents/api';
 import type { CompletionReport } from '@core/primitives/agents/api/completion-report';
+import type { ConductorDecisionMark } from '@core/primitives/agents/api/conductor-decisions';
 
 export const MAX_CONVERSATION_TITLE_LENGTH = 100;
 
@@ -97,6 +98,12 @@ export type ConversationEvent =
        * runtime does not report them; a reader then has `backgroundAgents` alone.
        */
       subAgents?: readonly RunningSubAgent[];
+      /**
+       * Set when the chat's conductor decided this status: its state, its headline (also in
+       * `completionSummary`), and whether a notification went out. Absent when rules or a
+       * verdict decided it, or for a status that is not a decision (working, idle).
+       */
+      conductor?: ConductorDecisionMark;
     };
 
 export type RenameConversationParams = {

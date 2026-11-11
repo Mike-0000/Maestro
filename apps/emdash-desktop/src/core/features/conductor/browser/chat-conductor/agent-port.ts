@@ -13,11 +13,8 @@ import {
 import { getConversationsClient } from '@core/features/conversations/api/browser/client';
 import { formatConversationTitleForDisplay } from '@core/features/conversations/api/browser/conversation-title-utils';
 import { conversationRegistry } from '@core/features/conversations/api/browser/stores/conversation-registry';
-import {
-  getProjectStore,
-  projectData,
-} from '@core/features/projects/api/browser/stores/project-selectors';
 import { developerSubmissionsSince } from '@core/features/terminals/api/browser/pty/developer-typing';
+import { getTaskComposition } from '@core/features/workbench/api/browser/task-composition-selectors';
 import {
   buildCompletionReport,
   terminalTailReport,
@@ -37,11 +34,11 @@ import {
 } from '../agent-io';
 import { deliverPromptWhenReady } from '../deferred-prompt';
 import type { DeliveryHold } from '../delivery-lane';
-import { entryForConversation, installedProviders, spawnPeers } from '../roster';
-import { resolveProviderId, spawnAgentTask, startAgentSession } from '../spawn';
+import { entryForConversation, installedProviders } from '../roster';
+import { addAgentChat, resolveProviderId, startAgentSession } from '../spawn';
 import { showsPermissionPrompt, type AgentSnapshot } from './agent-event';
 import { formatChatList } from './chat-list';
-import type { ChatAgentPort, ReceivedPrompts, StartAgentInput } from './session';
+import type { ChatInfo, ReceivedPrompts, StartChatInput, TaskAgentPort } from './session';
 import { restartChatAgent, stopChatAgent, type SessionControlDeps } from './session-control';
 
 /** How long a stopped session may take to leave the host's session list. */
@@ -118,15 +115,37 @@ function heldWhile(hold: DeliveryHold): string {
     : "while the developer types in the agent's terminal";
 }
 
+/** The name a chat goes by: its window title, as the task view shows it. */
+export function chatName(entry: AgentTileEntry): string {
+  return formatConversationTitleForDisplay(entry.providerId, entry.conversationTitle);
+}
+
 /**
- * A chat's agent for its conductor, on the conductor's own agent IO: the same delivery lane,
- * session start and spawn path Maestro's conductor uses, so a prompt typed for the developer
- * behaves the same whoever sends it.
+ * A new chat's tab in the task view, behind the tab the developer is on: it is there to switch
+ * to, and what they are looking at stays in front.
  */
-export function createChatAgentPort(canvas: CanvasStore, conversationId: string): ChatAgentPort {
-  const find = () => entryForConversation(canvas, conversationId);
-  const need = (): AgentTileEntry => {
-    const entry = find();
+function addChatTab(projectId: string, taskId: string, conversationId: string): void {
+  const layout = getTaskComposition(projectId, taskId)?.paneLayout;
+  if (!layout) return;
+  const pane = layout.focusedPane;
+  const front = pane.activeTabId;
+  layout.open('conversation', { conversationId }, { preview: false });
+  if (front && pane.activeTabId !== front) pane.setActiveTab(front);
+}
+
+/**
+ * A task's chats for its conductor, on the conductor's own agent IO: the same delivery lane,
+ * session start and spawn path Maestro's conductor uses, so a prompt typed for the developer
+ * behaves the same whoever sends it. Every action names its chat by conversation id.
+ */
+export function createTaskAgentPort(canvas: CanvasStore, taskId: string): TaskAgentPort {
+  const entries = () => canvas.agentEntries.filter((entry) => entry.taskId === taskId);
+  const find = (chatId: string) => {
+    const entry = entryForConversation(canvas, chatId);
+    return entry?.taskId === taskId ? entry : undefined;
+  };
+  const need = (chatId: string): AgentTileEntry => {
+    const entry = find(chatId);
     if (!entry) throw new Error('This chat is not loaded, so its agent cannot be reached.');
     return entry;
   };
@@ -134,87 +153,92 @@ export function createChatAgentPort(canvas: CanvasStore, conversationId: string)
   /** The conversation's provider and recorded account, as the accounts slice reads them. */
   const conversationOf = (entry: AgentTileEntry) => ({
     providerId: entry.providerId,
-    claudeAccountId: conversationRegistry.get(entry.taskId)?.conversations.get(conversationId)?.data
-      .claudeAccountId,
+    claudeAccountId: conversationRegistry.get(entry.taskId)?.conversations.get(entry.conversationId)
+      ?.data.claudeAccountId,
   });
-  const control = (entry: AgentTileEntry): SessionControlDeps => ({
-    kind: entry.type,
-    agentLabel: spokenProviderLabel(entry.providerId),
-    running: () => find()?.sessionActive ?? false,
-    stop: () => stopAgentSession(entry),
-    stopped: async () => {
-      // The session list follows the host by subscription, a moment behind the stop itself.
-      const deadline = Date.now() + STOP_WAIT_MS;
-      while (find()?.sessionActive) {
-        if (Date.now() >= deadline) return false;
-        await new Promise((resolve) => setTimeout(resolve, STOP_POLL_MS));
-      }
-      return true;
-    },
-    start: () => startAgentSession(entry.projectId, entry.taskId, conversationId),
-    deliver: async (prompt) => {
-      if (entry.type !== 'acp') return deliverPromptWhenReady(canvas, conversationId, prompt);
-      await sendToAgent(find() ?? entry, prompt, true);
-      return true;
-    },
-    currentAccount: () => getConversationClaudeAccount(conversationOf(entry)),
-    resolveAccount: (reference) => resolveClaudeAccountChoice(reference),
-    move: async (accountId, followUpPrompt) =>
-      (await getConversationsClient()).moveClaudeAccount(
-        { conversationId, accountId, ...(followUpPrompt ? { followUpPrompt } : {}) },
-        { timeoutMs: 0 }
-      ),
-    describeMoveError: (error, target, previous) =>
-      describeClaudeAccountMoveError(error, { target, previous }),
-  });
+  const control = (entry: AgentTileEntry): SessionControlDeps => {
+    const chatId = entry.conversationId;
+    return {
+      kind: entry.type,
+      agentLabel: spokenProviderLabel(entry.providerId),
+      running: () => find(chatId)?.sessionActive ?? false,
+      stop: () => stopAgentSession(entry),
+      stopped: async () => {
+        // The session list follows the host by subscription, a moment behind the stop itself.
+        const deadline = Date.now() + STOP_WAIT_MS;
+        while (find(chatId)?.sessionActive) {
+          if (Date.now() >= deadline) return false;
+          await new Promise((resolve) => setTimeout(resolve, STOP_POLL_MS));
+        }
+        return true;
+      },
+      start: () => startAgentSession(entry.projectId, entry.taskId, chatId),
+      deliver: async (prompt) => {
+        if (entry.type !== 'acp') return deliverPromptWhenReady(canvas, chatId, prompt);
+        await sendToAgent(find(chatId) ?? entry, prompt, true);
+        return true;
+      },
+      currentAccount: () => getConversationClaudeAccount(conversationOf(entry)),
+      resolveAccount: (reference) => resolveClaudeAccountChoice(reference),
+      move: async (accountId, followUpPrompt) =>
+        (await getConversationsClient()).moveClaudeAccount(
+          { conversationId: chatId, accountId, ...(followUpPrompt ? { followUpPrompt } : {}) },
+          { timeoutMs: 0 }
+        ),
+      describeMoveError: (error, target, previous) =>
+        describeClaudeAccountMoveError(error, { target, previous }),
+    };
+  };
 
   return {
-    snapshot() {
-      const entry = find();
+    chats(): ChatInfo[] {
+      return entries().map((entry) => ({
+        id: entry.conversationId,
+        name: chatName(entry),
+        providerId: entry.providerId,
+        providerLabel: spokenProviderLabel(entry.providerId),
+        status: entry.status,
+        running: entry.type === 'acp' || entry.sessionActive,
+      }));
+    },
+
+    snapshot(chatId) {
+      const entry = find(chatId);
       return entry ? snapshotOf(entry) : null;
     },
 
     watch(onChange) {
       // The canvas entries follow the live conversation stores, and survive a task being reloaded.
+      let previous = new Map(entries().map((entry) => [entry.conversationId, snapshotOf(entry)]));
       return reaction(
-        () => {
-          const entry = find();
-          return entry ? snapshotOf(entry) : null;
-        },
-        (snapshot) => onChange(snapshot),
-        { equals: sameSnapshot }
+        () => new Map(entries().map((entry) => [entry.conversationId, snapshotOf(entry)])),
+        (next) => {
+          const before = previous;
+          previous = next;
+          for (const [chatId, snapshot] of next) {
+            if (!sameSnapshot(before.get(chatId) ?? null, snapshot)) onChange(chatId, snapshot);
+          }
+          for (const chatId of before.keys()) if (!next.has(chatId)) onChange(chatId, null);
+        }
       );
     },
 
     facts() {
-      const entry = find();
-      if (!entry) {
-        return {
-          chatTitle: 'unknown',
-          taskName: 'unknown',
-          projectName: 'unknown',
-          providerLabel: 'unknown agent',
-          agentStatus: 'not loaded',
-        };
-      }
-      const running = entry.type === 'acp' || entry.sessionActive;
+      const [first] = entries();
       return {
-        chatTitle: formatConversationTitleForDisplay(entry.providerId, entry.conversationTitle),
-        taskName: entry.taskName,
-        projectName: entry.projectName,
-        providerLabel: spokenProviderLabel(entry.providerId),
-        agentStatus: running ? entry.status : `${entry.status}, not running`,
+        taskName: first?.taskName ?? 'unknown',
+        projectName: first?.projectName ?? 'unknown',
       };
     },
 
-    async readOutput(lines) {
-      const output = await readAgentOutput(need(), lines);
+    async readOutput(chatId, lines) {
+      const output = await readAgentOutput(need(chatId), lines);
       // `readAgentOutput` answers with a parenthesized note when it has no output to give.
       return NO_OUTPUT_NOTE.test(output.trim()) ? '' : output;
     },
 
-    async finishedReport(): Promise<CompletionReport | null> {
-      const entry = find();
+    async finishedReport(chatId): Promise<CompletionReport | null> {
+      const entry = find(chatId);
       if (!entry) return null;
       if (entry.completionReport) return entry.completionReport;
       return entry.type === 'acp'
@@ -222,8 +246,8 @@ export function createChatAgentPort(canvas: CanvasStore, conversationId: string)
         : terminalTailReport(await readFinishedTerminal(entry).catch(() => null));
     },
 
-    async send(message, onLateFailure) {
-      const entry = need();
+    async send(chatId, message, onLateFailure) {
+      const entry = need(chatId);
       // A send held for the developer's typing can wait minutes: the turn does not wait with it.
       let onHold: (hold: DeliveryHold) => void = () => {};
       const heldNow = new Promise<DeliveryHold>((resolve) => (onHold = resolve));
@@ -245,15 +269,15 @@ export function createChatAgentPort(canvas: CanvasStore, conversationId: string)
         return `Held ${heldWhile(first)}; it is typed once that clears. The thread shows the developer if it cannot be delivered.`;
       }
       if (first) return 'Sent to the agent.';
-      const started = await startAgentSession(entry.projectId, entry.taskId, entry.conversationId);
+      const started = await startAgentSession(entry.projectId, entry.taskId, chatId);
       if (!started) throw new Error('The agent was not running and could not be started.');
-      const delivered = await deliverPromptWhenReady(canvas, conversationId, message);
+      const delivered = await deliverPromptWhenReady(canvas, chatId, message);
       if (!delivered) throw new Error('The agent was started, but it did not take the prompt.');
       return 'The agent was not running: it was started, then sent the prompt.';
     },
 
-    async interrupt() {
-      const entry = need();
+    async interrupt(chatId) {
+      const entry = need(chatId);
       if (entry.type !== 'acp' && !entry.sessionActive) {
         return 'The agent is not running, so there is nothing to interrupt.';
       }
@@ -261,8 +285,8 @@ export function createChatAgentPort(canvas: CanvasStore, conversationId: string)
       return 'Interrupted the agent.';
     },
 
-    async answerPrompt(decision) {
-      const entry = need();
+    async answerPrompt(chatId, decision) {
+      const entry = need(chatId);
       // Answering presses a key in the terminal: only when a permission prompt is what it shows.
       if (!showsPermissionPrompt(snapshotOf(entry))) {
         throw new Error('The agent is not showing a permission prompt, so nothing was pressed.');
@@ -273,74 +297,80 @@ export function createChatAgentPort(canvas: CanvasStore, conversationId: string)
         : 'Denied the permission prompt.';
     },
 
-    async startAgent(input: StartAgentInput, onLateFailure) {
-      const entry = need();
-      let providerId = entry.providerId;
-      if (input.provider) {
-        const installed = await installedProviders().catch(() => []);
-        // Detection that found nothing failed; the reference is then resolved among all providers.
-        const match =
-          installed.length > 0 ? matchInstalledProvider(input.provider, installed) : null;
-        if (installed.length > 0 && !match) {
-          throw new Error(
-            `Provider "${input.provider}" is not installed. Installed: ${installed.map((provider) => provider.id).join(', ')}.`
-          );
-        }
-        providerId = match?.id ?? (await resolveProviderId(input.provider));
+    async startChat(input: StartChatInput, onLateFailure) {
+      const [first] = entries();
+      if (!first) throw new Error('This task has no chat loaded, so no chat can be added to it.');
+      const installed = await installedProviders().catch(() => []);
+      // Detection that found nothing failed; the reference is then resolved among all providers.
+      const match = installed.length > 0 ? matchInstalledProvider(input.provider, installed) : null;
+      if (installed.length > 0 && !match) {
+        throw new Error(
+          `Provider "${input.provider}" is not installed. Installed: ${installed.map((provider) => provider.id).join(', ')}.`
+        );
       }
-      const result = await spawnAgentTask({
-        projectId: entry.projectId,
+      const providerId = match?.id ?? (await resolveProviderId(input.provider));
+      let claudeAccountId: string | undefined;
+      if (input.claudeAccount) {
+        const choice = resolveClaudeAccountChoice(input.claudeAccount);
+        if (!choice.ok) throw new Error(choice.message);
+        claudeAccountId = choice.account.id;
+      }
+      const result = await addAgentChat({
+        projectId: first.projectId,
+        taskId,
         providerId,
-        taskName: input.taskName,
         prompt: input.prompt,
-        worktree: input.worktree === true,
-        peers: spawnPeers(canvas, (id) => projectData(getProjectStore(id))?.repositoryWorkspaceId),
+        ...(input.name ? { title: input.name } : {}),
+        ...(claudeAccountId ? { claudeAccountId } : {}),
       });
-      const label = spokenProviderLabel(providerId);
+      addChatTab(first.projectId, taskId, result.conversationId);
+      const label = spokenProviderLabel(result.providerId);
       const failed = (why: string) => {
-        log.warn('chat conductor: started agent did not come up', {
+        log.warn('task conductor: started chat did not come up', {
           conversationId: result.conversationId,
         });
-        onLateFailure(`The ${label} agent "${result.taskName}" ${why}`);
+        onLateFailure(`The ${label} chat "${result.title}" ${why}`);
       };
-      // Its workspace can take a while (a new worktree): the turn does not wait for it.
-      void startAgentSession(entry.projectId, result.taskId, result.conversationId)
-        .then(async (started) => {
-          if (!started) return failed('did not start. Open its chat to see why.');
-          if (!result.promptDeferred) return;
-          const delivered = await deliverPromptWhenReady(
-            canvas,
-            result.conversationId,
-            input.prompt
-          );
-          if (!delivered) failed('started, but did not take its prompt.');
-        })
-        .catch((error: unknown) => failed(`could not be started: ${errorMessage(error)}`));
-      return [
-        `Created the chat "${result.taskName}" with a ${label} agent${input.worktree ? ' in its own worktree' : ''}; it is starting with the prompt. The thread shows the developer if it does not come up.`,
-        ...result.notes,
-      ].join(' ');
+      if (result.promptDeferred) {
+        // Its provider takes no prompt at start: the brief is typed in once the agent is up.
+        void startAgentSession(first.projectId, taskId, result.conversationId)
+          .then(async (started) => {
+            if (!started) return failed('did not start. Open its tab to see why.');
+            const delivered = await deliverPromptWhenReady(
+              canvas,
+              result.conversationId,
+              input.prompt
+            );
+            if (!delivered) failed('started, but did not take its prompt.');
+          })
+          .catch((error: unknown) => failed(`could not be started: ${errorMessage(error)}`));
+      }
+      return {
+        chatId: result.conversationId,
+        name: result.title,
+        result: `Started the chat "${result.title}" in this task with a ${label} agent; it is starting with the prompt. Its events reach you like the other chats'. The thread shows the developer if it does not come up.`,
+      };
     },
 
-    restart(input, onLateFailure) {
-      return restartChatAgent(control(need()), input, onLateFailure);
+    restart(chatId, input, onLateFailure) {
+      return restartChatAgent(control(need(chatId)), input, onLateFailure);
     },
 
-    stop() {
-      return stopChatAgent(control(need()));
+    stop(chatId) {
+      return stopChatAgent(control(need(chatId)));
     },
 
-    listAccounts() {
-      return describeClaudeAccountsForChat(conversationOf(need()), Date.now());
+    listAccounts(chatId) {
+      return describeClaudeAccountsForChat(conversationOf(need(chatId)), Date.now());
     },
 
-    async receivedPrompts(cursor) {
-      const entry = need();
-      if (entry.type === 'acp') return chatAgentPrompts(conversationId, cursor);
+    async receivedPrompts(chatId, cursor) {
+      const entry = need(chatId);
+      if (entry.type === 'acp') return chatAgentPrompts(chatId, cursor);
       // A terminal agent: what the developer submitted with their own keys in this window. The
       // conductor's and Maestro's sends never go through the keys, so these are the developer's.
       const now = Date.now();
-      const submitted = developerSubmissionsSince(conversationId, cursor ?? 0).filter(
+      const submitted = developerSubmissionsSince(chatId, cursor ?? 0).filter(
         (submission) => submission.at <= now
       );
       return {
@@ -350,19 +380,13 @@ export function createChatAgentPort(canvas: CanvasStore, conversationId: string)
     },
 
     listChats() {
-      const entry = need();
-      const others = canvas.agentEntries.filter(
-        (other) =>
-          other.projectId === entry.projectId && other.conversationId !== entry.conversationId
-      );
       return formatChatList(
-        others.map((other) => ({
-          title: formatConversationTitleForDisplay(other.providerId, other.conversationTitle),
-          taskName: other.taskName,
-          provider: spokenProviderLabel(other.providerId),
-          status: other.status,
-          running: other.type === 'acp' || other.sessionActive,
-          report: other.completionReport?.text ?? null,
+        entries().map((entry) => ({
+          title: chatName(entry),
+          provider: spokenProviderLabel(entry.providerId),
+          status: entry.status,
+          running: entry.type === 'acp' || entry.sessionActive,
+          report: entry.completionReport?.text ?? null,
         }))
       );
     },

@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
+  adoptChatThreads,
   boundThread,
   CHAT_THREAD_LIMITS,
   chatConductorThreadSchema,
+  conductorTaskThreadSchema,
   emptyChatThread,
+  emptyTaskThread,
+  TASK_THREAD_MAX_CHATS,
   type ChatConductorEntry,
+  type ChatConductorThread,
 } from './thread';
 
 const at = '2026-11-10T10:00:00.000Z';
@@ -106,5 +111,83 @@ describe('chat conductor thread', () => {
       status: { state: 'working' as const, headline: 'Running tests' },
     };
     expect(boundThread(thread)).toEqual(thread);
+  });
+});
+
+describe('task thread', () => {
+  const chatThread = (
+    conversationId: string,
+    updatedAt: string,
+    overrides: Partial<ChatConductorThread> = {}
+  ): ChatConductorThread => ({
+    ...emptyChatThread(conversationId, false),
+    entries: [{ kind: 'developer', id: `d-${conversationId}`, at: updatedAt, text: 'hi' }],
+    messages: [{ role: 'user', content: `history of ${conversationId}` }],
+    notes: `notes of ${conversationId}`,
+    status: { state: 'working', headline: conversationId },
+    lastEventKey: `finished:${conversationId}`,
+    sentToAgent: ['Run the tests.'],
+    promptCursor: 42,
+    updatedAt,
+    ...overrides,
+  });
+
+  it('starts empty and parses', () => {
+    const task = emptyTaskThread('task-1', true);
+    expect(conductorTaskThreadSchema.parse(task)).toEqual(task);
+    expect(task).toMatchObject({ version: 2, taskId: 'task-1', autonomy: true, adopted: [] });
+  });
+
+  it("adopts each chat's own thread once, in time order, with its notes and bookkeeping", () => {
+    const older = chatThread('conv-a', '2026-11-09T10:00:00.000Z');
+    const newer = chatThread('conv-b', '2026-11-10T10:00:00.000Z', { autonomy: true });
+    const task = adoptChatThreads(emptyTaskThread('task-1', false), [
+      { thread: newer, name: 'Bravo' },
+      { thread: older, name: 'Atlas' },
+    ]);
+    expect(task.entries.map((entry) => entry.id)).toEqual(['d-conv-a', 'd-conv-b']);
+    expect(task.messages).toEqual(newer.messages);
+    expect(task.status).toEqual(newer.status);
+    expect(task.autonomy).toBe(true);
+    expect(task.notes).toBe(
+      'From the chat "Atlas":\nnotes of conv-a\n\nFrom the chat "Bravo":\nnotes of conv-b'
+    );
+    expect(task.chats['conv-a']).toEqual({
+      lastEventKey: 'finished:conv-a',
+      sentToAgent: ['Run the tests.'],
+      promptCursor: 42,
+    });
+    expect(task.adopted).toEqual(['conv-a', 'conv-b']);
+    expect(task.lastChatId).toBe('conv-b');
+
+    // Safe to repeat: what was adopted is not taken again.
+    expect(adoptChatThreads(task, [{ thread: older, name: 'Atlas' }])).toBe(task);
+  });
+
+  it("keeps the task thread's own history and status when it has them", () => {
+    const task = {
+      ...emptyTaskThread('task-1', false),
+      messages: [{ role: 'user' as const, content: 'task history' }],
+      status: { state: 'done' as const, headline: 'Shipped' },
+      notes: 'Task notes.',
+    };
+    const merged = adoptChatThreads(task, [
+      { thread: chatThread('conv-a', '2026-11-09T10:00:00.000Z'), name: 'Atlas' },
+    ]);
+    expect(merged.messages).toEqual(task.messages);
+    expect(merged.status).toEqual(task.status);
+    expect(merged.notes.startsWith('Task notes.\n\nFrom the chat "Atlas"')).toBe(true);
+  });
+
+  it('keeps bookkeeping for a bounded number of chats', () => {
+    const chats = Object.fromEntries(
+      Array.from({ length: TASK_THREAD_MAX_CHATS + 5 }, (_, index) => [
+        `conv-${index}`,
+        { lastEventKey: null, sentToAgent: [], promptCursor: null },
+      ])
+    );
+    const bounded = boundThread({ ...emptyTaskThread('task-1', false), chats });
+    expect(Object.keys(bounded.chats)).toHaveLength(TASK_THREAD_MAX_CHATS);
+    expect(bounded.chats[`conv-${TASK_THREAD_MAX_CHATS + 4}`]).toBeDefined();
   });
 });

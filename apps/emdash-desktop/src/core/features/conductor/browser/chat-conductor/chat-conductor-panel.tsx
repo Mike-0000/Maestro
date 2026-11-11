@@ -27,6 +27,7 @@ import { useMarkdownLinkOpener } from '@core/primitives/external-links/browser';
 import { getNavigation } from '@core/primitives/navigation/browser/navigation-selectors';
 import { cn } from '@core/primitives/styling/browser/cn';
 import type { ChatConductorEntry } from '../../api/chat-conductor/thread';
+import { useHudClearance } from '../hud/hud-clearance';
 import { withoutImages } from './safe-markdown';
 import type { ChatConductorSession } from './session';
 import { ChatSubAgents } from './sub-agents';
@@ -199,6 +200,7 @@ export const ChatConductorPanel = observer(function ChatConductorPanel({
   autoFocus,
   onFocus,
 }: ChatConductorPanelProps) {
+  const [panel, setPanel] = useState<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   /** The developer is reading the end of the thread, so new entries scroll into view. */
@@ -206,11 +208,27 @@ export const ChatConductorPanel = observer(function ChatConductorPanel({
 
   const { entries, busy, activity, loaded, draft } = session;
   const canSend = ready && loaded && draft.trim().length > 0;
+  /** The setup screen stands in for the thread and the composer. */
+  const needsSetup = !ready && entries.length === 0;
+  // What the conductor bar, or a card raised from it, covers of this panel's bottom edge. The
+  // composer keeps that much under it, so it rises above them and the thread gives up the room.
+  const hudClearance = useHudClearance(panel);
 
   useLayoutEffect(() => {
     const element = scrollRef.current;
     if (element && followingRef.current) element.scrollTop = element.scrollHeight;
   }, [entries, busy, activity, loaded]);
+
+  // The thread gets shorter when the composer grows or rises: keep its end in view then, too.
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      if (followingRef.current) element.scrollTop = element.scrollHeight;
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [loaded, needsSetup]);
 
   useEffect(() => {
     if (autoFocus) composerRef.current?.focus({ preventScroll: true });
@@ -237,7 +255,7 @@ export const ChatConductorPanel = observer(function ChatConductorPanel({
     );
   }
 
-  if (!ready && entries.length === 0) {
+  if (needsSetup) {
     return (
       <EmptyState
         {...setupCopy(enabled)}
@@ -251,7 +269,7 @@ export const ChatConductorPanel = observer(function ChatConductorPanel({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col" onFocus={onFocus}>
+    <div ref={setPanel} className="flex h-full min-h-0 flex-col" onFocus={onFocus}>
       <div
         ref={scrollRef}
         className={cn('min-h-0 flex-1 overflow-y-auto', GUTTER)}
@@ -293,7 +311,13 @@ export const ChatConductorPanel = observer(function ChatConductorPanel({
       </div>
 
       <div className={cn('shrink-0 overflow-hidden', GUTTER)}>
-        <div className={cn(COLUMN, 'pt-1 pb-3')}>
+        <div
+          className={cn(
+            COLUMN,
+            'pt-1 motion-safe:transition-[padding-bottom] motion-safe:duration-150 motion-safe:ease-out'
+          )}
+          style={{ paddingBottom: `max(0.75rem, ${hudClearance}px)` }}
+        >
           {!ready && (
             <div className="mb-2 flex items-center gap-2 rounded-md border border-border-warning bg-background-warning px-3 py-1.5 text-xs text-foreground-warning">
               <span className="min-w-0 flex-1">
@@ -359,7 +383,7 @@ export const ChatConductorPanel = observer(function ChatConductorPanel({
             >
               Catch me up
             </Button>
-            <ChatSubAgents conversationId={session.conversationId} />
+            <ChatSubAgents conversationIds={session.chatIds} />
             <DropdownMenu.Root>
               <DropdownMenu.Trigger
                 render={

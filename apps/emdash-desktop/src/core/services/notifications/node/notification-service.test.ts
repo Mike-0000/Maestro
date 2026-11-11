@@ -193,6 +193,28 @@ describe('NotificationService', () => {
     expect(systemSink.deliver).not.toHaveBeenCalled();
   });
 
+  it('quiets finished agents under the policy, but not one their conductor decided to tell', async () => {
+    const clock = new ManualClock();
+    const pushSink = { id: 'mobile-push', deliver: vi.fn() };
+    service = new NotificationService({
+      store: new MemoryNotificationStore(),
+      clock,
+      routingContext: () => ({ ...routingContext(), quietCompletions: true }),
+    });
+    service.registerSink(pushSink);
+
+    service.publish(input({ kind: 'agent-complete', groupKey: 'conversation:a' }));
+    const decided = service.publish(input({ kind: 'agent-complete', groupKey: 'conversation:b' }), {
+      decided: true,
+    });
+    clock.runAll();
+
+    await vi.waitFor(() => expect(pushSink.deliver).toHaveBeenCalledTimes(1));
+    expect(pushSink.deliver).toHaveBeenCalledWith(
+      expect.objectContaining({ notification: expect.objectContaining({ id: decided }) })
+    );
+  });
+
   it('still delivers to the remaining sinks when one fails', async () => {
     const clock = new ManualClock();
     const warn = vi.fn();

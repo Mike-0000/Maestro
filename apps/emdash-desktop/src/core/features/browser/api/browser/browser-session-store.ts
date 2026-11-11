@@ -33,6 +33,11 @@ export type BrowserSessionUpdate = Partial<
 
 export class BrowserSessionStore {
   readonly sessions = observable.map<string, BrowserSessionSnapshot>();
+  /**
+   * Addresses a browser was asked to load from outside its own toolbar (a task's conductor), by
+   * browser id. Its surface loads one as the address bar would, then takes it.
+   */
+  readonly navigationRequests = observable.map<string, string>();
 
   constructor() {
     makeObservable(this, {
@@ -43,6 +48,8 @@ export class BrowserSessionStore {
       setSessionProfile: action,
       migrateProfileSessions: action,
       updateSession: action,
+      requestNavigation: action,
+      takeNavigationRequest: action,
       removeSession: action,
       clear: action,
     });
@@ -151,6 +158,18 @@ export class BrowserSessionStore {
     return next;
   }
 
+  /** Asks a browser's surface to load `url`, as its address bar would. */
+  requestNavigation(browserId: string, url: string): void {
+    if (this.sessions.has(browserId)) this.navigationRequests.set(browserId, url);
+  }
+
+  /** The address a browser was asked to load, once: taking it clears it. */
+  takeNavigationRequest(browserId: string): string | null {
+    const url = this.navigationRequests.get(browserId) ?? null;
+    this.navigationRequests.delete(browserId);
+    return url;
+  }
+
   getSession(browserId: string): BrowserSessionSnapshot | undefined {
     return this.sessions.get(browserId);
   }
@@ -162,6 +181,7 @@ export class BrowserSessionStore {
 
   removeSession(browserId: string): void {
     this.sessions.delete(browserId);
+    this.navigationRequests.delete(browserId);
   }
 
   clear(): void {

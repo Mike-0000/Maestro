@@ -7,8 +7,12 @@ import { conversationEvents } from '@core/features/conversations/api/node/conver
 import { emitConversationWireEvent } from '@core/features/conversations/node/event-host';
 import { loadActiveAgentStatusConversationIds } from '@core/features/conversations/node/load-active-agent-status-conversation-ids';
 import { renameConversation } from '@core/features/conversations/node/renameConversation';
+import { setConductorDecisionHost } from '@core/primitives/agents/api/conductor-decisions';
 import { acpAgentStatusBridge } from '@main/core/acp/agent-status-bridge';
-import { setAgentStatusConversationEventPublisher } from '@main/core/agent-status/agent-status-service';
+import {
+  agentStatusService,
+  setAgentStatusConversationEventPublisher,
+} from '@main/core/agent-status/agent-status-service';
 import { tuiAgentStatusBridge } from '@main/core/agent-status/tui-agent-status-bridge';
 import type { DesktopRuntimes } from '@main/gateway/desktop-runtimes';
 import {
@@ -60,6 +64,8 @@ export function installGateway(
   );
   const publishConversationEvent = emitConversationWireEvent;
   setAgentStatusConversationEventPublisher(publishConversationEvent);
+  // Chat conductors decide needs-you and done for the conversations they claim.
+  setConductorDecisionHost(agentStatusService.decisions);
   tuiAgentStatusBridge.initialize({
     runtimes: runtimes.broker,
     onLocalWorkerStateChanged: runtimes.workers.tuiAgents.onStateChanged.bind(

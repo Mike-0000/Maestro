@@ -46,9 +46,9 @@ export const RenameTaskModal = observer(function RenameTaskModal({
   const isValid = !isEmpty && !isDuplicate && !isUnchanged;
 
   const validationMessage = isDuplicate
-    ? 'A task with this name already exists in this project.'
+    ? 'A conductor with this name already exists in this project.'
     : isEmpty
-      ? 'Task name cannot be empty.'
+      ? 'Conductor name cannot be empty.'
       : undefined;
 
   const handleNameChange = useCallback(
@@ -72,13 +72,13 @@ export const RenameTaskModal = observer(function RenameTaskModal({
     try {
       const result = await task.rename(normalizedName);
       if (!result.success) {
-        setError('Task not found.');
+        setError('Conductor not found.');
         setIsSubmitting(false);
         return;
       }
       complete();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to rename task');
+      setError(e instanceof Error ? e.message : 'Failed to rename conductor');
       setIsSubmitting(false);
     }
   }, [isValid, taskManager, taskId, normalizedName, complete]);
@@ -86,12 +86,12 @@ export const RenameTaskModal = observer(function RenameTaskModal({
   return (
     <>
       <Dialog.Header showCloseButton={false}>
-        <Dialog.Title>Rename task</Dialog.Title>
+        <Dialog.Title>Rename conductor</Dialog.Title>
       </Dialog.Header>
       <Dialog.Body className="pt-0">
         <Field.Group>
           <Field.Root>
-            <Field.Label>Task name</Field.Label>
+            <Field.Label>Conductor name</Field.Label>
             <Input
               value={name}
               onChange={(e) => handleNameChange(e.target.value)}

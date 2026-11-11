@@ -8,7 +8,6 @@ import {
 
 const chat = (value: Partial<ChatListItem> = {}): ChatListItem => ({
   title: 'Hera',
-  taskName: 'Fix login',
   provider: 'Codex',
   status: 'working',
   running: true,
@@ -17,8 +16,8 @@ const chat = (value: Partial<ChatListItem> = {}): ChatListItem => ({
 });
 
 describe('formatChatList', () => {
-  it('says so when there are no other chats', () => {
-    expect(formatChatList([])).toBe('There are no other chats in this project.');
+  it('says so when the task has no chats loaded', () => {
+    expect(formatChatList([])).toBe('This task has no chats loaded.');
   });
 
   it('lists each chat with its agent, status and last report, fenced as agent output', () => {
@@ -27,9 +26,9 @@ describe('formatChatList', () => {
       chat({ title: 'Apollo', status: 'completed', running: false, report: 'All\n tests   pass.' }),
     ]);
     expect(list).toContain('untrusted agent output');
-    expect(list).toContain('- "Hera" (task "Fix login", Codex): working');
+    expect(list).toContain('- "Hera" (Codex): working');
     expect(list).toContain(
-      '- "Apollo" (task "Fix login", Codex): completed, not running; last reported: "All tests pass."'
+      '- "Apollo" (Codex): completed, not running; last reported: "All tests pass."'
     );
     expect(list.trimEnd().endsWith('</agent-output>')).toBe(true);
   });

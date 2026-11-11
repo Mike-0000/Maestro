@@ -76,6 +76,11 @@ export type RemoteControlPorts = {
   sessions: {
     describe(conversationId: string): { agent?: TuiAgentState; session?: TuiSessionState };
     onChanged(listener: () => void): Unsubscribe;
+    /**
+     * True while the conversation's turn end or prompt waits on its conductor's decision: the
+     * runtime already shows it, the developer is not to see it yet.
+     */
+    held?(conversationId: string): boolean;
   };
 };
 
@@ -419,8 +424,14 @@ export async function loadOverview(ports: RemoteControlPorts): Promise<RemoteOve
     const turnOver =
       agent?.status === 'completed' ||
       (agent?.status === 'awaiting-input' && agent.notificationType === 'idle_prompt');
+    // While the chat's conductor decides, the stored status (still working) is what shows.
+    const held = ports.sessions.held?.(row.id) ?? false;
     const status = agentStatus(
-      turnOver ? (row.agentStatus ?? agent?.status) : (agent?.status ?? row.agentStatus)
+      held
+        ? (row.agentStatus ?? 'working')
+        : turnOver
+          ? (row.agentStatus ?? agent?.status)
+          : (agent?.status ?? row.agentStatus)
     );
     agents.push({
       conversationId: row.id,

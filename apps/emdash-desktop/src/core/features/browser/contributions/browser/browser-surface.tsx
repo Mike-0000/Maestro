@@ -201,6 +201,14 @@ export const BrowserSurface = observer(function BrowserSurface({
     [loadUrl]
   );
 
+  // An address asked for from outside the toolbar (a task's conductor) loads as if typed there.
+  const requestedUrl = browserSessionStore.navigationRequests.get(browserId);
+  useEffect(() => {
+    if (!requestedUrl || !sessionBrowserId) return;
+    browserSessionStore.takeNavigationRequest(sessionBrowserId);
+    navigateTo(requestedUrl);
+  }, [requestedUrl, sessionBrowserId, navigateTo]);
+
   const goBack = useCallback(() => {
     if (!adapter?.canGoBack()) return;
     adapter.goBack();

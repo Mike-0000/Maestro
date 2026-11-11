@@ -14,9 +14,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CHAT_THREAD_LIMITS,
   emptyChatThread,
+  emptyTaskThread,
   type ChatConductorThread,
 } from '../api/chat-conductor/thread';
-import { ChatConductorThreads, chatThreadFileName } from './chat-conductor-threads';
+import {
+  ChatConductorThreads,
+  chatThreadFileName,
+  TaskConductorThreads,
+} from './chat-conductor-threads';
 
 const logger = {
   debug: vi.fn(),
@@ -249,5 +254,20 @@ describe('ChatConductorThreads', () => {
     const removed = threads.delete('conv-b');
     await Promise.all([save, removed]);
     expect(await threads.read('conv-b')).toBeNull();
+  });
+});
+
+describe('TaskConductorThreads', () => {
+  it('keeps one thread per task in its own folder, apart from the chat threads', async () => {
+    const tasks = new TaskConductorThreads(dataDir, logger);
+    const saved = { ...emptyTaskThread('task-1', true), notes: 'Goal: ship.' };
+    await tasks.save(saved);
+    expect(readdirSync(join(dataDir, 'task-conductors'))).toEqual(['task-1.json']);
+    expect(await tasks.read('task-1')).toEqual(saved);
+    expect(await tasks.list()).toEqual(['task-1']);
+    expect(await threads.list()).toEqual([]);
+    await tasks.delete('task-1');
+    expect(await tasks.read('task-1')).toBeNull();
+    await expect(tasks.save({ ...saved, taskId: '../x' })).rejects.toThrow();
   });
 });

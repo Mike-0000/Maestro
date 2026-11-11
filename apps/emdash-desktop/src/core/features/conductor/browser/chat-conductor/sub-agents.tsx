@@ -1,19 +1,22 @@
 import { observer } from 'mobx-react-lite';
 import { useEffect, useState } from 'react';
 import { getCanvasStore } from '@core/features/canvas/contributions/browser/app-stores';
+import { formatConversationTitleForDisplay } from '@core/features/conversations/api/browser/conversation-title-utils';
 import { subAgentCount } from '@core/primitives/agents/api';
 import { cn } from '@core/primitives/styling/browser/cn';
 import { entryForConversation } from '../roster';
 import {
   advanceSubAgentStripTo,
-  chatSubAgents,
   EMPTY_SUB_AGENT_STRIP,
   hasLeavingSubAgents,
+  hasNamedSubAgents,
   settleSubAgentStrip,
   showsSubAgentLabels,
+  subAgentChatSummary,
   subAgentSlotMotion,
   subAgentsKey,
   subAgentTitle,
+  taskSubAgents,
   type RunningSubAgents,
   type SubAgentSlot,
   type SubAgentStripState,
@@ -92,8 +95,9 @@ function SubAgentOrb({ slot, title }: { slot: SubAgentSlot; title: string }) {
 }
 
 /**
- * A named sub-agent's label beside its orb, cut to fit. It shows only where the strip is wide
- * enough (a container query on the strip); a narrow pane keeps the orbs alone.
+ * A named sub-agent's label beside its orb, cut to fit, and after it the name of its chat when
+ * the task has several. Each shows only where the strip is wide enough (container queries on the
+ * strip): a narrow pane keeps the orbs alone, a wider one adds the labels, a wide one the chats.
  */
 function SubAgentLabel({ slot }: { slot: SubAgentSlot }) {
   if (!slot.agent) return null;
@@ -102,19 +106,25 @@ function SubAgentLabel({ slot }: { slot: SubAgentSlot }) {
       aria-hidden
       title={subAgentTitle(slot.agent)}
       className={cn(
-        'hidden max-w-32 shrink-0 truncate pr-1.5 text-xs text-foreground-muted motion-reduce:animate-none @md:block',
+        'hidden shrink-0 items-center gap-1 pr-1.5 text-xs text-foreground-muted motion-reduce:animate-none @md:flex',
         slot.leaving ? EXIT : ENTER
       )}
     >
-      {slot.agent.label}
+      <span className="max-w-32 truncate">{slot.agent.label}</span>
+      {slot.agent.chat && (
+        <span className="hidden max-w-24 truncate text-tiny text-foreground-passive @2xl:block">
+          {slot.agent.chat}
+        </span>
+      )}
     </span>
   );
 }
 
 /**
- * The sub-agents running in a chat's agent session, one orb each after their count, with the
+ * The sub-agents running in a task's agent sessions, one orb each after their count, with the
  * label of each beside its orb when they are few and the row has room. Where the host names
- * none, the orbs stand for the sub-agents the agent waits on. It fills the free space of the row
+ * none, the orbs stand for the sub-agents the agent waits on. In a task with several chats each
+ * orb's tooltip names its chat, and the caption's tooltip says how they split. It fills the free space of the row
  * it sits in and holds that space with none running, so nothing around it moves when sub-agents
  * come and go. Orbs that do not fit wrap onto a line that is cut off, so a narrow pane shows
  * fewer whole orbs, never a clipped one.
@@ -122,11 +132,14 @@ function SubAgentLabel({ slot }: { slot: SubAgentSlot }) {
 export function SubAgentStrip({ running }: { running: RunningSubAgents }) {
   const strip = useSubAgentStrip(running);
   const shown = strip.slots.length > 0;
-  const named = strip.slots.some((slot) => slot.agent !== undefined);
   const labeled = showsSubAgentLabels(strip);
-  const title = named
-    ? `${subAgentCount(strip.count)} running`
-    : `The agent is waiting on ${subAgentCount(strip.count)}`;
+  const split = subAgentChatSummary(running);
+  const title =
+    (hasNamedSubAgents(strip)
+      ? `${subAgentCount(strip.count)} running`
+      : split
+        ? `Waiting on ${subAgentCount(strip.count)}`
+        : `The agent is waiting on ${subAgentCount(strip.count)}`) + (split ? `: ${split}` : '');
   return (
     <div
       role="status"
@@ -167,12 +180,26 @@ export function SubAgentStrip({ running }: { running: RunningSubAgents }) {
   );
 }
 
-/** The strip for one chat, read live from the agent entry the canvas keeps for it. */
+/**
+ * The strip for a task's chats, in the order given, read live from the agent entries the canvas
+ * keeps for them. A chat's name is its window title, as the task view's tab shows it.
+ */
 export const ChatSubAgents = observer(function ChatSubAgents({
-  conversationId,
+  conversationIds,
 }: {
-  conversationId: string;
+  conversationIds: readonly string[];
 }) {
-  const entry = entryForConversation(getCanvasStore(), conversationId);
-  return <SubAgentStrip running={chatSubAgents(entry?.subAgents, entry?.backgroundAgents)} />;
+  const canvas = getCanvasStore();
+  const chats = conversationIds.map((id) => {
+    const entry = entryForConversation(canvas, id);
+    return {
+      id,
+      name: entry
+        ? formatConversationTitleForDisplay(entry.providerId, entry.conversationTitle)
+        : '',
+      named: entry?.subAgents,
+      waitingOn: entry?.backgroundAgents,
+    };
+  });
+  return <SubAgentStrip running={taskSubAgents(chats)} />;
 });

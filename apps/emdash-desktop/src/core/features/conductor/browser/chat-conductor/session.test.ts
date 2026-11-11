@@ -1,7 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { describe, expect, it, vi } from 'vitest';
 import { CHAT_NOTHING_NEW } from '../../api/chat-conductor/prompt';
-import type { ChatConductorThread } from '../../api/chat-conductor/thread';
+import type { ConductorTaskThread } from '../../api/chat-conductor/thread';
 import {
   CHAT_CONDUCTOR_MARK,
   CHAT_EVENT_MARK,
@@ -16,6 +16,8 @@ import {
   MAX_TURN_ROUNDS,
   type ChatConductorPorts,
   type ChatTurnResult,
+  type LegacyThread,
+  type TaskBrowser,
 } from './session';
 
 type Message = Anthropic.Beta.BetaMessageParam;
@@ -43,49 +45,97 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function harness(options: { thread?: ChatConductorThread | null; autonomy?: boolean } = {}) {
+type Chat = { id: string; name: string; providerId: string };
+
+function harness(
+  options: { thread?: ConductorTaskThread | null; autonomy?: boolean; chats?: Chat[] } = {}
+) {
   const replies: (ChatTurnResult | Promise<ChatTurnResult> | Error)[] = [];
   const calls: Message[][] = [];
-  const saved: ChatConductorThread[] = [];
+  const saved: ConductorTaskThread[] = [];
   let ready = true;
-  let snapshot: AgentSnapshot | null = { status: 'idle', report: null, notification: null };
-  let onChange: ((value: AgentSnapshot | null) => void) | null = null;
+  const chats: Chat[] = options.chats ?? [{ id: 'conv-1', name: 'Zeus', providerId: 'claude' }];
+  const snapshots = new Map<string, AgentSnapshot | null>(
+    chats.map((chat) => [chat.id, { status: 'idle', report: null, notification: null }])
+  );
+  let onChange: ((chatId: string, value: AgentSnapshot | null) => void) | null = null;
   let id = 0;
+  let onScreen: string | null = chats[0]?.id ?? null;
   const received: SubmittedPrompt[] = [];
   let cursor = 0;
   const agent = {
-    snapshot: () => snapshot,
-    watch: (listener: (value: AgentSnapshot | null) => void) => {
+    chats: () =>
+      chats.map((chat) => ({
+        ...chat,
+        providerLabel: chat.providerId === 'codex' ? 'Codex' : 'Claude',
+        status: snapshots.get(chat.id)?.status ?? 'not loaded',
+        running: true,
+      })),
+    snapshot: (chatId: string) => snapshots.get(chatId) ?? null,
+    watch: (listener: (chatId: string, value: AgentSnapshot | null) => void) => {
       onChange = listener;
       return () => (onChange = null);
     },
-    facts: () => ({
-      chatTitle: 'Zeus',
-      taskName: 'Fix login',
-      projectName: 'Shop',
-      providerLabel: 'Claude',
-      agentStatus: snapshot?.status ?? 'not loaded',
+    facts: () => ({ taskName: 'Fix login', projectName: 'Shop' }),
+    readOutput: vi.fn(async (_chatId: string, _lines: number) => 'raw output'),
+    finishedReport: vi.fn(async (_chatId: string) => null),
+    send: vi.fn(
+      async (_chatId: string, _message: string, _late: (message: string) => void) =>
+        'Sent to the agent.'
+    ),
+    interrupt: vi.fn(async (_chatId: string) => 'Interrupted the agent.'),
+    answerPrompt: vi.fn(
+      async (_chatId: string, _decision: 'allow' | 'deny') => 'Allowed the permission prompt.'
+    ),
+    startChat: vi.fn(async (input: { name?: string }, _late: (message: string) => void) => {
+      const chat = {
+        id: `conv-${chats.length + 1}`,
+        name: input.name ?? 'Hera',
+        providerId: 'codex',
+      };
+      chats.push(chat);
+      snapshots.set(chat.id, { status: 'working', report: null, notification: null });
+      return { chatId: chat.id, name: chat.name, result: 'Started the chat.' };
     }),
-    readOutput: vi.fn(async (_lines: number) => 'raw output'),
-    finishedReport: vi.fn(async () => null),
-    send: vi.fn(async (_message: string) => 'Sent to the agent.'),
-    interrupt: vi.fn(async () => 'Interrupted the agent.'),
-    answerPrompt: vi.fn(async (_decision: 'allow' | 'deny') => 'Allowed the permission prompt.'),
-    startAgent: vi.fn(async () => 'Created the chat.'),
-    listChats: vi.fn(() => 'There are no other chats in this project.'),
+    listChats: vi.fn(() => "This task's chats."),
     restart: vi.fn(
       async (
+        _chatId: string,
         _input: { claudeAccount?: string; prompt?: string },
         _onLateFailure: (message: string) => void
       ) => 'Stopped the session and started it again.'
     ),
-    stop: vi.fn(async () => 'Stopped the session.'),
-    listAccounts: vi.fn(() => 'Claude accounts:\n- Primary\n- Work'),
+    stop: vi.fn(async (_chatId: string) => 'Stopped the session.'),
+    listAccounts: vi.fn((_chatId: string) => 'Claude accounts:\n- Primary\n- Work'),
     /** What the agent received since the cursor; tests push prompts into `received`. */
-    receivedPrompts: vi.fn(async (_cursor: number | null) => ({
+    receivedPrompts: vi.fn(async (_chatId: string, _cursor: number | null) => ({
       prompts: received.splice(0),
       cursor: ++cursor,
     })),
+  };
+  const tabs: TaskBrowser[] = [];
+  const browsers = {
+    devOrigins: ['http://localhost:5173'],
+    publicWeb: false,
+    list: vi.fn(() => tabs.map((tab) => ({ ...tab }))),
+    open: vi.fn((url: string | null) => {
+      const tab = { id: `browser-${tabs.length + 1}`, url: url ?? 'about:blank', title: null };
+      tabs.push(tab);
+      return tab;
+    }),
+    navigate: vi.fn((id: string, url: string) => {
+      const tab = tabs.find((candidate) => candidate.id === id);
+      if (!tab) throw new Error(`No browser tab of this task has the id ${id}.`);
+      tab.url = url;
+    }),
+    close: vi.fn((id: string) => {
+      tabs.splice(
+        tabs.findIndex((tab) => tab.id === id),
+        1
+      );
+    }),
+    devServerOrigins: () => browsers.devOrigins,
+    publicWebEnabled: async () => browsers.publicWeb,
   };
   const ports: ChatConductorPorts = {
     runTurn: async (messages) => {
@@ -101,26 +151,38 @@ function harness(options: { thread?: ChatConductorThread | null; autonomy?: bool
       saved.push(structuredClone(thread));
     },
     deleteThread: vi.fn(async () => {}),
+    readLegacy: vi.fn(async (_adopted: readonly string[]): Promise<LegacyThread[]> => []),
+    deleteLegacy: vi.fn(async (_ids: readonly string[]) => {}),
     agent,
+    browsers,
+    chatOnScreen: () => onScreen,
     ready: () => ready,
     defaultAutonomy: () => options.autonomy ?? true,
     now: () => new Date('2026-11-10T12:00:00Z'),
     newId: () => `id-${++id}`,
     warn: vi.fn(),
+    eventGatherMs: 0,
   };
-  const session = new ChatConductorSession('conv-1', ports);
+  const session = new ChatConductorSession('task-1', ports);
   return {
     session,
     ports,
     agent,
+    browsers,
     replies,
     calls,
     saved,
     received,
     setReady: (value: boolean) => (ready = value),
+    setOnScreen: (chatId: string | null) => (onScreen = chatId),
+    /** The first chat's agent changes state. */
     agentIs: (value: AgentSnapshot | null) => {
-      snapshot = value;
-      onChange?.(value);
+      snapshots.set('conv-1', value);
+      onChange?.('conv-1', value);
+    },
+    chatIs: (chatId: string, value: AgentSnapshot | null) => {
+      snapshots.set(chatId, value);
+      onChange?.(chatId, value);
     },
     idle: async () => {
       await vi.waitFor(() => expect(session.busy).toBe(false));
@@ -174,7 +236,7 @@ describe('ChatConductorSession', () => {
     expect(lastUserText(h.calls[0]!)).toContain('<context>');
     expect(lastUserText(h.calls[0]!)).toContain('Where is it?');
     const last = h.saved.at(-1)!;
-    expect(last.conversationId).toBe('conv-1');
+    expect(last.taskId).toBe('task-1');
     expect(last.entries).toHaveLength(2);
     expect(last.messages).toHaveLength(2);
   });
@@ -308,7 +370,7 @@ describe('ChatConductorSession', () => {
     expect(lastUserText(h.calls[0]!)).toContain('Ran the tests.');
     expect(h.session.entries).toHaveLength(before);
     // The turn is still history, and its event is remembered.
-    expect(h.saved.at(-1)!.lastEventKey).toMatch(/^finished:/);
+    expect(h.saved.at(-1)!.chats['conv-1']?.lastEventKey).toMatch(/^finished:/);
   });
 
   it('marks an event in the thread once its turn has something to show', async () => {
@@ -319,7 +381,7 @@ describe('ChatConductorSession', () => {
     await h.idle();
 
     expect(h.session.entries.slice(-2)).toMatchObject([
-      { kind: 'event', text: 'The agent finished a turn' },
+      { kind: 'event', text: 'Zeus finished a turn' },
       { kind: 'conductor', text: 'Tests pass. Open http://localhost:3000.' },
     ]);
   });
@@ -339,9 +401,10 @@ describe('ChatConductorSession', () => {
     await h.idle();
 
     expect(h.calls).toHaveLength(4);
-    expect(h.agent.readOutput).toHaveBeenCalledWith(400);
+    expect(h.agent.readOutput).toHaveBeenCalledWith('conv-1', 400);
     // Typed into the agent under the conductor's mark; the thread shows it as the model wrote it.
     expect(h.agent.send).toHaveBeenCalledWith(
+      'conv-1',
       markedForAgent('Run the tests.'),
       expect.any(Function)
     );
@@ -403,6 +466,7 @@ describe('ChatConductorSession', () => {
 
     expect(h.agent.listAccounts).toHaveBeenCalledTimes(1);
     expect(h.agent.restart).toHaveBeenCalledWith(
+      'conv-1',
       { claudeAccount: 'Work', prompt: markedForAgent('Carry on with the tests.') },
       expect.any(Function)
     );
@@ -413,28 +477,28 @@ describe('ChatConductorSession', () => {
       {
         tool: 'restart_agent',
         status: 'done',
-        summary: 'Restarted the agent on the Claude account "Work"',
+        summary: 'Restarted Zeus on the Claude account "Work"',
         detail: 'Carry on with the tests.',
       },
-      { tool: 'stop_agent', status: 'done', summary: "Stopped the agent's session" },
+      { tool: 'stop_agent', status: 'done', summary: "Stopped Zeus's session" },
     ]);
 
     // A plain restart, a failure, and a prompt that did not arrive afterwards.
-    h.agent.restart.mockImplementationOnce(async (_input, onLateFailure) => {
+    h.agent.restart.mockImplementationOnce(async (_chatId, _input, onLateFailure) => {
       onLateFailure('The restarted agent did not take the prompt.');
       throw new Error('The session did not start.');
     });
     h.replies.push(says(tool('restart_agent')), says(text('It would not start.')));
     h.session.send('Restart it.');
     await h.idle();
-    expect(h.agent.restart).toHaveBeenLastCalledWith({}, expect.any(Function));
+    expect(h.agent.restart).toHaveBeenLastCalledWith('conv-1', {}, expect.any(Function));
     expect(h.session.entries.slice(-3)).toMatchObject([
       { kind: 'error', text: 'The restarted agent did not take the prompt.' },
       {
         kind: 'action',
         tool: 'restart_agent',
         status: 'failed',
-        summary: "Could not restart the agent's session: The session did not start.",
+        summary: "Could not restart Zeus's session: The session did not start.",
       },
       { kind: 'conductor', text: 'It would not start.' },
     ]);
@@ -472,7 +536,7 @@ describe('ChatConductorSession', () => {
     await h.idle();
 
     expect(h.agent.send).not.toHaveBeenCalled();
-    expect(h.agent.readOutput).toHaveBeenCalledWith(80);
+    expect(h.agent.readOutput).toHaveBeenCalledWith('conv-1', 80);
     const results = h.calls[1]!.at(-1)!.content as Anthropic.Beta.BetaToolResultBlockParam[];
     expect(results[0]).toMatchObject({ is_error: true });
     expect(String(results[0]!.content)).toContain('autonomy is off');
@@ -585,9 +649,9 @@ describe('ChatConductorSession', () => {
     expect(restarted.agent.finishedReport).not.toHaveBeenCalled();
 
     // The same when the saved thread never ran a turn for an event, whatever the stored status.
-    const { lastEventKey: _dropped, ...rest } = handled;
+    const rest = { ...handled, chats: {} };
     for (const status of ['completed', 'awaiting-input', 'error'] as const) {
-      const unseen = harness({ thread: { ...rest, lastEventKey: null } });
+      const unseen = harness({ thread: rest });
       unseen.agentIs({ status, report: null, notification: null });
       await unseen.session.attach();
       await unseen.idle();
@@ -595,7 +659,7 @@ describe('ChatConductorSession', () => {
     }
 
     // The chat loads after the conductor attached, or its task is loaded again mid-run.
-    const late = harness({ thread: { ...rest, lastEventKey: null } });
+    const late = harness({ thread: rest });
     late.agentIs(null);
     await late.session.attach();
     late.agentIs(bare);
@@ -809,7 +873,7 @@ describe("the developer's own words to the agent, and the conductor's", () => {
     await h.idle();
 
     const turn = lastUserText(h.calls[0]!);
-    expect(turn).toContain('<prompts-to-agent>');
+    expect(turn).toContain('<prompts-to-agent chat="Zeus">');
     expect(turn).toContain(
       'typed by the developer into the agent themselves:\n  Publish this, go with your recommendations'
     );
@@ -818,11 +882,11 @@ describe("the developer's own words to the agent, and the conductor's", () => {
     h.agentIs(working);
     h.agentIs(finished('Batch 3 of 3 published.'));
     await h.idle();
-    expect(lastUserText(h.calls[1]!)).not.toContain('<prompts-to-agent>');
+    expect(lastUserText(h.calls[1]!)).not.toContain('<prompts-to-agent');
     expect(h.agent.receivedPrompts).toHaveBeenCalledTimes(3);
     // Each read starts where the last one left off, and the cursor is saved with the thread.
-    expect(h.agent.receivedPrompts.mock.calls.at(-1)?.[0]).toBe(2);
-    expect(h.saved.at(-1)?.promptCursor).toBe(3);
+    expect(h.agent.receivedPrompts.mock.calls.at(-1)).toEqual(['conv-1', 2]);
+    expect(h.saved.at(-1)?.chats['conv-1']?.promptCursor).toBe(3);
   });
 
   it('marks what it types and remembers it, so it never reads its own prompt as the developer', async () => {
@@ -835,6 +899,7 @@ describe("the developer's own words to the agent, and the conductor's", () => {
     await h.idle();
 
     expect(h.agent.send).toHaveBeenCalledWith(
+      'conv-1',
       markedForAgent('Run the release checks first.'),
       expect.any(Function)
     );
@@ -842,7 +907,7 @@ describe("the developer's own words to the agent, and the conductor's", () => {
     const action = h.session.entries.find((entry) => entry.kind === 'action');
     expect(action).toMatchObject({ detail: 'Run the release checks first.' });
     expect(JSON.stringify(h.session.entries)).not.toContain(CHAT_CONDUCTOR_MARK);
-    expect(h.saved.at(-1)?.sentToAgent).toEqual(['Run the release checks first.']);
+    expect(h.saved.at(-1)?.chats['conv-1']?.sentToAgent).toEqual(['Run the release checks first.']);
 
     // A chat agent's transcript holds the conductor's prompt as received, mark and all.
     h.received.push(
@@ -859,20 +924,27 @@ describe("the developer's own words to the agent, and the conductor's", () => {
     expect(turn).not.toContain('Run the release checks first.');
   });
 
-  it('marks the brief of an agent it starts', async () => {
+  it("starts a chat inside the task with a marked brief, on the last chat's provider", async () => {
     const h = await following();
     h.replies.push(
-      says(tool('start_agent', { task_name: 'Docs', prompt: 'Write the release notes.' })),
-      says(text('Started a docs agent.'))
+      says(tool('start_chat', { name: 'Docs', prompt: 'Write the release notes.' })),
+      says(text('Started a docs chat.'))
     );
     h.session.send('Start an agent for the release notes.');
     await h.idle();
-    expect(h.agent.startAgent).toHaveBeenCalledWith(
-      expect.objectContaining({ prompt: markedForAgent('Write the release notes.') }),
+    expect(h.agent.startChat).toHaveBeenCalledWith(
+      { name: 'Docs', provider: 'claude', prompt: markedForAgent('Write the release notes.') },
       expect.any(Function)
     );
-    // A new agent's brief is not one of this chat's prompts.
-    expect(h.saved.at(-1)?.sentToAgent ?? []).toEqual([]);
+    // Its brief is the conductor's own prompt to that chat, and that chat is the one it last dealt
+    // with now.
+    const thread = h.saved.at(-1)!;
+    expect(thread.chats['conv-2']?.sentToAgent).toEqual(['Write the release notes.']);
+    expect(thread.lastChatId).toBe('conv-2');
+    expect(h.session.entries.find((entry) => entry.kind === 'action')).toMatchObject({
+      summary: 'Started a new chat: Docs',
+      detail: 'Write the release notes.',
+    });
   });
 
   it('says so when what the agent received could not be read', async () => {
@@ -883,5 +955,271 @@ describe("the developer's own words to the agent, and the conductor's", () => {
     h.agentIs(finished('Done.'));
     await h.idle();
     expect(lastUserText(h.calls.at(-1)!)).toContain('could not be read (This chat is not loaded.)');
+  });
+});
+
+describe('one conductor over the chats of a task', () => {
+  const twoChats: Chat[] = [
+    { id: 'conv-1', name: 'Zeus', providerId: 'claude' },
+    { id: 'conv-2', name: 'Hera', providerId: 'codex' },
+  ];
+
+  async function task(options: { chats?: Chat[] } = {}) {
+    const h = harness({ chats: options.chats ?? twoChats.map((chat) => ({ ...chat })) });
+    h.replies.push(says(text('Caught up.')));
+    await h.session.attach();
+    await h.idle();
+    h.calls.length = 0;
+    return h;
+  }
+
+  it('acts on the chat a tool names, any case, and on the chat on screen without a name', async () => {
+    const h = await task();
+    h.replies.push(
+      says(
+        tool('send_to_agent', { chat: 'hera', message: 'Review the diff.' }),
+        tool('interrupt_agent')
+      ),
+      says(text('Done.'))
+    );
+    h.session.send('Have Hera review it and stop Zeus.');
+    await h.idle();
+    expect(h.agent.send).toHaveBeenCalledWith(
+      'conv-2',
+      markedForAgent('Review the diff.'),
+      expect.any(Function)
+    );
+    expect(h.agent.interrupt).toHaveBeenCalledWith('conv-1');
+    expect(h.session.entries.filter((entry) => entry.kind === 'action')).toMatchObject([
+      { summary: 'Sent Hera a prompt', detail: 'Review the diff.' },
+      { summary: 'Interrupted Zeus' },
+    ]);
+  });
+
+  it('refuses an unknown name, or no name with nothing on screen, listing the chats', async () => {
+    const h = await task();
+    h.setOnScreen(null);
+    h.replies.push(
+      says(tool('send_to_agent', { chat: 'Apollo', message: 'Go.' }), tool('interrupt_agent')),
+      says(text('Which chat?'))
+    );
+    h.session.send('Tell it to go.');
+    await h.idle();
+    expect(h.agent.send).not.toHaveBeenCalled();
+    expect(h.agent.interrupt).not.toHaveBeenCalled();
+    const results = JSON.stringify(h.calls.at(-1)!.at(-1));
+    expect(results).toContain('No chat in this task is called \\"Apollo\\"');
+    expect(results).toContain('Say which chat');
+    expect(results).toContain('\\"Zeus\\" (Claude), \\"Hera\\" (Codex)');
+    // No action rows for what was never attempted.
+    expect(h.session.entries.some((entry) => entry.kind === 'action')).toBe(false);
+  });
+
+  it('refuses a name two chats share rather than guess', async () => {
+    const h = await task({
+      chats: [
+        { id: 'conv-1', name: 'Zeus', providerId: 'claude' },
+        { id: 'conv-2', name: 'zeus', providerId: 'codex' },
+      ],
+    });
+    h.replies.push(
+      says(tool('send_to_agent', { chat: 'ZEUS', message: 'Go.' })),
+      says(text('Which one?'))
+    );
+    h.session.send('Tell Zeus to go.');
+    await h.idle();
+    expect(h.agent.send).not.toHaveBeenCalled();
+    expect(JSON.stringify(h.calls.at(-1)!.at(-1))).toContain('Several chats are called');
+  });
+
+  it('takes chats that report close together into one turn, each named', async () => {
+    const h = await task();
+    h.replies.push(says(text('Both are done.')));
+    // A turn is running: both events wait for it and then share the next one.
+    let release: (value: ChatTurnResult) => void = () => {};
+    h.replies.unshift(new Promise<ChatTurnResult>((resolve) => (release = resolve)));
+    h.replies.push(says(text('Unused.')));
+    h.session.send('How is it going?');
+    await vi.waitFor(() => expect(h.calls).toHaveLength(1));
+    h.chatIs('conv-1', working);
+    h.chatIs('conv-1', finished('Zeus is done.'));
+    h.chatIs('conv-2', working);
+    h.chatIs('conv-2', finished('Hera is done.'));
+    release(says(text('Going well.')));
+    await h.idle();
+
+    expect(h.calls).toHaveLength(2);
+    const turn = lastUserText(h.calls[1]!);
+    expect(turn).toContain("2 of the task's chats have news.");
+    expect(turn).toContain('<agent-output kind="final-reply" chat="Zeus">\nZeus is done.');
+    expect(turn).toContain('<agent-output kind="final-reply" chat="Hera">\nHera is done.');
+    expect([...h.session.entries].reverse().find((entry) => entry.kind === 'event')).toMatchObject({
+      text: 'Zeus finished a turn; Hera finished a turn',
+    });
+    // Each chat keeps its own event, so neither is news again.
+    const saved = h.saved.at(-1)!;
+    expect(saved.chats['conv-1']?.lastEventKey).toMatch(/^finished:/);
+    expect(saved.chats['conv-2']?.lastEventKey).toMatch(/^finished:/);
+    expect(saved.chats['conv-1']?.lastEventKey).not.toBe(saved.chats['conv-2']?.lastEventKey);
+  });
+
+  it('raises no event for a chat it just started until that chat has news', async () => {
+    const h = await task({ chats: [{ id: 'conv-1', name: 'Zeus', providerId: 'claude' }] });
+    h.replies.push(
+      says(tool('start_chat', { prompt: 'Review the diff.' })),
+      says(text('Started.'))
+    );
+    h.session.send('Get a second opinion from Codex.');
+    await h.idle();
+    // The new chat appears, working on its brief: not news.
+    h.chatIs('conv-2', { status: 'working', report: null, notification: null });
+    h.chatIs('conv-2', { status: 'idle', report: null, notification: null });
+    await h.idle();
+    expect(h.calls).toHaveLength(2);
+
+    h.replies.push(says(text('Hera found two issues.')));
+    h.chatIs('conv-2', finished('Two issues.'));
+    await h.idle();
+    expect(h.calls).toHaveLength(3);
+    expect(lastUserText(h.calls[2]!)).toContain('News from the chat "Hera".');
+  });
+
+  it('starts a chat on the provider of the chat it last dealt with', async () => {
+    const h = await task();
+    h.replies.push(
+      says(tool('read_chat', { chat: 'Hera' })),
+      says(tool('start_chat', { prompt: 'Another reviewer.' })),
+      says(text('Started.'))
+    );
+    h.session.send('Read Hera, then start another reviewer.');
+    await h.idle();
+    expect(h.agent.startChat).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: 'codex' }),
+      expect.any(Function)
+    );
+  });
+
+  it("adopts the chats' own threads when it loads, and removes them once saved", async () => {
+    const h = harness({ chats: twoChats.map((chat) => ({ ...chat })) });
+    const legacy = {
+      version: 1 as const,
+      conversationId: 'conv-2',
+      entries: [
+        { kind: 'conductor' as const, id: 'old', at: '2026-11-01T10:00:00.000Z', text: 'Earlier.' },
+      ],
+      messages: [],
+      notes: 'Hera reviews.',
+      status: null,
+      autonomy: true,
+      lastEventKey: 'finished:abc',
+      updatedAt: '2026-11-01T10:00:00.000Z',
+    };
+    vi.mocked(h.ports.readLegacy).mockResolvedValueOnce([{ thread: legacy, name: 'Hera' }]);
+    await h.session.load();
+    expect(h.session.entries).toMatchObject([{ id: 'old', text: 'Earlier.' }]);
+    expect(h.session.notes).toBe('From the chat "Hera":\nHera reviews.');
+    expect(h.ports.readLegacy).toHaveBeenCalledWith([]);
+    expect(h.ports.deleteLegacy).toHaveBeenCalledWith(['conv-2']);
+    const saved = h.saved.at(-1)!;
+    expect(saved.adopted).toEqual(['conv-2']);
+    expect(saved.chats['conv-2']?.lastEventKey).toBe('finished:abc');
+
+    // A chat that loads later is taken in too; one already adopted is not asked for again.
+    vi.mocked(h.ports.readLegacy).mockResolvedValueOnce([]);
+    await h.session.adoptLoadedChats();
+    expect(h.ports.readLegacy).toHaveBeenLastCalledWith(['conv-2']);
+  });
+
+  it('keeps each chat’s typed prompts apart and names whose they are', async () => {
+    const h = await task();
+    vi.mocked(h.agent.receivedPrompts).mockImplementation(async (chatId) => ({
+      prompts:
+        chatId === 'conv-2' ? [{ text: 'Ship the review today', by: 'developer' as const }] : [],
+      cursor: 1,
+    }));
+    h.replies.push(says(text(CHAT_NOTHING_NEW)));
+    h.chatIs('conv-2', working);
+    h.chatIs('conv-2', finished('Reviewed.'));
+    await h.idle();
+    const turn = lastUserText(h.calls.at(-1)!);
+    expect(turn).toContain('<prompts-to-agent chat="Hera">');
+    expect(turn).toContain('Ship the review today');
+    expect(h.agent.receivedPrompts).toHaveBeenLastCalledWith('conv-2', expect.any(Number));
+  });
+});
+
+describe("the task's browser tabs", () => {
+  it('opens, lists, navigates and closes tabs the developer asked for, showing the URL', async () => {
+    const h = await following();
+    h.replies.push(
+      says(tool('open_browser', { url: 'http://localhost:5173/login' })),
+      says(tool('list_browsers')),
+      says(tool('navigate_browser', { id: 'browser-1', url: 'localhost:5173/signup' })),
+      says(tool('close_browser', { id: 'browser-1' })),
+      says(text('Done.'))
+    );
+    h.session.send('Open the login page, then the signup page, then close it.');
+    await h.idle();
+
+    expect(h.browsers.open).toHaveBeenCalledWith('http://localhost:5173/login');
+    expect(h.browsers.navigate).toHaveBeenCalledWith('browser-1', 'http://localhost:5173/signup');
+    expect(h.browsers.close).toHaveBeenCalledWith('browser-1');
+    expect(h.session.entries.filter((entry) => entry.kind === 'action')).toMatchObject([
+      {
+        tool: 'open_browser',
+        summary: 'Opened a browser at http://localhost:5173/login',
+        detail: 'http://localhost:5173/login',
+      },
+      { tool: 'navigate_browser', detail: 'localhost:5173/signup' },
+      { tool: 'close_browser', status: 'done' },
+    ]);
+    const listed = JSON.stringify(h.calls[2]!.at(-1));
+    expect(listed).toContain('id browser-1: http://localhost:5173/login');
+  });
+
+  it('opens a public site only when the developer named it and the setting is on', async () => {
+    const h = await following();
+    h.browsers.publicWeb = true;
+    h.replies.push(
+      says(tool('open_browser', { url: 'https://docs.stripe.com/api' })),
+      says(tool('open_browser', { url: 'https://phish.example/login' })),
+      says(text('Opened the docs.'))
+    );
+    h.session.send('Open docs.stripe.com so I can read the API.');
+    await h.idle();
+    expect(h.browsers.open).toHaveBeenCalledTimes(1);
+    expect(h.browsers.open).toHaveBeenCalledWith('https://docs.stripe.com/api');
+    expect(h.session.entries.filter((entry) => entry.kind === 'action')).toMatchObject([
+      { status: 'done' },
+      { status: 'failed', summary: expect.stringContaining("developer's own message names it") },
+    ]);
+  });
+
+  it('opens nothing but the dev servers on a chat event, and only with autonomy', async () => {
+    const h = await following();
+    h.browsers.publicWeb = true;
+    h.replies.push(
+      says(
+        tool('open_browser', { url: 'https://docs.stripe.com' }),
+        tool('open_browser', { url: 'http://localhost:5173' })
+      ),
+      says(text(CHAT_NOTHING_NEW))
+    );
+    h.agentIs(working);
+    h.agentIs(finished('See https://docs.stripe.com and http://localhost:5173.'));
+    await h.idle();
+    expect(h.browsers.open).toHaveBeenCalledTimes(1);
+    expect(h.browsers.open).toHaveBeenCalledWith('http://localhost:5173/');
+
+    const off = await following({ autonomy: false });
+    off.replies.push(
+      says(tool('open_browser', { url: 'http://localhost:5173' })),
+      says(text(CHAT_NOTHING_NEW))
+    );
+    off.agentIs(working);
+    off.agentIs(finished('The app is up.'));
+    await off.idle();
+    expect(off.browsers.open).not.toHaveBeenCalled();
+    expect(off.session.entries.at(-1)).toMatchObject({ kind: 'action', status: 'refused' });
   });
 });

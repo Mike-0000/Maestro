@@ -162,6 +162,23 @@ describe('remote control', () => {
     expect(overview.agents[1]).toMatchObject({ kind: 'chat', status: 'idle', archived: true });
   });
 
+  it('shows a prompt held for the chat conductor as the stored status, not as waiting', async () => {
+    seedProject('p1', 'C:\\Code\\app');
+    seedTask('t1', 'p1');
+    seedConversation('c1', { projectId: 'p1', taskId: 't1' });
+    agents.set('c1', {
+      conversationId: 'c1',
+      status: 'awaiting-input',
+      notificationType: 'permission_prompt',
+      updatedAt: 5_000_000_000_000,
+    });
+    ports = { ...ports, sessions: { ...ports.sessions, held: (id) => id === 'c1' } };
+
+    const overview = await loadOverview(ports);
+
+    expect(overview.agents[0]).toMatchObject({ status: 'working', needsAttention: false });
+  });
+
   it('starts an agent in the project directory and launches its session', async () => {
     seedProject('p1', '/code/app');
 

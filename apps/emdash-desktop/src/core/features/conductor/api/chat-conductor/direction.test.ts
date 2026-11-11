@@ -19,11 +19,18 @@ import {
 // agent marked as its own.
 
 const facts: ChatFacts = {
-  chatTitle: 'Claude',
   taskName: 'Release',
   projectName: 'webshop',
-  providerLabel: 'Claude Code',
-  agentStatus: 'completed',
+  chats: [
+    {
+      name: 'Atlas',
+      providerLabel: 'Claude Code',
+      status: 'completed',
+      running: true,
+      onScreen: true,
+    },
+  ],
+  lastChat: null,
   autonomy: true,
   notes: '',
   status: null,
@@ -33,6 +40,7 @@ const facts: ChatFacts = {
 
 const finished: ChatEvent = {
   kind: 'finished',
+  chat: 'Atlas',
   reply: 'Publishing batch 2 of 3 now.',
   truncated: false,
   appUrls: [],
@@ -84,18 +92,24 @@ describe("the conductor's mark", () => {
 describe('prompts the agent received from others', () => {
   it('come in their own block on an event, outside the agent output, after the mark', () => {
     const text = chatEventTurnText(
-      {
-        ...finished,
-        prompts: [
-          { text: 'Publish this, go with your recommendations', by: 'developer' },
-          { text: null, by: 'developer' },
-          { text: 'Also bump the version', by: 'relayed' },
-        ],
-      },
+      [
+        {
+          ...finished,
+          prompts: [
+            { text: 'Publish this, go with your recommendations', by: 'developer' },
+            { text: null, by: 'developer' },
+            { text: 'Also bump the version', by: 'relayed' },
+          ],
+        },
+      ],
       facts
     );
     expect(isChatEventTurnStart({ role: 'user', content: text })).toBe(true);
-    const block = text.slice(text.indexOf('<prompts-to-agent>'), text.indexOf('<agent-output'));
+    const block = text.slice(
+      text.indexOf('<prompts-to-agent chat="Atlas">'),
+      text.indexOf('<agent-output')
+    );
+    expect(block).toContain('reached the agent of "Atlas"');
     expect(block).toContain('</prompts-to-agent>');
     expect(block).toContain('the newest direction wins');
     expect(block).toContain(
@@ -103,11 +117,11 @@ describe('prompts the agent received from others', () => {
     );
     expect(block).toContain('its text could not be read');
     expect(block).toContain('not from you: the developer in the chat, or Maestro passing words on');
-    expect(text.indexOf(CHAT_EVENT_MARK)).toBeLessThan(text.indexOf('<prompts-to-agent>'));
+    expect(text.indexOf(CHAT_EVENT_MARK)).toBeLessThan(text.indexOf('<prompts-to-agent'));
   });
 
   it('leave no block when there were none', () => {
-    expect(chatEventTurnText(finished, facts)).not.toContain('<prompts-to-agent>');
+    expect(chatEventTurnText([finished], facts)).not.toContain('<prompts-to-agent');
     expect(promptsBlock({})).toBeNull();
   });
 

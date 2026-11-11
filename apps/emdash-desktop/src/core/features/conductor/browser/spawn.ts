@@ -223,6 +223,66 @@ export async function spawnAgentTask(request: SpawnRequest): Promise<SpawnResult
   };
 }
 
+export type AddChatRequest = {
+  projectId: string;
+  taskId: string;
+  providerId: string;
+  prompt: string;
+  /** The chat's name; the next free roster name when absent. */
+  title?: string;
+  /** The Claude account a claude agent runs on; the default account when absent. */
+  claudeAccountId?: string;
+};
+
+export type AddChatResult = {
+  conversationId: string;
+  title: string;
+  providerId: string;
+  /** The provider cannot take a prompt at start: it is typed in once the agent is up. */
+  promptDeferred: boolean;
+};
+
+/**
+ * Adds an agent chat to an existing task, the way the task's "New chat" does: a terminal
+ * conversation in the task's workspace, with `prompt` as its first message where the provider can
+ * start with one. The chat stays inside the task: no new task appears in the sidebar.
+ */
+export async function addAgentChat(request: AddChatRequest): Promise<AddChatResult> {
+  const manager = conversationRegistry.get(request.taskId);
+  if (!manager) throw new Error('This task is not loaded, so no chat can be added to it.');
+  const metadata = await agentMetadata();
+  const agent = matchInstalledProvider(request.providerId, metadata);
+  if (!agent) {
+    const known = metadata.map((candidate) => candidate.id).join(', ');
+    throw new Error(`Unknown agent provider "${request.providerId}". Known providers: ${known}.`);
+  }
+  const canDeliverPrompt = agentSupportsInitialPromptDelivery(agent.capabilities);
+  const prompt = request.prompt.trim();
+  const id = crypto.randomUUID();
+  const title =
+    request.title?.trim() ||
+    nextDefaultConversationTitle(
+      Array.from(manager.conversations.values(), (conversation) => conversation.data)
+    );
+  await manager.createConversation({
+    id,
+    projectId: request.projectId,
+    taskId: request.taskId,
+    provider: agent.id,
+    title,
+    autoApprove: false,
+    type: 'pty',
+    ...(prompt && canDeliverPrompt ? { initialPrompt: prompt } : {}),
+    ...(request.claudeAccountId ? { claudeAccountId: request.claudeAccountId } : {}),
+  });
+  return {
+    conversationId: id,
+    title,
+    providerId: agent.id,
+    promptDeferred: Boolean(prompt) && !canDeliverPrompt,
+  };
+}
+
 const START_POLL_MS = 400;
 const START_TIMEOUT_MS = 90_000;
 const CREATED_CHECK_TIMEOUT_MS = 15_000;

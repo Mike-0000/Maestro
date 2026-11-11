@@ -287,8 +287,8 @@ export const SidebarProjectItem = observer(function SidebarProjectItem({
                   type="button"
                   aria-label={
                     createDisabledReason
-                      ? `New task for ${projectLabel}. ${createDisabledReason}`
-                      : `New task for ${projectLabel}`
+                      ? `New conductor for ${projectLabel}. ${createDisabledReason}`
+                      : `New conductor for ${projectLabel}`
                   }
                   className={
                     'opacity-0 transition-opacity duration-150 group-hover/row:opacity-100'
@@ -307,7 +307,7 @@ export const SidebarProjectItem = observer(function SidebarProjectItem({
             <Tooltip.Content>
               {createDisabledReason ?? (
                 <>
-                  New Task
+                  New Conductor
                   <BoundShortcut command="app.newTask" variant="keycaps" />
                 </>
               )}

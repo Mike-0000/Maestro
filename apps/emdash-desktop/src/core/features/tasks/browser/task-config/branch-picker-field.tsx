@@ -73,7 +73,7 @@ export function BranchPickerField({
                   checked={createBranchAndWorktree}
                   onCheckedChange={setCreateBranchAndWorktree}
                 />
-                <Field.Label>Create task branch and worktree</Field.Label>
+                <Field.Label>Create a branch and worktree</Field.Label>
               </Field.Root>
               {createBranchAndWorktree && (
                 <>

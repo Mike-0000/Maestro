@@ -22,8 +22,8 @@ export const newProjectCommand = defineCommand({
 
 export const newTaskCommand = defineCommand({
   id: 'app.newTask',
-  title: 'New Task',
-  description: 'Create a new task in this project',
+  title: 'New Conductor',
+  description: 'Create a new conductor in this project',
   category: 'App',
   icon: 'square-plus',
   // Keybindings invoke without input; contextual callers may supply a project.

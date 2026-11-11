@@ -78,18 +78,18 @@ export const DeleteTaskModal = observer(function DeleteTaskModal({
     if (!checked) setDeleteBranchOverride(undefined);
   };
 
-  const title = isBulk ? `Delete ${count} tasks` : 'Delete task';
+  const title = isBulk ? `Delete ${count} conductors` : 'Delete conductor';
 
   const description = isBulk
-    ? `${count} tasks will be permanently deleted. This action cannot be undone.`
+    ? `${count} conductors will be permanently deleted. This action cannot be undone.`
     : `"${tasks[0]!.taskName}" will be permanently deleted. This action cannot be undone.`;
 
   const worktreeLabel = isBulk
-    ? `Delete worktrees (${worktreeTasks.length} of ${count} tasks)`
+    ? `Delete worktrees (${worktreeTasks.length} of ${count} conductors)`
     : 'Delete worktree';
 
   const branchLabel = isBulk
-    ? `Delete branches (${branchTasks.length} of ${count} tasks)`
+    ? `Delete branches (${branchTasks.length} of ${count} conductors)`
     : `Delete branch`;
 
   const dirtyWarning = (() => {
@@ -105,7 +105,7 @@ export const DeleteTaskModal = observer(function DeleteTaskModal({
     const names = dirtyTasks
       .map((t) => `"${tasks.find((task) => task.taskId === t.taskId)?.taskName ?? t.taskId}"`)
       .join(', ');
-    return `${dirtyTasks.length} ${dirtyTasks.length === 1 ? 'task has' : 'tasks have'} uncommitted changes that will be lost: ${names}`;
+    return `${dirtyTasks.length} ${dirtyTasks.length === 1 ? 'conductor has' : 'conductors have'} uncommitted changes that will be lost: ${names}`;
   })();
 
   const unpushedWarning = (() => {
@@ -115,7 +115,7 @@ export const DeleteTaskModal = observer(function DeleteTaskModal({
       const count = unpushed[0]!.unpushedCommits!;
       return `"${tasks[0]!.taskName}" has ${count} unpushed ${count === 1 ? 'commit' : 'commits'}.`;
     }
-    return `${unpushed.length} ${unpushed.length === 1 ? 'task has' : 'tasks have'} unpushed commits.`;
+    return `${unpushed.length} ${unpushed.length === 1 ? 'conductor has' : 'conductors have'} unpushed commits.`;
   })();
 
   return (
@@ -146,8 +146,8 @@ export const DeleteTaskModal = observer(function DeleteTaskModal({
                     <TriangleAlert className="mt-px size-3.5 shrink-0" />
                     <span>
                       {hostActionDisabledReason ?? 'Live Project access is unavailable.'} The
-                      worktree cannot be deleted right now. The task record will be removed; delete
-                      the worktree later from the workspaces view.
+                      worktree cannot be deleted right now. The conductor record will be removed;
+                      delete the worktree later from the workspaces view.
                     </span>
                   </div>
                 )}
@@ -189,7 +189,7 @@ export const DeleteTaskModal = observer(function DeleteTaskModal({
           >
             <TriangleAlert className="mt-px size-3.5 shrink-0" />
             <span>
-              {hostActionDisabledReason} The Task record can still be deleted without removing
+              {hostActionDisabledReason} The conductor record can still be deleted without removing
               workspace artifacts.
             </span>
           </div>

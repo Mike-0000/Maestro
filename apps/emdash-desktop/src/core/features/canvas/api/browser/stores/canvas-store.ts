@@ -21,6 +21,7 @@ import { getTaskManagerStore } from '@core/features/tasks/api/browser/task-state
 import { taskManagerStoreToken } from '@core/features/tasks/contributions/browser/project-store-tokens';
 import type { AgentStatus, NotificationType, RunningSubAgent } from '@core/primitives/agents/api';
 import type { CompletionReport } from '@core/primitives/agents/api/completion-report';
+import type { ConductorDecisionMark } from '@core/primitives/agents/api/conductor-decisions';
 import { log } from '@core/primitives/logging/browser/logger';
 import type { MementoHandle } from '@core/primitives/mementos/browser';
 import { isProvisioned } from '@core/primitives/task-state/browser/task-state';
@@ -166,6 +167,11 @@ export type AgentTileEntry = {
    * 'awaiting-input'); absent for none or when the host reports only `backgroundAgents`.
    */
   readonly subAgents?: readonly RunningSubAgent[];
+  /**
+   * The chat conductor's decision behind this status: needs_you or done with its headline, or
+   * quiet; and whether a notification went out. Absent when rules or a verdict set the status.
+   */
+  readonly conductor?: ConductorDecisionMark;
   /** True when the task workspace is provisioned (its sessions can attach). */
   readonly taskProvisioned: boolean;
   /** True when the host reports a running session for this conversation. */
@@ -3929,6 +3935,7 @@ function toAgentEntry(
     completionReport: conversation.completionReport,
     ...(conversation.backgroundAgents ? { backgroundAgents: conversation.backgroundAgents } : {}),
     ...(conversation.subAgents?.length ? { subAgents: conversation.subAgents } : {}),
+    ...(conversation.conductorDecision ? { conductor: conversation.conductorDecision } : {}),
     taskProvisioned: isProvisioned(task),
     sessionActive: runtime.sessionActive,
     workspaceId: task.workspaceId,

@@ -79,7 +79,7 @@ export const SidebarHostConversationItem = observer(function SidebarHostConversa
     }
     const outcome = await openConfirm({
       title: 'Resume this conversation here?',
-      description: `“${title}” was started on this machine from another computer. Resuming opens it in a new task in this project.`,
+      description: `“${title}” was started on this machine from another computer. Resuming opens it in a new conductor in this project.`,
       confirmLabel: 'Resume here',
       variant: 'default',
     });

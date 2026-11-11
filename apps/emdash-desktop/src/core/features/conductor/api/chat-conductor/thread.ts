@@ -2,9 +2,11 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 
 /**
- * A chat conductor's thread: what the developer sees when they open a chat (their messages, the
+ * A conductor's thread: what the developer sees in a chat's Conductor view (their messages, the
  * conductor's, what it did), plus what the conductor needs to carry on (model history, its notes,
- * its status). One thread per conversation, saved as one JSON file by the main process.
+ * its status). One thread per task (`ConductorTaskThread`), shared by every chat in it, saved as
+ * one JSON file by the main process. Threads from when each chat had its own conductor
+ * (`ChatConductorThread`, version 1) are read once more to be adopted into their task's thread.
  */
 
 export const CHAT_THREAD_LIMITS = {
@@ -80,6 +82,99 @@ export const chatConductorThreadSchema = z.object({
 });
 export type ChatConductorThread = z.infer<typeof chatConductorThreadSchema>;
 
+/** Most chats a task thread keeps bookkeeping for; the ones dealt with least recently go first. */
+export const TASK_THREAD_MAX_CHATS = 60;
+
+/** What a task's conductor keeps per chat, so each chat's events and prompts are told apart. */
+export const conductorChatStateSchema = z.object({
+  /** Identity of the chat's last event a turn ran for (see `agentEventSignal`). */
+  lastEventKey: z.string().nullable(),
+  /** The starts of the last messages the conductor typed into this chat's agent, unmarked. */
+  sentToAgent: z.array(z.string()),
+  /** Where reading the prompts this chat's agent received left off. */
+  promptCursor: z.number().nullable(),
+});
+export type ConductorChatState = z.infer<typeof conductorChatStateSchema>;
+
+export const conductorTaskThreadSchema = z.object({
+  version: z.literal(2),
+  taskId: z.string().min(1),
+  entries: z.array(chatConductorEntrySchema),
+  messages: z.custom<Anthropic.Beta.BetaMessageParam[]>((value) => Array.isArray(value)),
+  notes: z.string(),
+  status: chatConductorStatusSchema.nullable(),
+  autonomy: z.boolean(),
+  /** Per chat (conversation id), in the order they were last dealt with, oldest first. */
+  chats: z.record(z.string(), conductorChatStateSchema),
+  /** The chat the conductor last dealt with: the default for a new chat's provider. */
+  lastChatId: z.string().nullable(),
+  /** Conversations whose own (version 1) thread was taken into this one. */
+  adopted: z.array(z.string()),
+  updatedAt: z.string(),
+});
+export type ConductorTaskThread = z.infer<typeof conductorTaskThreadSchema>;
+
+export function emptyTaskThread(taskId: string, autonomy: boolean): ConductorTaskThread {
+  return {
+    version: 2,
+    taskId,
+    entries: [],
+    messages: [],
+    notes: '',
+    status: null,
+    autonomy,
+    chats: {},
+    lastChatId: null,
+    adopted: [],
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Takes chats' own threads into their task's thread, once each: what the developer read stays,
+ * in time order; each chat's notes are kept under its name; and each chat's bookkeeping carries
+ * over, so its old events are not news again. Model history comes from the newest thread when the
+ * task thread has none of its own. Threads already adopted are skipped, so this is safe to repeat.
+ */
+export function adoptChatThreads(
+  task: ConductorTaskThread,
+  legacy: readonly { readonly thread: ChatConductorThread; readonly name: string }[]
+): ConductorTaskThread {
+  const fresh = legacy
+    .filter(({ thread }) => !task.adopted.includes(thread.conversationId))
+    .sort((a, b) => a.thread.updatedAt.localeCompare(b.thread.updatedAt));
+  if (fresh.length === 0) return task;
+  const newest = fresh.at(-1)!.thread;
+  const notes = [
+    task.notes.trim(),
+    ...fresh
+      .filter(({ thread }) => thread.notes.trim())
+      .map(({ thread, name }) => `From the chat "${name}":\n${thread.notes.trim()}`),
+  ].filter(Boolean);
+  const chats = { ...task.chats };
+  for (const { thread } of fresh) {
+    chats[thread.conversationId] = {
+      lastEventKey: thread.lastEventKey,
+      sentToAgent: thread.sentToAgent ?? [],
+      promptCursor: thread.promptCursor ?? null,
+    };
+  }
+  const empty = task.entries.length === 0 && task.messages.length === 0;
+  return {
+    ...task,
+    entries: [...task.entries, ...fresh.flatMap(({ thread }) => thread.entries)].sort((a, b) =>
+      a.at.localeCompare(b.at)
+    ),
+    messages: task.messages.length > 0 ? task.messages : newest.messages,
+    notes: notes.join('\n\n'),
+    status: empty ? newest.status : task.status,
+    autonomy: empty ? newest.autonomy : task.autonomy,
+    chats,
+    lastChatId: task.lastChatId ?? newest.conversationId,
+    adopted: [...task.adopted, ...fresh.map(({ thread }) => thread.conversationId)],
+  };
+}
+
 export function emptyChatThread(conversationId: string, autonomy: boolean): ChatConductorThread {
   return {
     version: 1,
@@ -118,10 +213,23 @@ function boundEntry(entry: ChatConductorEntry): ChatConductorEntry {
  * cut to size. Model history is left alone: the renderer already stores it trimmed (see
  * `storeChatHistory`), and cutting it here could split a tool call from its result.
  */
-export function boundThread(thread: ChatConductorThread): ChatConductorThread {
+export function boundThread<
+  Thread extends Pick<ChatConductorThread, 'entries' | 'notes' | 'status'>,
+>(thread: Thread): Thread {
   const { headlineChars, notesChars, entries } = CHAT_THREAD_LIMITS;
+  const chats =
+    'chats' in thread
+      ? {
+          chats: Object.fromEntries(
+            Object.entries(thread.chats as ConductorTaskThread['chats']).slice(
+              -TASK_THREAD_MAX_CHATS
+            )
+          ),
+        }
+      : {};
   return {
     ...thread,
+    ...chats,
     entries: thread.entries.slice(-entries).map(boundEntry),
     notes: cut(thread.notes, notesChars),
     status:

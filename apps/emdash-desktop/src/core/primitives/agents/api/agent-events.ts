@@ -1,3 +1,5 @@
+import type { ConductorDecisionMark } from './conductor-decisions';
+
 export type AgentEventType = 'notification' | 'stop' | 'error' | 'start';
 
 export type AgentStatus = 'idle' | 'working' | 'awaiting-input' | 'error' | 'completed';
@@ -38,6 +40,8 @@ export interface AgentEvent {
     backgroundAgents?: number;
     /** The sub-agents running inside the agent's session, oldest first; absent for none. */
     subAgents?: readonly RunningSubAgent[];
+    /** Set when the chat's conductor decided this status (see `conductor-decisions.ts`). */
+    conductor?: ConductorDecisionMark;
   };
 }
 

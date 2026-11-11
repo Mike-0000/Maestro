@@ -9,6 +9,10 @@ export interface LabeledSubAgent {
   readonly id: string;
   readonly label: string;
   readonly agentType?: string;
+  /** The chat it runs in, by name. Set only in a task with several chats, where it tells them apart. */
+  readonly chat?: string;
+  /** The host did not name it: it stands for one of the sub-agents its chat's agent waits on. */
+  readonly counted?: boolean;
 }
 
 /**
@@ -63,10 +67,73 @@ export function chatSubAgents(
   return named && named.length > 0 ? named : runningSubAgents(waitingOn);
 }
 
+/** One of a task's chats, with what its agent reports. */
+export interface ChatSubAgentSource {
+  /** The chat's conversation id. */
+  readonly id: string;
+  /** The name the chat goes by in the task view. */
+  readonly name: string;
+  readonly named?: readonly LabeledSubAgent[];
+  readonly waitingOn?: number | null;
+}
+
+/**
+ * What a task's strip shows: the sub-agents of all its chats, chat by chat in tab order. With one
+ * chat that is the chat's own list or count. With several, every sub-agent carries its chat's
+ * name, and a chat whose host names none adds one unnamed entry per sub-agent it waits on, so
+ * each orb still belongs to a chat. Ids are prefixed with the chat's, so they stay apart across
+ * chats and keep their places when the task gains or loses a chat.
+ */
+export function taskSubAgents(chats: readonly ChatSubAgentSource[]): RunningSubAgents {
+  const several = chats.length > 1;
+  const [only] = chats;
+  if (!several && (!only || !only.named || only.named.length === 0)) {
+    return runningSubAgents(only?.waitingOn);
+  }
+  const agents: LabeledSubAgent[] = [];
+  for (const chat of chats) {
+    const running = chatSubAgents(chat.named, chat.waitingOn);
+    const chatName = several && chat.name ? { chat: chat.name } : {};
+    if (typeof running === 'number') {
+      for (let index = 0; index < running; index += 1) {
+        agents.push({
+          id: `${chat.id}/#${index}`,
+          label: 'sub-agent',
+          counted: true,
+          ...chatName,
+        });
+      }
+      continue;
+    }
+    for (const agent of running) {
+      agents.push({
+        id: `${chat.id}/${agent.id}`,
+        label: agent.label,
+        ...(agent.agentType ? { agentType: agent.agentType } : {}),
+        ...chatName,
+      });
+    }
+  }
+  return agents;
+}
+
+/** "2 in Atlas, 1 in Bravo": how the running sub-agents split over the task's chats, if they do. */
+export function subAgentChatSummary(running: RunningSubAgents): string | null {
+  if (typeof running === 'number') return null;
+  const counts = new Map<string, number>();
+  for (const agent of running) {
+    if (agent.chat) counts.set(agent.chat, (counts.get(agent.chat) ?? 0) + 1);
+  }
+  if (counts.size === 0) return null;
+  return [...counts].map(([chat, count]) => `${count} in ${chat}`).join(', ');
+}
+
 /** Equal for the same strip contents, so a re-render with equal data advances nothing. */
 export function subAgentsKey(running: RunningSubAgents): string {
   if (typeof running === 'number') return `#${running}`;
-  return running.map((agent) => `${agent.id}\u0000${agent.label}`).join('\u0001');
+  return running
+    .map((agent) => `${agent.id}\u0000${agent.label}\u0000${agent.chat ?? ''}`)
+    .join('\u0001');
 }
 
 /** The strip after what runs changed, named or counted. */
@@ -159,22 +226,33 @@ export function advanceNamedSubAgentStrip(
   return { count: agents.length, slots, overflow: agents.length - present.length, leaving: false };
 }
 
-/** Labels fit beside the orbs: every orb shown is named, and there are only a few. */
+/** Labels fit beside the orbs: every orb shown is named by its host, and there are only a few. */
 export function showsSubAgentLabels(state: SubAgentStripState): boolean {
   const present = state.slots.filter((slot) => !slot.leaving);
   return (
     present.length > 0 &&
     present.length <= MAX_LABELED_SUB_AGENTS &&
     state.overflow === 0 &&
-    present.every((slot) => slot.agent !== undefined)
+    present.every((slot) => slot.agent !== undefined && !slot.agent.counted)
   );
 }
 
-/** The hover text for one named sub-agent: what it does, and its type when that adds something. */
+/** The strip shows sub-agents their host named, not only ones an agent is known to wait on. */
+export function hasNamedSubAgents(state: SubAgentStripState): boolean {
+  return state.slots.some((slot) => slot.agent !== undefined && !slot.agent.counted);
+}
+
+/**
+ * The hover text for one sub-agent: what it does, its type when that adds something, and its
+ * chat when the task has several. One the host did not name says only where it runs.
+ */
 export function subAgentTitle(agent: LabeledSubAgent): string {
-  return agent.agentType && agent.agentType !== agent.label
-    ? `${agent.label} (${agent.agentType})`
-    : agent.label;
+  if (agent.counted) return agent.chat ? `Sub-agent in ${agent.chat}` : 'Sub-agent';
+  const what =
+    agent.agentType && agent.agentType !== agent.label
+      ? `${agent.label} (${agent.agentType})`
+      : agent.label;
+  return agent.chat ? `${what} · ${agent.chat}` : what;
 }
 
 /** The strip once the exits have played: the places that were leaving are gone. */

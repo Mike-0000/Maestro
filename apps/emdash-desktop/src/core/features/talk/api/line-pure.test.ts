@@ -182,7 +182,11 @@ describe('what the line is given', () => {
   it('keeps the text conductor reading the prompt it always had', () => {
     expect(CONDUCTOR_SYSTEM_PROMPT).toBe(`${CONDUCTOR_RULES}\n\n${CONDUCTOR_REPLY_RULES}`);
     expect(CONDUCTOR_SYSTEM_PROMPT).toContain('\n\nHow to reply:\n- Your final text is spoken');
-    expect(CONDUCTOR_SYSTEM_PROMPT.endsWith('If nothing was needed, say so briefly.')).toBe(true);
+    expect(
+      CONDUCTOR_SYSTEM_PROMPT.endsWith(
+        "Never state an agent's status unless it is in the current context or a tool result from this turn."
+      )
+    ).toBe(true);
   });
 
   it('answers in a sentence or two when the voice is not kept short', () => {

@@ -4,17 +4,26 @@ import { log } from '@core/primitives/logging/browser/logger';
 import { getConductorClient } from '../../api/browser/client';
 import type { ConductorStatus } from '../../api/contract';
 import { DEFAULT_CONDUCTOR_SETTINGS } from '../../api/contract';
-import { createChatAgentPort } from './agent-port';
+import { chatName, createTaskAgentPort } from './agent-port';
+import { createTaskBrowserPort } from './browser-port';
 import type { FrontConductor, FrontConductorSource } from './front';
-import { ChatConductorSession, type ChatConductorPorts } from './session';
+import { ChatConductorSession, type ChatConductorPorts, type LegacyThread } from './session';
 
-/** A Conductor view that is on screen: the chat it shows, and whether its pane has focus. */
+/**
+ * A chat tab that is on screen (a pane's active tab): the chat, its task, whether its pane has
+ * focus, and whether it shows the Conductor view or the raw chat.
+ */
 export type ChatConductorScreen = {
   readonly conversationId: string;
+  readonly taskId: string;
   readonly focusedPane: boolean;
+  /** The Conductor view is in front; false for the raw chat. */
+  readonly conductor: boolean;
 };
 
-/** The chat conductor in front, as the HUD addresses it. */
+type PlacedScreen = ChatConductorScreen & { readonly at: number };
+
+/** The conductor in front, as the HUD addresses it. */
 export type FrontChatConductor = FrontConductor & { readonly session: ChatConductorSession };
 
 /** What the manager reads of Maestro's conductor: its status, kept current by that store. */
@@ -22,28 +31,39 @@ export interface ChatConductorStatusSource {
   readonly status: ConductorStatus | null;
 }
 
+/** Of several screens, the one in the focused pane, then the one shown or used last. */
+function frontmost(screens: Iterable<PlacedScreen>): PlacedScreen | null {
+  let best: PlacedScreen | null = null;
+  for (const screen of screens) {
+    if (
+      !best ||
+      (screen.focusedPane !== best.focusedPane ? screen.focusedPane : screen.at > best.at)
+    ) {
+      best = screen;
+    }
+  }
+  return best;
+}
+
 /**
- * The chat conductors of the app, one session per conversation.
+ * The conductors of the app, one session per task: every chat in a task is that conductor's, and
+ * the Conductor view of any of its chat tabs shows the same thread.
  *
- * A session costs nothing until the developer first shows a chat's Conductor view: only then does
- * it attach and follow the chat. Chats that had a thread when the app closed are followed again
- * as soon as their conversation is loaded; no agent is started to do so.
+ * A session costs nothing until the developer first shows a Conductor view of its task: only then
+ * does it attach and follow the task's chats. Tasks that had a thread when the app closed are
+ * followed again as soon as one of their chats is loaded; no agent is started to do so. Threads
+ * from when each chat had its own conductor are adopted by their task's thread as the chats load.
  */
 export class ChatConductorManager implements FrontConductorSource {
   private readonly sessions = observable.map<string, ChatConductorSession>([], { deep: false });
   private readonly disposers: (() => void)[] = [];
-  /** Conversations with a saved thread that are not followed yet. */
-  private readonly waiting = observable.set<string>();
+  /** Tasks with a saved thread that are not followed yet. */
+  private readonly waitingTasks = observable.set<string>();
+  /** Conversations with an own thread from before, not adopted yet. */
+  private readonly legacy = observable.set<string>();
   private disposed = false;
-  /**
-   * The Conductor views on screen right now, by the place that shows them (a pane), with when
-   * each was last shown anew or touched: of two, the one in the focused pane, then the later one,
-   * is in front.
-   */
-  private readonly screens = observable.map<string, ChatConductorScreen & { readonly at: number }>(
-    [],
-    { deep: false }
-  );
+  /** The chat tabs on screen right now, by the place that shows them (a pane). */
+  private readonly screens = observable.map<string, PlacedScreen>([], { deep: false });
   private screenClock = 0;
 
   constructor(
@@ -51,12 +71,12 @@ export class ChatConductorManager implements FrontConductorSource {
     private readonly conductor: ChatConductorStatusSource
   ) {}
 
-  /** Chat conductors can run a turn: the setting is on and a key is set. */
+  /** Conductors can run a turn: the setting is on and a key is set. */
   get ready(): boolean {
     return this.conductor.status?.chatConductorReady ?? false;
   }
 
-  /** Whether the developer turned chat conductors off (as opposed to a missing key). */
+  /** Whether the developer turned conductors off (as opposed to a missing key). */
   get enabled(): boolean {
     return (
       this.conductor.status?.settings?.chatConductors ?? DEFAULT_CONDUCTOR_SETTINGS.chatConductors
@@ -64,33 +84,35 @@ export class ChatConductorManager implements FrontConductorSource {
   }
 
   /**
-   * The chat conductor the developer is looking at, whose thread the HUD's typed box, voice
-   * commands and dictation reach. Null when no Conductor view is on screen (the canvas, a Raw
-   * view, another task, settings) or chat conductors cannot run.
+   * The conductor the developer is looking at, whose thread the HUD's typed box and voice
+   * commands reach: its task's session, named for the task, with the chat whose tab shows it.
+   * Null when no Conductor view is on screen (the canvas, a Raw view, another view) or
+   * conductors cannot run.
    */
   get front(): FrontChatConductor | null {
     if (!this.ready) return null;
-    let best: (ChatConductorScreen & { readonly at: number }) | null = null;
-    for (const screen of this.screens.values()) {
-      if (
-        !best ||
-        (screen.focusedPane !== best.focusedPane ? screen.focusedPane : screen.at > best.at)
-      ) {
-        best = screen;
-      }
-    }
-    const session = best ? this.sessions.get(best.conversationId) : undefined;
+    const best = frontmost([...this.screens.values()].filter((screen) => screen.conductor));
+    const session = best ? this.sessions.get(best.taskId) : undefined;
     if (!best || !session) return null;
+    const entry = this.canvas.agentEntries.find(
+      (candidate) => candidate.conversationId === best.conversationId
+    );
     return {
       session,
-      name: this.canvas.spokenName(best.conversationId),
+      name: entry?.taskName ?? this.canvas.spokenName(best.conversationId),
       chatId: best.conversationId,
     };
   }
 
+  /** The task's chat whose tab is on screen (Conductor view or raw), if any. */
+  chatOnScreen(taskId: string): string | null {
+    const best = frontmost([...this.screens.values()].filter((screen) => screen.taskId === taskId));
+    return best?.conversationId ?? null;
+  }
+
   /**
-   * A place that can show a Conductor view (a pane) says what it shows now: `null` when its
-   * Conductor view is not on screen, or the place is gone.
+   * A place that can show a chat tab (a pane) says what it shows now: `null` when no chat tab of
+   * it is on screen, or the place is gone.
    */
   showOnScreen(screenId: string, screen: ChatConductorScreen | null): void {
     const current = this.screens.get(screenId);
@@ -101,7 +123,9 @@ export class ChatConductorManager implements FrontConductorSource {
       }
       if (
         current?.conversationId === screen.conversationId &&
-        current.focusedPane === screen.focusedPane
+        current.taskId === screen.taskId &&
+        current.focusedPane === screen.focusedPane &&
+        current.conductor === screen.conductor
       ) {
         return;
       }
@@ -116,19 +140,19 @@ export class ChatConductorManager implements FrontConductorSource {
     runInAction(() => this.screens.set(screenId, { ...current, at: ++this.screenClock }));
   }
 
-  /** The conductor of a chat, created on first use. It does nothing until attached. */
-  session(conversationId: string): ChatConductorSession {
-    const existing = this.sessions.get(conversationId);
+  /** The conductor of a task, created on first use. It does nothing until attached. */
+  session(taskId: string): ChatConductorSession {
+    const existing = this.sessions.get(taskId);
     if (existing) return existing;
-    const session = new ChatConductorSession(conversationId, this.ports(conversationId));
-    runInAction(() => this.sessions.set(conversationId, session));
+    const session = new ChatConductorSession(taskId, this.ports(taskId));
+    runInAction(() => this.sessions.set(taskId, session));
     void session.load();
     return session;
   }
 
-  /** The conductor of a chat if one exists, without creating it. */
-  peek(conversationId: string): ChatConductorSession | undefined {
-    return this.sessions.get(conversationId);
+  /** The conductor of a task if one exists, without creating it. */
+  peek(taskId: string): ChatConductorSession | undefined {
+    return this.sessions.get(taskId);
   }
 
   activate(): void {
@@ -146,44 +170,82 @@ export class ChatConductorManager implements FrontConductorSource {
   }
 
   private async followSavedThreads(): Promise<void> {
-    let saved: string[];
+    let tasks: string[];
+    let chats: string[];
     try {
-      saved = await (await getConductorClient()).listChatThreads();
+      const client = await getConductorClient();
+      [tasks, chats] = await Promise.all([client.listTaskThreads(), client.listChatThreads()]);
     } catch (error) {
-      log.warn('chat conductor: saved threads could not be listed', { error });
+      log.warn('task conductor: saved threads could not be listed', { error });
       return;
     }
-    if (this.disposed || saved.length === 0) return;
+    if (this.disposed || (tasks.length === 0 && chats.length === 0)) return;
     runInAction(() => {
-      for (const conversationId of saved) this.waiting.add(conversationId);
+      for (const taskId of tasks) this.waitingTasks.add(taskId);
+      for (const conversationId of chats) this.legacy.add(conversationId);
     });
-    // Conversations load with their task and project; each is followed when it shows up.
+    // Chats load with their task and project; a task is followed when one of its chats shows up,
+    // and a chat's own thread goes into its task's thread then.
     const dispose = reaction(
       () => {
-        if (this.waiting.size === 0) return [];
+        if (this.waitingTasks.size === 0 && this.legacy.size === 0) return [];
         return this.canvas.agentEntries
-          .map((entry) => entry.conversationId)
-          .filter((conversationId) => this.waiting.has(conversationId));
+          .filter(
+            (entry) => this.waitingTasks.has(entry.taskId) || this.legacy.has(entry.conversationId)
+          )
+          .map((entry) => [entry.taskId, entry.conversationId] as const);
       },
       (loaded, _previous, self) => {
-        for (const conversationId of loaded) {
-          this.waiting.delete(conversationId);
-          void this.session(conversationId).attach();
+        const tasksToFollow = new Set<string>();
+        for (const [taskId, conversationId] of loaded) {
+          this.waitingTasks.delete(taskId);
+          this.legacy.delete(conversationId);
+          tasksToFollow.add(taskId);
         }
-        if (this.waiting.size === 0) self.dispose();
+        for (const taskId of tasksToFollow) {
+          const session = this.session(taskId);
+          void session.adoptLoadedChats().then(() => session.attach());
+        }
+        if (this.waitingTasks.size === 0 && this.legacy.size === 0) self.dispose();
       },
       { fireImmediately: true }
     );
     this.disposers.push(dispose);
   }
 
-  private ports(conversationId: string): ChatConductorPorts {
+  /** The own threads of the task's loaded chats, except those already adopted. */
+  private async readLegacy(taskId: string, adopted: readonly string[]): Promise<LegacyThread[]> {
+    const chats = this.canvas.agentEntries.filter(
+      (entry) => entry.taskId === taskId && !adopted.includes(entry.conversationId)
+    );
+    if (chats.length === 0) return [];
+    const client = await getConductorClient();
+    const saved = new Set(await client.listChatThreads());
+    const found: LegacyThread[] = [];
+    for (const entry of chats) {
+      if (!saved.has(entry.conversationId)) continue;
+      const thread = await client.readChatThread({ conversationId: entry.conversationId });
+      if (thread) found.push({ thread, name: chatName(entry) });
+    }
+    return found;
+  }
+
+  private ports(taskId: string): ChatConductorPorts {
     return {
       runTurn: async (messages) => (await getConductorClient()).runChatTurn({ messages }),
-      readThread: async () => (await getConductorClient()).readChatThread({ conversationId }),
-      saveThread: async (thread) => (await getConductorClient()).saveChatThread(thread),
-      deleteThread: async () => (await getConductorClient()).deleteChatThread({ conversationId }),
-      agent: createChatAgentPort(this.canvas, conversationId),
+      readThread: async () => (await getConductorClient()).readTaskThread({ taskId }),
+      saveThread: async (thread) => (await getConductorClient()).saveTaskThread(thread),
+      deleteThread: async () => (await getConductorClient()).deleteTaskThread({ taskId }),
+      readLegacy: (adopted) => this.readLegacy(taskId, adopted),
+      deleteLegacy: async (conversationIds) => {
+        const client = await getConductorClient();
+        await Promise.all(
+          conversationIds.map((conversationId) => client.deleteChatThread({ conversationId }))
+        );
+      },
+      agent: createTaskAgentPort(this.canvas, taskId),
+      browsers: createTaskBrowserPort(this.canvas, taskId),
+      chatOnScreen: () => this.chatOnScreen(taskId),
       ready: () => this.ready,
       defaultAutonomy: () =>
         this.conductor.status?.settings?.chatConductorAutonomy ??

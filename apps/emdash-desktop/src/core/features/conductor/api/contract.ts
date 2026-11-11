@@ -4,7 +4,13 @@ import { z } from 'zod';
 import { agentRequestAckSchema, agentRequestSchema } from './agent-requests';
 import { completionAnnouncementModes } from './announcements';
 import { callModes, DEFAULT_CALL_WINDOW_SEC } from './calls';
-import { chatConductorThreadSchema } from './chat-conductor/thread';
+import {
+  conductorDecisionEventSchema,
+  conductorDecisionOutcomeSchema,
+  conductorDecisionRequestSchema,
+  conductorDecisionSchema,
+} from './chat-conductor/decisions';
+import { chatConductorThreadSchema, conductorTaskThreadSchema } from './chat-conductor/thread';
 import { jevAnswerSchema, type JevQuestions } from './jev';
 import { instructionChangeSchema, standingInstructionSchema } from './standing-instructions';
 
@@ -118,6 +124,13 @@ export const conductorSettingsSchema = z.object({
   chatConductorEffort: conductorEffortSchema,
   /** Whether a new chat's conductor starts out allowed to act on its own; each chat keeps its own. */
   chatConductorAutonomy: z.boolean(),
+  /**
+   * A chat's conductor decides when its agent shows as needing the developer or done, and whether
+   * a notification (sound, desktop, phone) goes out, in place of the rules and attention verdicts.
+   * Takes effect only while chat conductors run; whatever the conductor cannot decide in time
+   * falls back to the rules.
+   */
+  conductorDecidesAttention: z.boolean(),
 });
 export type ConductorSettings = z.infer<typeof conductorSettingsSchema>;
 
@@ -153,6 +166,7 @@ export const DEFAULT_CONDUCTOR_SETTINGS: ConductorSettings = {
   chatConductors: true,
   chatConductorEffort: 'medium',
   chatConductorAutonomy: true,
+  conductorDecidesAttention: true,
 };
 
 /**
@@ -535,6 +549,41 @@ export const conductorContract = defineContract({
   }),
   /** The ids of the conversations that have a saved thread. */
   listChatThreads: procedure({ input: z.void(), output: z.array(z.string()) }),
+  /** A task conductor's saved thread, or null when the task has none (or it cannot be read). */
+  readTaskThread: procedure({
+    input: z.object({ taskId: z.string().min(1) }),
+    output: conductorTaskThreadSchema.nullable(),
+  }),
+  saveTaskThread: procedure({ input: conductorTaskThreadSchema, output: z.void() }),
+  deleteTaskThread: procedure({
+    input: z.object({ taskId: z.string().min(1) }),
+    output: z.void(),
+  }),
+  /** The ids of the tasks that have a saved conductor thread. */
+  listTaskThreads: procedure({ input: z.void(), output: z.array(z.string()) }),
+  /**
+   * Decisions on needs-you and done (see `chat-conductor/decisions.ts`). The set of conversations
+   * whose conductor decides; it replaces the previous set and lapses unless renewed.
+   */
+  claimDecisions: procedure({
+    input: z.object({ conversationIds: z.array(z.string().min(1)).max(500) }),
+    output: z.object({ ttlMs: z.number() }),
+  }),
+  /** The renderer has a decision request and a conductor is on it. */
+  ackDecision: procedure({ input: z.object({ holdId: z.string().min(1) }), output: z.void() }),
+  /** The conductor's decision on a held event. */
+  resolveDecision: procedure({
+    input: z.object({
+      holdId: z.string().min(1),
+      conversationId: z.string().min(1),
+      decision: conductorDecisionSchema,
+    }),
+    output: z.object({ outcome: conductorDecisionOutcomeSchema }),
+  }),
+  /** Decision requests still open, for a renderer that (re)attaches. */
+  openDecisions: procedure({ input: z.void(), output: z.array(conductorDecisionRequestSchema) }),
+  /** Decision requests as events are held, and their closing. */
+  decisions: eventStream({ key: z.void(), event: conductorDecisionEventSchema }),
   getStatus: procedure({ input: z.void(), output: conductorStatusSchema }),
   updateSettings: procedure({
     input: conductorSettingsSchema.partial(),

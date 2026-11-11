@@ -1,13 +1,19 @@
 import { err, ok } from '@emdash/shared';
 import type { Scope } from '@emdash/shared/concurrency';
 import type { Logger } from '@emdash/shared/logger';
+import { createEventStreamHost } from '@emdash/wire/live';
 import { createController, type Controller } from '@emdash/wire/rpc';
 import { setAttentionJudge } from '@core/primitives/agents/api/attention-judge';
+import {
+  DECISION_CLAIM_TTL_MS,
+  getConductorDecisionHost,
+  setConductorDecisionPolicy,
+} from '@core/primitives/agents/api/conductor-decisions';
 import type { ChorusHostServices } from '@core/primitives/chorus-host/api/host-services';
 import { setQuietCompletionsPolicy } from '@core/primitives/notifications/api/quiet-completions';
 import { conductorContract } from '../api/contract';
 import { agentRequestEvents, agentRequestHub } from './agent-request-hub';
-import { ChatConductorThreads } from './chat-conductor-threads';
+import { ChatConductorThreads, TaskConductorThreads } from './chat-conductor-threads';
 import { ConductorService } from './conductor-service';
 import { checkWorktreeConflicts } from './conflicts';
 import {
@@ -39,6 +45,16 @@ export function createConductorWireController(options: {
   // Notification routing asks whether finished agents with nothing for the developer stay quiet.
   setQuietCompletionsPolicy({ quiet: () => service.quietCompletions() });
   options.scope.add(() => setQuietCompletionsPolicy(null));
+  // Agent status holds turn ends and prompts for the chats whose conductor decides them.
+  const decisionEvents = createEventStreamHost(conductorContract.decisions);
+  setConductorDecisionPolicy({
+    enabled: () => service.decisionsEnabled(),
+    emit: (event) => decisionEvents.emit(undefined, event),
+  });
+  options.scope.add(() => {
+    setConductorDecisionPolicy(null);
+    decisionEvents.dispose();
+  });
   // The two need each other: checks read settings and usage through the conductor service, and
   // its status reports on checks. Attaching afterwards breaks the circle.
   const investigations = new InvestigationService({
@@ -50,6 +66,7 @@ export function createConductorWireController(options: {
   service.attachInvestigator((settings) => investigations.investigatorStatus(settings));
   options.scope.add(() => investigations.dispose());
   const chatThreads = new ChatConductorThreads(options.host.dataDir, options.logger);
+  const taskThreads = new TaskConductorThreads(options.host.dataDir, options.logger);
   return createController(conductorContract, {
     runTurn: ({ mode, messages }) => service.runTurn(mode, messages),
     runChatTurn: ({ messages }) => service.runChatTurn(messages),
@@ -57,6 +74,19 @@ export function createConductorWireController(options: {
     saveChatThread: (thread) => chatThreads.save(thread),
     deleteChatThread: ({ conversationId }) => chatThreads.delete(conversationId),
     listChatThreads: () => chatThreads.list(),
+    readTaskThread: ({ taskId }) => taskThreads.read(taskId),
+    saveTaskThread: (thread) => taskThreads.save(thread),
+    deleteTaskThread: ({ taskId }) => taskThreads.delete(taskId),
+    listTaskThreads: () => taskThreads.list(),
+    // Without a gate (main not wired yet), nothing is held and every answer is stale.
+    claimDecisions: ({ conversationIds }) =>
+      getConductorDecisionHost()?.claim(conversationIds) ?? { ttlMs: DECISION_CLAIM_TTL_MS },
+    ackDecision: ({ holdId }) => getConductorDecisionHost()?.ack(holdId),
+    resolveDecision: ({ holdId, conversationId, decision }) => ({
+      outcome: getConductorDecisionHost()?.resolve(holdId, conversationId, decision) ?? 'stale',
+    }),
+    openDecisions: () => getConductorDecisionHost()?.open() ?? [],
+    decisions: decisionEvents,
     decide: ({ state, questions }) => service.decide(state, questions),
     getStatus: () => service.status(),
     updateSettings: (patch) => {

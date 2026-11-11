@@ -84,4 +84,31 @@ describe('ConversationStore.applyAgentStatusChanged', () => {
     conversation.clearWorking();
     expect(conversation.subAgents).toEqual([]);
   });
+
+  it('keeps the chat conductor decision behind the status until the agent moves on', () => {
+    const conversation = store();
+    const decision = { state: 'needs_you', headline: 'Pick a database', notify: true } as const;
+    conversation.applyAgentStatusChanged(
+      event({
+        status: 'awaiting-input',
+        seen: false,
+        completionSummary: 'Pick a database',
+        conductor: decision,
+      })
+    );
+    expect(conversation.conductorDecision).toEqual(decision);
+    expect(conversation.completionSummary).toBe('Pick a database');
+
+    conversation.applyAgentStatusChanged(event({ status: 'working' }));
+    expect(conversation.conductorDecision).toBeNull();
+
+    conversation.applyAgentStatusChanged(
+      event({ status: 'completed', conductor: { state: 'quiet', notify: false } })
+    );
+    expect(conversation.conductorDecision).toEqual({ state: 'quiet', notify: false });
+    conversation.clearWorking();
+    expect(conversation.conductorDecision).toEqual({ state: 'quiet', notify: false });
+    conversation.setStatus('working');
+    expect(conversation.conductorDecision).toBeNull();
+  });
 });

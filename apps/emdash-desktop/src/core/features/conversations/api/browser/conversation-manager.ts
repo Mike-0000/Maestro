@@ -22,6 +22,7 @@ import {
   type RunningSubAgent,
 } from '@core/primitives/agents/api';
 import type { CompletionReport } from '@core/primitives/agents/api/completion-report';
+import type { ConductorDecisionMark } from '@core/primitives/agents/api/conductor-decisions';
 import { Resource } from '@core/primitives/async-resource/browser/resource';
 import {
   type Conversation,
@@ -671,6 +672,11 @@ export class ConversationStore {
    * array is replaced only when what it shows changed, and is never mutated.
    */
   subAgents: readonly RunningSubAgent[] = NO_SUB_AGENTS;
+  /**
+   * The chat conductor's decision behind the current status (needs you, done, or nothing for the
+   * developer), with its headline; null when rules or a verdict set it, or once the agent moves on.
+   */
+  conductorDecision: ConductorDecisionMark | null = null;
 
   constructor(conversation: Conversation) {
     this.data = conversation;
@@ -685,6 +691,7 @@ export class ConversationStore {
       completionReport: observable.ref,
       backgroundAgents: observable,
       subAgents: observable.ref,
+      conductorDecision: observable.ref,
       setStatus: action,
       setSubAgents: action,
       applyAgentStatusChanged: action,
@@ -722,6 +729,7 @@ export class ConversationStore {
     }
     if (status !== 'working') this.backgroundAgents = null;
     if (!runsSubAgents(status)) this.subAgents = NO_SUB_AGENTS;
+    this.conductorDecision = null;
   }
 
   /** Takes the status the main process published for this conversation. */
@@ -741,6 +749,7 @@ export class ConversationStore {
     this.setSubAgents(
       runsSubAgents(payload.status) ? (payload.subAgents ?? NO_SUB_AGENTS) : NO_SUB_AGENTS
     );
+    this.conductorDecision = payload.conductor ?? null;
   }
 
   setSubAgents(subAgents: readonly RunningSubAgent[]) {

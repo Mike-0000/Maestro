@@ -121,10 +121,12 @@ const TasksToolbar = observer(function TasksToolbar({
         variant="primary"
         disabled={!!createDisabledReason}
         title={createDisabledReason}
-        aria-label={createDisabledReason ? `Create Task. ${createDisabledReason}` : 'Create Task'}
+        aria-label={
+          createDisabledReason ? `Create Conductor. ${createDisabledReason}` : 'Create Conductor'
+        }
         onClick={() => void openCreateTaskModal({ projectId })}
       >
-        Create Task <BoundShortcut command="app.newTask" variant="keycaps" />
+        Create Conductor <BoundShortcut command="app.newTask" variant="keycaps" />
       </Button>
     </CollectionToolbar.Root>
   );

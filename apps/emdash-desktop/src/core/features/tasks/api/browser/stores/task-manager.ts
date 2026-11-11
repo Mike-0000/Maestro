@@ -847,7 +847,7 @@ export class TaskManagerStore {
           this.tasks.set(id, t);
         });
       });
-      toast.error(`Could not delete ${taskIds.length === 1 ? 'task' : 'tasks'}`, {
+      toast.error(`Could not delete ${taskIds.length === 1 ? 'conductor' : 'conductors'}`, {
         description: formatErrorMessage(e),
       });
       throw e;

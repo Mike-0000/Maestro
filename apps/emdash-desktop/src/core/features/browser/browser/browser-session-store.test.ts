@@ -240,4 +240,22 @@ describe('BrowserSessionStore', () => {
 
     expect(store.getSession('browser-1')).toBeUndefined();
   });
+
+  it('holds an address asked for from outside the toolbar until the surface takes it', () => {
+    const store = new BrowserSessionStore();
+    store.requestNavigation('browser-1', 'http://localhost:5173/');
+    expect(store.navigationRequests.size).toBe(0);
+    store.createSession({
+      browserId: 'browser-1',
+      projectId: 'project-1',
+      workspaceId: 'workspace-1',
+      taskId: 'task-1',
+    });
+    store.requestNavigation('browser-1', 'http://localhost:5173/');
+    expect(store.takeNavigationRequest('browser-1')).toBe('http://localhost:5173/');
+    expect(store.takeNavigationRequest('browser-1')).toBeNull();
+    store.requestNavigation('browser-1', 'http://localhost:5173/a');
+    store.removeSession('browser-1');
+    expect(store.navigationRequests.size).toBe(0);
+  });
 });

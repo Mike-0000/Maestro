@@ -127,7 +127,7 @@ export const CreateTaskModal = observer(function CreateTaskModal({
   return (
     <>
       <Dialog.Header className="flex items-center gap-2">
-        <Dialog.Title>Create Task</Dialog.Title>
+        <Dialog.Title>Create Conductor</Dialog.Title>
       </Dialog.Header>
       <Dialog.Body>
         <div className="flex w-full flex-col gap-5">
