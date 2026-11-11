@@ -1,4 +1,4 @@
-import { DropdownMenu } from '@emdash/ui/react/primitives';
+import { Button, DropdownMenu } from '@emdash/ui/react/primitives';
 import { Headphones } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import {
@@ -37,19 +37,28 @@ const AudioDeviceMenuInner = observer(function AudioDeviceMenuInner() {
         if (open) void devices.refresh();
       }}
     >
+      {/* The bar's quiet glyph button, like its neighbours; the devices in use are its title. */}
       <DropdownMenu.Trigger
         render={
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="base"
+            icon
             aria-label={`Audio devices. ${label}`}
             title={label}
-            className="flex size-8 shrink-0 items-center justify-center rounded-lg text-foreground-muted hover:bg-background-secondary hover:text-foreground data-[popup-open]:bg-background-secondary data-[popup-open]:text-foreground"
           />
         }
       >
-        <Headphones className="size-4" />
+        <Headphones aria-hidden />
       </DropdownMenu.Trigger>
-      <DropdownMenu.Content side="top" align="end" width="content" className="max-w-[360px]">
+      <DropdownMenu.Content
+        side="top"
+        align="end"
+        sideOffset={12}
+        width="content"
+        className="max-w-90"
+      >
         <DeviceGroup
           title="Microphone"
           choice={devices.input}
@@ -68,7 +77,7 @@ const AudioDeviceMenuInner = observer(function AudioDeviceMenuInner() {
           onChoose={(choice) => devices.setOutput(choice)}
         />
         {systemVoice && (
-          <p className="max-w-[320px] px-2 pt-1 pb-1.5 text-xs text-foreground-muted">
+          <p className="max-w-80 px-2 pt-1 pb-1.5 text-xs text-foreground-muted">
             Replies in the Windows voice always play on the Windows default speaker.
           </p>
         )}
@@ -106,7 +115,7 @@ function DeviceGroup({
         <DropdownMenu.RadioItem value={SYSTEM_DEFAULT}>
           <span className="min-w-0 truncate">
             System default
-            {defaultLabel && <span className="text-foreground-muted"> ({defaultLabel})</span>}
+            {defaultLabel && <span className="text-foreground-passive"> ({defaultLabel})</span>}
           </span>
         </DropdownMenu.RadioItem>
         {options.map((device) => (
@@ -118,7 +127,7 @@ function DeviceGroup({
           <DropdownMenu.RadioItem value={choice.id} disabled>
             <span className="min-w-0 truncate">
               {choice.label}
-              <span className="text-foreground-muted"> (not connected, using default)</span>
+              <span className="text-foreground-passive"> (not connected, using default)</span>
             </span>
           </DropdownMenu.RadioItem>
         )}

@@ -1,3 +1,4 @@
+import { StateGlyph } from '@emdash/ui/react/components';
 import { observer } from 'mobx-react-lite';
 import { getCanvasStore } from '@core/features/canvas/contributions/browser/app-stores';
 import { formatConversationTitleForDisplay } from '@core/features/conversations/api/browser/conversation-title-utils';
@@ -20,10 +21,8 @@ export function HelpersFact({ running }: { running: RunningSubAgents }) {
       className="flex min-w-0 shrink items-center gap-1.5 motion-safe:animate-in motion-safe:duration-300 motion-safe:fade-in"
       title={split ? `${count}: ${split}` : full}
     >
-      <span
-        aria-hidden
-        className="size-1.5 shrink-0 rounded-full bg-accent motion-safe:animate-pulse"
-      />
+      {/* The kit's working mark, its slot drawn down to the dot itself. */}
+      <StateGlyph state="working" size="sm" className="size-1.5" />
       <span className="truncate @max-[34rem]/conductor:hidden">{full}</span>
       <span className="hidden @max-[34rem]/conductor:inline">{count}</span>
     </span>

@@ -1,8 +1,11 @@
-import { PhoneCall, PhoneForwarded } from 'lucide-react';
+import { StateGlyph } from '@emdash/ui/react/components';
+import { Button, Kbd } from '@emdash/ui/react/primitives';
+import { PhoneForwarded } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { getVoiceStore } from '@core/features/voice/contributions/browser/app-stores';
 import type { CallKind } from '../../api/calls';
 import { getConductorStore } from '../../contributions/browser/app-stores';
+import { HudCard, HudCardHeader } from './hud-card';
 
 const KIND_LABEL: Record<CallKind, string> = {
   completion: 'finished',
@@ -24,63 +27,66 @@ export const CallCard = observer(function CallCard() {
   const { call, state } = current;
   const answering = state === 'picked-up';
   const waiting = conductor.calls.waiting.length;
-  // A card one surface step above the bar with a hairline; the caller's line leads, what they
-  // said follows in reading text, and Answer is the one primary action.
+  // The caller's line leads with the needs-you mark (a phone while answering), what they said
+  // follows in reading text, and Answer is the one primary action.
   return (
-    <div className="space-y-1.5 rounded-lg border border-border bg-(--em-surface-hover) px-3 py-2.5">
-      <div className="flex items-center gap-2 text-sm">
-        {answering ? (
-          <PhoneForwarded className="size-3.5 shrink-0 text-foreground-muted" />
-        ) : (
-          <PhoneCall className="size-3.5 shrink-0 text-foreground-muted" />
-        )}
-        <span className="min-w-0 flex-1 truncate text-foreground">
-          {answering ? (
+    <HudCard label={`Call from ${call.agentName}`}>
+      <HudCardHeader
+        glyph={
+          answering ? (
+            <PhoneForwarded aria-hidden className="size-3.5 text-foreground-muted" />
+          ) : (
+            <StateGlyph state="needs-you" />
+          )
+        }
+        title={
+          answering ? (
             <>
-              Answering <span className="font-medium">{call.agentName}</span>
+              Answering <span className="font-semibold">{call.agentName}</span>
             </>
           ) : (
             <>
-              <span className="font-medium">{call.agentName}</span> {KIND_LABEL[call.kind]}
+              {call.agentName} <span className="font-normal">{KIND_LABEL[call.kind]}</span>
             </>
-          )}
-          {waiting > 0 && (
-            <span className="ml-2 text-xs text-foreground-passive">{waiting} more waiting</span>
-          )}
-        </span>
-        {/* Always there: a call that was picked up can still be dropped by hand. */}
-        <button
-          type="button"
-          onClick={() => conductor.skipCall()}
-          className="rounded-md px-2 py-1 text-xs text-foreground-muted transition-colors hover:bg-foreground/8 hover:text-foreground"
-        >
-          Skip
-        </button>
-        {!answering && (
+          )
+        }
+        meta={waiting > 0 ? `${waiting} more waiting` : undefined}
+        actions={
           <>
-            <button
-              type="button"
-              onClick={() => conductor.pickUpCall()}
-              className="rounded-md px-2 py-1 text-xs text-foreground-muted transition-colors hover:bg-foreground/8 hover:text-foreground"
-            >
-              Type
-            </button>
-            <button
-              type="button"
-              onClick={() => voice.tap()}
-              className="rounded-md bg-(--primary-button-background) px-2 py-1 text-xs font-medium text-primary-button-foreground transition-colors hover:bg-(--primary-button-background-hover)"
-            >
-              Answer <span className="opacity-60">tap Right Ctrl</span>
-            </button>
+            {/* Always there: a call that was picked up can still be dropped by hand. */}
+            <Button type="button" variant="text" size="xs" onClick={() => conductor.skipCall()}>
+              Skip
+            </Button>
+            {!answering && (
+              <>
+                <Button
+                  type="button"
+                  variant="text"
+                  size="xs"
+                  onClick={() => conductor.pickUpCall()}
+                >
+                  Type
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  title="Answer by voice: tap Right Ctrl, or press Answer"
+                  onClick={() => voice.tap()}
+                >
+                  Answer <Kbd>Right Ctrl</Kbd>
+                </Button>
+              </>
+            )}
           </>
-        )}
-      </div>
-      <p className="line-clamp-3 text-sm text-foreground-body">{call.text}</p>
+        }
+      />
+      <p className="mt-1.5 line-clamp-3 text-sm text-foreground-body">{call.text}</p>
       {answering && (
-        <p className="text-xs text-foreground-muted">
+        <p className="mt-1.5 text-xs text-foreground-muted">
           What you say or type next goes to {call.agentName} unless you name another agent.
         </p>
       )}
-    </div>
+    </HudCard>
   );
 });

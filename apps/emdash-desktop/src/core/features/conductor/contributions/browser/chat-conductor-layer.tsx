@@ -197,7 +197,7 @@ export const ChatConductorLayer = observer(function ChatConductorLayer({
           <PaneDimensionProvider sink={sink}>{children}</PaneDimensionProvider>
         </div>
         {showsConductor && session && (
-          <div className="surface-paper absolute inset-0 bg-(--em-surface)">
+          <div className="surface-paper absolute inset-0 bg-surface">
             <ChatConductorPanel
               key={conversationId}
               session={session}

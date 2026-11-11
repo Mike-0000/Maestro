@@ -1,3 +1,4 @@
+import { FactGrid } from '@emdash/ui/react/patterns';
 import { Button, DropdownMenu, Tooltip } from '@emdash/ui/react/primitives';
 import { Ellipsis } from 'lucide-react';
 import { useRef, useState, type ReactNode } from 'react';
@@ -24,19 +25,7 @@ function Point({ lead, children }: { lead: string; children: ReactNode }) {
   );
 }
 
-/** One row of the closing grid: a small label, then its value. Stacks in a narrow pane. */
-function Row({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <>
-      <dt className="text-xs text-foreground-muted">{label}</dt>
-      <dd className="min-w-0 text-foreground-body @max-[34rem]/conductor:mb-3 @max-[34rem]/conductor:last:mb-0">
-        {children}
-      </dd>
-    </>
-  );
-}
-
-/** A quiet action in the card's row: underlined text in the muted tone. */
+/** A quiet action in the card's row: the kit's underlined text action in the muted tone. */
 function TextAction({
   children,
   disabled,
@@ -47,14 +36,9 @@ function TextAction({
   onClick?: () => void;
 }) {
   return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onClick}
-      className="rounded-sm text-sm text-foreground-muted underline decoration-foreground-passive/60 underline-offset-4 transition-colors outline-none hover:text-foreground hover:decoration-foreground-muted focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50"
-    >
+    <Button type="button" variant="text" disabled={disabled} onClick={onClick}>
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -115,9 +99,7 @@ export function DigestCard({
       aria-label={`Report: ${digest.headline}`}
       className={cn(
         'min-w-0 text-base select-text motion-safe:animate-in motion-safe:duration-300 motion-safe:fade-in',
-        current
-          ? 'mt-4'
-          : 'rounded-lg border border-border-subtle bg-(--em-surface-emphasis) px-5 py-4'
+        current ? 'mt-4' : 'rounded-lg border border-border-subtle bg-surface-emphasis px-5 py-4'
       )}
     >
       <h3 className="leading-snug font-semibold text-pretty text-foreground">
@@ -161,8 +143,8 @@ export function DigestCard({
         )}
       </ul>
 
-      <dl className="mt-5 grid grid-cols-[6rem_minmax(0,1fr)] items-baseline gap-x-4 gap-y-2.5 @max-[34rem]/conductor:grid-cols-1 @max-[34rem]/conductor:gap-y-0.5">
-        <Row label="You asked">
+      <FactGrid size="reading" className="mt-5">
+        <FactGrid.Row label="You asked">
           <InlineText text={digest.asked} />
           {askedAt && (
             <>
@@ -175,16 +157,14 @@ export function DigestCard({
               {askedTime(askedAt) && <span className="sr-only">, asked {askedTime(askedAt)}</span>}
             </>
           )}
-        </Row>
-        <Row label="Where it is">
+        </FactGrid.Row>
+        <FactGrid.Row label="Where it is">
           <InlineText text={digest.where} />
-        </Row>
-        <Row label="Your move">
-          <span className="font-semibold text-foreground">
-            <InlineText text={digest.move} />
-          </span>
-        </Row>
-      </dl>
+        </FactGrid.Row>
+        <FactGrid.Row label="Your move" emphasis>
+          <InlineText text={digest.move} />
+        </FactGrid.Row>
+      </FactGrid>
 
       {(actions.done || hasTextActions) && (
         <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2">

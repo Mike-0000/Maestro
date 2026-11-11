@@ -1,3 +1,4 @@
+import { EmptyState } from '@emdash/ui/react/components';
 import { Button, Spinner } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -9,7 +10,7 @@ import type { ChatConductorSession } from './session';
 import { ChatHelpers } from './sub-agents';
 import { composerPlaceholder } from './view/composer-placeholder';
 import { ComposerTools, ConductorComposer } from './view/conductor-composer';
-import { StateGlyph } from './view/status-strip';
+import { ConductorStateGlyph } from './view/status-strip';
 import { ThreadBlocks } from './view/thread-blocks';
 import { buildThreadView } from './view/thread-view';
 import { useBusySince } from './view/use-busy-since';
@@ -23,11 +24,10 @@ import { VitalsFooter } from './view/vitals-footer';
  */
 const GUTTER = '[scrollbar-gutter:stable_both-edges]';
 /**
- * Their shared column: a centred reading measure, with side padding that grows with the pane from
- * 16px in a narrow split to 48px in a wide one.
+ * Their shared column: the app's reading measure, centred, with side padding that grows with the
+ * pane from 16px in a narrow split to 48px in a wide one.
  */
-const COLUMN =
-  'mx-auto w-full max-w-[calc(45rem_+_2*clamp(1rem,4%,3rem))] px-[clamp(1rem,4%,3rem)]';
+const COLUMN = 'reading-column';
 /** Closer to the end than this and the thread follows new entries. */
 const FOLLOW_SLACK_PX = 64;
 
@@ -61,15 +61,14 @@ function ConductorEmpty({
   action: ReactNode;
 }) {
   return (
-    <div className="flex min-h-full items-center justify-center px-6 py-12">
-      <div className="flex max-w-lg flex-col items-center text-center motion-safe:animate-in motion-safe:duration-300 motion-safe:fade-in">
-        <h2 className="text-2xl font-medium text-balance text-foreground">{title}</h2>
-        <p className="mt-3 max-w-sm text-sm leading-relaxed text-balance text-foreground-muted">
-          {description}
-        </p>
-        <div className="mt-6">{action}</div>
-      </div>
-    </div>
+    <EmptyState
+      size="page"
+      bare
+      label={title}
+      description={description}
+      action={action}
+      className="min-h-full px-6 py-12"
+    />
   );
 }
 
@@ -232,7 +231,7 @@ export const ChatConductorPanel = observer(function ChatConductorPanel({
           {entries.length === 0 ? (
             busy ? (
               <div className="flex min-h-full items-center justify-center gap-2.5 px-6 text-sm text-foreground-muted">
-                <StateGlyph glyph="working" />
+                <ConductorStateGlyph glyph="working" />
                 <span>Catching you up…</span>
               </div>
             ) : (
@@ -260,7 +259,7 @@ export const ChatConductorPanel = observer(function ChatConductorPanel({
               {busy && (
                 // Where the conductor's next words will appear; what it is doing is in the footer.
                 <div aria-hidden className="mt-4 flex h-7 items-center">
-                  <StateGlyph glyph="working" />
+                  <ConductorStateGlyph glyph="working" />
                 </div>
               )}
             </div>
@@ -269,11 +268,11 @@ export const ChatConductorPanel = observer(function ChatConductorPanel({
         {/* The thread fades into the strip above and the footer below instead of being cut. */}
         <div
           aria-hidden
-          className="pointer-events-none absolute top-0 right-2 left-0 h-5 bg-linear-to-b from-(--em-surface) to-transparent"
+          className="pointer-events-none absolute top-0 right-2 left-0 h-5 bg-linear-to-b from-surface to-transparent"
         />
         <div
           aria-hidden
-          className="pointer-events-none absolute right-2 bottom-0 left-0 h-8 bg-linear-to-t from-(--em-surface) to-transparent"
+          className="pointer-events-none absolute right-2 bottom-0 left-0 h-8 bg-linear-to-t from-surface to-transparent"
         />
       </div>
 
@@ -300,13 +299,15 @@ export const ChatConductorPanel = observer(function ChatConductorPanel({
                     ? 'The conductor has no API key, so it cannot run.'
                     : 'Chat conductors are turned off, so this one is not following the task.'}
                 </span>
-                <button
+                <Button
                   type="button"
+                  variant="text"
+                  size="xs"
                   onClick={openConductorSettings}
-                  className="shrink-0 rounded-sm text-foreground-muted underline decoration-foreground-passive/60 underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                  className="text-tiny underline-offset-2"
                 >
                   Open settings
-                </button>
+                </Button>
               </div>
             )}
           </div>

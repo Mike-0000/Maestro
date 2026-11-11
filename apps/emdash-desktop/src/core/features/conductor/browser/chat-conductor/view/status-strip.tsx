@@ -1,3 +1,4 @@
+import { StateGlyph, type StateGlyphState } from '@emdash/ui/react/components';
 import { Tabs } from '@emdash/ui/react/primitives';
 import { cn } from '@core/primitives/styling/browser/cn';
 import type { ConductorVitals } from './vitals';
@@ -5,38 +6,28 @@ import type { ConductorVitals } from './vitals';
 export type ConductorGlyph = ConductorVitals['glyph'];
 export type ChatViewChoice = 'conductor' | 'raw';
 
-/**
- * Where the conductor stands, as one small mark: a filled dot when it needs the developer (red on
- * an error), a softly pulsing accent dot while it works, a hollow ring when the work is done, and
- * a dimmer ring at rest. The pulse stops under reduced motion.
- */
-export function StateGlyph({ glyph, className }: { glyph: ConductorGlyph; className?: string }) {
-  return (
-    <span
-      aria-hidden
-      data-glyph={glyph}
-      className={cn('inline-flex size-3 shrink-0 items-center justify-center', className)}
-    >
-      {glyph === 'working' ? (
-        <span className="size-1.5 rounded-full bg-accent motion-safe:animate-pulse" />
-      ) : glyph === 'needs_you' ? (
-        <span className="size-2 rounded-full bg-foreground" />
-      ) : glyph === 'error' ? (
-        <span className="size-2 rounded-full bg-foreground-error" />
-      ) : (
-        <span
-          className={cn(
-            'size-2 rounded-full border-[1.5px] border-foreground-passive',
-            glyph === 'idle' && 'opacity-60'
-          )}
-        />
-      )}
-    </span>
-  );
-}
+const KIT_STATE: Record<ConductorGlyph, StateGlyphState> = {
+  working: 'working',
+  needs_you: 'needs-you',
+  error: 'error',
+  done: 'done',
+  idle: 'idle',
+};
 
-const TAB =
-  'relative after:pointer-events-none after:absolute after:inset-x-2 after:bottom-0 after:h-px after:rounded-full after:bg-current after:opacity-0 after:transition-opacity after:duration-150 aria-selected:after:opacity-100';
+/**
+ * Where the conductor stands, as the kit's one state mark: a filled dot when it needs the
+ * developer (the error dot on an error), a softly pulsing accent dot while it works, a hollow
+ * ring when the work is done, and a dimmer ring at rest. The pulse stops under reduced motion.
+ */
+export function ConductorStateGlyph({
+  glyph,
+  className,
+}: {
+  glyph: ConductorGlyph;
+  className?: string;
+}) {
+  return <StateGlyph state={KIT_STATE[glyph]} size="sm" data-glyph={glyph} className={className} />;
+}
 
 export interface StatusStripProps {
   /** The mark to show, or null when there is nothing to report yet. */
@@ -57,13 +48,13 @@ export interface StatusStripProps {
  */
 export function StatusStrip({ glyph, headline, needsYou, view, onViewChange }: StatusStripProps) {
   return (
-    <div className="surface-paper @container/strip flex h-9 shrink-0 items-center gap-3 bg-(--em-surface) pr-1.5 pl-4">
+    <div className="surface-paper @container/strip flex h-9 shrink-0 items-center gap-3 bg-surface pr-1.5 pl-4">
       <span
         role="status"
         className="flex min-w-0 flex-1 items-center gap-2"
         title={headline || undefined}
       >
-        {glyph && <StateGlyph glyph={glyph} />}
+        {glyph && <ConductorStateGlyph glyph={glyph} />}
         {headline && (
           <span
             className={cn(
@@ -81,13 +72,9 @@ export function StatusStrip({ glyph, headline, needsYou, view, onViewChange }: S
           if (value === 'conductor' || value === 'raw') onViewChange(value);
         }}
       >
-        <Tabs.List aria-label="Chat view">
-          <Tabs.Tab value="conductor" className={TAB}>
-            Conductor
-          </Tabs.Tab>
-          <Tabs.Tab value="raw" className={TAB}>
-            Raw
-          </Tabs.Tab>
+        <Tabs.List variant="underline" aria-label="Chat view">
+          <Tabs.Tab value="conductor">Conductor</Tabs.Tab>
+          <Tabs.Tab value="raw">Raw</Tabs.Tab>
         </Tabs.List>
       </Tabs.Root>
     </div>

@@ -43,9 +43,9 @@ function DiagnosticControls({ enabled }: { enabled: boolean }) {
   const conductor = getConductorStore();
   const [message, setMessage] = useState('');
   return (
-    <div className="flex items-center gap-2 text-xs">
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs">
       <Button
-        variant="secondary"
+        variant="text"
         size="xs"
         disabled={!enabled}
         onClick={() => {
@@ -71,8 +71,9 @@ function DiagnosticControls({ enabled }: { enabled: boolean }) {
         Copy recent events for agent
       </Button>
       <Button
-        variant="secondary"
+        variant="text"
         size="xs"
+        tone="destructive"
         onClick={() => {
           if (
             !window.confirm(
@@ -92,7 +93,9 @@ function DiagnosticControls({ enabled }: { enabled: boolean }) {
       >
         Delete diagnostics
       </Button>
-      <span role="status">{message}</span>
+      <span role="status" className="text-foreground-muted">
+        {message}
+      </span>
     </div>
   );
 }
@@ -179,13 +182,18 @@ const LocalTranscriberModel = observer(function LocalTranscriberModel() {
     );
   }
   return (
-    <div className="flex items-center gap-2 text-xs">
-      <span className="text-amber-700 dark:text-amber-300" role="status">
+    <div className="flex items-center gap-4 text-xs">
+      <span className="text-foreground-warning" role="status">
         {model.state === 'failed'
           ? `Download failed: ${model.message ?? 'unknown error'}`
           : 'Model not downloaded: voice commands will fail until it is.'}
       </span>
-      <Button variant="secondary" size="xs" onClick={() => void dictation.downloadModel()}>
+      <Button
+        variant="text"
+        size="xs"
+        className="shrink-0"
+        onClick={() => void dictation.downloadModel()}
+      >
         {model.state === 'failed'
           ? 'Try again'
           : `Download (${Math.round(model.totalBytes / 1_000_000)} MB)`}
@@ -209,869 +217,881 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
   const credentials = voice.status?.credentials;
 
   return (
-    <div className="space-y-8 pb-10">
+    <div className="pb-16">
       <PageLayout.Header
         sticky
         draggable
         title="Voice & Conductor"
         description="Talk to your agents. Keys are encrypted with Windows DPAPI and never leave the main process."
       />
+      <div className="flex flex-col gap-10">
+        <WindowsChecks />
 
-      <WindowsChecks />
-
-      <SettingsSection title="Diagnostic history">
-        <SettingsRow
-          label="Record voice interaction traces"
-          description="Off by default. Stores redacted transcripts, commands, tool arguments and replies locally. May still contain private information. Turning off deletes stored diagnostics."
-          control={
-            <Switch
-              checked={conductorSettings?.diagnosticHistory ?? false}
-              disabled={!conductorSettings}
-              onCheckedChange={(diagnosticHistory) =>
-                void conductor.updateSettings({ diagnosticHistory })
-              }
-            />
-          }
-        />
-        <SettingsRow
-          label="Retain for days"
-          description="At most 30 days and 2 MB per diagnostic file."
-          control={
-            <CommitInput
-              value={String(conductorSettings?.diagnosticDays ?? 7)}
-              ariaLabel="Diagnostic retention days"
-              className="w-24"
-              onCommit={(value) => {
-                const days = Number(value);
-                if (Number.isInteger(days) && days >= 1 && days <= 30)
-                  void conductor.updateSettings({ diagnosticDays: days });
-              }}
-            />
-          }
-        />
-        <DiagnosticControls enabled={conductorSettings?.diagnosticHistory ?? false} />
-      </SettingsSection>
-
-      <SettingsSection title="Provider">
-        <SettingsRow
-          label="Use OpenRouter for everything"
-          description="One OpenRouter key runs the conductor, speech-to-text, and Jev."
-          control={
-            <Switch
-              checked={
-                conductorSettings?.provider === 'openrouter' &&
-                voiceSettings?.engine === 'openrouter' &&
-                conductorSettings.jevSource !== 'typesafe'
-              }
-              disabled={!conductorSettings || !voiceSettings}
-              onCheckedChange={(useOpenRouter) => {
-                void conductor.updateSettings({
-                  provider: useOpenRouter ? 'openrouter' : 'anthropic',
-                });
-                void voice.updateSettings({ engine: useOpenRouter ? 'openrouter' : 'openai' });
-                void conductor.updateSettings({ jevSource: useOpenRouter ? 'openrouter' : 'auto' });
-              }}
-            />
-          }
-        />
-      </SettingsSection>
-
-      <SettingsSection title="API keys">
-        <KeyRow
-          id="anthropic"
-          label="Anthropic"
-          description="Powers the conductor. Built-in commands work without it."
-          present={credentials?.anthropic}
-          onSaved={() => void conductor.refreshStatus()}
-        />
-        <KeyRow
-          id="openrouter"
-          label="OpenRouter"
-          description="Runs the conductor, speech-to-text, Jev, and optional Gemini speech output through OpenRouter."
-          present={credentials?.openrouter}
-          onSaved={() => void conductor.refreshStatus()}
-        />
-        <KeyRow
-          id="typesafe"
-          label="TypeSafe (Jev)"
-          description="Optional: call Jev directly on TypeSafe. Not needed if you use OpenRouter."
-          present={credentials?.typesafe}
-          onSaved={() => void conductor.refreshStatus()}
-        />
-        <KeyRow
-          id="openai"
-          label="OpenAI"
-          description="Speech-to-text with gpt-4o-transcribe."
-          present={credentials?.openai}
-        />
-        <KeyRow
-          id="xai"
-          label="xAI"
-          description="The realtime voice conductor, on Grok Voice. XAI_API_KEY also works."
-          present={credentials?.xai}
-          onSaved={() => void getTalkStore().refreshStatus()}
-        />
-        <KeyRow
-          id="deepgram"
-          label="Deepgram"
-          description="Speech-to-text with Nova-3 and keyterm boosting for agent names."
-          present={credentials?.deepgram}
-        />
-        <KeyRow
-          id="gemini"
-          label="Google Gemini"
-          description="Optional cloud text-to-speech. Spoken replies are sent to Google and billed by audio duration. GEMINI_API_KEY also works."
-          present={credentials?.gemini}
-        />
-      </SettingsSection>
-
-      <SettingsSection title="Canvas">
-        <CanvasSettings />
-      </SettingsSection>
-
-      <SettingsSection title="Voice">
-        <SettingsRow
-          label="Speech-to-text engine"
-          description="Local whisper.cpp keeps audio on this machine; see docs/chorus/voice.md to set it up."
-          control={
-            <Select.Root
-              value={voiceSettings?.engine ?? 'openai'}
-              disabled={!voiceSettings}
-              onValueChange={(engine) => {
-                if (engine) void voice.updateSettings({ engine });
-              }}
-            >
-              <Select.Trigger className="w-[230px]">
-                <Select.Value>{ENGINE_LABELS[voiceSettings?.engine ?? 'openai']}</Select.Value>
-              </Select.Trigger>
-              <Select.Content align="end">
-                {Object.entries(ENGINE_LABELS).map(([id, label]) => (
-                  <Select.Item key={id} value={id}>
-                    {label}
-                  </Select.Item>
-                ))}
-              </Select.Content>
-            </Select.Root>
-          }
-        />
-        <SettingsRow
-          label="Transcribe on this computer"
-          description="Off by default. Transcribe voice commands locally with Parakeet (the dictation model) instead of the speech-to-text engine above; the text goes straight to the conductor and no audio is sent to a transcription API."
-          control={
-            <Switch
-              checked={voiceSettings?.localTranscriber ?? false}
-              disabled={!voiceSettings}
-              onCheckedChange={(localTranscriber) => {
-                void voice.updateSettings({ localTranscriber });
-                if (localTranscriber) void dictation.refreshModel();
-              }}
-            />
-          }
-        />
-        <SettingsRow
-          label="On-device speech model"
-          description="Used by dictation, and by Transcribe on this computer. Ultra (Moondream's Parakeet, about 670 MB) detects 25 European languages and copes better with noise; Unified (NVIDIA, about 660 MB) is English only. Each is a one-time download, and switching keeps the other on disk."
-          control={
-            <Select.Root
-              value={voiceSettings?.localSpeechModel ?? 'parakeet-ultra'}
-              disabled={!voiceSettings}
-              onValueChange={(value) => {
-                const parsed = localSpeechModelSchema.safeParse(value);
-                if (!parsed.success) return;
-                void voice
-                  .updateSettings({ localSpeechModel: parsed.data })
-                  .then(() => dictation.refreshModel());
-              }}
-            >
-              <Select.Trigger className="w-[230px]">
-                <Select.Value>
-                  {LOCAL_SPEECH_MODEL_LABELS[voiceSettings?.localSpeechModel ?? 'parakeet-ultra']}
-                </Select.Value>
-              </Select.Trigger>
-              <Select.Content align="end">
-                {Object.entries(LOCAL_SPEECH_MODEL_LABELS).map(([id, label]) => (
-                  <Select.Item key={id} value={id}>
-                    {label}
-                  </Select.Item>
-                ))}
-              </Select.Content>
-            </Select.Root>
-          }
-        />
-        {voiceSettings?.localTranscriber && (
+        <SettingsSection title="Diagnostic history">
           <SettingsRow
-            label="Model download"
-            description="A one-time download; after that, transcription works offline."
-            control={<LocalTranscriberModel />}
-          />
-        )}
-        {voiceSettings?.engine === 'whisper-local' && (
-          <SettingsRow
-            label="whisper-server URL"
-            description="Address of a running whisper.cpp server (the /inference endpoint is used)."
+            label="Record voice interaction traces"
+            description="Off by default. Stores redacted transcripts, commands, tool arguments and replies locally. May still contain private information. Turning off deletes stored diagnostics."
             control={
-              <CommitInput
-                value={voiceSettings.whisperUrl}
-                ariaLabel="whisper-server URL"
-                onCommit={(whisperUrl) => void voice.updateSettings({ whisperUrl })}
+              <Switch
+                checked={conductorSettings?.diagnosticHistory ?? false}
+                disabled={!conductorSettings}
+                onCheckedChange={(diagnosticHistory) =>
+                  void conductor.updateSettings({ diagnosticHistory })
+                }
               />
             }
           />
-        )}
-        {voiceSettings?.engine === 'openrouter' && (
           <SettingsRow
-            label="OpenRouter speech model"
-            description="Any OpenRouter model that accepts audio input, e.g. google/gemini-3.5-flash-lite or openai/gpt-audio-mini."
+            label="Retain for days"
+            description="At most 30 days and 2 MB per diagnostic file."
             control={
               <CommitInput
-                value={voiceSettings.openrouterSttModel}
-                ariaLabel="OpenRouter speech model"
-                onCommit={(openrouterSttModel) => void voice.updateSettings({ openrouterSttModel })}
-              />
-            }
-          />
-        )}
-        <SettingsRow
-          label="Language"
-          description="ISO code of the language you speak, e.g. en, de, fr."
-          control={
-            <CommitInput
-              value={voiceSettings?.language ?? 'en'}
-              ariaLabel="Language"
-              className="w-20"
-              onCommit={(language) => void voice.updateSettings({ language })}
-            />
-          }
-        />
-        <SettingsRow
-          label="Hold to talk anywhere"
-          description={
-            voiceSettings &&
-            voiceSettings.globalHoldKey !== HOLD_KEY_OFF &&
-            voice.status &&
-            !voice.status.globalHoldActive
-              ? 'The system keyboard hook could not start; hold-to-talk works only inside Maestro.'
-              : 'Click, then press the key or keys to use in any app. Hold to talk and release to send, or double-tap to keep listening and tap once more to send. Off: hold-to-talk works only inside Maestro. Maestro only watches for these keys; it never records what you type.'
-          }
-          control={
-            <KeyCaptureControl
-              label={holdComboLabel(voiceSettings?.globalHoldKey ?? HOLD_KEY_OFF)}
-              ariaLabel="Hold to talk anywhere key"
-              disabled={!voiceSettings}
-              resolve={holdComboFromCodes}
-              onCommit={(globalHoldKey) => void voice.updateSettings({ globalHoldKey })}
-              onClear={() => void voice.updateSettings({ globalHoldKey: HOLD_KEY_OFF })}
-            />
-          }
-        />
-        <SettingsRow
-          label="Global talk shortcut"
-          description={
-            voiceSettings?.globalShortcut && voice.status && !voice.status.globalShortcutRegistered
-              ? 'Windows would not register this shortcut: another app owns it, or the key cannot be a global shortcut. Record a different one.'
-              : 'Toggles listening from anywhere in Windows. Click, then press a key or a combination such as Num Lock or Ctrl + Alt + Space. In the app you can also hold Right Ctrl.'
-          }
-          control={
-            <KeyCaptureControl
-              label={
-                voiceSettings?.globalShortcut
-                  ? acceleratorLabel(voiceSettings.globalShortcut)
-                  : null
-              }
-              ariaLabel="Global talk shortcut"
-              disabled={!voiceSettings}
-              resolve={acceleratorFromCodes}
-              onCommit={(globalShortcut) => void voice.updateSettings({ globalShortcut })}
-              onClear={() => void voice.updateSettings({ globalShortcut: '' })}
-            />
-          }
-        />
-        <SettingsRow
-          label="Live transcript"
-          description="Stream audio while you speak and show words as they are recognized (Deepgram)."
-          control={
-            <Switch
-              checked={voiceSettings?.streaming ?? true}
-              disabled={!voiceSettings}
-              onCheckedChange={(streaming) => void voice.updateSettings({ streaming })}
-            />
-          }
-        />
-        <SettingsRow
-          label="Hands-free"
-          description="Keep listening and start on speech. Only utterances that begin with the wake phrase are acted on; every utterance is transcribed, so this uses more STT."
-          control={
-            <Switch
-              checked={voiceSettings?.handsFree ?? false}
-              disabled={!voiceSettings}
-              onCheckedChange={(handsFree) => void voice.updateSettings({ handsFree })}
-            />
-          }
-        />
-        {voiceSettings?.handsFree && (
-          <SettingsRow
-            label="Wake phrase"
-            description="Say it first: “Maestro, focus Claude 1”. Leave empty to act on everything (not recommended)."
-            control={
-              <CommitInput
-                value={voiceSettings.wakePhrase}
-                ariaLabel="Wake phrase"
-                className="w-40"
-                allowEmpty
-                onCommit={(wakePhrase) => void voice.updateSettings({ wakePhrase })}
-              />
-            }
-          />
-        )}
-        <SettingsRow
-          label="Speak replies"
-          description="Read the conductor's answers aloud."
-          control={
-            <Switch
-              checked={voiceSettings?.speakReplies ?? true}
-              disabled={!voiceSettings}
-              onCheckedChange={(speakReplies) => void voice.updateSettings({ speakReplies })}
-            />
-          }
-        />
-        <SettingsRow
-          label="Announce agents that need you"
-          description="Say “Codex 1 needs permission” when an agent waits or finishes."
-          control={
-            <Switch
-              checked={voiceSettings?.speakAttention ?? true}
-              disabled={!voiceSettings}
-              onCheckedChange={(speakAttention) => void voice.updateSettings({ speakAttention })}
-            />
-          }
-        />
-        <SettingsRow
-          label="Spoken output"
-          description={
-            voiceSettings?.ttsEngine.startsWith('openrouter-') && !credentials?.openrouter
-              ? 'Add an OpenRouter API key above; until then, replies use the Windows voice.'
-              : voiceSettings?.ttsEngine.startsWith('vertex-')
-                ? 'Signs in with your gcloud application default credentials (gcloud auth application-default login) and bills your Google Cloud project. Windows speech is the fallback.'
-                : 'Kitten Mini runs offline on your CPU; Gemini (direct, via OpenRouter, or via Google Cloud) sends reply text to Google. Windows speech is the fallback.'
-          }
-          control={
-            <Select.Root
-              value={voiceSettings?.ttsEngine ?? 'platform'}
-              disabled={!voiceSettings}
-              onValueChange={(engine) => {
-                if (isTtsEngine(engine)) void voice.updateSettings({ ttsEngine: engine });
-              }}
-            >
-              <Select.Trigger className="w-[280px]">
-                <Select.Value>
-                  {TTS_ENGINE_LABELS[voiceSettings?.ttsEngine ?? 'platform']}
-                </Select.Value>
-              </Select.Trigger>
-              <Select.Content align="end">
-                {(Object.keys(TTS_ENGINE_LABELS) as TtsEngine[]).map((engine) => (
-                  <Select.Item key={engine} value={engine}>
-                    {TTS_ENGINE_LABELS[engine]}
-                  </Select.Item>
-                ))}
-              </Select.Content>
-            </Select.Root>
-          }
-        />
-        {voiceSettings?.ttsEngine === 'kitten' && (
-          <SettingsRow
-            label="Local voice"
-            description="An English voice from the bundled Kitten Mini model; no account or download needed."
-            control={
-              <Select.Root
-                value={voiceSettings.localVoice}
-                onValueChange={(localVoice) => {
-                  if (
-                    localVoice === 'Bella' ||
-                    localVoice === 'Jasper' ||
-                    localVoice === 'Luna' ||
-                    localVoice === 'Bruno' ||
-                    localVoice === 'Rosie' ||
-                    localVoice === 'Hugo' ||
-                    localVoice === 'Kiki' ||
-                    localVoice === 'Leo'
-                  ) {
-                    void voice.updateSettings({ localVoice });
-                  }
+                value={String(conductorSettings?.diagnosticDays ?? 7)}
+                ariaLabel="Diagnostic retention days"
+                className="w-24"
+                onCommit={(value) => {
+                  const days = Number(value);
+                  if (Number.isInteger(days) && days >= 1 && days <= 30)
+                    void conductor.updateSettings({ diagnosticDays: days });
                 }}
-              >
-                <Select.Trigger className="w-[230px]">
-                  <Select.Value>{voiceSettings.localVoice}</Select.Value>
-                </Select.Trigger>
-                <Select.Content align="end">
-                  {(
-                    ['Bella', 'Jasper', 'Luna', 'Bruno', 'Rosie', 'Hugo', 'Kiki', 'Leo'] as const
-                  ).map((name) => (
-                    <Select.Item key={name} value={name}>
-                      {name}
-                    </Select.Item>
-                  ))}
-                </Select.Content>
-              </Select.Root>
+              />
             }
           />
-        )}
-        {usesGeminiVoice(voiceSettings?.ttsEngine) && (
+          <DiagnosticControls enabled={conductorSettings?.diagnosticHistory ?? false} />
+        </SettingsSection>
+
+        <SettingsSection title="Provider">
           <SettingsRow
-            label="Gemini voice"
-            description="A prebuilt English voice for spoken replies and notifications. Not used while a custom Gemini voice is set."
+            label="Use OpenRouter for everything"
+            description="One OpenRouter key runs the conductor, speech-to-text, and Jev."
+            control={
+              <Switch
+                checked={
+                  conductorSettings?.provider === 'openrouter' &&
+                  voiceSettings?.engine === 'openrouter' &&
+                  conductorSettings.jevSource !== 'typesafe'
+                }
+                disabled={!conductorSettings || !voiceSettings}
+                onCheckedChange={(useOpenRouter) => {
+                  void conductor.updateSettings({
+                    provider: useOpenRouter ? 'openrouter' : 'anthropic',
+                  });
+                  void voice.updateSettings({ engine: useOpenRouter ? 'openrouter' : 'openai' });
+                  void conductor.updateSettings({
+                    jevSource: useOpenRouter ? 'openrouter' : 'auto',
+                  });
+                }}
+              />
+            }
+          />
+        </SettingsSection>
+
+        <SettingsSection title="API keys">
+          <KeyRow
+            id="anthropic"
+            label="Anthropic"
+            description="Powers the conductor. Built-in commands work without it."
+            present={credentials?.anthropic}
+            onSaved={() => void conductor.refreshStatus()}
+          />
+          <KeyRow
+            id="openrouter"
+            label="OpenRouter"
+            description="Runs the conductor, speech-to-text, Jev, and optional Gemini speech output through OpenRouter."
+            present={credentials?.openrouter}
+            onSaved={() => void conductor.refreshStatus()}
+          />
+          <KeyRow
+            id="typesafe"
+            label="TypeSafe (Jev)"
+            description="Optional: call Jev directly on TypeSafe. Not needed if you use OpenRouter."
+            present={credentials?.typesafe}
+            onSaved={() => void conductor.refreshStatus()}
+          />
+          <KeyRow
+            id="openai"
+            label="OpenAI"
+            description="Speech-to-text with gpt-4o-transcribe."
+            present={credentials?.openai}
+          />
+          <KeyRow
+            id="xai"
+            label="xAI"
+            description="The realtime voice conductor, on Grok Voice. XAI_API_KEY also works."
+            present={credentials?.xai}
+            onSaved={() => void getTalkStore().refreshStatus()}
+          />
+          <KeyRow
+            id="deepgram"
+            label="Deepgram"
+            description="Speech-to-text with Nova-3 and keyterm boosting for agent names."
+            present={credentials?.deepgram}
+          />
+          <KeyRow
+            id="gemini"
+            label="Google Gemini"
+            description="Optional cloud text-to-speech. Spoken replies are sent to Google and billed by audio duration. GEMINI_API_KEY also works."
+            present={credentials?.gemini}
+          />
+        </SettingsSection>
+
+        <SettingsSection title="Canvas">
+          <CanvasSettings />
+        </SettingsSection>
+
+        <SettingsSection title="Voice">
+          <SettingsRow
+            label="Speech-to-text engine"
+            description="Local whisper.cpp keeps audio on this machine; see docs/chorus/voice.md to set it up."
             control={
               <Select.Root
-                value={voiceSettings?.geminiVoice ?? 'Kore'}
+                value={voiceSettings?.engine ?? 'openai'}
                 disabled={!voiceSettings}
-                onValueChange={(geminiVoice) => {
-                  if (
-                    geminiVoice === 'Kore' ||
-                    geminiVoice === 'Puck' ||
-                    geminiVoice === 'Aoede' ||
-                    geminiVoice === 'Zephyr'
-                  ) {
-                    void voice.updateSettings({ geminiVoice });
-                  }
+                onValueChange={(engine) => {
+                  if (engine) void voice.updateSettings({ engine });
                 }}
               >
-                <Select.Trigger className="w-[230px]">
-                  <Select.Value>{voiceSettings?.geminiVoice ?? 'Kore'}</Select.Value>
+                <Select.Trigger appearance="input" className="w-56">
+                  <Select.Value>{ENGINE_LABELS[voiceSettings?.engine ?? 'openai']}</Select.Value>
                 </Select.Trigger>
                 <Select.Content align="end">
-                  {(['Kore', 'Puck', 'Aoede', 'Zephyr'] as const).map((name) => (
-                    <Select.Item key={name} value={name}>
-                      {name}
+                  {Object.entries(ENGINE_LABELS).map(([id, label]) => (
+                    <Select.Item key={id} value={id}>
+                      {label}
                     </Select.Item>
                   ))}
                 </Select.Content>
               </Select.Root>
             }
           />
-        )}
-        {usesGeminiVoice(voiceSettings?.ttsEngine) && (
           <SettingsRow
-            label="Custom Gemini voice"
-            description={`A voice id you made with voice design (voice_… or voicekey_…). It replaces the prebuilt voice on the Google Cloud engines. A voice made in a Google Cloud project only works there; OpenRouter and API keys cannot reach it. Empty uses the prebuilt voice.${
-              voiceSettings?.geminiCustomVoice.trim() &&
-              !voiceSettings.ttsEngine.startsWith('vertex-')
-                ? ' Warning: the selected engine cannot use it, so the prebuilt voice is spoken. Switch to a Google Cloud engine.'
-                : ''
-            }`}
+            label="Transcribe on this computer"
+            description="Off by default. Transcribe voice commands locally with Parakeet (the dictation model) instead of the speech-to-text engine above; the text goes straight to the conductor and no audio is sent to a transcription API."
             control={
-              <CommitInput
-                value={voiceSettings?.geminiCustomVoice ?? ''}
-                ariaLabel="Custom Gemini voice id"
-                placeholder="voice_…"
-                className="w-56 font-mono text-xs"
-                allowEmpty
-                onCommit={(value) =>
-                  void voice.updateSettings({ geminiCustomVoice: value.trim().slice(0, 200) })
-                }
+              <Switch
+                checked={voiceSettings?.localTranscriber ?? false}
+                disabled={!voiceSettings}
+                onCheckedChange={(localTranscriber) => {
+                  void voice.updateSettings({ localTranscriber });
+                  if (localTranscriber) void dictation.refreshModel();
+                }}
               />
             }
           />
-        )}
-        {voiceSettings?.ttsEngine.startsWith('vertex-') && (
           <SettingsRow
-            label="Google Cloud voice style"
-            description="How the voice delivers every sentence, in your own words: tone, pace, manner. It is sent with each reply and each agent announcement, so they sound alike. Empty lets the model choose per sentence."
+            label="On-device speech model"
+            description="Used by dictation, and by Transcribe on this computer. Ultra (Moondream's Parakeet, about 670 MB) detects 25 European languages and copes better with noise; Unified (NVIDIA, about 660 MB) is English only. Each is a one-time download, and switching keeps the other on disk."
             control={
-              <Textarea
-                key={voiceSettings.geminiVoiceStyle}
-                defaultValue={voiceSettings.geminiVoiceStyle}
-                aria-label="Google Cloud voice style"
-                placeholder="Laid-back and unhurried, like chatting with a friend…"
-                rows={4}
-                maxLength={GEMINI_VOICE_STYLE_MAX_CHARS}
-                className="w-72 text-xs"
-                onBlur={(event) => {
-                  const next = event.currentTarget.value.trim();
-                  if (next !== voiceSettings.geminiVoiceStyle) {
-                    void voice.updateSettings({ geminiVoiceStyle: next });
+              <Select.Root
+                value={voiceSettings?.localSpeechModel ?? 'parakeet-ultra'}
+                disabled={!voiceSettings}
+                onValueChange={(value) => {
+                  const parsed = localSpeechModelSchema.safeParse(value);
+                  if (!parsed.success) return;
+                  void voice
+                    .updateSettings({ localSpeechModel: parsed.data })
+                    .then(() => dictation.refreshModel());
+                }}
+              >
+                <Select.Trigger appearance="input" className="w-56">
+                  <Select.Value>
+                    {LOCAL_SPEECH_MODEL_LABELS[voiceSettings?.localSpeechModel ?? 'parakeet-ultra']}
+                  </Select.Value>
+                </Select.Trigger>
+                <Select.Content align="end">
+                  {Object.entries(LOCAL_SPEECH_MODEL_LABELS).map(([id, label]) => (
+                    <Select.Item key={id} value={id}>
+                      {label}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select.Root>
+            }
+          />
+          {voiceSettings?.localTranscriber && (
+            <SettingsRow
+              label="Model download"
+              description="A one-time download; after that, transcription works offline."
+              control={<LocalTranscriberModel />}
+            />
+          )}
+          {voiceSettings?.engine === 'whisper-local' && (
+            <SettingsRow
+              layout="stacked"
+              label="whisper-server URL"
+              description="Address of a running whisper.cpp server (the /inference endpoint is used)."
+              control={
+                <CommitInput
+                  value={voiceSettings.whisperUrl}
+                  ariaLabel="whisper-server URL"
+                  className="max-w-xl"
+                  onCommit={(whisperUrl) => void voice.updateSettings({ whisperUrl })}
+                />
+              }
+            />
+          )}
+          {voiceSettings?.engine === 'openrouter' && (
+            <SettingsRow
+              label="OpenRouter speech model"
+              description="Any OpenRouter model that accepts audio input, e.g. google/gemini-3.5-flash-lite or openai/gpt-audio-mini."
+              control={
+                <CommitInput
+                  value={voiceSettings.openrouterSttModel}
+                  ariaLabel="OpenRouter speech model"
+                  onCommit={(openrouterSttModel) =>
+                    void voice.updateSettings({ openrouterSttModel })
+                  }
+                />
+              }
+            />
+          )}
+          <SettingsRow
+            label="Language"
+            description="ISO code of the language you speak, e.g. en, de, fr."
+            control={
+              <CommitInput
+                value={voiceSettings?.language ?? 'en'}
+                ariaLabel="Language"
+                className="w-20"
+                onCommit={(language) => void voice.updateSettings({ language })}
+              />
+            }
+          />
+          <SettingsRow
+            label="Hold to talk anywhere"
+            description={
+              voiceSettings &&
+              voiceSettings.globalHoldKey !== HOLD_KEY_OFF &&
+              voice.status &&
+              !voice.status.globalHoldActive
+                ? 'The system keyboard hook could not start; hold-to-talk works only inside Maestro.'
+                : 'Click, then press the key or keys to use in any app. Hold to talk and release to send, or double-tap to keep listening and tap once more to send. Off: hold-to-talk works only inside Maestro. Maestro only watches for these keys; it never records what you type.'
+            }
+            control={
+              <KeyCaptureControl
+                label={holdComboLabel(voiceSettings?.globalHoldKey ?? HOLD_KEY_OFF)}
+                ariaLabel="Hold to talk anywhere key"
+                disabled={!voiceSettings}
+                resolve={holdComboFromCodes}
+                onCommit={(globalHoldKey) => void voice.updateSettings({ globalHoldKey })}
+                onClear={() => void voice.updateSettings({ globalHoldKey: HOLD_KEY_OFF })}
+              />
+            }
+          />
+          <SettingsRow
+            label="Global talk shortcut"
+            description={
+              voiceSettings?.globalShortcut &&
+              voice.status &&
+              !voice.status.globalShortcutRegistered
+                ? 'Windows would not register this shortcut: another app owns it, or the key cannot be a global shortcut. Record a different one.'
+                : 'Toggles listening from anywhere in Windows. Click, then press a key or a combination such as Num Lock or Ctrl + Alt + Space. In the app you can also hold Right Ctrl.'
+            }
+            control={
+              <KeyCaptureControl
+                label={
+                  voiceSettings?.globalShortcut
+                    ? acceleratorLabel(voiceSettings.globalShortcut)
+                    : null
+                }
+                ariaLabel="Global talk shortcut"
+                disabled={!voiceSettings}
+                resolve={acceleratorFromCodes}
+                onCommit={(globalShortcut) => void voice.updateSettings({ globalShortcut })}
+                onClear={() => void voice.updateSettings({ globalShortcut: '' })}
+              />
+            }
+          />
+          <SettingsRow
+            label="Live transcript"
+            description="Stream audio while you speak and show words as they are recognized (Deepgram)."
+            control={
+              <Switch
+                checked={voiceSettings?.streaming ?? true}
+                disabled={!voiceSettings}
+                onCheckedChange={(streaming) => void voice.updateSettings({ streaming })}
+              />
+            }
+          />
+          <SettingsRow
+            label="Hands-free"
+            description="Keep listening and start on speech. Only utterances that begin with the wake phrase are acted on; every utterance is transcribed, so this uses more STT."
+            control={
+              <Switch
+                checked={voiceSettings?.handsFree ?? false}
+                disabled={!voiceSettings}
+                onCheckedChange={(handsFree) => void voice.updateSettings({ handsFree })}
+              />
+            }
+          />
+          {voiceSettings?.handsFree && (
+            <SettingsRow
+              label="Wake phrase"
+              description="Say it first: “Maestro, focus Claude 1”. Leave empty to act on everything (not recommended)."
+              control={
+                <CommitInput
+                  value={voiceSettings.wakePhrase}
+                  ariaLabel="Wake phrase"
+                  className="w-40"
+                  allowEmpty
+                  onCommit={(wakePhrase) => void voice.updateSettings({ wakePhrase })}
+                />
+              }
+            />
+          )}
+          <SettingsRow
+            label="Speak replies"
+            description="Read the conductor's answers aloud."
+            control={
+              <Switch
+                checked={voiceSettings?.speakReplies ?? true}
+                disabled={!voiceSettings}
+                onCheckedChange={(speakReplies) => void voice.updateSettings({ speakReplies })}
+              />
+            }
+          />
+          <SettingsRow
+            label="Announce agents that need you"
+            description="Say “Codex 1 needs permission” when an agent waits or finishes."
+            control={
+              <Switch
+                checked={voiceSettings?.speakAttention ?? true}
+                disabled={!voiceSettings}
+                onCheckedChange={(speakAttention) => void voice.updateSettings({ speakAttention })}
+              />
+            }
+          />
+          <SettingsRow
+            label="Spoken output"
+            description={
+              voiceSettings?.ttsEngine.startsWith('openrouter-') && !credentials?.openrouter
+                ? 'Add an OpenRouter API key above; until then, replies use the Windows voice.'
+                : voiceSettings?.ttsEngine.startsWith('vertex-')
+                  ? 'Signs in with your gcloud application default credentials (gcloud auth application-default login) and bills your Google Cloud project. Windows speech is the fallback.'
+                  : 'Kitten Mini runs offline on your CPU; Gemini (direct, via OpenRouter, or via Google Cloud) sends reply text to Google. Windows speech is the fallback.'
+            }
+            control={
+              <Select.Root
+                value={voiceSettings?.ttsEngine ?? 'platform'}
+                disabled={!voiceSettings}
+                onValueChange={(engine) => {
+                  if (isTtsEngine(engine)) void voice.updateSettings({ ttsEngine: engine });
+                }}
+              >
+                <Select.Trigger appearance="input" className="w-72">
+                  <Select.Value>
+                    {TTS_ENGINE_LABELS[voiceSettings?.ttsEngine ?? 'platform']}
+                  </Select.Value>
+                </Select.Trigger>
+                <Select.Content align="end">
+                  {(Object.keys(TTS_ENGINE_LABELS) as TtsEngine[]).map((engine) => (
+                    <Select.Item key={engine} value={engine}>
+                      {TTS_ENGINE_LABELS[engine]}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select.Root>
+            }
+          />
+          {voiceSettings?.ttsEngine === 'kitten' && (
+            <SettingsRow
+              label="Local voice"
+              description="An English voice from the bundled Kitten Mini model; no account or download needed."
+              control={
+                <Select.Root
+                  value={voiceSettings.localVoice}
+                  onValueChange={(localVoice) => {
+                    if (
+                      localVoice === 'Bella' ||
+                      localVoice === 'Jasper' ||
+                      localVoice === 'Luna' ||
+                      localVoice === 'Bruno' ||
+                      localVoice === 'Rosie' ||
+                      localVoice === 'Hugo' ||
+                      localVoice === 'Kiki' ||
+                      localVoice === 'Leo'
+                    ) {
+                      void voice.updateSettings({ localVoice });
+                    }
+                  }}
+                >
+                  <Select.Trigger appearance="input" className="w-56">
+                    <Select.Value>{voiceSettings.localVoice}</Select.Value>
+                  </Select.Trigger>
+                  <Select.Content align="end">
+                    {(
+                      ['Bella', 'Jasper', 'Luna', 'Bruno', 'Rosie', 'Hugo', 'Kiki', 'Leo'] as const
+                    ).map((name) => (
+                      <Select.Item key={name} value={name}>
+                        {name}
+                      </Select.Item>
+                    ))}
+                  </Select.Content>
+                </Select.Root>
+              }
+            />
+          )}
+          {usesGeminiVoice(voiceSettings?.ttsEngine) && (
+            <SettingsRow
+              label="Gemini voice"
+              description="A prebuilt English voice for spoken replies and notifications. Not used while a custom Gemini voice is set."
+              control={
+                <Select.Root
+                  value={voiceSettings?.geminiVoice ?? 'Kore'}
+                  disabled={!voiceSettings}
+                  onValueChange={(geminiVoice) => {
+                    if (
+                      geminiVoice === 'Kore' ||
+                      geminiVoice === 'Puck' ||
+                      geminiVoice === 'Aoede' ||
+                      geminiVoice === 'Zephyr'
+                    ) {
+                      void voice.updateSettings({ geminiVoice });
+                    }
+                  }}
+                >
+                  <Select.Trigger appearance="input" className="w-56">
+                    <Select.Value>{voiceSettings?.geminiVoice ?? 'Kore'}</Select.Value>
+                  </Select.Trigger>
+                  <Select.Content align="end">
+                    {(['Kore', 'Puck', 'Aoede', 'Zephyr'] as const).map((name) => (
+                      <Select.Item key={name} value={name}>
+                        {name}
+                      </Select.Item>
+                    ))}
+                  </Select.Content>
+                </Select.Root>
+              }
+            />
+          )}
+          {usesGeminiVoice(voiceSettings?.ttsEngine) && (
+            <SettingsRow
+              label="Custom Gemini voice"
+              description={`A voice id you made with voice design (voice_… or voicekey_…). It replaces the prebuilt voice on the Google Cloud engines. A voice made in a Google Cloud project only works there; OpenRouter and API keys cannot reach it. Empty uses the prebuilt voice.${
+                voiceSettings?.geminiCustomVoice.trim() &&
+                !voiceSettings.ttsEngine.startsWith('vertex-')
+                  ? ' Warning: the selected engine cannot use it, so the prebuilt voice is spoken. Switch to a Google Cloud engine.'
+                  : ''
+              }`}
+              control={
+                <CommitInput
+                  value={voiceSettings?.geminiCustomVoice ?? ''}
+                  ariaLabel="Custom Gemini voice id"
+                  placeholder="voice_…"
+                  className="w-64 font-mono text-xs"
+                  allowEmpty
+                  onCommit={(value) =>
+                    void voice.updateSettings({ geminiCustomVoice: value.trim().slice(0, 200) })
+                  }
+                />
+              }
+            />
+          )}
+          {voiceSettings?.ttsEngine.startsWith('vertex-') && (
+            <SettingsRow
+              layout="stacked"
+              label="Google Cloud voice style"
+              description="How the voice delivers every sentence, in your own words: tone, pace, manner. It is sent with each reply and each agent announcement, so they sound alike. Empty lets the model choose per sentence."
+              control={
+                <Textarea
+                  key={voiceSettings.geminiVoiceStyle}
+                  defaultValue={voiceSettings.geminiVoiceStyle}
+                  aria-label="Google Cloud voice style"
+                  placeholder="Laid-back and unhurried, like chatting with a friend…"
+                  rows={4}
+                  maxLength={GEMINI_VOICE_STYLE_MAX_CHARS}
+                  className="max-w-xl"
+                  onBlur={(event) => {
+                    const next = event.currentTarget.value.trim();
+                    if (next !== voiceSettings.geminiVoiceStyle) {
+                      void voice.updateSettings({ geminiVoiceStyle: next });
+                    }
+                  }}
+                />
+              }
+            />
+          )}
+          {voiceSettings?.ttsEngine.startsWith('vertex-') && (
+            <SettingsRow
+              label="Google Cloud project"
+              description="The project that owns your custom voices. Empty uses your gcloud sign-in's quota project."
+              control={
+                <CommitInput
+                  value={voiceSettings.vertexProject}
+                  ariaLabel="Google Cloud project id"
+                  placeholder="Project id"
+                  className="w-64 font-mono text-xs"
+                  allowEmpty
+                  onCommit={(value) =>
+                    void voice.updateSettings({ vertexProject: value.trim().slice(0, 100) })
+                  }
+                />
+              }
+            />
+          )}
+          <SettingsRow
+            label="Windows fallback voice"
+            description="Used if the selected model fails. Test previews the selected output engine."
+            control={<VoicePicker />}
+          />
+        </SettingsSection>
+
+        <SettingsSection title="Conductor">
+          <SettingsRow
+            label="Conductor provider"
+            description="Call Claude directly with an Anthropic key, or any tool-capable model through OpenRouter."
+            control={
+              <Select.Root
+                value={conductorSettings?.provider ?? 'anthropic'}
+                disabled={!conductorSettings}
+                onValueChange={(provider) => {
+                  if (provider) void conductor.updateSettings({ provider });
+                }}
+              >
+                <Select.Trigger appearance="input" className="w-56">
+                  <Select.Value>
+                    {conductorSettings?.provider === 'openrouter' ? 'OpenRouter' : 'Anthropic API'}
+                  </Select.Value>
+                </Select.Trigger>
+                <Select.Content align="end">
+                  <Select.Item value="anthropic">Anthropic API</Select.Item>
+                  <Select.Item value="openrouter">OpenRouter</Select.Item>
+                </Select.Content>
+              </Select.Root>
+            }
+          />
+          {conductorSettings?.provider === 'openrouter' ? (
+            <SettingsRow
+              label="OpenRouter model"
+              description="Model id on OpenRouter; it must support tool calling."
+              control={
+                <CommitInput
+                  value={conductorSettings.openrouterModel}
+                  ariaLabel="OpenRouter conductor model"
+                  onCommit={(openrouterModel) => void conductor.updateSettings({ openrouterModel })}
+                />
+              }
+            />
+          ) : (
+            <SettingsRow
+              label="Model"
+              description="Claude model that plans and routes your commands."
+              control={
+                <CommitInput
+                  value={conductorSettings?.model ?? ''}
+                  ariaLabel="Conductor model"
+                  onCommit={(model) => void conductor.updateSettings({ model })}
+                />
+              }
+            />
+          )}
+          <SettingsRow
+            label="Command effort"
+            description="Reasoning effort for quick commands. Lower is faster."
+            control={
+              <EffortSelect
+                value={conductorSettings?.commandEffort}
+                onChange={(commandEffort) => void conductor.updateSettings({ commandEffort })}
+              />
+            }
+          />
+          <SettingsRow
+            label="Planning effort"
+            description="Reasoning effort when splitting a goal across several agents."
+            control={
+              <EffortSelect
+                value={conductorSettings?.planEffort}
+                onChange={(planEffort) => void conductor.updateSettings({ planEffort })}
+              />
+            }
+          />
+          <SettingsRow
+            label="Max agents per plan"
+            control={
+              <CommitInput
+                value={String(conductorSettings?.maxAgentsPerPlan ?? 4)}
+                ariaLabel="Max agents per plan"
+                className="w-20"
+                onCommit={(value) => {
+                  const maxAgentsPerPlan = Number.parseInt(value, 10);
+                  if (maxAgentsPerPlan >= 1 && maxAgentsPerPlan <= 12) {
+                    void conductor.updateSettings({ maxAgentsPerPlan });
                   }
                 }}
               />
             }
           />
-        )}
-        {voiceSettings?.ttsEngine.startsWith('vertex-') && (
           <SettingsRow
-            label="Google Cloud project"
-            description="The project that owns your custom voices. Empty uses your gcloud sign-in's quota project."
+            label="Use Jev for fast decisions"
+            description={
+              conductor.status?.jevReady
+                ? `On, via ${conductor.status.jevVia === 'openrouter' ? 'OpenRouter' : 'TypeSafe'}: routing, permission risk, attention order, and plan review use Jev.`
+                : conductorSettings?.jevEnabled === false
+                  ? 'Off.'
+                  : 'Add an OpenRouter (or TypeSafe) API key above to enable.'
+            }
+            control={
+              <Switch
+                checked={conductorSettings?.jevEnabled ?? true}
+                disabled={!conductorSettings}
+                onCheckedChange={(jevEnabled) => void conductor.updateSettings({ jevEnabled })}
+              />
+            }
+          />
+          <SettingsRow
+            label="Jev source"
+            description="Where Jev runs. Auto uses whichever key is set, preferring OpenRouter when the conductor uses it."
+            control={
+              <Select.Root
+                value={conductorSettings?.jevSource ?? 'auto'}
+                disabled={!conductorSettings}
+                onValueChange={(jevSource) => {
+                  if (jevSource) void conductor.updateSettings({ jevSource });
+                }}
+              >
+                <Select.Trigger appearance="input" className="w-56">
+                  <Select.Value>
+                    {JEV_SOURCE_LABELS[conductorSettings?.jevSource ?? 'auto']}
+                  </Select.Value>
+                </Select.Trigger>
+                <Select.Content align="end">
+                  {Object.entries(JEV_SOURCE_LABELS).map(([id, label]) => (
+                    <Select.Item key={id} value={id}>
+                      {label}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select.Root>
+            }
+          />
+          <SettingsRow
+            label="Jev confidence to act"
+            description="Jev acts on its own only above this confidence; below it, Claude decides. Showing windows needs 0.1 less; sending messages and starting agents needs 0.05 more."
             control={
               <CommitInput
-                value={voiceSettings.vertexProject}
-                ariaLabel="Google Cloud project id"
-                placeholder="Project id"
-                className="w-56 font-mono text-xs"
-                allowEmpty
-                onCommit={(value) =>
-                  void voice.updateSettings({ vertexProject: value.trim().slice(0, 100) })
+                value={String(conductorSettings?.jevConfidence ?? 0.8)}
+                ariaLabel="Jev confidence to act"
+                className="w-20"
+                onCommit={(value) => {
+                  const jevConfidence = Number.parseFloat(value);
+                  if (jevConfidence >= 0.5 && jevConfidence <= 0.99) {
+                    void conductor.updateSettings({ jevConfidence });
+                  }
+                }}
+              />
+            }
+          />
+          <SettingsRow
+            label="Fast verbatim routing"
+            description="When Jev is confident, it sends your own words to an agent or starts a new agent itself instead of Claude rewriting your request. Off: Claude writes every message and starts every agent."
+            control={
+              <Switch
+                checked={conductorSettings?.jevVerbatimRouting ?? true}
+                disabled={!conductorSettings || conductorSettings.jevEnabled === false}
+                onCheckedChange={(jevVerbatimRouting) =>
+                  void conductor.updateSettings({ jevVerbatimRouting })
                 }
               />
             }
           />
-        )}
-        <SettingsRow
-          label="Windows fallback voice"
-          description="Used if the selected model fails. Test previews the selected output engine."
-          control={<VoicePicker />}
-        />
-      </SettingsSection>
-
-      <SettingsSection title="Conductor">
-        <SettingsRow
-          label="Conductor provider"
-          description="Call Claude directly with an Anthropic key, or any tool-capable model through OpenRouter."
-          control={
-            <Select.Root
-              value={conductorSettings?.provider ?? 'anthropic'}
-              disabled={!conductorSettings}
-              onValueChange={(provider) => {
-                if (provider) void conductor.updateSettings({ provider });
-              }}
-            >
-              <Select.Trigger className="w-[180px]">
-                <Select.Value>
-                  {conductorSettings?.provider === 'openrouter' ? 'OpenRouter' : 'Anthropic API'}
-                </Select.Value>
-              </Select.Trigger>
-              <Select.Content align="end">
-                <Select.Item value="anthropic">Anthropic API</Select.Item>
-                <Select.Item value="openrouter">OpenRouter</Select.Item>
-              </Select.Content>
-            </Select.Root>
-          }
-        />
-        {conductorSettings?.provider === 'openrouter' ? (
           <SettingsRow
-            label="OpenRouter model"
-            description="Model id on OpenRouter; it must support tool calling."
+            label="Start plans without asking"
+            description="Spawn planned agents immediately instead of waiting for your yes."
             control={
-              <CommitInput
-                value={conductorSettings.openrouterModel}
-                ariaLabel="OpenRouter conductor model"
-                onCommit={(openrouterModel) => void conductor.updateSettings({ openrouterModel })}
+              <Switch
+                checked={conductorSettings?.autoApprovePlans ?? false}
+                disabled={!conductorSettings}
+                onCheckedChange={(autoApprovePlans) =>
+                  void conductor.updateSettings({ autoApprovePlans })
+                }
               />
             }
           />
-        ) : (
           <SettingsRow
-            label="Model"
-            description="Claude model that plans and routes your commands."
+            label="Report what finished agents said"
+            description="When an agent finishes, the conductor reads its final reply to tell you what it did (say, the URL of the app it started) and to do follow-ups you asked for, such as opening that app. With Jev, clear results are read out in the agent's own words and progress notes with nothing new stay on screen; Claude only handles the rest. Off: a short fixed announcement."
             control={
-              <CommitInput
-                value={conductorSettings?.model ?? ''}
-                ariaLabel="Conductor model"
-                onCommit={(model) => void conductor.updateSettings({ model })}
+              <Switch
+                checked={conductorSettings?.completionFollowUp ?? true}
+                disabled={!conductorSettings}
+                onCheckedChange={(completionFollowUp) =>
+                  void conductor.updateSettings({ completionFollowUp })
+                }
               />
             }
           />
-        )}
-        <SettingsRow
-          label="Command effort"
-          description="Reasoning effort for quick commands. Lower is faster."
-          control={
-            <EffortSelect
-              value={conductorSettings?.commandEffort}
-              onChange={(commandEffort) => void conductor.updateSettings({ commandEffort })}
-            />
-          }
-        />
-        <SettingsRow
-          label="Planning effort"
-          description="Reasoning effort when splitting a goal across several agents."
-          control={
-            <EffortSelect
-              value={conductorSettings?.planEffort}
-              onChange={(planEffort) => void conductor.updateSettings({ planEffort })}
-            />
-          }
-        />
-        <SettingsRow
-          label="Max agents per plan"
-          control={
-            <CommitInput
-              value={String(conductorSettings?.maxAgentsPerPlan ?? 4)}
-              ariaLabel="Max agents per plan"
-              className="w-20"
-              onCommit={(value) => {
-                const maxAgentsPerPlan = Number.parseInt(value, 10);
-                if (maxAgentsPerPlan >= 1 && maxAgentsPerPlan <= 12) {
-                  void conductor.updateSettings({ maxAgentsPerPlan });
+          <SettingsRow
+            label="Let the conductor decide who needs you"
+            description="When an agent ends a turn, the conductor's model reads its final reply and decides whether the agent is waiting for you or is done. An agent that ends on a question it cannot go on without shows as Needs you at once; one that only offers next steps shows as Done and stays that way. Permission prompts are not affected. Off, or when the model cannot be reached: the agent's own events decide."
+            control={
+              <Switch
+                checked={conductorSettings?.attentionVerdicts ?? true}
+                disabled={!conductorSettings}
+                onCheckedChange={(attentionVerdicts) =>
+                  void conductor.updateSettings({ attentionVerdicts })
                 }
-              }}
-            />
-          }
-        />
-        <SettingsRow
-          label="Use Jev for fast decisions"
-          description={
-            conductor.status?.jevReady
-              ? `On, via ${conductor.status.jevVia === 'openrouter' ? 'OpenRouter' : 'TypeSafe'}: routing, permission risk, attention order, and plan review use Jev.`
-              : conductorSettings?.jevEnabled === false
-                ? 'Off.'
-                : 'Add an OpenRouter (or TypeSafe) API key above to enable.'
-          }
-          control={
-            <Switch
-              checked={conductorSettings?.jevEnabled ?? true}
-              disabled={!conductorSettings}
-              onCheckedChange={(jevEnabled) => void conductor.updateSettings({ jevEnabled })}
-            />
-          }
-        />
-        <SettingsRow
-          label="Jev source"
-          description="Where Jev runs. Auto uses whichever key is set, preferring OpenRouter when the conductor uses it."
-          control={
-            <Select.Root
-              value={conductorSettings?.jevSource ?? 'auto'}
-              disabled={!conductorSettings}
-              onValueChange={(jevSource) => {
-                if (jevSource) void conductor.updateSettings({ jevSource });
-              }}
-            >
-              <Select.Trigger className="w-[160px]">
-                <Select.Value>
-                  {JEV_SOURCE_LABELS[conductorSettings?.jevSource ?? 'auto']}
-                </Select.Value>
-              </Select.Trigger>
-              <Select.Content align="end">
-                {Object.entries(JEV_SOURCE_LABELS).map(([id, label]) => (
-                  <Select.Item key={id} value={id}>
-                    {label}
-                  </Select.Item>
-                ))}
-              </Select.Content>
-            </Select.Root>
-          }
-        />
-        <SettingsRow
-          label="Jev confidence to act"
-          description="Jev acts on its own only above this confidence; below it, Claude decides. Showing windows needs 0.1 less; sending messages and starting agents needs 0.05 more."
-          control={
-            <CommitInput
-              value={String(conductorSettings?.jevConfidence ?? 0.8)}
-              ariaLabel="Jev confidence to act"
-              className="w-20"
-              onCommit={(value) => {
-                const jevConfidence = Number.parseFloat(value);
-                if (jevConfidence >= 0.5 && jevConfidence <= 0.99) {
-                  void conductor.updateSettings({ jevConfidence });
+              />
+            }
+          />
+          <SettingsRow
+            label="Only tell me when an agent needs me"
+            description="A finished agent the conductor judges to need nothing from you shows on screen only: it is not read out, and it makes no notification sound, desktop notification or phone alert. Agents waiting for you, stuck, or asking a question are still announced with the attention sound. Needs the setting above. You can also say it to the conductor: “don’t notify me unless it needs me”."
+            control={
+              <Switch
+                checked={conductorSettings?.announceCompletions === 'attention_only'}
+                disabled={!conductorSettings || conductorSettings.attentionVerdicts === false}
+                onCheckedChange={(quiet) =>
+                  void conductor.updateSettings({
+                    announceCompletions: quiet ? 'attention_only' : 'all',
+                  })
                 }
-              }}
-            />
-          }
-        />
-        <SettingsRow
-          label="Fast verbatim routing"
-          description="When Jev is confident, it sends your own words to an agent or starts a new agent itself instead of Claude rewriting your request. Off: Claude writes every message and starts every agent."
-          control={
-            <Switch
-              checked={conductorSettings?.jevVerbatimRouting ?? true}
-              disabled={!conductorSettings || conductorSettings.jevEnabled === false}
-              onCheckedChange={(jevVerbatimRouting) =>
-                void conductor.updateSettings({ jevVerbatimRouting })
-              }
-            />
-          }
-        />
-        <SettingsRow
-          label="Start plans without asking"
-          description="Spawn planned agents immediately instead of waiting for your yes."
-          control={
-            <Switch
-              checked={conductorSettings?.autoApprovePlans ?? false}
-              disabled={!conductorSettings}
-              onCheckedChange={(autoApprovePlans) =>
-                void conductor.updateSettings({ autoApprovePlans })
-              }
-            />
-          }
-        />
-        <SettingsRow
-          label="Report what finished agents said"
-          description="When an agent finishes, the conductor reads its final reply to tell you what it did (say, the URL of the app it started) and to do follow-ups you asked for, such as opening that app. With Jev, clear results are read out in the agent's own words and progress notes with nothing new stay on screen; Claude only handles the rest. Off: a short fixed announcement."
-          control={
-            <Switch
-              checked={conductorSettings?.completionFollowUp ?? true}
-              disabled={!conductorSettings}
-              onCheckedChange={(completionFollowUp) =>
-                void conductor.updateSettings({ completionFollowUp })
-              }
-            />
-          }
-        />
-        <SettingsRow
-          label="Let the conductor decide who needs you"
-          description="When an agent ends a turn, the conductor's model reads its final reply and decides whether the agent is waiting for you or is done. An agent that ends on a question it cannot go on without shows as Needs you at once; one that only offers next steps shows as Done and stays that way. Permission prompts are not affected. Off, or when the model cannot be reached: the agent's own events decide."
-          control={
-            <Switch
-              checked={conductorSettings?.attentionVerdicts ?? true}
-              disabled={!conductorSettings}
-              onCheckedChange={(attentionVerdicts) =>
-                void conductor.updateSettings({ attentionVerdicts })
-              }
-            />
-          }
-        />
-        <SettingsRow
-          label="Only tell me when an agent needs me"
-          description="A finished agent the conductor judges to need nothing from you shows on screen only: it is not read out, and it makes no notification sound, desktop notification or phone alert. Agents waiting for you, stuck, or asking a question are still announced with the attention sound. Needs the setting above. You can also say it to the conductor: “don’t notify me unless it needs me”."
-          control={
-            <Switch
-              checked={conductorSettings?.announceCompletions === 'attention_only'}
-              disabled={!conductorSettings || conductorSettings.attentionVerdicts === false}
-              onCheckedChange={(quiet) =>
-                void conductor.updateSettings({
-                  announceCompletions: quiet ? 'attention_only' : 'all',
-                })
-              }
-            />
-          }
-        />
-        <SettingsRow
-          label="Let agents ask the conductor"
-          description="Claude Code and Codex agents on this computer can ask the conductor to start another agent, pass a message to one, ask you a question, or tell you something by voice. The conductor decides requests to start or message an agent, or asks you when it is unsure; you can cancel each one as it starts. Off: every request is refused."
-          control={
-            <Switch
-              checked={conductorSettings?.agentRequests ?? true}
-              disabled={!conductorSettings}
-              onCheckedChange={(agentRequests) => void conductor.updateSettings({ agentRequests })}
-            />
-          }
-        />
-        <SettingsRow
-          label="Calls from agents"
-          description="Agents reach you one at a time. While one is on the line, tap Right Ctrl (or hold it, or press Answer) and what you say goes to that agent without naming it. Confirmations are read aloud, and so are sends when you answered a call or Maestro is not in front. Spoken reads each call out; Shown only displays it. Off: one combined announcement, as before."
-          control={
-            <Select.Root
-              value={conductorSettings?.calls ?? 'off'}
-              disabled={!conductorSettings}
-              onValueChange={(calls) => {
-                if (calls) void conductor.updateSettings({ calls });
-              }}
-            >
-              <Select.Trigger className="w-[160px]">
-                <Select.Value>{CALL_MODE_LABELS[conductorSettings?.calls ?? 'off']}</Select.Value>
-              </Select.Trigger>
-              <Select.Content align="end">
-                {Object.entries(CALL_MODE_LABELS).map(([id, label]) => (
-                  <Select.Item key={id} value={id}>
-                    {label}
-                  </Select.Item>
-                ))}
-              </Select.Content>
-            </Select.Root>
-          }
-        />
-        <SettingsRow
-          label="Seconds a call stays on the line"
-          description="How long you have to pick a call up after it was delivered (2 to 30). After that the next call comes, and the agent still shows as waiting."
-          control={
-            <CommitInput
-              value={String(conductorSettings?.callWindowSec ?? 6)}
-              ariaLabel="Seconds a call stays on the line"
-              className="w-20"
-              onCommit={(value) => {
-                const callWindowSec = Number.parseInt(value, 10);
-                if (callWindowSec >= 2 && callWindowSec <= 30) {
-                  void conductor.updateSettings({ callWindowSec });
+              />
+            }
+          />
+          <SettingsRow
+            label="Let agents ask the conductor"
+            description="Claude Code and Codex agents on this computer can ask the conductor to start another agent, pass a message to one, ask you a question, or tell you something by voice. The conductor decides requests to start or message an agent, or asks you when it is unsure; you can cancel each one as it starts. Off: every request is refused."
+            control={
+              <Switch
+                checked={conductorSettings?.agentRequests ?? true}
+                disabled={!conductorSettings}
+                onCheckedChange={(agentRequests) =>
+                  void conductor.updateSettings({ agentRequests })
                 }
-              }}
-            />
-          }
-        />
-        <SettingsRow
-          label="Daily token budget"
-          description={
-            conductor.status
-              ? `Used today: ${formatTokens(conductor.status.usageToday.inputTokens + conductor.status.usageToday.outputTokens)} (${formatTokens(conductor.status.usageToday.cacheReadTokens)} cached). 0 disables the limit.`
-              : '0 disables the limit.'
-          }
-          control={
-            <CommitInput
-              value={String(conductorSettings?.dailyTokenBudget ?? 0)}
-              ariaLabel="Daily token budget"
-              className="w-32"
-              onCommit={(value) => {
-                const dailyTokenBudget = Number.parseInt(value.replace(/[,_\s]/g, ''), 10);
-                if (dailyTokenBudget >= 0) void conductor.updateSettings({ dailyTokenBudget });
-              }}
-            />
-          }
-        />
-        <SettingsRow
-          label="Conversation memory"
-          description="The conductor remembers the last few exchanges. Clear it to start fresh."
-          control={
-            <Button variant="secondary" size="xs" onClick={() => conductor.clearHistory()}>
-              Clear
-            </Button>
-          }
-        />
-      </SettingsSection>
+              />
+            }
+          />
+          <SettingsRow
+            label="Calls from agents"
+            description="Agents reach you one at a time. While one is on the line, tap Right Ctrl (or hold it, or press Answer) and what you say goes to that agent without naming it. Confirmations are read aloud, and so are sends when you answered a call or Maestro is not in front. Spoken reads each call out; Shown only displays it. Off: one combined announcement, as before."
+            control={
+              <Select.Root
+                value={conductorSettings?.calls ?? 'off'}
+                disabled={!conductorSettings}
+                onValueChange={(calls) => {
+                  if (calls) void conductor.updateSettings({ calls });
+                }}
+              >
+                <Select.Trigger appearance="input" className="w-56">
+                  <Select.Value>{CALL_MODE_LABELS[conductorSettings?.calls ?? 'off']}</Select.Value>
+                </Select.Trigger>
+                <Select.Content align="end">
+                  {Object.entries(CALL_MODE_LABELS).map(([id, label]) => (
+                    <Select.Item key={id} value={id}>
+                      {label}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select.Root>
+            }
+          />
+          <SettingsRow
+            label="Seconds a call stays on the line"
+            description="How long you have to pick a call up after it was delivered (2 to 30). After that the next call comes, and the agent still shows as waiting."
+            control={
+              <CommitInput
+                value={String(conductorSettings?.callWindowSec ?? 6)}
+                ariaLabel="Seconds a call stays on the line"
+                className="w-20"
+                onCommit={(value) => {
+                  const callWindowSec = Number.parseInt(value, 10);
+                  if (callWindowSec >= 2 && callWindowSec <= 30) {
+                    void conductor.updateSettings({ callWindowSec });
+                  }
+                }}
+              />
+            }
+          />
+          <SettingsRow
+            label="Daily token budget"
+            description={
+              conductor.status
+                ? `Used today: ${formatTokens(conductor.status.usageToday.inputTokens + conductor.status.usageToday.outputTokens)} (${formatTokens(conductor.status.usageToday.cacheReadTokens)} cached). 0 disables the limit.`
+                : '0 disables the limit.'
+            }
+            control={
+              <CommitInput
+                value={String(conductorSettings?.dailyTokenBudget ?? 0)}
+                ariaLabel="Daily token budget"
+                className="w-32"
+                onCommit={(value) => {
+                  const dailyTokenBudget = Number.parseInt(value.replace(/[,_\s]/g, ''), 10);
+                  if (dailyTokenBudget >= 0) void conductor.updateSettings({ dailyTokenBudget });
+                }}
+              />
+            }
+          />
+          <SettingsRow
+            label="Conversation memory"
+            description="The conductor remembers the last few exchanges. Clear it to start fresh."
+            control={
+              <Button variant="text" size="xs" onClick={() => conductor.clearHistory()}>
+                Clear
+              </Button>
+            }
+          />
+        </SettingsSection>
 
-      <SettingsSection title="Chat conductors">
-        <SettingsRow
-          label="Give each chat its own conductor"
-          description="Separate from Maestro, the voice conductor above that speaks for all your agents. A chat's conductor reads that one agent for you, tells you in writing what you need to know, and can direct the agent. Opening a chat then shows your thread with it first; the raw chat is one click away. It uses the same provider, key and daily token budget as Maestro. Off: chats open as they always did."
-          control={
-            <Switch
-              checked={conductorSettings?.chatConductors ?? true}
-              disabled={!conductorSettings}
-              onCheckedChange={(chatConductors) =>
-                void conductor.updateSettings({ chatConductors })
-              }
-            />
-          }
-        />
-        <SettingsRow
-          label="Chat conductor effort"
-          description="Reasoning effort for a chat conductor's turns. Higher reads the agent's work more carefully and costs more per turn."
-          control={
-            <EffortSelect
-              value={conductorSettings?.chatConductorEffort}
-              onChange={(chatConductorEffort) =>
-                void conductor.updateSettings({ chatConductorEffort })
-              }
-            />
-          }
-        />
-        <SettingsRow
-          label="New chats start with acting on my behalf"
-          description="On: when the agent finishes or asks something while you are away, its conductor may prompt it, answer it or interrupt it on its own, within what you asked for. Off: it only reports and waits for you. Each chat has its own switch under its thread; this sets where new ones start."
-          control={
-            <Switch
-              checked={conductorSettings?.chatConductorAutonomy ?? true}
-              disabled={!conductorSettings}
-              onCheckedChange={(chatConductorAutonomy) =>
-                void conductor.updateSettings({ chatConductorAutonomy })
-              }
-            />
-          }
-        />
-        <SettingsRow
-          label="Conductors decide when you are told"
-          description="On: when an agent finishes or waits on you, its conductor reads it first and decides whether the chat shows as needing you or done, and whether a sound, desktop notification or phone push goes out. Anything it cannot decide in time falls back to the usual rules. Off: the usual rules decide. Needs chat conductors on."
-          control={
-            <Switch
-              checked={conductorSettings?.conductorDecidesAttention ?? true}
-              disabled={!conductorSettings || !(conductorSettings.chatConductors ?? true)}
-              onCheckedChange={(conductorDecidesAttention) =>
-                void conductor.updateSettings({ conductorDecidesAttention })
-              }
-            />
-          }
-        />
-      </SettingsSection>
+        <SettingsSection title="Chat conductors">
+          <SettingsRow
+            label="Give each chat its own conductor"
+            description="Separate from Maestro, the voice conductor above that speaks for all your agents. A chat's conductor reads that one agent for you, tells you in writing what you need to know, and can direct the agent. Opening a chat then shows your thread with it first; the raw chat is one click away. It uses the same provider, key and daily token budget as Maestro. Off: chats open as they always did."
+            control={
+              <Switch
+                checked={conductorSettings?.chatConductors ?? true}
+                disabled={!conductorSettings}
+                onCheckedChange={(chatConductors) =>
+                  void conductor.updateSettings({ chatConductors })
+                }
+              />
+            }
+          />
+          <SettingsRow
+            label="Chat conductor effort"
+            description="Reasoning effort for a chat conductor's turns. Higher reads the agent's work more carefully and costs more per turn."
+            control={
+              <EffortSelect
+                value={conductorSettings?.chatConductorEffort}
+                onChange={(chatConductorEffort) =>
+                  void conductor.updateSettings({ chatConductorEffort })
+                }
+              />
+            }
+          />
+          <SettingsRow
+            label="New chats start with acting on my behalf"
+            description="On: when the agent finishes or asks something while you are away, its conductor may prompt it, answer it or interrupt it on its own, within what you asked for. Off: it only reports and waits for you. Each chat has its own switch under its thread; this sets where new ones start."
+            control={
+              <Switch
+                checked={conductorSettings?.chatConductorAutonomy ?? true}
+                disabled={!conductorSettings}
+                onCheckedChange={(chatConductorAutonomy) =>
+                  void conductor.updateSettings({ chatConductorAutonomy })
+                }
+              />
+            }
+          />
+          <SettingsRow
+            label="Conductors decide when you are told"
+            description="On: when an agent finishes or waits on you, its conductor reads it first and decides whether the chat shows as needing you or done, and whether a sound, desktop notification or phone push goes out. Anything it cannot decide in time falls back to the usual rules. Off: the usual rules decide. Needs chat conductors on."
+            control={
+              <Switch
+                checked={conductorSettings?.conductorDecidesAttention ?? true}
+                disabled={!conductorSettings || !(conductorSettings.chatConductors ?? true)}
+                onCheckedChange={(conductorDecidesAttention) =>
+                  void conductor.updateSettings({ conductorDecidesAttention })
+                }
+              />
+            }
+          />
+        </SettingsSection>
 
-      <StandingInstructionSettings />
+        <StandingInstructionSettings />
 
-      <TalkLineSettings />
+        <TalkLineSettings />
 
-      {CODE_CHECKS_UI && <CodeCheckSettings />}
+        {CODE_CHECKS_UI && <CodeCheckSettings />}
+      </div>
     </div>
   );
 });
@@ -1093,6 +1113,7 @@ const StandingInstructionSettings = observer(function StandingInstructionSetting
   return (
     <SettingsSection title="Standing instructions">
       <SettingsRow
+        layout="stacked"
         label="How the conductor should act from now on"
         description={`Say it to the conductor ("from now on, keep your prompts short and open-ended") and it saves the instruction here, or type one. They shape how it words prompts and replies and which defaults it picks, in every session; they never change what Maestro asks you to confirm. ${saved.length} of ${STANDING_LIMITS.entries} saved.${message ? ` ${message}` : ''}`}
         control={
@@ -1102,7 +1123,7 @@ const StandingInstructionSettings = observer(function StandingInstructionSetting
             value=""
             ariaLabel="New standing instruction"
             placeholder="Add an instruction…"
-            className="w-72"
+            className="max-w-xl"
             onCommit={(text) => change({ action: 'add', text })}
           />
         }
@@ -1114,7 +1135,7 @@ const StandingInstructionSettings = observer(function StandingInstructionSetting
           description={entry.text}
           control={
             <Button
-              variant="secondary"
+              variant="text"
               size="xs"
               aria-label={`Remove standing instruction ${entry.id}`}
               onClick={() => change({ action: 'remove', id: entry.id })}
@@ -1171,7 +1192,7 @@ const CodeCheckFolders = observer(function CodeCheckFolders() {
         description={`Folders outside the project that code checks may also read, read-only: another repository, a notes folder. A whole drive, the home folder, and hidden or settings folders are refused, and secret files are never read. ${folders.length === 0 ? 'None: code checks read only the project.' : ''}${message ? ` ${message}` : ''}`}
         control={
           <Button
-            variant="secondary"
+            variant="text"
             size="xs"
             disabled={!conductor.settings || adding}
             onClick={() => void add()}
@@ -1186,7 +1207,7 @@ const CodeCheckFolders = observer(function CodeCheckFolders() {
           label={<span className="font-mono text-xs break-all">{folder}</span>}
           control={
             <Button
-              variant="secondary"
+              variant="text"
               size="xs"
               onClick={() =>
                 void conductor.updateSettings({
@@ -1258,7 +1279,7 @@ const CodeCheckSettings = observer(function CodeCheckSettings() {
               if (investigatorModel) void conductor.updateSettings({ investigatorModel });
             }}
           >
-            <Select.Trigger className="w-[180px]">
+            <Select.Trigger appearance="input" className="w-56">
               <Select.Value>
                 {INVESTIGATOR_MODELS[model as keyof typeof INVESTIGATOR_MODELS] ?? model}
               </Select.Value>
@@ -1333,7 +1354,7 @@ const CodeCheckSettings = observer(function CodeCheckSettings() {
         label="Check Claude Code again"
         description="Runs the self-test: that the scout cannot read outside the project and its extra folders, cannot read secret files in either, and runs no project hooks."
         control={
-          <Button variant="secondary" size="xs" disabled={checking} onClick={recheck}>
+          <Button variant="text" size="xs" disabled={checking} onClick={recheck}>
             {checking ? 'Checking…' : 'Check again'}
           </Button>
         }
@@ -1388,7 +1409,7 @@ const TalkLineSettings = observer(function TalkLineSettings() {
             value={agentId}
             ariaLabel="Custom voice agent id"
             placeholder="agent_…"
-            className="w-56 font-mono text-xs"
+            className="w-64 font-mono text-xs"
             allowEmpty
             onCommit={(value) => void talk.updateSettings({ agentId: value })}
           />
@@ -1409,7 +1430,7 @@ const TalkLineSettings = observer(function TalkLineSettings() {
               if (model) void talk.updateSettings({ model });
             }}
           >
-            <Select.Trigger className="w-[220px]">
+            <Select.Trigger appearance="input" className="w-56">
               <Select.Value>{settings?.model ?? ''}</Select.Value>
             </Select.Trigger>
             <Select.Content align="end">
@@ -1437,7 +1458,7 @@ const TalkLineSettings = observer(function TalkLineSettings() {
               if (voice) void talk.updateSettings({ voice });
             }}
           >
-            <Select.Trigger className="w-[140px]">
+            <Select.Trigger appearance="input" className="w-56">
               <Select.Value>{settings?.voice ?? ''}</Select.Value>
             </Select.Trigger>
             <Select.Content align="end">
@@ -1462,7 +1483,7 @@ const TalkLineSettings = observer(function TalkLineSettings() {
             value={customVoice}
             ariaLabel="Custom voice id"
             placeholder="Voice id"
-            className="w-56 font-mono text-xs"
+            className="w-64 font-mono text-xs"
             allowEmpty
             onCommit={(value) =>
               void talk.updateSettings({
@@ -1473,6 +1494,7 @@ const TalkLineSettings = observer(function TalkLineSettings() {
         }
       />
       <SettingsRow
+        layout="stacked"
         label="Voice style"
         description="How the voice should sound, in your own words: tone, pace, manner. It changes how Maestro speaks, never what it does or tells you, and works with a custom voice agent too. The open line follows it from its next answer."
         control={
@@ -1484,7 +1506,7 @@ const TalkLineSettings = observer(function TalkLineSettings() {
             rows={4}
             maxLength={TALK_VOICE_STYLE_MAX_CHARS}
             disabled={!settings}
-            className="w-72 text-xs"
+            className="max-w-xl"
             onBlur={(event) => {
               const next = event.currentTarget.value.trim();
               if (settings && next !== settings.voiceStyle) {
@@ -1520,7 +1542,7 @@ const TalkLineSettings = observer(function TalkLineSettings() {
               if (effort && isTalkEffort(effort)) void talk.updateSettings({ effort });
             }}
           >
-            <Select.Trigger className="w-[140px]">
+            <Select.Trigger appearance="input" className="w-56">
               <Select.Value>{settings ? TALK_EFFORT_LABELS[settings.effort] : ''}</Select.Value>
             </Select.Trigger>
             <Select.Content align="end">
@@ -1650,15 +1672,18 @@ const KeyRow = observer(function KeyRow({
     }
   };
   return (
+    // A key is a long value: the field sits under the label and its description at full width,
+    // so the description never runs under it. Whether a key is set reads in words.
     <SettingsRow
+      layout="stacked"
       label={
         <>
           {label}
           <span
             className={
               present
-                ? 'ml-2 text-xs font-normal text-green-700 dark:text-green-400'
-                : 'ml-2 text-xs font-normal text-foreground-muted'
+                ? 'ml-2 text-xs font-normal text-foreground-muted'
+                : 'ml-2 text-xs font-normal text-foreground-passive'
             }
           >
             {present ? 'Configured' : 'Not set'}
@@ -1667,8 +1692,8 @@ const KeyRow = observer(function KeyRow({
       }
       description={description}
       control={
-        <div className="flex items-center gap-2">
-          <div className="w-56 shrink-0">
+        <div className="flex w-full items-center gap-4">
+          <div className="max-w-md min-w-0 flex-1">
             <Input
               type="password"
               autoComplete="off"
@@ -1684,7 +1709,7 @@ const KeyRow = observer(function KeyRow({
             />
           </div>
           <Button
-            variant="secondary"
+            variant="text"
             size="xs"
             disabled={saving || !draft.trim()}
             onClick={() => void save(draft.trim())}
@@ -1692,7 +1717,7 @@ const KeyRow = observer(function KeyRow({
             Save
           </Button>
           {present && (
-            <Button variant="ghost" size="xs" disabled={saving} onClick={() => void save(null)}>
+            <Button variant="text" size="xs" disabled={saving} onClick={() => void save(null)}>
               Remove
             </Button>
           )}
@@ -1750,7 +1775,7 @@ function EffortSelect({
         if (next) onChange(next);
       }}
     >
-      <Select.Trigger className="w-[140px]">
+      <Select.Trigger appearance="input" className="w-56">
         <Select.Value>{EFFORT_LABELS[value ?? 'low']}</Select.Value>
       </Select.Trigger>
       <Select.Content align="end">
@@ -1784,7 +1809,7 @@ const VoicePicker = observer(function VoicePicker() {
           if (next) void voice.updateSettings({ ttsVoice: next === '__default' ? '' : next });
         }}
       >
-        <Select.Trigger className="w-[230px]">
+        <Select.Trigger appearance="input" className="w-56">
           <Select.Value>{current || 'System default'}</Select.Value>
         </Select.Trigger>
         <Select.Content align="end">
@@ -1796,7 +1821,7 @@ const VoicePicker = observer(function VoicePicker() {
           ))}
         </Select.Content>
       </Select.Root>
-      <Button variant="ghost" size="xs" onClick={() => voice.speech.speak('Maestro is listening.')}>
+      <Button variant="text" size="xs" onClick={() => voice.speech.speak('Maestro is listening.')}>
         Test
       </Button>
     </div>
@@ -1846,7 +1871,7 @@ function WindowsChecks() {
             checks.git ? (
               <Button
                 variant="primary"
-                size="xs"
+                size="sm"
                 disabled={fixing}
                 onClick={() => {
                   setFixing(true);
@@ -1872,7 +1897,7 @@ function WindowsChecks() {
         control={
           worktreeRoot ? null : (
             <Button
-              variant="secondary"
+              variant="text"
               size="xs"
               onClick={() => {
                 void getMachinesClient()
@@ -1896,10 +1921,19 @@ function WindowsChecks() {
       />
       <SettingsRow
         label="Faster worktrees with Defender"
-        description={`Real-time scanning slows worktree creation and installs. To exclude the worktree folder, run this in an administrator PowerShell: ${defenderCommand}. Maestro never changes security settings for you.`}
+        description={
+          <>
+            Real-time scanning slows worktree creation and installs. To exclude the worktree folder,
+            run this in an administrator PowerShell:{' '}
+            <code className="rounded-xs bg-surface-hover px-1 font-mono break-words">
+              {defenderCommand}
+            </code>
+            . Maestro never changes security settings for you.
+          </>
+        }
         control={
           <Button
-            variant="ghost"
+            variant="text"
             size="xs"
             onClick={() => {
               void copyTextToClipboard(defenderCommand).then(() => setCopied(true));

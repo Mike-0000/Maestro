@@ -36,7 +36,7 @@ export function ConductorComposer({
   return (
     <div
       className={cn(
-        'flex items-end gap-1 rounded-lg border border-border bg-(--em-surface-emphasis) pr-1.5 pl-4 transition-[border-color,box-shadow] duration-150',
+        'flex items-end gap-1 rounded-lg border border-border bg-surface-emphasis pr-1.5 pl-4 transition-[border-color,box-shadow] duration-150',
         'focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/25',
         disabled && 'opacity-60'
       )}

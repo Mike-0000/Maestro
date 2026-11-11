@@ -1,5 +1,6 @@
+import { Button } from '@emdash/ui/react/primitives';
 import type { ReactNode } from 'react';
-import { StateGlyph } from './status-strip';
+import { ConductorStateGlyph } from './status-strip';
 import type { ConductorVitals } from './vitals';
 
 export interface VitalsFooterProps {
@@ -23,7 +24,7 @@ export function VitalsFooter({ vitals, onStop, helpers, diffStat }: VitalsFooter
   return (
     <div className="flex h-6 min-w-0 items-center gap-4 text-tiny text-foreground-passive">
       <span className="flex min-w-0 shrink items-center gap-1.5">
-        <StateGlyph glyph={vitals.glyph} className="size-2.5" />
+        <ConductorStateGlyph glyph={vitals.glyph} className="size-2.5" />
         <span
           className={vitals.glyph === 'needs_you' ? 'truncate text-foreground-muted' : 'truncate'}
           title={vitals.left}
@@ -31,13 +32,15 @@ export function VitalsFooter({ vitals, onStop, helpers, diffStat }: VitalsFooter
           {vitals.left}
         </span>
         {onStop && (
-          <button
+          <Button
             type="button"
+            variant="text"
+            size="xs"
             onClick={onStop}
-            className="ml-1 shrink-0 rounded-sm text-foreground-muted underline decoration-foreground-passive/60 underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            className="ml-1 text-tiny underline-offset-2"
           >
             Stop
-          </button>
+          </Button>
         )}
       </span>
       {helpers}

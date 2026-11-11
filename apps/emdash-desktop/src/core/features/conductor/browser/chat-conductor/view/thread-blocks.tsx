@@ -138,7 +138,7 @@ function ActionRow({ entry }: { entry: ActionEntry }) {
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
         className={cn(
-          'group/step -mx-2 flex max-w-[calc(100%+1rem)] items-start gap-2.5 rounded-md px-2 py-0.5 text-left transition-colors hover:bg-(--em-surface-hover)',
+          'group/step -mx-2 flex max-w-[calc(100%+1rem)] items-start gap-2.5 rounded-md px-2 py-0.5 text-left transition-colors hover:bg-surface-hover',
           FOCUS_RING,
           tone
         )}
@@ -156,7 +156,7 @@ function ActionRow({ entry }: { entry: ActionEntry }) {
         </span>
       </button>
       {open && (
-        <pre className="mt-1.5 mb-1 ml-6 max-h-80 overflow-auto rounded-md bg-(--em-surface-emphasis) px-3 py-2 font-mono text-xs leading-relaxed break-words whitespace-pre-wrap text-foreground select-text">
+        <pre className="mt-1.5 mb-1 ml-6 max-h-80 overflow-auto rounded-md bg-surface-emphasis px-3 py-2 font-mono text-xs leading-relaxed break-words whitespace-pre-wrap text-foreground select-text">
           {entry.detail}
         </pre>
       )}
