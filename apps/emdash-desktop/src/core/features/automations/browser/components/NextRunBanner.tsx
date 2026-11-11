@@ -1,5 +1,4 @@
 import { AbsoluteTime } from '@emdash/ui/react/primitives';
-import { Clock } from 'lucide-react';
 import { useScheduledAutomationRun } from '../use-automations';
 
 interface NextRunBannerProps {
@@ -8,6 +7,7 @@ interface NextRunBannerProps {
   runtimeAvailable?: boolean;
 }
 
+/** When the automation runs next, as one fact in the caption role. Nothing when none is due. */
 export function NextRunBanner({ automationId, projectId, runtimeAvailable }: NextRunBannerProps) {
   const { data } = useScheduledAutomationRun(projectId!, automationId, runtimeAvailable);
   const scheduledAt = data?.scheduledAt ?? null;
@@ -15,9 +15,8 @@ export function NextRunBanner({ automationId, projectId, runtimeAvailable }: Nex
   if (!scheduledAt) return null;
 
   return (
-    <div className="flex items-center gap-1.5 rounded-lg border border-border-info bg-background-info p-2 text-foreground-info">
-      <Clock className="size-3 shrink-0" aria-hidden />
-      Next run scheduled <AbsoluteTime value={scheduledAt} />
-    </div>
+    <span className="text-foreground-muted">
+      Next run <AbsoluteTime value={scheduledAt} className="tabular-nums" />
+    </span>
   );
 }

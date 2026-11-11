@@ -1,6 +1,5 @@
-import { DropdownMenu } from '@emdash/ui/react/primitives';
+import { Button, DropdownMenu } from '@emdash/ui/react/primitives';
 import { ChevronDown } from 'lucide-react';
-import { cn } from '@core/primitives/styling/browser/cn';
 import type { BuiltinAutomationTemplate } from '../../automation-template';
 import { emptyStateAutomationTemplates } from '../../builtin-catalog';
 
@@ -10,37 +9,38 @@ interface UseTemplateButtonProps {
   onSelect: (template: BuiltinAutomationTemplate) => void;
 }
 
+/**
+ * "Start from a template": a quiet text action that opens the templates as a menu (name and
+ * one line of what it does). Choosing one fills the form; nothing is created until Create.
+ */
 export function UseTemplateButton({ open, onOpenChange, onSelect }: UseTemplateButtonProps) {
   return (
     <DropdownMenu.Root open={open} onOpenChange={onOpenChange}>
-      <DropdownMenu.Trigger
-        render={
-          <button
-            className={cn(
-              'inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2.5',
-              'text-xs font-medium text-foreground transition-colors hover:bg-muted/40 outline-none',
-              'data-popup-open:bg-muted/40'
-            )}
-          />
-        }
-      >
-        <span>Use template</span>
-        <ChevronDown className="size-3 shrink-0 text-foreground-passive" />
+      <DropdownMenu.Trigger render={<Button variant="text" size="sm" />}>
+        Start from a template
+        <ChevronDown className="size-3.5 shrink-0" aria-hidden />
       </DropdownMenu.Trigger>
-      <DropdownMenu.Content align="end" className="w-80">
+      <DropdownMenu.Content align="end" width="content">
         <DropdownMenu.Group>
-          <DropdownMenu.Label className="px-2 py-1 text-[11px] tracking-wider uppercase">
-            Templates
-          </DropdownMenu.Label>
-          {emptyStateAutomationTemplates.map((template) => (
-            <DropdownMenu.Item
-              key={template.id}
-              onClick={() => onSelect(template)}
-              className="flex-col items-start gap-0.5 py-1.5"
-            >
-              <span className="text-sm font-medium text-foreground">{template.name}</span>
-            </DropdownMenu.Item>
-          ))}
+          <DropdownMenu.Label>Templates</DropdownMenu.Label>
+          {emptyStateAutomationTemplates.map((template) => {
+            const Icon = template.icon;
+            return (
+              <DropdownMenu.Item
+                key={template.id}
+                onClick={() => onSelect(template)}
+                className="h-auto items-start py-1.5"
+              >
+                <Icon className="mt-0.5" aria-hidden />
+                <span className="flex w-64 min-w-0 flex-col">
+                  <span className="truncate text-foreground">{template.name}</span>
+                  <span className="line-clamp-2 text-xs text-foreground-passive">
+                    {template.description}
+                  </span>
+                </span>
+              </DropdownMenu.Item>
+            );
+          })}
         </DropdownMenu.Group>
       </DropdownMenu.Content>
     </DropdownMenu.Root>

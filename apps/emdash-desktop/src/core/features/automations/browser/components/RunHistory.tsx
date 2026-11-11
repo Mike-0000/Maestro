@@ -1,8 +1,7 @@
 import { EmptyState } from '@emdash/ui/react/components';
-import { Button, Spinner } from '@emdash/ui/react/primitives';
+import { Button, ToggleGroup } from '@emdash/ui/react/primitives';
 import { useState } from 'react';
 import type { Automation } from '@core/primitives/automations/api';
-import { cn } from '@core/primitives/styling/browser/cn';
 import type { RunHistoryFilter } from '../automation-run-store';
 import {
   useAutomationRunCounts,
@@ -25,6 +24,10 @@ interface RunHistoryProps {
   automation: Automation;
 }
 
+/**
+ * The automation's runs: a quiet status filter with counts (the project task list's
+ * Active / Archived control), then the runs as two-line rows on the sheet, newest first.
+ */
 export function RunHistory({ automation }: RunHistoryProps) {
   const [filter, setFilter] = useState<RunHistoryFilter>('all');
   const availability = useAutomationTargetAvailability(automation.projectId);
@@ -43,40 +46,32 @@ export function RunHistory({ automation }: RunHistoryProps) {
   ).data;
 
   return (
-    <section className="flex h-full flex-col rounded-lg border">
-      <div className="flex w-full gap-1.5 border-b p-2">
+    <section className="flex flex-col gap-3" aria-label="Runs">
+      <ToggleGroup.Root
+        multiple={false}
+        value={[filter]}
+        aria-label="Show runs"
+        className="self-start"
+        onValueChange={([value]) => {
+          if (value) setFilter(value as RunHistoryFilter);
+        }}
+      >
         {FILTERS.map(({ value, label }) => (
-          <button
-            key={value}
-            type="button"
-            onClick={() => setFilter(value)}
-            className={cn(
-              'flex items-center gap-1 w-full justify-center rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
-              filter === value
-                ? 'bg-background-2 text-foreground'
-                : 'text-foreground-muted hover:bg-background-1 hover:text-foreground'
-            )}
-          >
+          <ToggleGroup.Item key={value} value={value} aria-label={`${label} (${counts[value]})`}>
             {label}
-            <span
-              className={cn(
-                'tabular-nums',
-                filter === value ? 'text-foreground-muted' : 'text-foreground-passive'
-              )}
-            >
-              {counts[value]}
-            </span>
-          </button>
+            <span className="text-foreground-passive tabular-nums">{counts[value]}</span>
+          </ToggleGroup.Item>
         ))}
-      </div>
-      <div className="min-h-0 flex-1 divide-y divide-border/70 overflow-y-auto">
+      </ToggleGroup.Root>
+      <div className="flex min-h-40 flex-col gap-0.5">
         {!runtimeAvailable ? (
           <EmptyState
-            label="Connect to the remote automation runtime to load its runs."
-            className="h-full"
+            bare
+            label="Runs aren't available"
+            description="Connect to the remote automation runtime to load its runs."
           />
         ) : runs.isPending ? (
-          <Spinner />
+          <EmptyState bare tone="loading" label="Loading runs…" />
         ) : runs.data.length > 0 ? (
           <>
             {runs.data.map((run) => (
@@ -89,9 +84,9 @@ export function RunHistory({ automation }: RunHistoryProps) {
               />
             ))}
             {runs.hasMore && (
-              <div className="flex justify-center p-2">
+              <div className="flex justify-center pt-2">
                 <Button
-                  variant="ghost"
+                  variant="text"
                   size="sm"
                   disabled={runs.isLoadingMore}
                   onClick={() => void runs.loadMore()}
@@ -102,7 +97,15 @@ export function RunHistory({ automation }: RunHistoryProps) {
             )}
           </>
         ) : (
-          <EmptyState label="No runs yet." className="h-full bg-transparent" />
+          <EmptyState
+            bare
+            label={filter === 'all' ? 'No runs yet' : 'No runs here'}
+            description={
+              filter === 'all'
+                ? 'Each run shows up here, with the task it started.'
+                : 'No runs have this status.'
+            }
+          />
         )}
       </div>
     </section>

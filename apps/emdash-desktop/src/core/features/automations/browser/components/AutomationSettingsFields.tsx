@@ -56,7 +56,7 @@ export function AutomationSettingsFields({
         <Field.Root>
           <div className="flex items-center justify-between gap-3">
             <Label>{onDemand ? 'Trigger' : 'Schedule'}</Label>
-            <label className="flex items-center gap-2 text-xs text-foreground-muted">
+            <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground-muted">
               On demand
               <Switch
                 checked={onDemand}
@@ -73,7 +73,9 @@ export function AutomationSettingsFields({
                 <>
                   {' '}
                   Automation id for the trigger gateway:{' '}
-                  <code className="select-all">{automationId}</code>
+                  <code className="rounded-xs bg-surface-emphasis px-1 font-mono text-foreground select-all">
+                    {automationId}
+                  </code>
                 </>
               )}
             </p>
@@ -115,7 +117,7 @@ export function AutomationSettingsFields({
                 },
                 {
                   value: 'workspace',
-                  label: 'Workspace Settings',
+                  label: 'Workspace settings',
                   content: <WorkspaceSettingsSection defaultOpen={true} />,
                 },
               ]}
@@ -124,7 +126,7 @@ export function AutomationSettingsFields({
         </TaskStateProvider>
       </Field.Group>
 
-      {error && <p className="text-destructive text-xs">{error}</p>}
+      {error && <p className="mt-4 text-xs text-foreground-error">{error}</p>}
     </fieldset>
   );
 }

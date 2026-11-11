@@ -273,6 +273,49 @@ export function usagePlanLabel(
   return formatClaudePlan(usage?.snapshot?.subscriptionType ?? account.plan);
 }
 
+/** One window as the sidebar shows it: `5h 12%`, `wk 54%`. */
+export type CompactUsageFigure = {
+  key: UsageMeter['key'];
+  /** `5h` or `wk`. */
+  short: string;
+  /** `5-hour` or `weekly`, for screen readers. */
+  label: string;
+  percentLabel: string;
+  severity: UsageSeverity;
+};
+
+/**
+ * Both windows for the always-visible indicator, the 5-hour one first (the one that runs out
+ * within a working session), then the week. Empty when nothing is known.
+ */
+export function compactUsage(usage: ClaudeAccountUsage | undefined): CompactUsageFigure[] {
+  const snapshot = usage?.snapshot;
+  if (!snapshot) return [];
+  const figures: CompactUsageFigure[] = [];
+  if (snapshot.fiveHour) {
+    figures.push({
+      key: 'five-hour',
+      short: '5h',
+      label: '5-hour',
+      percentLabel: formatUsagePercent(snapshot.fiveHour.usedPercent),
+      severity: usageSeverity(snapshot.fiveHour.usedPercent),
+    });
+  }
+  if (snapshot.sevenDay) {
+    figures.push({
+      key: 'weekly',
+      short: 'wk',
+      label: 'weekly',
+      percentLabel: formatUsagePercent(snapshot.sevenDay.usedPercent),
+      severity: usageSeverity(
+        snapshot.sevenDay.usedPercent,
+        reportedSeverity(snapshot, 'weekly_all')
+      ),
+    });
+  }
+  return figures;
+}
+
 /** The single figure a compact indicator shows: the weekly window, else the 5-hour one. */
 export function headlineUsage(
   usage: ClaudeAccountUsage | undefined

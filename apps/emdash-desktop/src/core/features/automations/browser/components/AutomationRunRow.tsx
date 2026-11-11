@@ -19,6 +19,15 @@ import { RunMetaLine } from './RunMetaLine';
 import { TaskDataLine } from './TaskDataLine';
 import { TaskPlaceholder } from './TaskPlaceholder';
 
+/** Statuses in which a run may still create its task. */
+const PENDING_STATUSES = new Set<AutomationRun['status']>([
+  'scheduled',
+  'queued',
+  'provisioning_workspace',
+  'starting_session',
+  'done',
+]);
+
 interface AutomationRunRowProps {
   runId: string;
   automationId: string;
@@ -70,8 +79,10 @@ export const AutomationRunRow = observer(function AutomationRunRow({
   return (
     <div
       className={cn(
-        'group relative flex cursor-pointer flex-col px-2 py-2 transition-colors',
-        interactive ? 'hover:bg-background-2' : 'cursor-default opacity-70'
+        // A two-line row on the sheet: separated by rhythm and the hover step, no rules.
+        '-mx-2 flex flex-col gap-0.5 rounded-md px-2 py-1.5 transition-colors outline-none',
+        'focus-visible:ring-1 focus-visible:ring-ring',
+        interactive ? 'cursor-pointer hover:bg-surface-hover' : 'cursor-default'
       )}
       role="button"
       tabIndex={interactive ? 0 : -1}
@@ -97,7 +108,11 @@ export const AutomationRunRow = observer(function AutomationRunRow({
       {taskStore ? (
         <TaskDataLine task={taskStore} agentStatus={agentStatus} missedDeadline={missedDeadline} />
       ) : (
-        <TaskPlaceholder name={displayName} />
+        <TaskPlaceholder
+          name={displayName}
+          pending={PENDING_STATUSES.has(run.status)}
+          fallback={run.triggerKind === 'manual' ? 'Manual run' : 'Scheduled run'}
+        />
       )}
       <RunMetaLine
         displayTime={displayTime}
@@ -106,18 +121,19 @@ export const AutomationRunRow = observer(function AutomationRunRow({
         error={run.error}
       />
       {run.delivery && (
-        <div className="flex min-w-0 items-center gap-2 text-tiny text-foreground-muted">
-          <span>{formatRunDeliveryLabel(run.delivery)}</span>
+        <div className="flex min-w-0 items-center gap-x-3 text-tiny text-foreground-muted">
+          <span className="min-w-0 truncate">{formatRunDeliveryLabel(run.delivery)}</span>
           {run.delivery.pullRequestUrl && (
             <button
               type="button"
-              className="truncate underline"
+              title={run.delivery.pullRequestUrl}
+              className="shrink-0 rounded-xs text-link underline decoration-current/40 underline-offset-2 outline-none hover:decoration-current focus-visible:ring-2 focus-visible:ring-ring"
               onClick={(event) => {
                 event.stopPropagation();
                 if (run.delivery?.pullRequestUrl) void openExternal(run.delivery.pullRequestUrl);
               }}
             >
-              {run.delivery.pullRequestUrl}
+              Open pull request
             </button>
           )}
         </div>

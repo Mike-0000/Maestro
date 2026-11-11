@@ -1,40 +1,34 @@
-import { Alert } from '@emdash/ui/react/primitives';
+const LINK =
+  'rounded-xs text-link underline decoration-current/40 underline-offset-2 outline-none hover:decoration-current focus-visible:ring-2 focus-visible:ring-ring';
 
+/** Where the catalog's skills come from, as a quiet caption note (no box, links in the link role). */
 export function SkillsInfoBox() {
   return (
-    <Alert.Root status="info" icon={null}>
-      <Alert.Description>
-        Skills from the{' '}
-        <a
-          href="https://github.com/openai/skills"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="decoration-muted-foreground/40 font-medium text-foreground underline underline-offset-2 hover:decoration-foreground"
-        >
-          OpenAI
-        </a>{' '}
-        and{' '}
-        <a
-          href="https://github.com/anthropics/skills"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="decoration-muted-foreground/40 font-medium text-foreground underline underline-offset-2 hover:decoration-foreground"
-        >
-          Anthropic
-        </a>{' '}
-        catalogs. Install a skill to make it available across all your coding agents. Skills follow
-        the open{' '}
-        <a
-          href="https://agentskills.io"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="decoration-muted-foreground/40 font-medium text-foreground underline underline-offset-2 hover:decoration-foreground"
-        >
-          Agent Skills
-        </a>{' '}
-        standard. If you want to use skills from another library, feel free to let us know through
-        the feedback modal.
-      </Alert.Description>
-    </Alert.Root>
+    <p className="max-w-2xl text-xs leading-relaxed text-foreground-muted">
+      Skills from the{' '}
+      <a
+        href="https://github.com/openai/skills"
+        target="_blank"
+        rel="noopener noreferrer"
+        className={LINK}
+      >
+        OpenAI
+      </a>{' '}
+      and{' '}
+      <a
+        href="https://github.com/anthropics/skills"
+        target="_blank"
+        rel="noopener noreferrer"
+        className={LINK}
+      >
+        Anthropic
+      </a>{' '}
+      catalogs. Install a skill to make it available across all your coding agents. Skills follow
+      the open{' '}
+      <a href="https://agentskills.io" target="_blank" rel="noopener noreferrer" className={LINK}>
+        Agent Skills
+      </a>{' '}
+      standard. To use skills from another library, tell us through Give feedback.
+    </p>
   );
 }

@@ -1,11 +1,12 @@
-import { SeparatedList, Spinner } from '@emdash/ui/react/primitives';
+import { Spinner } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
 import { getClaudeAccountsStore } from '../contributions/browser/app-stores';
 import { ClaudeUsageRow, useClaudeUsageWatch } from './claude-usage-rows';
 
 /**
- * Usage for every Claude account, one row each, for the popover and the dialog. Keeps usage
- * polled while it is mounted. The settings page lays the same rows out in its own card.
+ * Usage for every Claude account, one block each separated by space, for the popover and the
+ * dialog. Keeps usage polled while it is mounted. The settings page lays the same rows out in
+ * its own card.
  */
 export const ClaudeUsagePanel = observer(function ClaudeUsagePanel({
   now,
@@ -20,14 +21,18 @@ export const ClaudeUsagePanel = observer(function ClaudeUsagePanel({
 
   if (!store.state) {
     return (
-      <div className="flex justify-center py-6">
-        <Spinner />
+      <div
+        role="status"
+        className="flex items-center justify-center gap-2 py-6 text-xs text-foreground-muted"
+      >
+        <Spinner size="sm" />
+        Loading accounts…
       </div>
     );
   }
 
   return (
-    <SeparatedList gap="0.75rem">
+    <div className="flex flex-col gap-5">
       {store.accounts.map((account) => (
         <ClaudeUsageRow
           key={account.id}
@@ -36,6 +41,6 @@ export const ClaudeUsagePanel = observer(function ClaudeUsagePanel({
           onBeforeSignIn={onBeforeSignIn}
         />
       ))}
-    </SeparatedList>
+    </div>
   );
 });

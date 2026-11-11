@@ -1,30 +1,18 @@
-import {
-  Button,
-  Collapsible,
-  Field,
-  Input,
-  Label,
-  Sheet,
-  useToast,
-} from '@emdash/ui/react/primitives';
-import { CheckCircle2 } from 'lucide-react';
+import { Button, Field, Input, Label, Sheet, useToast } from '@emdash/ui/react/primitives';
+import { TriangleAlert } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useState } from 'react';
 import type { Automation } from '@core/primitives/automations/api';
 import type { ConversationConfig } from '@core/primitives/automations/api';
 import { assertValidCronTrigger } from '@core/primitives/automations/api';
 import { ConfirmButton } from '@core/primitives/keybindings/browser/confirm-button';
-import { useLocalStorage } from '@core/primitives/react-hooks/browser/useLocalStorage';
 import { formatAutomationError } from '../automation-run-format';
 import type { BuiltinAutomationTemplate } from '../automation-template';
-import { emptyStateAutomationTemplates } from '../builtin-catalog';
 import { useAutomationTargetAvailability, useCreateAutomation } from '../use-automations';
 import { useAutomationFormState } from '../useAutomationFormState';
 import { AutomationSettingsFields } from './AutomationSettingsFields';
-import { AutomationTemplateRail } from './AutomationTemplateRail';
+import { UseTemplateButton } from './pickers/UseTemplateButton';
 import { SheetHeader } from './sheet-header';
-
-const TEMPLATE_SECTION_COLLAPSED_KEY = 'emdash-automation-template-section-collapsed';
 
 export interface CreateAutomationViewProps {
   onClose: () => void;
@@ -32,6 +20,11 @@ export interface CreateAutomationViewProps {
   initialTemplate?: BuiltinAutomationTemplate;
 }
 
+/**
+ * The create sheet: title and one sentence, then the form (name, project, schedule, prompt and
+ * workspace), with "Start from a template" beside the name as a quiet way to fill it in. Cancel
+ * and the one primary, Create, sit in the footer.
+ */
 export const CreateAutomationView = observer(function CreateAutomationView({
   onClose,
   onSaved,
@@ -52,10 +45,7 @@ export const CreateAutomationView = observer(function CreateAutomationView({
 
   const [error, setError] = useState<string | null>(null);
   const [cronError, setCronError] = useState<string | null>(null);
-  const [templatesCollapsed, setTemplatesCollapsed] = useLocalStorage(
-    TEMPLATE_SECTION_COLLAPSED_KEY,
-    false
-  );
+  const [templatesOpen, setTemplatesOpen] = useState(false);
 
   const create = useCreateAutomation();
   const availability = useAutomationTargetAvailability(effectiveProjectId);
@@ -95,7 +85,6 @@ export const CreateAutomationView = observer(function CreateAutomationView({
       });
       toast('Automation created', {
         description: `"${saved.name}" is ready to go.`,
-        icon: <CheckCircle2 className="size-4 text-emerald-500" aria-hidden="true" />,
       });
       onSaved?.(saved);
     } catch (saveError) {
@@ -110,19 +99,29 @@ export const CreateAutomationView = observer(function CreateAutomationView({
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <SheetHeader title="Create automation" onClose={onClose} />
-      <div className="flex-1 overflow-y-auto">
-        <div className="flex flex-col gap-4 px-4">
+    <div className="flex h-full min-h-0 flex-col">
+      <SheetHeader
+        onClose={onClose}
+        title={<Sheet.Title>New automation</Sheet.Title>}
+        description="Runs an agent on a schedule in one of your projects."
+      />
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-5 pb-6">
+        <div className="flex flex-col gap-5">
           <Field.Root>
-            <Label>Name</Label>
+            <div className="flex items-center justify-between gap-3">
+              <Label htmlFor="automation-name">Name</Label>
+              <UseTemplateButton
+                open={templatesOpen}
+                onOpenChange={setTemplatesOpen}
+                onSelect={handleTemplateSelect}
+              />
+            </div>
             <Input
-              bare
+              id="automation-name"
               autoFocus={name.trim().length === 0}
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Daily Pull Request Review"
-              className="h-9 px-0 text-lg!"
+              placeholder="Daily pull request review"
             />
           </Field.Root>
           <AutomationSettingsFields
@@ -134,42 +133,25 @@ export const CreateAutomationView = observer(function CreateAutomationView({
             error={error}
           />
           {availability.data?.available === false && effectiveProjectId && (
-            <p className="rounded-md bg-background-warning px-3 py-2 text-xs text-foreground-warning">
+            <p className="flex items-start gap-2 text-xs text-foreground-warning">
+              <TriangleAlert className="mt-px size-3.5 shrink-0" aria-hidden />
               {availability.data.reason}
             </p>
           )}
         </div>
       </div>
-      <Collapsible.Root
-        open={!templatesCollapsed}
-        onOpenChange={(open) => setTemplatesCollapsed(!open)}
-        className="border-t border-border bg-background"
-      >
-        {/* The whole row is the trigger; the primitive owns the trailing chevron. */}
-        <Collapsible.Trigger className="h-auto rounded-none px-4 py-3">
-          Use a template
-        </Collapsible.Trigger>
-        <Collapsible.Panel className="h-(--collapsible-panel-height) overflow-hidden transition-[height] duration-200 ease-out">
-          <AutomationTemplateRail
-            templates={emptyStateAutomationTemplates}
-            onSelect={handleTemplateSelect}
-            compact
-          />
-        </Collapsible.Panel>
-      </Collapsible.Root>
-      <Sheet.Footer className="flex flex-row items-center justify-end gap-2">
-        <Button variant="secondary" size="sm" onClick={onClose}>
+      <Sheet.Footer>
+        <Button variant="ghost" onClick={onClose}>
           Cancel
         </Button>
         <ConfirmButton
           variant="primary"
-          size="sm"
           onClick={() => {
             void handleSave();
           }}
           disabled={!canCreate || isPending}
         >
-          {isPending ? 'Saving…' : 'Create'}
+          {isPending ? 'Creating…' : 'Create'}
         </ConfirmButton>
       </Sheet.Footer>
     </div>

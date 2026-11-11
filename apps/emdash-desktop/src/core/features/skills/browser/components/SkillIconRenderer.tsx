@@ -1,11 +1,12 @@
 import type { CatalogSkill } from '@emdash/core/primitives/skills/api';
 import React, { useState } from 'react';
-import { useTheme } from '@core/primitives/theme/browser';
+import { cn } from '@core/primitives/styling/browser/cn';
 import { resolveSkillIcon } from './skillIcons';
 
-function processSvg(raw: string, fillColor: string): string {
+/** Library marks are drawn in the current text colour, so they follow the theme. */
+function processSvg(raw: string): string {
   let svg = raw.replace(/\bwidth="[^"]*"/g, '').replace(/\bheight="[^"]*"/g, '');
-  svg = svg.replace('<svg ', `<svg fill="${fillColor}" `);
+  svg = svg.replace('<svg ', '<svg fill="currentColor" ');
   return svg.replace('<svg ', '<svg class="h-full w-full" ');
 }
 
@@ -13,27 +14,27 @@ interface SkillIconRendererProps {
   skill: CatalogSkill;
 }
 
+/**
+ * The skill's mark on a small tile one step up from its row: a library glyph in the muted text
+ * colour, a Skills.sh image as published, or the first letter.
+ */
 export const SkillIconRenderer: React.FC<SkillIconRendererProps> = ({ skill }) => {
   const [imgError, setImgError] = useState(false);
-  const { effectiveTheme } = useTheme();
-  const isDark = effectiveTheme === 'emdark';
 
   const letter = skill.displayName.charAt(0).toUpperCase();
 
   const renderImageIcon = () => {
     if (!skill.iconUrl || imgError) return null;
-    const filter =
-      skill.source === 'skillssh'
-        ? undefined
-        : isDark
-          ? 'brightness(0) invert(1)'
-          : 'brightness(0)';
+    // Catalog logos are single-colour artwork: flatten them to the text colour of the theme.
+    const monochrome = skill.source !== 'skillssh';
     return (
       <img
         src={skill.iconUrl}
         alt=""
-        className="h-full w-full rounded-lg object-contain"
-        style={{ filter }}
+        className={cn(
+          'h-full w-full rounded-xs object-contain',
+          monochrome && 'brightness-0 emdark:invert'
+        )}
         onError={() => setImgError(true)}
         loading="lazy"
       />
@@ -48,15 +49,14 @@ export const SkillIconRenderer: React.FC<SkillIconRendererProps> = ({ skill }) =
 
     const svg = resolveSkillIcon(skill.catalogSkillId ?? skill.id, skill.source);
     if (svg) {
-      const html = processSvg(svg, isDark ? '#ffffff' : '#000000');
-      return <div dangerouslySetInnerHTML={{ __html: html }} />;
+      return <div className="size-full" dangerouslySetInnerHTML={{ __html: processSvg(svg) }} />;
     }
 
     return renderImageIcon() ?? letter;
   };
 
   return (
-    <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-background-2 p-2 font-semibold text-foreground/60 transition-colors group-hover:bg-background-3">
+    <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-surface-hover p-1.5 text-sm font-medium text-foreground-muted transition-colors group-hover:bg-surface-selected">
       {renderIcon()}
     </div>
   );

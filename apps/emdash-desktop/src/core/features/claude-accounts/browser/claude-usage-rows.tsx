@@ -1,7 +1,7 @@
-import { Badge, Button, Spinner, Tooltip, toast } from '@emdash/ui/react/primitives';
+import { Button, Spinner, Tooltip, toast } from '@emdash/ui/react/primitives';
 import { RefreshCw } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { cn } from '@core/primitives/styling/browser/cn';
 import type { ClaudeAccount } from '../api/types';
 import { getClaudeAccountsStore } from '../contributions/browser/app-stores';
@@ -14,44 +14,34 @@ import {
   type UsageMeter,
   type UsageSeverity,
 } from './usage-model';
+import { USAGE_TEXT_CLASS } from './usage-tone';
 import { useClaudeAccountSignIn } from './use-claude-account-sign-in';
 
-// The app's severity ramp: neutral until usage is high, then warning, then error.
+// Quiet until usage is high: the bar and figure stay neutral, then take the warning colour near
+// the limit and the error colour at it (text and fill only, never a tinted panel).
 const FILL_CLASS: Record<UsageSeverity, string> = {
   calm: 'bg-foreground-muted',
   warning: 'bg-foreground-warning',
   critical: 'bg-foreground-error',
 };
 
-const PERCENT_CLASS: Record<UsageSeverity, string> = {
-  calm: 'text-foreground',
-  warning: 'text-foreground-warning',
-  critical: 'text-foreground-error',
-};
+/** The 5-hour window first (it runs out within a working session), then the week. */
+const METER_ORDER: Record<UsageMeter['key'], number> = { 'five-hour': 0, weekly: 1 };
 
 /** Keeps usage polled for as long as the calling component is mounted. */
 export function useClaudeUsageWatch(): void {
   useEffect(() => getClaudeAccountsStore().watchUsage(), []);
 }
 
-function UsageMeterBar({ meter, accountLabel }: { meter: UsageMeter; accountLabel: string }) {
+/**
+ * One window on one line of the meters grid: its name, the bar, the figure, and when it resets
+ * (the exact moment in a tooltip). The grid's columns line the bars and figures up.
+ */
+function UsageMeterLine({ meter, accountLabel }: { meter: UsageMeter; accountLabel: string }) {
   const resetMoment = formatResetMoment(meter.resetsAt);
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-baseline justify-between gap-3 text-xs">
-        <span className="shrink-0 text-foreground-muted">{meter.label}</span>
-        <span className="min-w-0 truncate text-foreground-muted">
-          <span className={cn('font-medium tabular-nums', PERCENT_CLASS[meter.severity])}>
-            {meter.percentLabel}
-          </span>
-          {meter.resets ? (
-            <span title={resetMoment ? `Resets ${resetMoment}` : undefined}>
-              {' · '}
-              {meter.resets}
-            </span>
-          ) : null}
-        </span>
-      </div>
+    <Fragment>
+      <span className="text-xs text-foreground-muted">{meter.label}</span>
       <div
         role="progressbar"
         aria-label={`${accountLabel}: ${meter.label} usage`}
@@ -70,14 +60,29 @@ function UsageMeterBar({ meter, accountLabel }: { meter: UsageMeter; accountLabe
           style={{ width: `${meter.percent}%` }}
         />
       </div>
-    </div>
+      <span
+        className={cn(
+          'text-right text-xs font-medium tabular-nums',
+          USAGE_TEXT_CLASS[meter.severity]
+        )}
+      >
+        {meter.percentLabel}
+      </span>
+      <span
+        className="truncate text-xs text-foreground-passive tabular-nums"
+        title={resetMoment ? `Resets ${resetMoment}` : undefined}
+      >
+        {meter.resets ?? ''}
+      </span>
+    </Fragment>
   );
 }
 
 /**
- * One account's usage: name, default marker and plan on the first line, then the weekly and
- * 5-hour meters, the per-model weekly figures in small type, and a note when the numbers are
- * old or missing. The action on the right makes it the account new agents use.
+ * One account's usage: its name, plan and whether new agents use it on the first line, then the
+ * 5-hour and weekly meters as bars with their figures and reset times, the per-model weekly
+ * figures in the caption role, and a note when the numbers are old or missing. The text action
+ * on the right signs it in or makes it the account new agents use.
  */
 export const ClaudeUsageRow = observer(function ClaudeUsageRow({
   account,
@@ -124,33 +129,33 @@ export const ClaudeUsageRow = observer(function ClaudeUsageRow({
     (view.kind === 'unavailable' && view.action === 'sign-in') ||
     (view.kind === 'meters' && view.stale?.action === 'sign-in');
 
+  const facts = [plan, isDefault && store.hasMultipleAccounts ? 'Used by new agents' : null].filter(
+    (fact): fact is string => Boolean(fact)
+  );
+
   return (
     <div className="flex min-w-0 flex-col gap-2.5">
-      <div className="flex min-h-6 items-center gap-2">
+      <div className="flex min-h-6 items-baseline gap-2">
         <span
           className="min-w-0 truncate text-sm font-medium text-foreground"
           title={account.email}
         >
           {account.label}
         </span>
-        {isDefault && store.hasMultipleAccounts ? (
-          <Tooltip.Root>
-            <Tooltip.Trigger className="inline-flex shrink-0 items-center leading-none">
-              <Badge>Default</Badge>
-            </Tooltip.Trigger>
-            <Tooltip.Content side="top">New agents use this account.</Tooltip.Content>
-          </Tooltip.Root>
+        {facts.length > 0 ? (
+          <span className="min-w-0 truncate text-xs text-foreground-muted">
+            {facts.join(' · ')}
+          </span>
         ) : null}
-        {plan ? <span className="shrink-0 text-xs text-foreground-muted">{plan}</span> : null}
         <span className="flex-1" />
         {view.kind === 'loading' ? null : wantsSignIn || !signedIn ? (
-          <Button type="button" variant="secondary" size="xs" onClick={startSignIn}>
+          <Button type="button" variant="text" size="xs" onClick={startSignIn}>
             {signedIn ? 'Sign in again' : 'Sign in'}
           </Button>
         ) : !isDefault ? (
           <Button
             type="button"
-            variant="secondary"
+            variant="text"
             size="xs"
             disabled={switching}
             onClick={() => void makeDefault()}
@@ -169,13 +174,20 @@ export const ClaudeUsageRow = observer(function ClaudeUsageRow({
         <p className="text-xs text-foreground-muted">{view.message}</p>
       ) : (
         <>
-          <div className={cn('flex flex-col gap-2.5', view.stale && 'opacity-70')}>
-            {view.meters.map((meter) => (
-              <UsageMeterBar key={meter.key} meter={meter} accountLabel={account.label} />
-            ))}
+          <div
+            className={cn(
+              'grid grid-cols-[auto_minmax(3rem,1fr)_auto_minmax(0,auto)] items-center gap-x-3 gap-y-2',
+              view.stale && 'opacity-70'
+            )}
+          >
+            {[...view.meters]
+              .sort((a, b) => METER_ORDER[a.key] - METER_ORDER[b.key])
+              .map((meter) => (
+                <UsageMeterLine key={meter.key} meter={meter} accountLabel={account.label} />
+              ))}
           </div>
           {view.models.length > 0 ? (
-            <p className="text-xs text-foreground-passive tabular-nums">
+            <p className="text-tiny text-foreground-passive tabular-nums">
               Weekly by model:{' '}
               {view.models.map((model) => `${model.label} ${model.percentLabel}`).join(' · ')}
             </p>
@@ -202,8 +214,8 @@ export const ClaudeUsageRefresh = observer(function ClaudeUsageRefresh({
   const store = getClaudeAccountsStore();
   const updated = formatUpdatedAgo(store.usageCheckedAt, now);
   return (
-    <div className={cn('flex items-center gap-1.5', className)}>
-      <span className="text-xs text-foreground-muted" aria-live="polite">
+    <div className={cn('flex items-center gap-1', className)}>
+      <span className="text-xs text-foreground-passive tabular-nums" aria-live="polite">
         {store.usageLoading ? 'Checking…' : updated}
       </span>
       <Tooltip.Root>

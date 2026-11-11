@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ClaudeAccountUsage, ClaudeUsageSnapshot } from '../api/types';
 import {
+  compactUsage,
   formatAsOf,
   formatResetsIn,
   formatUpdatedAgo,
@@ -298,5 +299,27 @@ describe('headlineUsage', () => {
     expect(
       headlineUsage(usage({ snapshot: snapshot({ sevenDay: null, fiveHour: null }) }))
     ).toBeNull();
+  });
+});
+
+describe('compactUsage', () => {
+  it('gives the 5-hour window first, then the week', () => {
+    expect(compactUsage(usage())).toEqual([
+      { key: 'five-hour', short: '5h', label: '5-hour', percentLabel: '12%', severity: 'calm' },
+      { key: 'weekly', short: 'wk', label: 'weekly', percentLabel: '46%', severity: 'calm' },
+    ]);
+  });
+
+  it('raises the severity near the limit and is empty when nothing is known', () => {
+    const high = compactUsage(
+      usage({
+        snapshot: snapshot({ fiveHour: { usedPercent: 92, resetsAt: null }, sevenDay: null }),
+      })
+    );
+    expect(high).toEqual([
+      { key: 'five-hour', short: '5h', label: '5-hour', percentLabel: '92%', severity: 'critical' },
+    ]);
+    expect(compactUsage(undefined)).toEqual([]);
+    expect(compactUsage(usage({ status: 'unavailable', snapshot: null }))).toEqual([]);
   });
 });

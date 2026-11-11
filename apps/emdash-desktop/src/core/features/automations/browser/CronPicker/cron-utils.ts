@@ -188,6 +188,35 @@ export function toCron(state: CronState): string {
   }
 }
 
+function clockTime(hour: number, minute: number): string {
+  return `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+}
+
+/**
+ * The schedule in a short sentence, the same words the picker reads as: "Every day at 09:00",
+ * "Every Monday at 10:00", "Every hour at :15", "Every month on the 1st at 09:00". Null when the
+ * expression is outside the subset the picker understands.
+ */
+export function describeCron(expr: string): string | null {
+  const state = parseCron(expr);
+  if (!state) return null;
+  const at = clockTime(state.hour, state.minute);
+  switch (state.period) {
+    case 'minute':
+      return 'Every minute';
+    case 'hour':
+      return `Every hour at :${state.minute.toString().padStart(2, '0')}`;
+    case 'day':
+      return `Every day at ${at}`;
+    case 'week':
+      return `Every ${WEEKDAY_LABELS[state.weekDay]} at ${at}`;
+    case 'month':
+      return `Every month on the ${ordinal(state.monthDay)} at ${at}`;
+    case 'year':
+      return `Every year on ${MONTH_LABELS[state.month - 1]} ${ordinal(state.monthDay)} at ${at}`;
+  }
+}
+
 /**
  * When changing period, carry forward compatible fields and set sensible defaults
  * for newly relevant fields.

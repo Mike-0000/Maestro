@@ -1,10 +1,13 @@
 import type { HostRef } from '@emdash/core/primitives/host/api';
 import type { InstalledAddon } from '@emdash/core/runtimes/agent-config/api';
+import { StateGlyph, EmptyState } from '@emdash/ui/react/components';
 import { PageLayout, SettingsRow, SettingsSection } from '@emdash/ui/react/patterns';
-import { Badge, Button, Collapsible, Spinner, useToast } from '@emdash/ui/react/primitives';
+import { Button, Collapsible, useToast } from '@emdash/ui/react/primitives';
 import { useMutation, useQuery } from '@tanstack/react-query';
+import { TriangleAlert } from 'lucide-react';
 import type { AddonCatalogEntry, AgentAddonsError } from '@core/features/agent-addons/api/contract';
 import { useOpenModal } from '@core/manifests/browser/modal-api';
+import { cn } from '@core/primitives/styling/browser/cn';
 import { getAgentAddonsClient } from './client';
 import { useInstalledAddons } from './live-model-hooks';
 
@@ -27,14 +30,24 @@ export function AddonsPanel({ host, header }: AddonsPanelProps) {
   const installed = useInstalledAddons(host);
 
   return (
-    <div className="flex flex-col text-foreground">
+    <div className="flex flex-col pb-16 text-foreground">
       {header && <PageLayout.Header sticky title={header.title} description={header.description} />}
       {catalog.isPending ? (
-        <div className="flex justify-center py-12">
-          <Spinner />
-        </div>
+        <EmptyState tone="loading" label="Loading add-ons…" className="min-h-48" />
+      ) : catalog.isError ? (
+        <EmptyState
+          tone="error"
+          className="min-h-48"
+          label="Couldn't load add-ons"
+          details={catalog.error.message}
+          action={
+            <Button variant="text" onClick={() => void catalog.refetch()}>
+              Try again
+            </Button>
+          }
+        />
       ) : (
-        <div className="space-y-8">
+        <div className="flex flex-col gap-10">
           {(catalog.data ?? []).map((addon) => (
             <AddonSection
               key={addon.id}
@@ -117,43 +130,53 @@ function AddonSection({
   return (
     <SettingsSection title={addon.name}>
       <SettingsRow
-        label={
-          <span className="flex items-center gap-2">
-            {addon.summary}
-            <StatusBadge status={status} />
-          </span>
+        label={addon.summary}
+        description={
+          <>
+            {addon.description}
+            <StatusLine status={status} />
+          </>
         }
-        description={addon.description}
         control={
-          <div className="flex gap-2">
+          <div className="flex items-center gap-x-4">
             {status.kind !== 'not-installed' && (
-              <Button variant="secondary" size="sm" disabled={busy} onClick={() => remove.mutate()}>
-                Remove
-              </Button>
-            )}
-            {status.kind === 'not-installed' && (
-              <Button size="sm" disabled={busy} onClick={() => install.mutate()}>
-                Install
-              </Button>
-            )}
-            {status.kind === 'update' && (
-              <Button size="sm" disabled={busy} onClick={() => install.mutate()}>
-                Update
-              </Button>
-            )}
-            {status.kind === 'installed' && status.incomplete && (
-              <Button size="sm" disabled={busy} onClick={() => install.mutate()}>
-                Repair
+              <Button variant="text" size="sm" disabled={busy} onClick={() => remove.mutate()}>
+                Remove…
               </Button>
             )}
             {status.kind === 'installed' && !status.incomplete && (
+              <Button variant="text" size="sm" disabled={busy} onClick={() => install.mutate()}>
+                Reinstall
+              </Button>
+            )}
+            {status.kind === 'not-installed' && (
               <Button
                 variant="secondary"
                 size="sm"
                 disabled={busy}
                 onClick={() => install.mutate()}
               >
-                Reinstall
+                Install
+              </Button>
+            )}
+            {status.kind === 'update' && (
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={busy}
+                onClick={() => install.mutate()}
+              >
+                Update
+              </Button>
+            )}
+            {status.kind === 'installed' && status.incomplete && (
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={busy}
+                onClick={() => install.mutate()}
+              >
+                Repair
               </Button>
             )}
           </div>
@@ -164,12 +187,33 @@ function AddonSection({
   );
 }
 
-function StatusBadge({ status }: { status: AddonStatus }) {
+/** The add-on's state in words under its description: warnings in the warning colour, no chips. */
+function StatusLine({ status }: { status: AddonStatus }) {
   if (status.kind === 'not-installed') return null;
-  if (status.kind === 'update') return <Badge tone="warning">Update available</Badge>;
-  if (status.incomplete) return <Badge tone="warning">Files missing</Badge>;
-  if (status.edited) return <Badge tone="info">Installed, edited</Badge>;
-  return <Badge tone="success">Installed</Badge>;
+  const warning = status.kind === 'update' || status.incomplete;
+  const words =
+    status.kind === 'update'
+      ? 'Installed, update available'
+      : status.incomplete
+        ? 'Installed, but some files are missing'
+        : status.edited
+          ? 'Installed, with your edits'
+          : 'Installed';
+  return (
+    <span
+      className={cn(
+        'mt-1 flex items-center gap-1.5',
+        warning ? 'text-foreground-warning' : 'text-foreground-muted'
+      )}
+    >
+      {warning ? (
+        <TriangleAlert className="size-3.5 shrink-0" aria-hidden />
+      ) : (
+        <StateGlyph state="done" size="sm" />
+      )}
+      {words}
+    </span>
+  );
 }
 
 function AddonContents({
@@ -181,10 +225,10 @@ function AddonContents({
 }) {
   return (
     <Collapsible.Root>
-      <div className="w-fit">
-        <Collapsible.Trigger type="button">What it adds</Collapsible.Trigger>
-      </div>
-      <Collapsible.Panel className="grid gap-4 pt-2 text-sm">
+      <Collapsible.Trigger type="button" variant="text">
+        What it adds
+      </Collapsible.Trigger>
+      <Collapsible.Panel className="grid gap-4 pt-3 text-sm">
         {addon.targets.map((target) => {
           const record = installed.find((entry) => entry.providerId === target.providerId);
           const folder = record?.root ?? `${target.providerName}'s config folder`;
@@ -205,7 +249,7 @@ function AddonContents({
                     <span className="font-mono">{target.instructions.path}</span>, which Maestro
                     never touches outside that block:
                   </p>
-                  <pre className="max-h-64 overflow-auto rounded-md bg-background-secondary p-3 text-xs whitespace-pre-wrap">
+                  <pre className="max-h-64 overflow-auto rounded-md bg-background p-3 font-mono text-xs whitespace-pre-wrap text-foreground-body">
                     {target.instructions.content.trim()}
                   </pre>
                 </>

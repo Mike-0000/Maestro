@@ -7,7 +7,7 @@ export const McpView: React.FC = () => (
     host={LOCAL_HOST_REF}
     header={{
       title: 'MCP',
-      description: 'Connect your agents with external data sources and tools',
+      description: 'Connect your agents to outside tools and data sources.',
     }}
   />
 );

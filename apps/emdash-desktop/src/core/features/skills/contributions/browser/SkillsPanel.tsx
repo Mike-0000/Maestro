@@ -52,7 +52,7 @@ export function SkillsPanel({ host, header }: SkillsPanelProps) {
           actions={toolbar}
         />
       ) : (
-        toolbar
+        <div className="pb-6">{toolbar}</div>
       )}
       <SkillsList skills={skills} onOpenTerminal={handleOpenTerminal} />
     </div>
