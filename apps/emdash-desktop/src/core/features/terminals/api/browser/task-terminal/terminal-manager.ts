@@ -24,18 +24,32 @@ import { makePtySessionId } from '@core/primitives/pty/api';
 import { type CreateTerminalParams, type Terminal } from '@core/primitives/terminals/api';
 import { nextTerminalName } from '../../../browser/task-terminal/terminal-tabs';
 
+/** Longest a new terminal's first connect waits for its `create` call before hydrating anyway. */
+const CREATE_WAIT_MS = 30_000;
+
 export class TerminalManagerStore implements Disposable {
   readonly projectId: string;
   readonly taskId: string;
   /** Data layer: plain Terminal records loaded from the main process. */
   readonly list: Resource<Terminal[]>;
-  /** Data stores keyed by terminal id — populated by reaction on list.data. */
+  /** Data stores keyed by terminal id â€” populated by reaction on list.data. */
   terminals = observable.map<string, TerminalStore>();
-  /** Session layer keyed by terminal id — created alongside data, connected lazily. */
+  /** Session layer keyed by terminal id â€” created alongside data, connected lazily. */
   sessions = observable.map<string, PtySession>();
   // Shallow: TerminalKey values must stay plain objects so they can be
   // structured-cloned when posted over the wire (MobX proxies cannot).
   runtimeKeys = observable.map<string, TerminalRuntimeKey>({}, { deep: false });
+  /**
+   * Terminals created in this window whose `create` call has not settled yet, keyed by id. The
+   * session exists (optimistically) before the main process has written the terminal's row, so
+   * its first connect waits for this; hydrating earlier fails with "Terminal not found" and left
+   * a new terminal blank until relaunch.
+   */
+  private readonly pendingCreates = new Map<
+    string,
+    { settled: Promise<void>; settle: () => void }
+  >();
+  private disposed = false;
   private readonly _disposeReaction: () => void;
   private readonly _disposeHostReaction: () => void;
 
@@ -138,6 +152,14 @@ export class TerminalManagerStore implements Disposable {
       name: params.name,
     };
 
+    // Registered before the session exists, so the session's first connect always sees it.
+    let settleCreate: () => void = () => {};
+    const settled = new Promise<void>((resolve) => {
+      settleCreate = resolve;
+    });
+    const pending = { settled, settle: settleCreate };
+    this.pendingCreates.set(params.id, pending);
+
     runInAction(() => {
       this.terminals.set(params.id, new TerminalStore(optimistic));
       this.sessions.set(params.id, this.createSession(optimistic));
@@ -154,6 +176,8 @@ export class TerminalManagerStore implements Disposable {
         }
         this.runtimeKeys.set(params.id, key);
       });
+      // A connect that gave up waiting (see CREATE_WAIT_MS) failed to hydrate; retry it now.
+      this.sessions.get(params.id)?.resumeIfRequested();
       return terminal;
     } catch (err) {
       runInAction(() => {
@@ -162,6 +186,31 @@ export class TerminalManagerStore implements Disposable {
         this.terminals.delete(params.id);
       });
       throw err;
+    } finally {
+      // After the rollback above, so a waiting connect finds a destroyed session and stops.
+      if (this.pendingCreates.get(params.id) === pending) this.pendingCreates.delete(params.id);
+      pending.settle();
+    }
+  }
+
+  /**
+   * Waits for a pending `create` of this terminal, at most CREATE_WAIT_MS, so a create that never
+   * settles cannot leave the connect waiting forever (it then hydrates and fails as before, and
+   * the create's success retries it).
+   */
+  private async waitForPendingCreate(terminalId: string): Promise<void> {
+    const pending = this.pendingCreates.get(terminalId);
+    if (!pending) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        pending.settled,
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, CREATE_WAIT_MS);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -228,11 +277,15 @@ export class TerminalManagerStore implements Disposable {
   }
 
   dispose(): void {
+    this.disposed = true;
     this._disposeReaction();
     this._disposeHostReaction();
     for (const session of this.sessions.values()) {
       session.destroy();
     }
+    // Release connects still waiting on a create; their sessions are destroyed, so they stop.
+    for (const pending of this.pendingCreates.values()) pending.settle();
+    this.pendingCreates.clear();
     this.list.dispose();
   }
 
@@ -261,7 +314,12 @@ export class TerminalManagerStore implements Disposable {
     const handlers = makeFileLinkHandlers(terminal.projectId, terminal.taskId);
     return new PtySession(
       makePtySessionId(terminal.projectId, terminal.taskId, terminal.id),
-      () => this.hydrateTerminal(terminal.id),
+      async () => {
+        await this.waitForPendingCreate(terminal.id);
+        // Disposed or rolled back while waiting: nothing to hydrate.
+        if (this.disposed || !this.sessions.has(terminal.id)) return false;
+        return this.hydrateTerminal(terminal.id);
+      },
       handlers.onOpenFile,
       handlers.onOpenExternal,
       createTerminalsConnector(

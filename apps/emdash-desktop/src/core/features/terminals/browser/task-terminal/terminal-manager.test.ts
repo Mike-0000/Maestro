@@ -162,6 +162,183 @@ describe('TerminalManagerStore session hydration', () => {
     store.dispose();
   });
 
+  it('connects a new terminal only after the main process has created it', async () => {
+    // The main process writes the terminal's row while `create` is in flight; hydrating before
+    // then answers "Terminal not found". The pane connects as soon as the optimistic session
+    // shows, so without waiting it raced the create and the terminal stayed blank.
+    let rowWritten = false;
+    let finishCreate: () => void = () => {};
+    createTerminal.mockImplementation(
+      (input) =>
+        new Promise((resolve) => {
+          finishCreate = () => {
+            rowWritten = true;
+            resolve({
+              success: true,
+              data: {
+                terminal: { ...input, shellId: 'system' },
+                key: { workspaceId: 'workspace-1', terminalId: input.id },
+              },
+            });
+          };
+        })
+    );
+    hydrateTerminal.mockImplementation(async (input) =>
+      rowWritten
+        ? {
+            success: true,
+            data: { key: { workspaceId: 'workspace-1', terminalId: input.terminalId } },
+          }
+        : { success: false, error: { type: 'not_found', message: 'Terminal not found' } }
+    );
+    // The list load stays in flight, so it cannot replace the optimistic record mid-test.
+    listTerminals.mockReturnValue(new Promise(() => {}));
+    const store = new TerminalManagerStore('project-1', 'task-1');
+
+    const created = store.createTerminal({
+      id: 'terminal-new',
+      projectId: 'project-1',
+      taskId: 'task-1',
+      name: 'Terminal 1',
+    });
+    const session = store.sessions.get('terminal-new');
+    expect(session).toBeDefined();
+    const connected = session!.connect();
+
+    // Let the connect run as far as it can before the create returns.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(hydrateTerminal).not.toHaveBeenCalled();
+    expect(session!.status).toBe('connecting');
+
+    finishCreate();
+    await created;
+    await connected;
+
+    expect(hydrateTerminal).toHaveBeenCalledTimes(1);
+    expect(frontendConnect).toHaveBeenCalledTimes(1);
+    expect(session!.status).toBe('ready');
+    store.dispose();
+  });
+
+  it('stops a waiting connect when creating the terminal fails', async () => {
+    let failCreate: () => void = () => {};
+    createTerminal.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          failCreate = () =>
+            resolve({ success: false, error: { type: 'failed', message: 'No shell' } });
+        })
+    );
+    // The list load stays in flight, so it cannot replace the optimistic record mid-test.
+    listTerminals.mockReturnValue(new Promise(() => {}));
+    const store = new TerminalManagerStore('project-1', 'task-1');
+
+    const created = store.createTerminal({
+      id: 'terminal-broken',
+      projectId: 'project-1',
+      taskId: 'task-1',
+      name: 'Terminal 1',
+    });
+    const session = store.sessions.get('terminal-broken');
+    const connected = session!.connect();
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    failCreate();
+    await expect(created).rejects.toThrow('No shell');
+    await connected;
+
+    expect(store.sessions.has('terminal-broken')).toBe(false);
+    expect(hydrateTerminal).not.toHaveBeenCalled();
+    expect(frontendConnect).not.toHaveBeenCalled();
+    store.dispose();
+  });
+
+  it('stops waiting for a create that never settles and retries once it succeeds', async () => {
+    vi.useFakeTimers();
+    try {
+      let rowWritten = false;
+      let finishCreate: () => void = () => {};
+      createTerminal.mockImplementation(
+        (input) =>
+          new Promise((resolve) => {
+            finishCreate = () => {
+              rowWritten = true;
+              resolve({
+                success: true,
+                data: {
+                  terminal: { ...input, shellId: 'system' },
+                  key: { workspaceId: 'workspace-1', terminalId: input.id },
+                },
+              });
+            };
+          })
+      );
+      hydrateTerminal.mockImplementation(async (input) =>
+        rowWritten
+          ? {
+              success: true,
+              data: { key: { workspaceId: 'workspace-1', terminalId: input.terminalId } },
+            }
+          : { success: false, error: { type: 'not_found', message: 'Terminal not found' } }
+      );
+      listTerminals.mockReturnValue(new Promise(() => {}));
+      const store = new TerminalManagerStore('project-1', 'task-1');
+
+      const created = store.createTerminal({
+        id: 'terminal-slow',
+        projectId: 'project-1',
+        taskId: 'task-1',
+        name: 'Terminal 1',
+      });
+      const session = store.sessions.get('terminal-slow')!;
+      const connected = session.connect();
+      const connectResult = connected.then(
+        () => 'resolved',
+        () => 'rejected'
+      );
+
+      // The wait is bounded: the connect hydrates, fails as before, and does not hang.
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(await connectResult).toBe('rejected');
+      expect(hydrateTerminal).toHaveBeenCalledTimes(1);
+      expect(session.status).toBe('disconnected');
+
+      // The late create still succeeds and reconnects the session the pane asked for.
+      finishCreate();
+      await created;
+      await vi.advanceTimersByTimeAsync(0);
+      expect(frontendConnect).toHaveBeenCalledTimes(1);
+      expect(session.status).toBe('ready');
+      store.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('releases a waiting connect when the store is disposed', async () => {
+    createTerminal.mockReturnValue(new Promise(() => {}));
+    listTerminals.mockReturnValue(new Promise(() => {}));
+    const store = new TerminalManagerStore('project-1', 'task-1');
+
+    void store
+      .createTerminal({
+        id: 'terminal-gone',
+        projectId: 'project-1',
+        taskId: 'task-1',
+        name: 'Terminal 1',
+      })
+      .catch(() => {});
+    const session = store.sessions.get('terminal-gone')!;
+    const connected = session.connect();
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    store.dispose();
+    await connected;
+
+    expect(hydrateTerminal).not.toHaveBeenCalled();
+    expect(frontendConnect).not.toHaveBeenCalled();
+  });
+
   it('keeps observed terminal records stale and blocks live creation while offline', async () => {
     const host = {
       state: {
