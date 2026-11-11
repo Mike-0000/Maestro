@@ -1,5 +1,7 @@
+import { StateGlyph } from '@emdash/ui/react/components';
+import { Button } from '@emdash/ui/react/primitives';
 import { NodeResizer, useStore, type NodeProps } from '@xyflow/react';
-import { Bot, Globe, Hand, Maximize2, Play, X } from 'lucide-react';
+import { Bot, Globe, Hand, Maximize2, X } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useLayoutEffect, useRef } from 'react';
 import type { BrowserTileEntry } from '@core/features/canvas/api/browser/stores/canvas-store';
@@ -14,6 +16,14 @@ import {
 } from '../../api/canvas-model';
 import { getCanvasBrowserHost, getCanvasStore } from '../../contributions/browser/app-stores';
 import { useIsLivePane } from '../canvas-pane-context';
+import {
+  FLOATING_LAYER,
+  RESIZE_HANDLE_CLASS,
+  WINDOW_ACTIONS,
+  WINDOW_FRAME,
+  WINDOW_HEADER,
+} from '../canvas-styles';
+import { TileIconButton } from './tile-icon-button';
 
 export type BrowserTileData = { tileId: string };
 
@@ -116,39 +126,30 @@ export const BrowserTileNode = observer(function BrowserTileNode({ data, selecte
 
   return (
     <div
-      className={cn(
-        'flex h-full w-full flex-col overflow-hidden rounded-xl border bg-background shadow-lg',
-        focused ? 'border-blue-500 ring-2 ring-blue-500/40' : 'border-border',
-        leased && 'border-violet-500 ring-2 ring-violet-500/40'
-      )}
+      className={cn(WINDOW_FRAME, focused && 'border-ring')}
       onPointerDownCapture={() => store.focusTile(tileId)}
     >
       <NodeResizer
         isVisible={selected && !glyph}
         minWidth={MIN_TILE_SIZE.w}
         minHeight={MIN_TILE_SIZE.h}
-        lineClassName="!border-blue-500/60"
-        handleClassName="!size-2.5 !rounded-sm !border-blue-500 !bg-background"
+        handleClassName={RESIZE_HANDLE_CLASS}
         onResizeEnd={(_event, params) =>
           store.resizeTile(tileId, { x: params.x, y: params.y, w: params.width, h: params.height })
         }
       />
       <BrowserTileHeader entry={entry} glyph={glyph} leased={leased} onActivate={activate} />
-      <div
-        ref={pageRef}
-        data-browser-page={browserId}
-        className="relative min-h-0 flex-1 bg-background-secondary"
-      >
+      <div ref={pageRef} data-browser-page={browserId} className="relative min-h-0 flex-1">
         {!live &&
           (glyph ? (
-            <div className="flex h-full items-center justify-center text-3xl text-foreground-muted">
-              <Globe className="mr-3 size-10" />
-              {entry.title ?? hostLabel(entry.url)}
+            <div className="flex h-full items-center justify-center gap-4 px-6 text-3xl text-foreground-muted">
+              <Globe className="size-10 shrink-0" />
+              <span className="truncate">{entry.title ?? hostLabel(entry.url)}</span>
             </div>
           ) : (
             <button
               type="button"
-              className="nodrag group flex h-full w-full items-center justify-center overflow-hidden"
+              className="nodrag group/page flex h-full w-full items-center justify-center overflow-hidden focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset"
               onClick={activate}
               title="Click to use this app at 100 %"
             >
@@ -160,14 +161,25 @@ export const BrowserTileNode = observer(function BrowserTileNode({ data, selecte
                   draggable={false}
                 />
               ) : (
-                <span className="flex flex-col items-center gap-2 text-sm text-foreground-muted">
-                  <Play className="size-6" />
-                  {alive ? 'Loading…' : 'Paused. Click to resume.'}
+                <span className="flex flex-col items-center gap-1 text-center">
+                  <span className="text-sm font-medium text-foreground">
+                    {alive ? 'Loading…' : 'Paused'}
+                  </span>
+                  {!alive && (
+                    <span className="text-xs text-foreground-muted">Click to resume.</span>
+                  )}
                 </span>
               )}
-              <span className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-background/90 px-3 py-1 text-xs text-foreground-muted opacity-0 shadow group-hover:opacity-100">
-                {alive ? 'Click to interact' : 'Click to resume'}
-              </span>
+              {preview && (
+                <span
+                  className={cn(
+                    FLOATING_LAYER,
+                    'pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full px-3 py-1 text-xs opacity-0 transition-opacity group-hover/page:opacity-100 group-focus-visible/page:opacity-100'
+                  )}
+                >
+                  {alive ? 'Click to interact' : 'Click to resume'}
+                </span>
+              )}
             </button>
           ))}
       </div>
@@ -191,60 +203,59 @@ const BrowserTileHeader = observer(function BrowserTileHeader({
   const agents = entry.control === 'agents';
   return (
     <div
-      className={cn(
-        'flex shrink-0 items-center gap-2 border-b border-border bg-background-secondary px-3',
-        glyph && 'h-16'
-      )}
+      className={cn(WINDOW_HEADER, glyph ? 'h-16 gap-3 px-4' : 'pr-1.5 pl-3')}
       style={glyph ? undefined : { height: BROWSER_TILE_HEADER }}
     >
-      <Globe className={cn('shrink-0 text-foreground-muted', glyph ? 'size-7' : 'size-3.5')} />
+      <Globe className={cn('shrink-0 text-foreground-passive', glyph ? 'size-7' : 'size-3.5')} />
       <span
         className={cn(
-          'min-w-0 truncate font-medium text-foreground',
-          glyph ? 'text-2xl' : 'text-xs'
+          'min-w-0 truncate text-foreground',
+          glyph ? 'text-2xl font-medium' : 'text-xs'
         )}
         title={entry.url}
       >
         {entry.title || hostLabel(entry.url)}
       </span>
       {!glyph && (
-        <span className="min-w-0 truncate text-[11px] text-foreground-muted">{entry.taskName}</span>
+        <span className="min-w-0 truncate text-tiny text-foreground-passive">{entry.taskName}</span>
       )}
       <span className="flex-1" />
-      {leased && <LeaseBanner browserId={entry.browserId} label={activity ?? 'Driving the app'} />}
+      {leased && <LeaseLine browserId={entry.browserId} label={activity ?? 'Driving the app'} />}
       {!glyph && (
         <span className="flex shrink-0 items-center gap-0.5">
-          <button
+          {/* Who may use the app: a fact worth seeing at rest, so it never hides with the rest. */}
+          <Button
             type="button"
+            variant="ghost"
+            size="xs"
+            aria-pressed={agents}
             onClick={() => void host.setControl(entry, agents ? 'user' : 'agents')}
             title={
               agents
                 ? 'Agents and the conductor may use this app. Click to take it back.'
                 : 'Only you use this app. Click to let agents and the conductor use it.'
             }
-            className={cn(
-              'nodrag flex h-6 items-center gap-1 rounded px-1.5 text-[11px] font-medium',
-              agents
-                ? 'bg-violet-500/15 text-violet-700 dark:text-violet-300'
-                : 'text-foreground-muted hover:bg-background-tertiary hover:text-foreground'
-            )}
+            className="nodrag gap-1 px-1.5 text-tiny"
           >
             {agents ? <Bot className="size-3.5" /> : <Hand className="size-3.5" />}
             {agents ? 'Agents' : 'You'}
-          </button>
-          <TileButton label="Focus (100 %)" onClick={onActivate}>
-            <Maximize2 className="size-3.5" />
-          </TileButton>
-          <TileButton label="Close app browser" onClick={() => void host.close(entry)}>
-            <X className="size-3.5" />
-          </TileButton>
+          </Button>
+          <span className={WINDOW_ACTIONS}>
+            <TileIconButton label="Focus (100 %)" onClick={onActivate}>
+              <Maximize2 className="size-3.5" />
+            </TileIconButton>
+            <TileIconButton label="Close app browser" onClick={() => void host.close(entry)}>
+              <X className="size-3.5" />
+            </TileIconButton>
+          </span>
         </span>
       )}
     </div>
   );
 });
 
-const LeaseBanner = observer(function LeaseBanner({
+/** An agent is driving the app: the working mark, what it is doing, and the way to stop it. */
+const LeaseLine = observer(function LeaseLine({
   browserId,
   label,
 }: {
@@ -253,41 +264,21 @@ const LeaseBanner = observer(function LeaseBanner({
 }) {
   const host = getCanvasBrowserHost();
   return (
-    <div className="flex shrink-0 items-center gap-1.5 rounded-full bg-violet-600 py-0.5 pr-0.5 pl-2 text-[11px] text-white">
-      <Bot className="size-3.5" />
+    <span className="flex min-w-0 shrink items-center gap-1.5 text-xs text-foreground">
+      <StateGlyph state="working" size="sm" />
       <span className="max-w-64 truncate">{label}</span>
-      <button
+      <Button
         type="button"
-        className="nodrag rounded-full bg-white/20 px-2 font-medium hover:bg-white/30"
+        variant="text"
+        size="xs"
+        className="nodrag ml-1"
         onClick={() => void host.stopLease(browserId)}
       >
         Stop
-      </button>
-    </div>
+      </Button>
+    </span>
   );
 });
-
-function TileButton({
-  label,
-  onClick,
-  children,
-}: {
-  label: string;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-      className="nodrag flex size-6 items-center justify-center rounded text-foreground-muted hover:bg-background-tertiary hover:text-foreground"
-    >
-      {children}
-    </button>
-  );
-}
 
 function intersection(a: DOMRect, b: DOMRect): TileRect | null {
   const x = Math.max(a.left, b.left);

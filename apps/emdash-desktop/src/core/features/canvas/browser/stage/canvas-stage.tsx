@@ -1,3 +1,5 @@
+import { StateGlyph } from '@emdash/ui/react/components';
+import { Button } from '@emdash/ui/react/primitives';
 import {
   ChevronLeft,
   ChevronRight,
@@ -27,6 +29,8 @@ import {
 } from '../../api/stage-layout';
 import { getCanvasStore } from '../../contributions/browser/app-stores';
 import { isTypingTarget } from '../canvas-keys';
+import { SPOKEN_NAME_BADGE } from '../canvas-styles';
+import { statusPresentation } from '../tiles/status-presentation';
 import { StagePaneContent } from './stage-pane';
 
 const STAGE_PADDING = 8;
@@ -82,9 +86,10 @@ export const CanvasStage = observer(function CanvasStage() {
   const key = pageKey(paneIds);
 
   return (
-    <div className="absolute inset-0 z-20 flex flex-col bg-background">
+    // The stage is the board's ground (sunken) with its windows as paper panes on it.
+    <div className="surface-sunken absolute inset-0 z-20 flex flex-col bg-surface">
       <StageHeader view={view} activePane={activePane} />
-      <div ref={setBody} className="relative min-h-0 flex-1 bg-background-secondary/60">
+      <div ref={setBody} className="relative min-h-0 flex-1">
         {view?.panes.map((pane) => (
           <StagePaneFrame
             key={pane.tileId}
@@ -149,19 +154,22 @@ const StageHeader = observer(function StageHeader({
   const adjusted = view.adjusted || store.stageSaved.order.length > 0;
 
   return (
-    <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border bg-background px-3 text-xs">
-      <LayoutGrid className="size-4 shrink-0 text-foreground-muted" />
-      <span className="shrink-0 text-sm font-semibold text-foreground">{store.stageTitle}</span>
-      <span className="shrink-0 text-foreground-muted tabular-nums">
+    <div className="flex h-10 shrink-0 items-center gap-2 px-3 text-xs">
+      <LayoutGrid className="size-4 shrink-0 text-foreground-passive" />
+      <span className="shrink-0 text-sm font-medium text-foreground">{store.stageTitle}</span>
+      <span className="shrink-0 text-foreground-passive tabular-nums">
         {view.order.length} window{view.order.length === 1 ? '' : 's'}
       </span>
-      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-2">
+      <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto px-2">
         {view.order.map((tileId, index) => {
           const onPage = view.panes.some((pane) => pane.tileId === tileId);
           return (
-            <button
+            <Button
               key={tileId}
               type="button"
+              variant="ghost"
+              size="xs"
+              aria-pressed={solo === tileId}
               title={
                 solo === tileId
                   ? 'Back to all windows'
@@ -180,17 +188,15 @@ const StageHeader = observer(function StageHeader({
                 }));
               }}
               className={cn(
-                'shrink-0 rounded-full border px-2.5 py-0.5 font-medium',
-                solo === tileId
-                  ? 'border-blue-500 bg-blue-500/15 text-blue-700 dark:text-blue-300'
-                  : onPage
-                    ? 'border-border text-foreground hover:bg-background-secondary'
-                    : 'border-transparent text-foreground-muted hover:bg-background-secondary',
-                activePane === tileId && 'ring-1 ring-blue-500/60'
+                'shrink-0 px-2',
+                // On this page at full strength, the pane you are in underlined; the rest quiet.
+                onPage ? 'text-foreground' : 'text-foreground-passive',
+                activePane === tileId &&
+                  'underline decoration-foreground-passive underline-offset-4'
               )}
             >
               {store.windowName(tileId)}
-            </button>
+            </Button>
           );
         })}
       </div>
@@ -203,7 +209,7 @@ const StageHeader = observer(function StageHeader({
           >
             <ChevronLeft className="size-4" />
           </StageButton>
-          <span className="text-foreground-muted tabular-nums">
+          <span className="text-foreground-passive tabular-nums">
             {view.page + 1} / {view.pageCount}
           </span>
           <StageButton
@@ -236,15 +242,17 @@ const StageHeader = observer(function StageHeader({
       >
         {immersive ? <Minimize2 className="size-3.5" /> : <Expand className="size-3.5" />}
       </StageButton>
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="sm"
         title="Back to the canvas (Esc)"
         onClick={() => store.leaveStage()}
-        className="flex h-7 shrink-0 items-center gap-1 rounded-md border border-border px-2 font-medium text-foreground hover:bg-background-secondary"
+        className="gap-1.5 px-2 text-foreground"
       >
         <X className="size-3.5" />
         Canvas
-      </button>
+      </Button>
     </div>
   );
 });
@@ -268,9 +276,9 @@ const StagePaneFrame = observer(function StagePaneFrame({
   return (
     <div
       className={cn(
-        'absolute flex flex-col overflow-hidden rounded-lg border bg-background shadow-sm',
-        active ? 'border-blue-500/70' : 'border-border',
-        dropping && 'ring-2 ring-blue-500'
+        'surface-paper absolute flex flex-col overflow-hidden rounded-lg border bg-surface',
+        active ? 'border-ring' : 'border-border-subtle',
+        dropping && 'ring-1 ring-ring'
       )}
       style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}
       onPointerDownCapture={() => {
@@ -300,12 +308,12 @@ const StagePaneFrame = observer(function StagePaneFrame({
           event.dataTransfer.setData(PANE_DRAG_TYPE, tileId);
           event.dataTransfer.effectAllowed = 'move';
         }}
-        className="flex h-8 shrink-0 cursor-grab items-center gap-2 border-b border-border bg-background-secondary px-2 text-xs active:cursor-grabbing"
+        className="surface-base-emphasis flex h-8 shrink-0 cursor-grab items-center gap-2 bg-surface pr-1 pl-3 text-xs active:cursor-grabbing"
         title="Drag onto another pane to swap them"
       >
         <StagePaneTitle tileId={tileId} />
-        <span className="flex-1" />
         <StageButton
+          small
           label={solo ? 'Back to all windows' : 'Show only this window'}
           onClick={() =>
             store.updateStage(solo ? 'Showed all windows' : 'Solo', (saved) => ({
@@ -325,9 +333,7 @@ const StagePaneFrame = observer(function StagePaneFrame({
         />
         {badges && (
           <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center">
-            <span className="rounded-2xl bg-background/90 px-6 py-2 text-5xl font-bold tracking-tight text-foreground shadow-lg">
-              {store.windowName(tileId)}
-            </span>
+            <span className={SPOKEN_NAME_BADGE}>{store.windowName(tileId)}</span>
           </div>
         )}
       </div>
@@ -338,12 +344,25 @@ const StagePaneFrame = observer(function StagePaneFrame({
 const StagePaneTitle = observer(function StagePaneTitle({ tileId }: { tileId: string }) {
   const store = getCanvasStore();
   const entry = store.entryForTile(tileId);
+  const presentation = entry ? statusPresentation(entry) : null;
   return (
     <>
-      <span className="truncate font-semibold text-foreground">{store.windowName(tileId)}</span>
+      <span className="truncate text-sm text-foreground">{store.windowName(tileId)}</span>
       {entry && (
-        <span className="min-w-0 truncate text-foreground-muted">
+        <span className="min-w-0 truncate text-foreground-passive">
           {entry.taskName} · {entry.projectName}
+        </span>
+      )}
+      <span className="flex-1" />
+      {presentation && (
+        <span
+          className={cn(
+            'flex shrink-0 items-center gap-1.5 whitespace-nowrap text-foreground-muted',
+            presentation.yours && 'text-foreground'
+          )}
+        >
+          <StateGlyph state={presentation.glyph} size="sm" />
+          {presentation.label}
         </span>
       )}
     </>
@@ -364,7 +383,7 @@ function Splitter({
       role="separator"
       aria-orientation={horizontal ? 'vertical' : 'horizontal'}
       className={cn(
-        'absolute z-10 rounded-full transition-colors hover:bg-blue-500/40 active:bg-blue-500/60',
+        'absolute z-10 rounded-full transition-colors hover:bg-foreground/15 active:bg-ring/60',
         horizontal ? 'cursor-col-resize' : 'cursor-row-resize'
       )}
       style={{
@@ -398,24 +417,29 @@ function StageButton({
   label,
   onClick,
   disabled,
+  small = false,
   children,
 }: {
   label: string;
   onClick: () => void;
   disabled?: boolean;
+  /** The 24px size, for a pane's title bar. */
+  small?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size={small ? 'xs' : 'sm'}
+      icon
       aria-label={label}
       title={label}
       disabled={disabled}
       onClick={onClick}
-      className="flex size-7 shrink-0 items-center justify-center rounded-md text-foreground-muted hover:bg-background-secondary hover:text-foreground disabled:opacity-40"
     >
       {children}
-    </button>
+    </Button>
   );
 }
 
