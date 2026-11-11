@@ -34,6 +34,10 @@ export const scroll = style({
   overflowX: 'hidden',
   overflowY: 'auto',
   scrollbarGutter: 'stable',
+  // A size container, so the sticky sidebar can be exactly as tall as this scroll box (100cqh):
+  // 100vh overflowed it whenever the view is shorter than the window (title bar, voice bar
+  // reserve) and scrolled the whole layout, sidebar included.
+  containerType: 'size',
 });
 
 // ── Centered page container ───────────────────────────────────────────────────
@@ -69,8 +73,8 @@ export const sidebarWrapper = style({
   alignSelf: 'start',
   boxSizing: 'border-box',
   display: 'flex',
-  minHeight: '100vh',
-  maxHeight: '100vh',
+  minHeight: '100cqh',
+  maxHeight: '100cqh',
   flexDirection: 'column',
   paddingTop: '2.5rem',
   paddingBottom: '0.75rem',

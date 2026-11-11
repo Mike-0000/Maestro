@@ -38,6 +38,8 @@ const SIDEBAR_ITEMS: PageSidebarMenuItem[] = [
   navItemFor('browser'),
   navItemFor('repository'),
   navItemFor('prompts'),
+  // Reached from the voice bar too; listed here so the page shows where it sits.
+  navItemFor('chorus'),
   LOCAL_SECTION,
   navItemFor('system'),
   navItemFor('workspaces-local'),
