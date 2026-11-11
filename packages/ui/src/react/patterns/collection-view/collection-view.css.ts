@@ -25,9 +25,9 @@ export const root = style({
       flex: '1 1 0%',
       flexDirection: 'column',
       overflow: 'hidden',
-      borderRadius: tokenVars.radiusLg,
-      border: `1px solid ${vars.surfaceBorder}`,
-      backgroundColor: vars.surface,
+      // A page-level list sits straight on the page (design brief 2.10): no
+      // outer card, rows separate by rhythm and the hover / selected steps.
+      backgroundColor: 'transparent',
     },
   },
 });
@@ -72,6 +72,8 @@ export const group = style({
   },
 });
 
+// Grouped layout reads like a settings section: one card per group on the
+// emphasis surface with one subtle hairline (design brief 2.8).
 export const groupCard = style({
   '@layer': {
     recipes: {
@@ -79,9 +81,15 @@ export const groupCard = style({
       width: '100%',
       flexDirection: 'column',
       overflow: 'hidden',
+      padding: '0.25rem',
       borderRadius: tokenVars.radiusLg,
-      border: `1px solid ${vars.surfaceBorder}`,
-      backgroundColor: vars.surface,
+      border: `1px solid ${vars.borderSubtle}`,
+      backgroundColor: vars.surfaceEmphasis,
+      vars: {
+        [vars.surface]: vars.surfaceEmphasis,
+        [vars.surfaceHover]: vars.surfaceEmphasisHover,
+        [vars.surfaceSelected]: vars.surfaceEmphasisSelected,
+      },
     },
   },
 });
@@ -107,7 +115,7 @@ export const rowGrid = style({
       gridTemplateColumns: 'var(--collection-view-template)',
       alignItems: 'center',
       columnGap: tokenVars.space3,
-      paddingInline: '1rem',
+      paddingInline: '0.75rem',
     },
   },
 });
@@ -141,7 +149,7 @@ const freeformBase = style({
       minWidth: 0,
       alignItems: 'center',
       gap: tokenVars.space3,
-      paddingInline: '1rem',
+      paddingInline: '0.75rem',
     },
   },
 });

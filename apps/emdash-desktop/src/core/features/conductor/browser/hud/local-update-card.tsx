@@ -1,6 +1,8 @@
-import { GitMerge, LoaderCircle, RefreshCw, ShieldCheck, X } from 'lucide-react';
+import { StateGlyph } from '@emdash/ui/react/components';
+import { Button, Select, Spinner } from '@emdash/ui/react/primitives';
+import { GitMerge, RefreshCw, ShieldCheck } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { getConductorStore } from '@core/features/conductor/contributions/browser/app-stores';
 import type { LocalUpdateStatus } from '@core/features/local-updates/api';
 import { getLocalUpdatesClient } from '@core/features/local-updates/api/browser/client';
@@ -11,9 +13,14 @@ import {
   projectDisplayName,
 } from '@core/features/projects/api/browser/stores/project-selectors';
 import { useOpenModal } from '@core/manifests/browser/modal-api';
-import { cn } from '@core/primitives/styling/browser/cn';
+import { HudCard, HudCardHeader } from './hud-card';
 import { runLocalUpdateFlow } from './local-update-flow';
 
+/**
+ * The local Maestro update ("ship"): the delivery state of the project's enrolled tasks, the
+ * current candidate, and the one move it allows. It is a tool for working on Maestro itself, so
+ * it keeps to the bar's right end, narrow, instead of the middle of the content.
+ */
 export const LocalUpdateCard = observer(function LocalUpdateCard({
   onHide,
 }: {
@@ -150,229 +157,247 @@ export const LocalUpdateCard = observer(function LocalUpdateCard({
   const candidate = status?.candidate;
   const activeTasks = status?.tasks.filter((task) => task.state !== 'withdrawn') ?? [];
   const withdrawnCount = (status?.tasks.length ?? 0) - activeTasks.length;
+  const projectName = projects.find((project) => project.id === projectId)?.name ?? '';
   return (
-    <section
-      aria-label="Local Maestro update"
-      className="pointer-events-auto w-full max-w-[560px] rounded-2xl border border-border bg-background/95 p-3 text-foreground shadow-xl backdrop-blur"
-    >
-      <header className="flex items-center gap-2">
-        <GitMerge className="size-4 shrink-0 text-foreground-muted" />
-        <h2 className="flex-1 text-xs font-semibold">Local Maestro update</h2>
-        {projects.length > 1 && (
-          <select
-            aria-label="Delivery project"
-            className="max-w-48 rounded border border-border bg-background px-2 py-1 text-xs"
-            value={projectId ?? ''}
-            disabled={busy}
-            onChange={(event) => setProjectId(event.target.value)}
-          >
-            {projects.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
-        )}
-        <button
-          type="button"
-          aria-label="Refresh local update status"
-          disabled={busy}
-          onClick={() => void refresh()}
-          className="rounded p-1 text-foreground-muted hover:bg-background-secondary disabled:opacity-50"
-        >
-          {busy ? (
-            <LoaderCircle className="size-3.5 animate-spin" />
-          ) : (
-            <RefreshCw className="size-3.5" />
-          )}
-        </button>
-        <button
-          type="button"
-          aria-label="Hide local Maestro update"
-          title="Hide local Maestro update"
-          disabled={busy}
-          onClick={onHide}
-          className="rounded p-1 text-foreground-muted hover:bg-background-secondary disabled:opacity-50"
-        >
-          <X className="size-3.5" />
-        </button>
-      </header>
+    // The wrapper spans the bar's width so the card can sit at its right end.
+    <div className="pointer-events-none flex w-full max-w-220 justify-end">
+      <HudCard label="Local Maestro update" className="max-w-md">
+        <HudCardHeader
+          glyph={<GitMerge aria-hidden className="size-3.5 text-foreground-muted" />}
+          title="Local Maestro update"
+          actions={
+            <>
+              {projects.length > 1 && (
+                <Select.Root
+                  value={projectId ?? ''}
+                  disabled={busy}
+                  onValueChange={(value) => {
+                    if (typeof value === 'string' && value) setProjectId(value);
+                  }}
+                >
+                  <Select.Trigger aria-label="Delivery project" className="h-7 w-36 text-xs">
+                    <Select.Value>{projectName}</Select.Value>
+                  </Select.Trigger>
+                  <Select.Content align="end">
+                    {projects.map((project) => (
+                      <Select.Item key={project.id} value={project.id}>
+                        {project.name}
+                      </Select.Item>
+                    ))}
+                  </Select.Content>
+                </Select.Root>
+              )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                icon
+                aria-label="Refresh local update status"
+                title="Refresh local update status"
+                disabled={busy}
+                onClick={() => void refresh()}
+                className="-mr-3"
+              >
+                {busy ? <Spinner size="sm" /> : <RefreshCw aria-hidden />}
+              </Button>
+            </>
+          }
+          onClose={onHide}
+          closeLabel="Hide local Maestro update"
+          closeDisabled={busy}
+        />
 
-      {stage && <p className="mt-2 text-xs text-foreground-muted">{stage}</p>}
-      {error && <p className="mt-2 text-xs text-red-600 dark:text-red-300">{error}</p>}
-      {!status && !error && (
-        <p className="mt-2 text-xs text-foreground-muted">Loading delivery status…</p>
-      )}
-      {status && (
-        <>
-          <p className="mt-2 text-xs text-foreground-muted">
-            {status.enabled
-              ? `Generation ${status.generation} · ${activeTasks.length} enrolled tasks${
-                  withdrawnCount > 0 ? ` · ${withdrawnCount} withdrawn` : ''
-                }`
-              : 'The durable project coordinator is not enabled.'}
-          </p>
-          {status.targetInstallGate && (
-            <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
-              Candidate {status.targetInstallGate.candidateId.slice(0, 8)} owns the local install
-              target. New Maestro sessions are paused until it completes.
+        <div className="mt-1 space-y-2 pl-6 text-xs">
+          {stage && <p className="text-foreground-muted">{stage}</p>}
+          {error && (
+            <p className="flex gap-1.5 text-foreground">
+              <span className="flex h-4.5 shrink-0 items-center">
+                <StateGlyph state="error" size="sm" />
+              </span>
+              <span className="min-w-0 break-words">{error}</span>
             </p>
           )}
-          {activeTasks.length > 0 && (
-            <ul className="mt-2 flex flex-wrap gap-1.5">
-              {activeTasks.map((task) => (
-                <li
-                  key={task.taskId}
-                  className="rounded-full bg-background-secondary px-2 py-0.5 text-[11px]"
-                >
-                  {task.taskName}: {task.state}
-                </li>
-              ))}
-            </ul>
-          )}
-          {candidate && (
-            <div className="mt-2 rounded-lg border border-border bg-background-secondary/50 px-2.5 py-2 text-xs">
-              <p className="font-medium">
-                Candidate {candidate.id.slice(0, 8)} · {candidate.state}
+          {!status && !error && <p className="text-foreground-muted">Loading delivery status…</p>}
+          {status && (
+            <>
+              <p className="text-tiny text-foreground-passive tabular-nums">
+                {status.enabled
+                  ? `Generation ${status.generation} · ${activeTasks.length} enrolled tasks${
+                      withdrawnCount > 0 ? ` · ${withdrawnCount} withdrawn` : ''
+                    }`
+                  : 'The durable project coordinator is not enabled.'}
               </p>
-              <p className="mt-1 text-foreground-muted">
-                {candidate.included.map((task) => task.taskName).join(', ') ||
-                  'No included changes'}
-              </p>
-              {!candidate.eligible && (
-                <p className="mt-1 text-amber-700 dark:text-amber-300">
-                  New project work made this candidate stale.
+              {status.targetInstallGate && (
+                <p className="text-foreground-warning">
+                  Candidate {status.targetInstallGate.candidateId.slice(0, 8)} owns the local
+                  install target. New Maestro sessions are paused until it completes.
                 </p>
               )}
-              {(candidate.error ||
-                candidate.validation?.error ||
-                (candidate.state === 'blocked' && status.lastError)) && (
-                <p className="mt-1 text-red-600 dark:text-red-300">
-                  {candidate.error ?? candidate.validation?.error ?? status.lastError}
-                </p>
+              {activeTasks.length > 0 && (
+                <ul className="flex flex-wrap gap-1.5">
+                  {activeTasks.map((task) => (
+                    <li
+                      key={task.taskId}
+                      className="rounded-full bg-surface-emphasis px-2 py-0.5 text-tiny text-foreground-muted"
+                    >
+                      <span className="text-foreground">{task.taskName}</span>: {task.state}
+                    </li>
+                  ))}
+                </ul>
               )}
-              {candidate.error?.startsWith('Integration conflict in ') && (
-                <p className="mt-1 text-foreground-muted">
-                  Resolve and commit in <code className="break-all">{candidate.worktreePath}</code>,
-                  then resume integration.
-                </p>
-              )}
-              {['rolling-back', 'recovery-required'].includes(candidate.state) &&
-                candidate.error && (
-                  <p className="mt-1 text-amber-700 dark:text-amber-300">
-                    The update worker stopped before recovery was verified. New sessions remain
-                    paused; do not start agents. Close Maestro normally if it is still open, and
-                    keep the install journal and recovery folders intact while resolving the
-                    displayed error.
+              {candidate && (
+                <div className="space-y-1 rounded-lg bg-surface-emphasis px-3 py-2.5">
+                  <p className="font-medium text-foreground">
+                    Candidate {candidate.id.slice(0, 8)} · {candidate.state}
                   </p>
-                )}
-              {candidate.state === 'validated' && (
-                <p className="mt-1 flex items-center gap-1 text-green-700 dark:text-green-300">
-                  <ShieldCheck className="size-3.5" /> Windows package hashes recorded
-                </p>
-              )}
-              {candidate.githubBackup && (
-                <p className="mt-1 text-foreground-muted">
-                  GitHub backup: {candidate.githubBackup.state}
-                  {candidate.githubBackup.error ? ` · ${candidate.githubBackup.error}` : ''}
-                </p>
-              )}
-              {candidate.state === 'applying' && (
-                <div className="mt-1 flex items-center gap-2 text-amber-700 dark:text-amber-300">
-                  <p className="flex-1">
-                    Install worker is waiting. Quit Maestro normally when you are ready to apply it.
+                  <p className="text-foreground-muted">
+                    {candidate.included.map((task) => task.taskName).join(', ') ||
+                      'No included changes'}
                   </p>
-                  <ActionButton
-                    disabled={busy}
-                    onClick={() => void run('cancel-install', candidate.id)}
-                  >
-                    Cancel install
-                  </ActionButton>
+                  {!candidate.eligible && (
+                    <p className="text-foreground-warning">
+                      New project work made this candidate stale.
+                    </p>
+                  )}
+                  {(candidate.error ||
+                    candidate.validation?.error ||
+                    (candidate.state === 'blocked' && status.lastError)) && (
+                    <p className="text-foreground-error">
+                      {candidate.error ?? candidate.validation?.error ?? status.lastError}
+                    </p>
+                  )}
+                  {candidate.error?.startsWith('Integration conflict in ') && (
+                    <p className="text-foreground-muted">
+                      Resolve and commit in{' '}
+                      <code className="rounded-xs bg-surface-hover px-1 font-mono break-all">
+                        {candidate.worktreePath}
+                      </code>
+                      , then resume integration.
+                    </p>
+                  )}
+                  {['rolling-back', 'recovery-required'].includes(candidate.state) &&
+                    candidate.error && (
+                      <p className="text-foreground-warning">
+                        The update worker stopped before recovery was verified. New sessions remain
+                        paused; do not start agents. Close Maestro normally if it is still open, and
+                        keep the install journal and recovery folders intact while resolving the
+                        displayed error.
+                      </p>
+                    )}
+                  {candidate.state === 'validated' && (
+                    <p className="flex items-center gap-1.5 text-foreground-muted">
+                      <ShieldCheck aria-hidden className="size-3.5 text-foreground-passive" />
+                      Windows package hashes recorded
+                    </p>
+                  )}
+                  {candidate.githubBackup && (
+                    <p className="text-foreground-muted">
+                      GitHub backup: {candidate.githubBackup.state}
+                      {candidate.githubBackup.error ? ` · ${candidate.githubBackup.error}` : ''}
+                    </p>
+                  )}
+                  {candidate.state === 'applying' && (
+                    <div className="flex items-center gap-3 pt-0.5">
+                      <p className="flex-1 text-foreground-warning">
+                        Install worker is waiting. Quit Maestro normally when you are ready to apply
+                        it.
+                      </p>
+                      <ActionButton
+                        disabled={busy}
+                        onClick={() => void run('cancel-install', candidate.id)}
+                      >
+                        Cancel install
+                      </ActionButton>
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
-          )}
-          {status.githubBackups.length > 0 && (
-            <ul className="mt-2 space-y-1 rounded-lg border border-border bg-background-secondary/50 px-2.5 py-2 text-xs">
-              {status.githubBackups.map((backup) => (
-                <li key={backup.candidateId} className="flex items-center gap-2">
-                  <span className="min-w-0 flex-1">
-                    GitHub backup pending Â· {backup.candidateId.slice(0, 8)}
-                    {backup.error ? ` Â· ${backup.error}` : ''}
-                  </span>
+              {status.githubBackups.length > 0 && (
+                <ul className="space-y-1 rounded-lg bg-surface-emphasis px-3 py-2.5">
+                  {status.githubBackups.map((backup) => (
+                    <li key={backup.candidateId} className="flex items-center gap-3">
+                      <span className="min-w-0 flex-1 text-foreground-muted">
+                        GitHub backup pending · {backup.candidateId.slice(0, 8)}
+                        {backup.error ? ` · ${backup.error}` : ''}
+                      </span>
+                      <ActionButton
+                        disabled={busy}
+                        onClick={() => void run('push-backup', backup.candidateId)}
+                      >
+                        Push
+                      </ActionButton>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-1">
+                {(!candidate ||
+                  !candidate.eligible ||
+                  [
+                    'installed',
+                    'cancelled',
+                    'rolled-back',
+                    'integrated',
+                    'validated',
+                    'promoted',
+                  ].includes(candidate.state) ||
+                  (candidate.state === 'blocked' &&
+                    !candidate.error?.startsWith('Integration conflict in '))) && (
+                  <ActionButton primary disabled={busy} onClick={() => void runUpdate()}>
+                    {busy ? (stage ?? 'Updating…') : 'Update Maestro'}
+                  </ActionButton>
+                )}
+                {candidate?.state === 'blocked' &&
+                  candidate.error?.startsWith('Integration conflict in ') && (
+                    <ActionButton primary disabled={busy} onClick={() => void run('resume')}>
+                      Resume resolved integration
+                    </ActionButton>
+                  )}
+                {candidate?.state === 'promoted' && (
                   <ActionButton
                     disabled={busy}
-                    onClick={() => void run('push-backup', backup.candidateId)}
+                    onClick={() => void run('cancel-candidate', candidate.id)}
                   >
-                    Push
+                    Cancel install candidate
                   </ActionButton>
-                </li>
-              ))}
-            </ul>
+                )}
+                {candidate?.state === 'installed' &&
+                  candidate.health?.previousBuild?.deliveryProtocol === 1 && (
+                    <ActionButton disabled={busy} onClick={() => void run('rollback')}>
+                      Roll back local install
+                    </ActionButton>
+                  )}
+              </div>
+            </>
           )}
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {(!candidate ||
-              !candidate.eligible ||
-              [
-                'installed',
-                'cancelled',
-                'rolled-back',
-                'integrated',
-                'validated',
-                'promoted',
-              ].includes(candidate.state) ||
-              (candidate.state === 'blocked' &&
-                !candidate.error?.startsWith('Integration conflict in '))) && (
-              <ActionButton disabled={busy} onClick={() => void runUpdate()}>
-                {busy ? (stage ?? 'Updating…') : 'Update Maestro'}
-              </ActionButton>
-            )}
-            {candidate?.state === 'blocked' &&
-              candidate.error?.startsWith('Integration conflict in ') && (
-                <ActionButton disabled={busy} onClick={() => void run('resume')}>
-                  Resume resolved integration
-                </ActionButton>
-              )}
-            {candidate?.state === 'promoted' && (
-              <ActionButton
-                disabled={busy}
-                onClick={() => void run('cancel-candidate', candidate.id)}
-              >
-                Cancel install candidate
-              </ActionButton>
-            )}
-            {candidate?.state === 'installed' &&
-              candidate.health?.previousBuild?.deliveryProtocol === 1 && (
-                <ActionButton disabled={busy} onClick={() => void run('rollback')}>
-                  Roll back local install
-                </ActionButton>
-              )}
-          </div>
-        </>
-      )}
-    </section>
+        </div>
+      </HudCard>
+    </div>
   );
 });
 
+/** The card's move is a primary button; everything else a quiet text action. */
 function ActionButton({
   children,
   disabled,
+  primary = false,
   onClick,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   disabled: boolean;
+  primary?: boolean;
   onClick(): void;
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant={primary ? 'primary' : 'text'}
+      size={primary ? 'sm' : 'xs'}
       disabled={disabled}
       onClick={onClick}
-      className={cn(
-        'rounded-md border border-border px-2.5 py-1.5 text-xs text-foreground hover:bg-background-secondary disabled:cursor-not-allowed disabled:opacity-50'
-      )}
+      className="shrink-0"
     >
       {children}
-    </button>
+    </Button>
   );
 }

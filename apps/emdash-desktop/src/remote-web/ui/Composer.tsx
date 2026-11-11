@@ -1,4 +1,4 @@
-import { ArrowUp, Mic } from 'lucide-react';
+import { ArrowUp, Mic, Square } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { appendDictation } from '../lib/voice-logic';
@@ -72,7 +72,7 @@ export const Composer = observer(function Composer({
         event.preventDefault();
         void send();
       }}
-      className="composer pb-safe-or-2 flex items-end gap-2 px-3 pt-1"
+      className="composer pb-safe-or-2 flex items-end gap-1.5 px-3 pt-1"
     >
       <label className="sr-only" htmlFor={`composer-${draftKey}`}>
         Message the agent
@@ -94,7 +94,7 @@ export const Composer = observer(function Composer({
         autoCapitalize="sentences"
         autoComplete="off"
         enterKeyHint="enter"
-        className="no-scrollbar border-line-strong bg-surface text-fg placeholder:text-fg-passive focus:border-focus focus:ring-focus/25 min-h-11 min-w-0 flex-1 resize-none rounded-[22px] border px-4 py-[10px] leading-[22px] outline-none focus:ring-2"
+        className="field no-scrollbar text-reading min-h-11 min-w-0 flex-1 resize-none rounded-lg px-3.5 py-2.5"
       />
       <DictateButton
         phase={dictation}
@@ -114,14 +114,14 @@ export const Composer = observer(function Composer({
         // Sending must not dismiss the on-screen keyboard.
         onMouseDown={(event) => event.preventDefault()}
         className={cx(
-          'flex size-11 shrink-0 items-center justify-center rounded-full transition-[background-color,transform,opacity] duration-150 active:scale-95',
-          canSend || sending ? 'bg-primary text-primary-fg' : 'bg-surface-2 text-fg-passive'
+          'flex size-11 shrink-0 items-center justify-center rounded-full transition-colors duration-150',
+          canSend || sending ? 'bg-primary text-primary-foreground' : 'text-foreground-passive'
         )}
       >
         {sending ? (
           <Spinner />
         ) : (
-          <ArrowUp className="size-5" strokeWidth={2.5} aria-hidden="true" />
+          <ArrowUp className="size-5" strokeWidth={2.25} aria-hidden="true" />
         )}
       </button>
     </form>
@@ -153,7 +153,7 @@ function DictateButton({
       {phase === 'recording' ? (
         <span
           aria-hidden="true"
-          className="bg-danger/30 absolute inset-0 rounded-full transition-transform duration-100"
+          className="absolute inset-0 rounded-full bg-accent/25 motion-safe:transition-transform motion-safe:duration-100"
           style={{ transform: `scale(${1.08 + level * 0.4})` }}
         />
       ) : null}
@@ -167,16 +167,18 @@ function DictateButton({
         onMouseDown={(event) => event.preventDefault()}
         onClick={phase === 'transcribing' ? onCancel : onPress}
         className={cx(
-          'relative flex size-11 items-center justify-center rounded-full transition-[background-color,transform,opacity] duration-150 active:scale-95 disabled:opacity-40',
+          'relative flex size-11 items-center justify-center rounded-full transition-colors duration-150 disabled:opacity-40',
           recording
-            ? 'bg-danger text-white'
-            : 'text-fg-muted hover:bg-surface-2 active:bg-surface-3'
+            ? 'bg-foreground text-foreground-inverse'
+            : 'text-foreground-muted hover:bg-surface-hover hover:text-foreground active:bg-surface-hover'
         )}
       >
         {phase === 'transcribing' ? (
           <Spinner />
+        ) : recording ? (
+          <Square className="size-3.5 fill-current" aria-hidden="true" />
         ) : (
-          <Mic className="size-[21px]" aria-hidden="true" />
+          <Mic className="size-5" aria-hidden="true" />
         )}
       </button>
     </span>

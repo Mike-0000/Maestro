@@ -1,8 +1,8 @@
 import { normalizeExclusionPatterns } from '@emdash/core/primitives/exclusion-policy/api';
-import { SettingsCard } from '@emdash/ui/react/patterns';
-import { Field, Input, Separator, Switch, Textarea, toast } from '@emdash/ui/react/primitives';
+import { SettingsRow, SettingsSection } from '@emdash/ui/react/patterns';
+import { Input, Switch, Textarea, toast } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { detectPlatformContext } from '@core/primitives/keybindings/api';
 import { getMachinesStore } from '../../contributions/app-stores';
 import { useHostSettings } from '../use-host-settings';
@@ -34,6 +34,12 @@ export const HostSettingsCard = observer(function HostSettingsCard({
   const [editing, setEditing] = useState<'shellSetup' | 'worktreeRoot' | 'watcherExclude' | null>(
     null
   );
+  const fieldId = useId();
+  const shellSetupId = `${fieldId}-shell-setup`;
+  const worktreeRootId = `${fieldId}-worktree-root`;
+  const tmuxId = `${fieldId}-tmux`;
+  const syncId = `${fieldId}-sync`;
+  const watcherId = `${fieldId}-watcher`;
 
   const watcherExcludeStored = settings?.watcherExclude?.join('\n') ?? '';
   useEffect(() => {
@@ -88,47 +94,53 @@ export const HostSettingsCard = observer(function HostSettingsCard({
   const disabled = isLoading || settings === undefined;
 
   return (
-    <SettingsCard>
-      <Field.Root>
-        <Field.Label>Host defaults</Field.Label>
-        <Field.Description>
-          Machine-level defaults applied to workspaces on this host. Stored in the host&apos;s
-          emdash data directory; edits made to the file directly show up here live.
-        </Field.Description>
-      </Field.Root>
-      <div className="mt-4 flex flex-col gap-4">
-        {parseError ? (
-          <div className="text-sm text-foreground-error">
-            The host settings file could not be parsed; defaults are in effect until it is fixed.
-          </div>
-        ) : null}
+    <SettingsSection
+      title="Host defaults"
+      description="Defaults for workspaces on this host, kept in its data folder. Edits made to that file show up here live."
+    >
+      {parseError ? (
+        <p role="alert" className="flex items-start gap-2 text-xs text-foreground-error">
+          <span aria-hidden className="mt-1.5 size-1.5 shrink-0 rounded-full bg-foreground-error" />
+          The host settings file could not be read, so the defaults apply until it is fixed.
+        </p>
+      ) : null}
 
-        <Field.Root>
-          <Field.Label>Shell setup</Field.Label>
-          <Field.Description className="text-foreground-muted">
-            Shell commands prepended to every lifecycle script and terminal session on this host
-            (nvm, mise, …). A workspace&apos;s .emdash.json shellSetup overrides this.
-          </Field.Description>
+      <SettingsRow
+        layout="stacked"
+        htmlFor={shellSetupId}
+        label="Shell setup"
+        description={
+          <>
+            Commands run before every lifecycle script and terminal session on this host (nvm, mise,
+            …). A workspace&apos;s <code className={CODE}>.emdash.json</code>{' '}
+            <code className={CODE}>shellSetup</code> overrides this.
+          </>
+        }
+        control={
           <Textarea
+            id={shellSetupId}
             placeholder={'nvm use\nsource .envrc'}
+            spellCheck={false}
+            className="font-mono text-xs"
             value={shellSetup}
             disabled={disabled}
             onFocus={() => setEditing('shellSetup')}
             onChange={(event) => setShellSetup(event.target.value)}
             onBlur={(event) => commitText('shellSetup', event.target.value)}
           />
-        </Field.Root>
+        }
+      />
 
-        <Separator />
-
-        <Field.Root>
-          <Field.Label>Worktree root</Field.Label>
-          <Field.Description className="text-foreground-muted">
-            Default directory new worktrees are created under on this host. Project settings can
-            override it per project.
-          </Field.Description>
+      <SettingsRow
+        layout="stacked"
+        htmlFor={worktreeRootId}
+        label="Worktree root"
+        description="Where new worktrees are created on this host. A project's settings can choose another folder."
+        control={
           <Input
+            id={worktreeRootId}
             placeholder="~/emdash/worktrees"
+            spellCheck={false}
             value={worktreeRoot}
             disabled={disabled}
             onFocus={() => setEditing('worktreeRoot')}
@@ -138,61 +150,58 @@ export const HostSettingsCard = observer(function HostSettingsCard({
               if (event.key === 'Enter') event.currentTarget.blur();
             }}
           />
-        </Field.Root>
+        }
+      />
 
-        <Separator />
-
-        <Field.Root orientation="horizontal">
-          <div className="flex flex-1 flex-col gap-1">
-            <Field.Label>Enable tmux by default</Field.Label>
-            <Field.Description className="text-foreground-muted">
-              Default tmux preference for sessions on this host. Project settings can override it
-              per project.
-            </Field.Description>
-          </div>
+      <SettingsRow
+        htmlFor={tmuxId}
+        label="Enable tmux by default"
+        description={
+          tmuxSupported
+            ? 'Run sessions on this host inside tmux. A project can override it.'
+            : 'tmux is not available for Windows sessions. Your saved preference is kept.'
+        }
+        control={
           <Switch
+            id={tmuxId}
             checked={tmuxSupported ? (settings?.tmux ?? false) : false}
             disabled={disabled || !tmuxSupported}
             onCheckedChange={(checked) => void commit({ tmux: checked })}
           />
-          {!tmuxSupported ? (
-            <div className="text-sm text-foreground-muted">
-              tmux is unavailable for Windows sessions. Your stored preference is preserved.
-            </div>
-          ) : null}
-        </Field.Root>
+        }
+      />
 
-        {machineId ? (
-          <>
-            <Separator />
-
-            <Field.Root orientation="horizontal">
-              <div className="flex flex-1 flex-col gap-1">
-                <Field.Label>Sync local settings</Field.Label>
-                <Field.Description className="text-foreground-muted">
-                  Mirror this machine&apos;s local settings to this host (currently watcher
-                  exclusions). While on, the host&apos;s values follow this machine&apos;s; the last
-                  synced values remain when turned off.
-                </Field.Description>
-              </div>
+      {machineId ? (
+        <>
+          <SettingsRow
+            htmlFor={syncId}
+            label="Sync local settings"
+            description="Mirror this computer's local settings (for now, watcher exclusions) to this host. While on, the host follows them; turning it off keeps the last synced values."
+            control={
               <Switch
+                id={syncId}
                 checked={syncLocalSettings}
                 disabled={disabled || machine === undefined}
                 onCheckedChange={(checked) => void toggleSyncLocalSettings(checked)}
               />
-            </Field.Root>
+            }
+          />
 
-            <Separator />
-
-            <Field.Root>
-              <Field.Label>Watcher exclusions</Field.Label>
-              <Field.Description className="text-foreground-muted">
+          <SettingsRow
+            layout="stacked"
+            htmlFor={watcherId}
+            label="Watcher exclusions"
+            description={
+              <>
                 {syncLocalSettings
-                  ? 'Synced from this machine\u2019s local settings. '
-                  : 'Folders the file watcher skips on this host for the editor, Git status, and workspace tracking, one pattern per line. Leave empty to use the default exclusions; watching dependency or build folders can use tens of thousands of native watches. '}
+                  ? 'Synced from this computer’s local settings. '
+                  : 'Folders the file watcher skips on this host, one pattern per line. Leave it empty for the default exclusions; watching dependency or build folders can use tens of thousands of native watches. '}
                 Changes apply the next time the workspace server restarts.
-              </Field.Description>
+              </>
+            }
+            control={
               <Textarea
+                id={watcherId}
                 placeholder="One pattern per line (defaults apply when empty)"
                 rows={4}
                 spellCheck={false}
@@ -210,10 +219,12 @@ export const HostSettingsCard = observer(function HostSettingsCard({
                   if (!syncLocalSettings) commitWatcherExclude(event.target.value);
                 }}
               />
-            </Field.Root>
-          </>
-        ) : null}
-      </div>
-    </SettingsCard>
+            }
+          />
+        </>
+      ) : null}
+    </SettingsSection>
   );
 });
+
+const CODE = 'rounded-xs bg-surface-emphasis px-1 font-mono text-tiny text-foreground';

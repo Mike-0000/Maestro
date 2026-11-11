@@ -3,7 +3,7 @@ import type { IntegrationProviderDescriptor } from '../contract';
 
 export const ISSUE_FEATURE_LABELS: Record<string, string> = {
   issues: 'Issues',
-  pullRequests: 'Pull Requests',
+  pullRequests: 'Pull requests',
   repositories: 'Repositories',
 };
 

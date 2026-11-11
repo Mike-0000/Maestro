@@ -1,14 +1,12 @@
 import { Button } from '@emdash/ui/react/primitives';
-import { motion, type Variants } from 'framer-motion';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import YTBanner from '@/assets/images/ytbanner.webp';
+import { motion, useReducedMotion, type Variants } from 'framer-motion';
+import { useCallback, useEffect, useRef } from 'react';
 import { useAppSettingsKey } from '@core/features/settings/api/browser/use-app-settings-key';
 import { confirmCommand } from '@core/features/workbench/contributions/commands';
 import { ChorusMark } from '@core/primitives/app-identity/browser/chorus-logo';
 import { detectPlatformContext, resolveEffectiveChord } from '@core/primitives/keybindings/api';
 import { useChordKeydown } from '@core/primitives/keybindings/browser';
 import { BoundShortcut } from '@core/primitives/keybindings/browser/shortcut';
-import { useTheme } from '@core/primitives/theme/browser';
 
 const SHORTCUT_PRESS_DURATION_MS = 120;
 
@@ -16,22 +14,24 @@ interface WelcomeScreenProps {
   onGetStarted: () => void;
 }
 
+/**
+ * The first screen after setup: the app's mark, one hero line, one sentence on what Maestro
+ * is for, and the one move. Everything sits on the plain content surface; the parts fade in
+ * one after another (a fade only, when the user prefers reduced motion).
+ */
 export function WelcomeScreen({ onGetStarted }: WelcomeScreenProps) {
-  const { effectiveTheme } = useTheme();
   const { value: keyboard } = useAppSettingsKey('keyboard');
   const confirmHotkey = confirmCommand.keybinding
     ? resolveEffectiveChord(confirmCommand.keybinding, keyboard ?? {}, detectPlatformContext())
     : null;
-  const [isShortcutPressed, setIsShortcutPressed] = useState(false);
   const shortcutPressTimeoutRef = useRef<number | null>(null);
+  const reduceMotion = useReducedMotion();
 
   const handleGetStarted = useCallback(() => {
     if (shortcutPressTimeoutRef.current !== null) {
       window.clearTimeout(shortcutPressTimeoutRef.current);
       shortcutPressTimeoutRef.current = null;
     }
-
-    setIsShortcutPressed(false);
     onGetStarted();
   }, [onGetStarted]);
 
@@ -43,7 +43,6 @@ export function WelcomeScreen({ onGetStarted }: WelcomeScreenProps) {
 
       if (shortcutPressTimeoutRef.current !== null) return;
 
-      setIsShortcutPressed(true);
       shortcutPressTimeoutRef.current = window.setTimeout(() => {
         handleGetStarted();
       }, SHORTCUT_PRESS_DURATION_MS);
@@ -66,84 +65,54 @@ export function WelcomeScreen({ onGetStarted }: WelcomeScreenProps) {
     hidden: { opacity: 0 },
     visible: {
       opacity: 1,
-      transition: {
-        staggerChildren: 0.3,
-        delayChildren: 0.7,
-      },
+      transition: { staggerChildren: 0.12, delayChildren: 0.15 },
     },
   };
 
   const itemVariants: Variants = {
-    hidden: { opacity: 0, y: 20 },
+    hidden: { opacity: 0, y: reduceMotion ? 0 : 6 },
     visible: {
       opacity: 1,
       y: 0,
-      transition: {
-        duration: 0.9,
-        ease: [0.25, 0.1, 0.25, 1] as [number, number, number, number], // Properly typed cubic-bezier
-      },
+      transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] },
     },
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background">
-      <div className="absolute right-0 bottom-0 left-0 h-3/5">
-        <div
-          className="absolute inset-0 opacity-40"
-          style={{
-            backgroundImage: `url(${YTBanner})`,
-            backgroundSize: 'cover',
-            backgroundPosition: 'center top',
-            maskImage:
-              'linear-gradient(to bottom, transparent 0%, transparent 30%, rgba(0,0,0,0.4) 60%, rgba(0,0,0,0.8) 100%)',
-            WebkitMaskImage:
-              'linear-gradient(to bottom, transparent 0%, transparent 30%, rgba(0,0,0,0.4) 60%, rgba(0,0,0,0.8) 100%)',
-          }}
-        />
-      </div>
-
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background px-6">
       <motion.div
-        className="relative z-10 flex flex-col items-center justify-center space-y-4 p-8"
+        className="flex max-w-md flex-col items-center text-center"
         variants={containerVariants}
         initial="hidden"
         animate="visible"
       >
-        <motion.div className="rounded-xl shadow-lg shadow-black/10" variants={itemVariants}>
-          <ChorusMark size={60} />
+        <motion.div variants={itemVariants}>
+          <ChorusMark size={56} animated={!reduceMotion} />
         </motion.div>
 
         <motion.h1
-          className="text-lg font-semibold tracking-tight text-foreground"
+          className="mt-8 text-2xl font-medium text-balance text-foreground"
           variants={itemVariants}
         >
-          Welcome.
+          Welcome to Maestro
         </motion.h1>
 
-        <motion.div
+        <motion.p
+          className="mt-3 max-w-sm text-sm leading-relaxed text-balance text-foreground-muted"
           variants={itemVariants}
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.97 }}
-          transition={{ duration: 0.1, ease: 'easeInOut' }}
         >
-          <div
-            className={`transition-transform duration-100 ease-in-out ${
-              isShortcutPressed ? 'scale-[0.97]' : ''
-            }`}
+          Run several coding agents side by side, each on its own branch, and keep track of them by
+          voice or at a glance.
+        </motion.p>
+
+        <motion.div className="mt-8" variants={itemVariants}>
+          <Button
+            variant="primary"
+            onClick={handleGetStarted}
+            kbd={<BoundShortcut command="app.confirm" variant="keycaps" />}
           >
-            <Button
-              variant="primary"
-              onClick={handleGetStarted}
-              size="sm"
-              className={
-                effectiveTheme === 'emdark' ? 'bg-gray-200 text-gray-900 hover:bg-gray-300' : ''
-              }
-            >
-              <span className="flex items-center gap-2">
-                Start shipping
-                <BoundShortcut command="app.confirm" variant="keycaps" />
-              </span>
-            </Button>
-          </div>
+            Get started
+          </Button>
         </motion.div>
       </motion.div>
     </div>

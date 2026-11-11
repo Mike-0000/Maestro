@@ -1,6 +1,6 @@
-import { Button, Dialog, Field, Input } from '@emdash/ui/react/primitives';
+import { Button, Dialog, Field, Input, ModalLayout } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
-import { useCallback, useState } from 'react';
+import { useCallback, useId, useState } from 'react';
 import { getProjectManagerStore } from '@core/features/projects/api/browser/stores/project-selectors';
 import { useModalController } from '@core/manifests/browser/modal-api';
 import { ConfirmButton } from '@core/primitives/keybindings/browser/confirm-button';
@@ -16,6 +16,7 @@ export const RenameProjectModal = observer(function RenameProjectModal({
   currentName,
 }: RenameProjectModalArgs) {
   const { complete, dismiss } = useModalController('renameProjectModal');
+  const nameId = useId();
   const [name, setName] = useState(currentName);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,50 +40,58 @@ export const RenameProjectModal = observer(function RenameProjectModal({
   }, [isValid, isSubmitting, projectId, trimmedName, complete]);
 
   return (
-    <>
-      <Dialog.Header showCloseButton={false}>
-        <Dialog.Title>Rename project</Dialog.Title>
-      </Dialog.Header>
-      <Dialog.Body className="pt-0">
-        <Field.Group>
-          <Field.Root>
-            <Field.Label>Project name</Field.Label>
-            <Input
-              value={name}
-              onChange={(e) => {
-                setName(e.target.value);
-                setError(null);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void handleSubmit();
-              }}
-              autoFocus
-            />
-            {isEmpty && (
-              <p className="text-destructive mt-1 text-xs">Project name cannot be empty.</p>
-            )}
-            {error && <p className="text-destructive mt-1 text-xs">{error}</p>}
-          </Field.Root>
-        </Field.Group>
+    <ModalLayout
+      title="Rename project"
+      description="Only the name in Maestro changes; the folder on disk keeps its name."
+      actions={
+        <>
+          <Button variant="ghost" onClick={dismiss}>
+            Cancel
+          </Button>
+          <ConfirmButton
+            variant="primary"
+            onClick={() => void handleSubmit()}
+            disabled={!isValid || isSubmitting}
+          >
+            {isSubmitting ? 'Renaming…' : 'Rename'}
+          </ConfirmButton>
+        </>
+      }
+    >
+      <Dialog.Body>
+        <Field.Root invalid={isEmpty || error !== null}>
+          <Field.Label htmlFor={nameId}>Project name</Field.Label>
+          <Input
+            id={nameId}
+            value={name}
+            aria-invalid={isEmpty || error !== null ? true : undefined}
+            onChange={(e) => {
+              setName(e.target.value);
+              setError(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void handleSubmit();
+            }}
+            autoFocus
+          />
+          {isEmpty && (
+            <p role="alert" className="text-xs text-foreground-error">
+              Project name cannot be empty.
+            </p>
+          )}
+          {error && (
+            <p role="alert" className="text-xs text-foreground-error">
+              {error}
+            </p>
+          )}
+        </Field.Root>
       </Dialog.Body>
-      <Dialog.Footer>
-        <Button variant="secondary" onClick={dismiss}>
-          Cancel
-        </Button>
-        <ConfirmButton
-          variant="primary"
-          onClick={() => void handleSubmit()}
-          disabled={!isValid || isSubmitting}
-        >
-          {isSubmitting ? 'Renaming...' : 'Rename'}
-        </ConfirmButton>
-      </Dialog.Footer>
-    </>
+    </ModalLayout>
   );
 });
 
 export const renameProjectModal = defineModal<void>()({
   id: 'renameProjectModal',
   component: RenameProjectModal,
-  size: 'xs',
+  size: 'sm',
 });

@@ -17,7 +17,7 @@ export const icon = style({
   position: 'absolute',
   left: '0.625rem',
   flexShrink: 0,
-  color: vars.foregroundMuted,
+  color: vars.foregroundPassive,
 });
 export const iconWithoutInset = style({ left: 0 });
 globalStyle(`${icon} svg:not([class*='size-'])`, { width: '0.875rem', height: '0.875rem' });
@@ -32,7 +32,7 @@ export const shortcut = style({
   display: 'inline-flex',
   alignItems: 'center',
   gap: tokenVars.space0_5,
-  color: vars.foregroundMuted,
+  color: vars.foregroundPassive,
 });
 
 /** Hide the shortcut hint once the user has typed so it behaves as a placeholder adornment. */
@@ -53,14 +53,14 @@ export const clearButton = style({
   borderRadius: tokenVars.radiusSm,
   border: 'none',
   backgroundColor: 'transparent',
-  color: vars.foregroundMuted,
+  color: vars.foregroundPassive,
   cursor: 'pointer',
   transition: 'color 150ms, background-color 150ms',
   selectors: {
     '&:hover': { backgroundColor: vars.surfaceHover, color: vars.foreground },
     '&:focus-visible': {
-      outline: 'none',
-      boxShadow: `0 0 0 2px ${vars.borderPrimary}`,
+      outline: `2px solid ${vars.focusRing}`,
+      outlineOffset: '1px',
     },
   },
 });

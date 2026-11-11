@@ -4,8 +4,8 @@ import { SetupStepPreview } from './setup-step-preview';
 export function CheckoutPrPanel({ workspaceConfig }: WorkspacePanelProps) {
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-xs text-foreground-muted">
-        The PR branch will be fetched and checked out in a dedicated worktree. No new branch will be
+      <p className="text-xs text-pretty text-foreground-muted">
+        The pull request's branch is fetched and checked out in its own worktree. No new branch is
         created.
       </p>
       <SetupStepPreview steps={workspaceConfig.setupSteps} />

@@ -198,9 +198,9 @@ describe('classifyProjectAvailability', () => {
     ['unsupported-platform', 'Orion is not supported', ['Open Machines'], ['Open Diagnostics']],
     [
       'protocol-upgrade-client',
-      'Update Emdash to use this Project',
-      ['Update Emdash'],
-      ['Update Emdash'],
+      'Update Maestro to use this Project',
+      ['Update Maestro'],
+      ['Update Maestro'],
     ],
     [
       'protocol-upgrade-server',
@@ -266,7 +266,7 @@ describe('classifyProjectAvailability', () => {
     ['artifact-download-failed', 'Local runtime download failed'],
     ['install-failed', 'Local runtime installation failed'],
     ['unsupported-platform', 'This platform is not supported'],
-    ['protocol-upgrade-client', 'Update Emdash to use this Project'],
+    ['protocol-upgrade-client', 'Update Maestro to use this Project'],
     ['protocol-upgrade-server', 'Update the local runtime'],
     ['runtime-unavailable', 'Local runtime is unavailable'],
     ['not-configured', 'Local runtime is not configured'],

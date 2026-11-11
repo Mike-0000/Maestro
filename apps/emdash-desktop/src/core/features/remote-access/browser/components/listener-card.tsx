@@ -1,4 +1,4 @@
-import { Pill } from '@emdash/ui/react/components';
+import { StateGlyph } from '@emdash/ui/react/components';
 import { SettingsRow, SettingsSection } from '@emdash/ui/react/patterns';
 import { Switch, toast } from '@emdash/ui/react/primitives';
 import { useState } from 'react';
@@ -10,7 +10,11 @@ import { errorMessage } from './remote-access-row';
 
 const SWITCH_ID = 'remote-access-enabled';
 
-/** The main switch, with the listener's state and what it does and does not expose. */
+/**
+ * The main switch, with the listener's state and what it does and does not expose. The state is
+ * one line of words (full strength while listening); only a listener that should run and does
+ * not is coloured, with the error mark.
+ */
 export function ListenerCard({ status }: { status: RemoteAccessStatus | undefined }) {
   // The requested value while `configure` is in flight; the live status takes over after.
   const [pending, setPending] = useState<boolean | null>(null);
@@ -33,31 +37,19 @@ export function ListenerCard({ status }: { status: RemoteAccessStatus | undefine
     <SettingsSection>
       <SettingsRow
         htmlFor={SWITCH_ID}
-        label={
-          <span className="flex items-center gap-2">
-            Allow remote access
-            {line.tone === 'success' ? (
-              <Pill variant="success" dot>
-                On
-              </Pill>
-            ) : line.tone === 'error' ? (
-              <Pill variant="error" dot>
-                Not running
-              </Pill>
-            ) : null}
-          </span>
-        }
+        label="Allow remote access"
         description={
           <span className="flex flex-col gap-1">
             <span
               role="status"
               className={cn(
-                'tabular-nums',
+                'inline-flex items-center gap-1.5 tabular-nums',
                 line.tone === 'success' && 'text-foreground',
-                line.tone === 'error' && 'text-foreground-destructive'
+                line.tone === 'error' && 'text-foreground-error'
               )}
             >
-              {line.text}
+              {line.tone === 'error' ? <StateGlyph state="error" size="sm" /> : null}
+              {line.tone === 'error' ? `Not running: ${line.text}` : line.text}
             </span>
             <span>
               The listener only accepts connections from this computer. A private network such as

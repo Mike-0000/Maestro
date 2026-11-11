@@ -1,7 +1,7 @@
 import '@emdash/ui/style.css';
-import { Button, Dialog } from '@emdash/ui/react/primitives';
+import { Button, Dialog, ModalLayout } from '@emdash/ui/react/primitives';
 import { page } from '@vitest/browser/context';
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
@@ -56,6 +56,48 @@ describe('Dialog layout', () => {
     expect(footer).not.toBeNull();
     expect(viewport!.scrollHeight).toBeGreaterThan(viewport!.clientHeight);
     expect(viewport!.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+      footer!.getBoundingClientRect().top + 0.5
+    );
+    expect(popup!.scrollHeight).toBeLessThanOrEqual(popup!.clientHeight);
+  });
+
+  it('scrolls a ModalLayout middle that grows after opening instead of running under the footer', async () => {
+    await page.viewport(1024, 600);
+    let grow: () => void = () => {};
+    function Growing() {
+      const [lines, setLines] = useState(2);
+      grow = () => setLines(120);
+      return (
+        <ModalLayout title="Growing dialog" actions={<Button>Footer action</Button>}>
+          <Dialog.Body>
+            {Array.from({ length: lines }, (_, index) => (
+              <p key={index}>Dialog body line {index + 1}</p>
+            ))}
+          </Dialog.Body>
+        </ModalLayout>
+      );
+    }
+    await act(async () => {
+      root.render(
+        <Dialog.Root open>
+          <Dialog.Content size="lg">
+            <Growing />
+          </Dialog.Content>
+        </Dialog.Root>
+      );
+    });
+    await act(async () => grow());
+    // Let the ResizeObserver run and the height transition settle.
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 400)));
+
+    const popup = document.querySelector<HTMLElement>('[data-slot="dialog-content"]');
+    const middle = popup?.querySelector<HTMLElement>('[data-slot="animated-height"]');
+    const footer = popup?.querySelector<HTMLElement>('[data-slot="dialog-footer"]');
+    expect(middle).not.toBeNull();
+    expect(footer).not.toBeNull();
+    expect(middle!.hasAttribute('data-overflowing')).toBe(true);
+    expect(middle!.scrollHeight).toBeGreaterThan(middle!.clientHeight);
+    expect(middle!.getBoundingClientRect().bottom).toBeLessThanOrEqual(
       footer!.getBoundingClientRect().top + 0.5
     );
     expect(popup!.scrollHeight).toBeLessThanOrEqual(popup!.clientHeight);

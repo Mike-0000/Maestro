@@ -15,7 +15,9 @@
  */
 
 import { useCommands } from '@components/contexts/CommandsContext';
-import { GenericFileIcon, IconError } from '@components/primitives/icons';
+import { activateOnKey } from '@components/primitives/activate-on-key';
+import { GenericFileIcon } from '@components/primitives/icons';
+import { StatusMark } from '@components/primitives/StatusMark';
 import { resolveFileIconClass } from '@lib/file-icons';
 import { Show } from 'solid-js';
 import type { ChatResourceLink, ResourceTarget } from '@/model';
@@ -27,7 +29,6 @@ import {
   sizeText,
   titleText,
 } from './resource-link.css';
-import { vars } from '@styles/theme.css';
 
 // ── Secondary label ─────────────────────────────────────────────────────────
 
@@ -90,7 +91,9 @@ export function ResourceLink(props: ResourceLinkProps) {
       class={isClickable() ? rowClickable : rowStatic}
       style={{ height: '100%' }}
       onClick={isClickable() ? handleClick : undefined}
+      onKeyDown={isClickable() ? activateOnKey : undefined}
       role={isClickable() ? 'button' : undefined}
+      tabIndex={isClickable() ? 0 : undefined}
     >
       <div class={iconWrap}>
         <Show when={iconName()} fallback={<GenericFileIcon />}>
@@ -102,15 +105,7 @@ export function ResourceLink(props: ResourceLinkProps) {
       <Show when={props.item.size !== undefined}>
         <span class={sizeText}>{formatSize(props.item.size!)}</span>
       </Show>
-      <Show when={props.item.status === 'error'}>
-        <span
-          style={{ display: 'inline-flex', 'vertical-align': 'middle', color: vars.fgError }}
-          title={props.item.error ?? 'Failed'}
-          aria-label="error"
-        >
-          <IconError />
-        </span>
-      </Show>
+      <StatusMark error={props.item.status === 'error'} errorTitle={props.item.error} />
     </div>
   );
 }

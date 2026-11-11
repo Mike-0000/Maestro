@@ -10,8 +10,9 @@ The package ships a single entry point:
 - `@emdash/chat-ui` — the three factory functions `createChatContext`,
   `createChatState`, and `createChatView`.
 
-The React wrapper (`ChatTranscript`) and theme adapter (`chat-theme.css`) now
-live in `@emdash/ui/react/chat-ui`. See that package for React integration docs.
+The React wrapper (`ChatTranscript`) lives in `@emdash/ui/react/chat-ui`. See that package for
+React integration docs. The transcript's default theme reads the host's `--em-*` tokens, so a
+host that loads `@emdash/ui/style.css` needs no theme adapter.
 
 Everything below is the supported surface. Internals (components, layout
 engine, stores) are not exported and may change without notice.

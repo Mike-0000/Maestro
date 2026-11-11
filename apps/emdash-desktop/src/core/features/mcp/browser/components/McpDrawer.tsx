@@ -4,9 +4,8 @@ import type {
   McpProvidersResponse,
   McpServer,
 } from '@emdash/core/primitives/mcp/api';
-import { Button, Field, Input, MicroLabel, Select, Sheet } from '@emdash/ui/react/primitives';
+import { Button, Field, Input, Select, Sheet, Textarea } from '@emdash/ui/react/primitives';
 import { useForm } from '@tanstack/react-form';
-import { Trash2 } from 'lucide-react';
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import { modalScope } from '@core/features/workbench/contributions/scopes';
 import { confirmRegistry } from '@core/primitives/keybindings/browser';
@@ -57,7 +56,7 @@ export const McpDrawer: React.FC<McpDrawerProps> = ({
 
   return (
     <Sheet.Root open={open} onOpenChange={onOpenChange}>
-      <Sheet.Content ref={attachRef} side="right" className="gap-0 p-0">
+      <Sheet.Content ref={attachRef} side="right">
         <ViewScopeInstanceProvider instance={instance}>
           {mode && (
             <McpDrawerContent
@@ -163,183 +162,187 @@ const McpDrawerContent: React.FC<McpDrawerContentProps> = ({
   return (
     <>
       <Sheet.Header>
-        <MicroLabel>MCP Server</MicroLabel>
         <Sheet.Title>
           {isEdit
-            ? 'Edit MCP Server'
+            ? `Edit ${form.state.values.name}`
             : isCatalog
-              ? `Add ${form.state.values.name}`
-              : 'Add Custom MCP Server'}
+              ? `Add ${mode.entry.name}`
+              : 'Add a custom server'}
         </Sheet.Title>
+        <p className="text-sm text-foreground-muted">
+          {isCatalog && mode.entry.description
+            ? mode.entry.description
+            : isEdit
+              ? 'Changes reach every agent it syncs to.'
+              : 'Connect a server that is not in the list. It runs on this computer or at a URL.'}
+        </p>
       </Sheet.Header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-        {isCatalog && mode.entry.description && (
-          <p className="text-muted-foreground mb-4 text-xs">{mode.entry.description}</p>
-        )}
-        <Field.Group>
-          <form.Field name="name">
+      <Sheet.Body>
+        <form.Field name="name">
+          {(field) => (
+            <Field.Root>
+              <Field.Label>Server name</Field.Label>
+              <Input
+                value={field.state.value}
+                onChange={(e) => field.handleChange(e.target.value)}
+                disabled={isCatalog || isEdit}
+                placeholder="my-server"
+                className="font-mono"
+              />
+            </Field.Root>
+          )}
+        </form.Field>
+
+        {!isCatalog && (
+          <form.Field name="transport">
             {(field) => (
               <Field.Root>
-                <Field.Label>Server Name</Field.Label>
-                <Input
+                <Field.Label>Transport</Field.Label>
+                <Select.Root
                   value={field.state.value}
-                  onChange={(e) => field.handleChange(e.target.value)}
-                  disabled={isCatalog || isEdit}
-                  placeholder="my-server"
-                />
+                  onValueChange={(v) => {
+                    const next = v as 'stdio' | 'http';
+                    field.handleChange(next);
+                  }}
+                >
+                  <Select.Trigger appearance="input" className="w-56">
+                    <Select.Value>
+                      {(value: string) => TRANSPORT_LABELS[value as 'stdio' | 'http'] ?? value}
+                    </Select.Value>
+                  </Select.Trigger>
+                  <Select.Content width="trigger">
+                    <Select.Item value="stdio">{TRANSPORT_LABELS.stdio}</Select.Item>
+                    <Select.Item value="http">{TRANSPORT_LABELS.http}</Select.Item>
+                  </Select.Content>
+                </Select.Root>
               </Field.Root>
             )}
           </form.Field>
+        )}
 
-          {!isCatalog && (
-            <form.Field name="transport">
-              {(field) => (
-                <Field.Root>
-                  <Field.Label>Transport</Field.Label>
-                  <Select.Root
-                    value={field.state.value}
-                    onValueChange={(v) => {
-                      const next = v as 'stdio' | 'http';
-                      field.handleChange(next);
-                    }}
-                  >
-                    <Select.Trigger>
-                      <Select.Value />
-                    </Select.Trigger>
-                    <Select.Content>
-                      <Select.Item value="stdio">stdio</Select.Item>
-                      <Select.Item value="http">http</Select.Item>
-                    </Select.Content>
-                  </Select.Root>
-                </Field.Root>
-              )}
-            </form.Field>
-          )}
-
-          <form.Subscribe selector={(state) => state.values.transport}>
-            {(transport) => (
-              <>
-                {transport === 'stdio' && (
-                  <>
-                    <form.Field name="command">
-                      {(field) => (
-                        <Field.Root>
-                          <Field.Label>Command</Field.Label>
-                          <Input
-                            value={field.state.value}
-                            onChange={(e) => field.handleChange(e.target.value)}
-                            disabled={isCatalog}
-                            placeholder="npx"
-                          />
-                        </Field.Root>
-                      )}
-                    </form.Field>
-                    <form.Field name="args">
-                      {(field) => (
-                        <Field.Root>
-                          <Field.Label>Arguments (one per line)</Field.Label>
-                          <textarea
-                            value={field.state.value}
-                            onChange={(e) => field.handleChange(e.target.value)}
-                            disabled={isCatalog}
-                            placeholder={'-y\nmy-mcp-server'}
-                            rows={3}
-                            className="border-input placeholder:text-muted-foreground focus-visible:ring-ring flex w-full rounded-md border bg-background px-3 py-2 text-sm ring-offset-background focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-                          />
-                        </Field.Root>
-                      )}
-                    </form.Field>
-                  </>
-                )}
-
-                {transport === 'http' && (
-                  <form.Field name="url">
+        <form.Subscribe selector={(state) => state.values.transport}>
+          {(transport) => (
+            <>
+              {transport === 'stdio' && (
+                <>
+                  <form.Field name="command">
                     {(field) => (
                       <Field.Root>
-                        <Field.Label>URL</Field.Label>
+                        <Field.Label>Command</Field.Label>
                         <Input
                           value={field.state.value}
                           onChange={(e) => field.handleChange(e.target.value)}
                           disabled={isCatalog}
-                          placeholder="https://mcp.example.com"
+                          placeholder="npx"
+                          className="font-mono"
                         />
                       </Field.Root>
                     )}
                   </form.Field>
-                )}
-              </>
-            )}
-          </form.Subscribe>
+                  <form.Field name="args">
+                    {(field) => (
+                      <Field.Root>
+                        <Field.Label>Arguments</Field.Label>
+                        <Textarea
+                          value={field.state.value}
+                          onChange={(e) => field.handleChange(e.target.value)}
+                          disabled={isCatalog}
+                          placeholder={'-y\nmy-mcp-server'}
+                          rows={3}
+                          className="min-h-20 font-mono text-xs"
+                        />
+                        <Field.Description>One per line.</Field.Description>
+                      </Field.Root>
+                    )}
+                  </form.Field>
+                </>
+              )}
 
-          <form.Field name="envEntries">
-            {(field) => (
-              <KeyValueSection
-                label="Environment Variables"
-                entries={field.state.value}
-                onChange={(entries) => field.handleChange(entries)}
-                addLabel="+ Add env var"
-                makeId={makeId}
-                credentialKeys={credentialKeys}
-                splitEnvPaste
-              />
-            )}
-          </form.Field>
-
-          <form.Subscribe selector={(state) => state.values.transport}>
-            {(transport) =>
-              transport === 'http' && (
-                <form.Field name="headerEntries">
+              {transport === 'http' && (
+                <form.Field name="url">
                   {(field) => (
-                    <KeyValueSection
-                      label="Headers"
-                      entries={field.state.value}
-                      onChange={(entries) => field.handleChange(entries)}
-                      addLabel="+ Add header"
-                      makeId={makeId}
-                      credentialKeys={credentialKeys}
-                    />
+                    <Field.Root>
+                      <Field.Label>URL</Field.Label>
+                      <Input
+                        value={field.state.value}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                        disabled={isCatalog}
+                        placeholder="https://mcp.example.com"
+                        className="font-mono"
+                      />
+                    </Field.Root>
                   )}
                 </form.Field>
-              )
-            }
-          </form.Subscribe>
+              )}
+            </>
+          )}
+        </form.Subscribe>
 
-          <form.Field name="selectedProviders">
-            {(field) => (
-              <SyncToAgentsSection
-                host={host}
-                providers={providers}
-                selectedProviders={field.state.value}
-                onToggle={(id) => {
-                  field.handleChange(
-                    field.state.value.includes(id)
-                      ? field.state.value.filter((value) => value !== id)
-                      : [...field.state.value, id]
-                  );
-                }}
-                onSetAll={(ids) => field.handleChange(ids)}
-              />
-            )}
-          </form.Field>
-        </Field.Group>
-      </div>
+        <form.Field name="envEntries">
+          {(field) => (
+            <KeyValueSection
+              label="Environment variables"
+              entries={field.state.value}
+              onChange={(entries) => field.handleChange(entries)}
+              addLabel="Add a variable"
+              makeId={makeId}
+              credentialKeys={credentialKeys}
+              splitEnvPaste
+            />
+          )}
+        </form.Field>
 
-      <Sheet.Footer className="flex-row items-center justify-between gap-2 sm:flex-row">
+        <form.Subscribe selector={(state) => state.values.transport}>
+          {(transport) =>
+            transport === 'http' && (
+              <form.Field name="headerEntries">
+                {(field) => (
+                  <KeyValueSection
+                    label="Headers"
+                    entries={field.state.value}
+                    onChange={(entries) => field.handleChange(entries)}
+                    addLabel="Add a header"
+                    makeId={makeId}
+                    credentialKeys={credentialKeys}
+                  />
+                )}
+              </form.Field>
+            )
+          }
+        </form.Subscribe>
+
+        <form.Field name="selectedProviders">
+          {(field) => (
+            <SyncToAgentsSection
+              host={host}
+              providers={providers}
+              selectedProviders={field.state.value}
+              onToggle={(id) => {
+                field.handleChange(
+                  field.state.value.includes(id)
+                    ? field.state.value.filter((value) => value !== id)
+                    : [...field.state.value, id]
+                );
+              }}
+              onSetAll={(ids) => field.handleChange(ids)}
+            />
+          )}
+        </form.Field>
+      </Sheet.Body>
+
+      <Sheet.Footer>
         {isEdit && onRemove ? (
           <Button
             type="button"
-            variant="ghost"
-            size="sm"
-            className="text-destructive hover:text-destructive"
+            variant="text"
+            tone="destructive"
+            className="sm:mr-auto"
             onClick={() => onRemove(form.state.values.name)}
           >
-            <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-            Remove
+            Remove server…
           </Button>
-        ) : (
-          <span />
-        )}
+        ) : null}
         <form.Subscribe selector={(state) => state.values}>
           {(values) => {
             const canSave =
@@ -353,9 +356,8 @@ const McpDrawerContent: React.FC<McpDrawerContentProps> = ({
                 type="button"
                 onClick={() => void handleSave()}
                 disabled={!canSave}
-                size="sm"
               >
-                {saving ? (isEdit ? 'Saving...' : 'Adding...') : isEdit ? 'Save' : 'Add'}
+                {saving ? (isEdit ? 'Saving…' : 'Adding…') : isEdit ? 'Save' : 'Add server'}
               </ConfirmButton>
             );
           }}
@@ -363,6 +365,11 @@ const McpDrawerContent: React.FC<McpDrawerContentProps> = ({
       </Sheet.Footer>
     </>
   );
+};
+
+const TRANSPORT_LABELS: Record<'stdio' | 'http', string> = {
+  stdio: 'Local command (stdio)',
+  http: 'Remote URL (http)',
 };
 
 function getInitialState(mode: McpDrawerMode) {

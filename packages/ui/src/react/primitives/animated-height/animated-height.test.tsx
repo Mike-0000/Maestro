@@ -70,12 +70,32 @@ describe('AnimatedHeight', () => {
     expect(onAnimatingChange).toHaveBeenLastCalledWith(false);
   });
 
-  it('ignores the first ResizeObserver callback', () => {
+  it('ignores a first ResizeObserver callback that matches the measured height', () => {
     const root = renderAnimatedHeight();
 
     fireResize();
 
     expect(root.style.gridTemplateRows).toBe('100px');
+    expect(root.hasAttribute('data-animating')).toBe(false);
+  });
+
+  it('follows content that changed before the first ResizeObserver callback', () => {
+    // A dialog mounts its loading body (measured at 100px), then swaps in the
+    // real body before ResizeObserver delivers its first callback. The first
+    // callback reports the new size and the row must follow it instead of
+    // staying pinned to the loading height.
+    const root = renderAnimatedHeight();
+    expect(root.style.gridTemplateRows).toBe('100px');
+
+    measuredHeight = 260;
+    fireResize();
+
+    expect(root.style.gridTemplateRows).toBe('260px');
+    expect(root.hasAttribute('data-animating')).toBe(true);
+
+    act(() => {
+      vi.advanceTimersByTime(HEIGHT_TRANSITION_DURATION_MS + 50);
+    });
     expect(root.hasAttribute('data-animating')).toBe(false);
   });
 

@@ -1,5 +1,6 @@
-import { Button, Dialog, useToast } from '@emdash/ui/react/primitives';
-import { AlertCircle, Check, Copy, ExternalLink, Loader2 } from 'lucide-react';
+import { BrailleSpinner, StateGlyph } from '@emdash/ui/react/components';
+import { Button, Dialog, ModalLayout, Spinner, useToast } from '@emdash/ui/react/primitives';
+import { Check, Copy, ExternalLink } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getGithubClient } from '@core/features/github/api/browser/client';
 import { useModalController } from '@core/manifests/browser/modal-api';
@@ -100,7 +101,7 @@ export function GithubDeviceFlowModal({ onError }: GithubDeviceFlowModalArgs) {
         setCopied(true);
 
         if (!isAutomatic) {
-          toast('✓ Code copied', { description: 'Paste it in GitHub to authorize' });
+          toast('Code copied', { description: 'Paste it on GitHub to authorize.' });
         }
 
         setTimeout(() => setCopied(false), 2000);
@@ -157,7 +158,7 @@ export function GithubDeviceFlowModal({ onError }: GithubDeviceFlowModalArgs) {
           } else if (event.type === 'auth-error') {
             setError(event.message || event.error);
             onError?.(event.error);
-            toast.error('Authentication Failed', {
+            toast.error('Authentication failed', {
               description: event.message || 'An error occurred',
             });
           }
@@ -198,146 +199,112 @@ export function GithubDeviceFlowModal({ onError }: GithubDeviceFlowModalArgs) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [copyToClipboard, openGitHub, userCode]);
 
-  const title = success ? 'GitHub connected' : error ? 'Authentication failed' : 'Authorize GitHub';
+  const title = success ? 'GitHub connected' : error ? 'Authorization failed' : 'Authorize GitHub';
 
   return (
-    <>
-      <Dialog.Header>
-        <Dialog.Title>{title}</Dialog.Title>
-      </Dialog.Header>
-      <Dialog.Body className="gap-4">
-        {success ? (
-          <div className="rounded-lg border border-border/60 bg-background/60 p-3">
-            <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-background-success">
-                <Check className="h-4 w-4 text-foreground-success" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-foreground">You're connected to GitHub</p>
-                {user ? (
-                  <div className="mt-1 flex min-w-0 items-center gap-2">
-                    {user.avatar_url ? (
-                      <img
-                        src={user.avatar_url}
-                        alt={user.name || user.login}
-                        className="h-5 w-5 shrink-0 rounded-full"
-                      />
-                    ) : null}
-                    <p className="text-muted-foreground truncate text-xs">@{user.login}</p>
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        ) : error ? (
-          <div className="rounded-lg border border-border-destructive bg-background-destructive p-3">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-foreground-destructive" />
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-foreground-destructive">
-                  GitHub authorization failed
-                </p>
-                <p className="mt-1 text-xs text-foreground-destructive/80">{error}</p>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <>
-            <p className="text-sm text-foreground-muted">
-              Enter this one-time code in GitHub to authorize Emdash.
-            </p>
-
-            <button
-              type="button"
-              onClick={() => copyToClipboard(userCode)}
-              disabled={!userCode}
-              className="focus-visible:border-ring focus-visible:ring-ring/50 rounded-lg border border-border bg-background/60 p-4 text-left transition-colors hover:border-border-1 hover:bg-background-1 focus-visible:ring-3 focus-visible:outline-none disabled:pointer-events-none"
-              aria-label={copied ? 'Code copied' : 'Copy authorization code'}
-            >
-              {userCode ? (
-                <p className="text-center font-mono text-3xl font-semibold tracking-wider text-foreground select-all">
-                  {userCode}
-                </p>
-              ) : (
-                <div className="flex items-center justify-center gap-2 text-sm text-foreground-muted">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Waiting for GitHub...
-                </div>
-              )}
-            </button>
-
-            <div className="space-y-2 text-sm">
-              <div className="flex items-start gap-3">
-                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-background-2 text-xs text-foreground-muted">
-                  1
-                </span>
-                <p className="text-foreground-muted">
-                  Paste the code in GitHub. The code has already been copied.
-                </p>
-              </div>
-              <div className="flex items-start gap-3">
-                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-background-2 text-xs text-foreground-muted">
-                  2
-                </span>
-                <p className="text-foreground-muted">Authorize Emdash.</p>
-              </div>
-            </div>
-
-            {browserOpening ? (
-              <div className="rounded-lg border border-border-info bg-background-info p-3 text-sm text-foreground-info">
-                Opening GitHub in {browserOpenCountdown}s...
-              </div>
-            ) : null}
-
-            <div className="flex items-center justify-between gap-3 text-xs text-foreground-muted">
-              <div className="flex min-w-0 items-center gap-2">
-                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
-                <span>Waiting for authorization</span>
-                {timeRemaining > 0 ? (
-                  <span>Code expires in {formatTime(timeRemaining)}</span>
-                ) : null}
-              </div>
-              <button
-                type="button"
-                onClick={() => openExternal(EMDASH_ISSUES_URL)}
-                className="shrink-0 underline-offset-3 hover:text-foreground hover:underline focus:text-foreground focus:underline focus:outline-none"
-              >
-                Having trouble?
-              </button>
-            </div>
-          </>
-        )}
-      </Dialog.Body>
-      <Dialog.Footer>
-        {error || success ? (
-          <Button variant="secondary" onClick={modal.dismiss}>
+    <ModalLayout
+      title={title}
+      description={
+        success || error ? undefined : 'Enter this one-time code on GitHub to authorize Emdash.'
+      }
+      leading={
+        success || error ? undefined : (
+          <Button variant="text" size="sm" onClick={() => openExternal(EMDASH_ISSUES_URL)}>
+            Having trouble?
+          </Button>
+        )
+      }
+      actions={
+        error || success ? (
+          <Button variant="ghost" onClick={modal.dismiss}>
             Close
           </Button>
         ) : (
           <>
-            <Button variant="secondary" onClick={modal.dismiss}>
+            <Button variant="ghost" onClick={modal.dismiss}>
               Cancel
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => copyToClipboard(userCode)}
-              disabled={!userCode || copied}
-            >
-              {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-              {copied ? 'Copied' : 'Copy code'}
             </Button>
             <Button
               variant="primary"
               onClick={openGitHub}
               disabled={!verificationUri || browserOpening}
             >
-              <ExternalLink className="h-4 w-4" />
+              <ExternalLink className="size-3.5" />
               Open GitHub
             </Button>
           </>
+        )
+      }
+    >
+      <Dialog.Body className="gap-4">
+        {success ? (
+          <div className="flex items-center gap-3">
+            {user?.avatar_url ? (
+              <img src={user.avatar_url} alt="" className="size-8 shrink-0 rounded-full" />
+            ) : null}
+            <div className="min-w-0 flex-1">
+              <p className="text-sm text-foreground">You&apos;re connected to GitHub</p>
+              {user ? (
+                <p className="truncate text-xs text-foreground-muted">@{user.login}</p>
+              ) : null}
+            </div>
+          </div>
+        ) : error ? (
+          <div role="alert" className="flex items-start gap-2">
+            <StateGlyph state="error" className="mt-0.5" />
+            <div className="min-w-0">
+              <p className="text-sm text-foreground">GitHub did not authorize Emdash.</p>
+              <p className="mt-1 text-xs break-words text-foreground-muted">{error}</p>
+            </div>
+          </div>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => copyToClipboard(userCode)}
+              disabled={!userCode}
+              className="group/code flex min-h-20 flex-col items-center justify-center gap-1 rounded-lg bg-surface-emphasis px-4 py-4 transition-colors outline-none hover:bg-surface-emphasis-hover focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none"
+              aria-label={copied ? 'Code copied' : 'Copy authorization code'}
+            >
+              {userCode ? (
+                <>
+                  <span className="font-mono text-2xl text-foreground select-all">{userCode}</span>
+                  <span className="flex items-center gap-1 text-xs text-foreground-passive group-hover/code:text-foreground-muted">
+                    {copied ? (
+                      <Check className="size-3" aria-hidden />
+                    ) : (
+                      <Copy className="size-3" aria-hidden />
+                    )}
+                    {copied ? 'Copied' : 'Click to copy'}
+                  </span>
+                </>
+              ) : (
+                <span className="flex items-center gap-2 text-sm text-foreground-muted">
+                  <Spinner size="sm" className="text-foreground-passive" />
+                  Waiting for GitHub…
+                </span>
+              )}
+            </button>
+
+            <p className="text-sm text-foreground-muted">
+              The code is already on your clipboard. Paste it on GitHub, then authorize Emdash.
+            </p>
+
+            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-foreground-passive tabular-nums">
+              <BrailleSpinner variant="wave" className="text-foreground-passive" />
+              <span>
+                {browserOpening
+                  ? `Opening GitHub in ${browserOpenCountdown}s…`
+                  : 'Waiting for authorization'}
+              </span>
+              {timeRemaining > 0 ? (
+                <span>· Code expires in {formatTime(timeRemaining)}</span>
+              ) : null}
+            </p>
+          </>
         )}
-      </Dialog.Footer>
-    </>
+      </Dialog.Body>
+    </ModalLayout>
   );
 }
 

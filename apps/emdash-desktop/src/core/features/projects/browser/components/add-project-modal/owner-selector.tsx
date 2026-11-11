@@ -57,9 +57,9 @@ export function OwnerSelector({
       >
         <span className="min-w-0 truncate">{owner?.label ?? 'Choose owner'}</span>
       </Combobox.Trigger>
-      <Combobox.Content align="start" sideOffset={6} style={{ minWidth: '20rem' }}>
+      <Combobox.Content align="start" sideOffset={6} className="min-w-80">
         <div className="flex items-center justify-between gap-3 px-2 py-1.5">
-          <span className="text-xs text-foreground-muted">Choose</span>
+          <span className="text-tiny text-foreground-passive">Account</span>
           <div className="min-w-0" onKeyDown={(event) => event.stopPropagation()}>
             <ProviderAccountSelect
               providerName="GitHub"
@@ -71,7 +71,11 @@ export function OwnerSelector({
           </div>
         </div>
         <Combobox.Separator />
-        <Combobox.Input showTrigger={false} placeholder="Search owners..." />
+        <Combobox.Input
+          showTrigger={false}
+          placeholder="Search owners..."
+          aria-label="Search owners"
+        />
         <Combobox.List>
           {owners.map((item) => (
             <Combobox.Item key={item.value} value={item}>

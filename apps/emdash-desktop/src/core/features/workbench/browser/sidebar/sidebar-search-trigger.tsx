@@ -44,7 +44,7 @@ export const SidebarSearchTrigger = observer(function SidebarSearchTrigger() {
       className="w-full justify-between"
     >
       <span className="flex min-w-0 items-center gap-2">
-        <Search className="h-5 w-5 shrink-0 sm:h-4 sm:w-4" />
+        <Search className="size-4 shrink-0" />
         <span className="truncate">Search…</span>
       </span>
       <BoundShortcut command="app.commandPalette" variant="keycaps" />

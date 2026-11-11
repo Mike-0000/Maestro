@@ -16,9 +16,7 @@ type Story = StoryObj;
 export const Default: Story = {
   render: () => (
     <Popover.Root>
-      <Popover.Trigger>
-        <Button variant="ghost">Open popover</Button>
-      </Popover.Trigger>
+      <Popover.Trigger render={<Button variant="ghost" />}>Open popover</Popover.Trigger>
       <Popover.Content>
         <Popover.Header>
           <Popover.Title>Popover title</Popover.Title>
@@ -37,9 +35,7 @@ export const Default: Story = {
 export const WithCloseButton: Story = {
   render: () => (
     <Popover.Root>
-      <Popover.Trigger>
-        <Button variant="ghost">Open popover</Button>
-      </Popover.Trigger>
+      <Popover.Trigger render={<Button variant="ghost" />}>Open popover</Popover.Trigger>
       <Popover.Content>
         <Popover.Header>
           <Popover.Title>Settings</Popover.Title>

@@ -153,7 +153,7 @@ describe('BrowserPane', () => {
     await act(async () => webview.dispatchEvent(new Event('did-stop-loading')));
 
     expect(container.querySelector('webview')).toBe(webview);
-    expect(container.querySelector('h1')).toBeNull();
+    expect(container.querySelector('[data-slot="empty-state"]')).toBeNull();
     expect(browserSessionStore.getSession(session.browserId)).toMatchObject({
       currentUrl: 'http://localhost:3000/',
       title: 'Healthy parent',
@@ -185,10 +185,14 @@ describe('BrowserPane', () => {
       );
     });
 
-    expect(container.querySelector('h1')?.textContent).toBe("This site can't be reached");
-    expect(container.querySelector('p')?.textContent).toBe(
-      "missing.invalid's server IP address could not be found. (ERR_NAME_NOT_RESOLVED)"
+    // The error reads as the kit EmptyState: heading, one sentence, and the net error code
+    // behind "Show details".
+    const errorState = container.querySelector('[data-slot="empty-state"]');
+    expect(errorState?.querySelector('h2')?.textContent).toBe("This site can't be reached");
+    expect(errorState?.querySelector('p')?.textContent).toBe(
+      "missing.invalid's server IP address could not be found."
     );
+    expect(errorState?.querySelector('details')?.textContent).toContain('ERR_NAME_NOT_RESOLVED');
     expect(container.textContent).not.toContain('Try:');
     expect(
       Array.from(container.querySelectorAll('button'))

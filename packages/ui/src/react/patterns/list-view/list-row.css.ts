@@ -16,8 +16,10 @@ export const row = recipe({
     interactive: {
       true: {
         cursor: 'pointer',
+        outline: 'none',
         selectors: {
           '&:hover': { backgroundColor: vars.surfaceHover },
+          '&:focus-visible': { boxShadow: `inset 0 0 0 1px ${vars.focusRing}` },
         },
       },
     },
@@ -35,6 +37,12 @@ export const row = recipe({
     divider: {
       default: {},
       subtle: { borderBottomColor: vars.borderSubtle },
+      /** No rule: rows separate by rhythm and the hover fill (design brief 2.2). */
+      none: { borderBottom: 'none' },
+    },
+    /** Rounded rows, for flat lists that sit straight on the page. */
+    rounded: {
+      true: { borderRadius: tokenVars.radiusMd },
     },
   },
   defaultVariants: {
@@ -42,6 +50,7 @@ export const row = recipe({
     selected: false,
     isLast: false,
     divider: 'default',
+    rounded: false,
   },
 });
 
@@ -66,17 +75,21 @@ export const sectionHeader = style({
   gap: '0.375rem',
   paddingLeft: '1rem',
   paddingRight: '1rem',
-  paddingTop: '0.5rem',
-  paddingBottom: '0.25rem',
+  paddingTop: '0.75rem',
+  paddingBottom: '0.375rem',
 });
 
+// Group-label role (design brief 2.4): 11px passive, sentence case.
 export const sectionHeaderLabel = style({
-  fontSize: tokenVars.textSm,
+  fontSize: tokenVars.textTiny,
+  lineHeight: tokenVars.textTinyLineHeight,
   fontWeight: 400,
-  color: vars.foreground,
+  color: vars.foregroundPassive,
 });
 
 export const sectionHeaderCount = style({
-  fontSize: tokenVars.textXs,
-  color: vars.foregroundMuted,
+  fontSize: tokenVars.textTiny,
+  lineHeight: tokenVars.textTinyLineHeight,
+  fontVariantNumeric: 'tabular-nums',
+  color: vars.foregroundPassive,
 });

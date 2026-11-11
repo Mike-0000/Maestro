@@ -1,3 +1,6 @@
+import { StateGlyph } from '@emdash/ui/react/components';
+import '@xyflow/react/dist/base.css';
+import { Button } from '@emdash/ui/react/primitives';
 import {
   Background,
   BackgroundVariant,
@@ -10,7 +13,6 @@ import {
   type Node,
   type NodeTypes,
 } from '@xyflow/react';
-import '@xyflow/react/dist/base.css';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { comparer, reaction, runInAction } from 'mobx';
 import { observer } from 'mobx-react-lite';
@@ -30,13 +32,14 @@ import {
 import { getCanvasStore } from '../contributions/browser/app-stores';
 import { handleCanvasKey } from './canvas-keys';
 import { CanvasPaneContext } from './canvas-pane-context';
+import { FLOATING_LAYER, regionMinimapFill, regionTint } from './canvas-styles';
 import { CanvasToolbar } from './canvas-toolbar';
 import { CanvasStage } from './stage/canvas-stage';
 import { AgentTileNode } from './tiles/agent-tile';
 import { BrowserTileNode, CANVAS_OVERLAY_ATTRIBUTE } from './tiles/browser-tile';
 import { DocTileNode } from './tiles/doc-tile';
 import { NoteTileNode } from './tiles/note-tile';
-import { GhostNode, RegionNode, regionStyle } from './tiles/region-node';
+import { GhostNode, RegionNode } from './tiles/region-node';
 import { TaskFrameNode } from './tiles/task-frame';
 
 const SCRIM_NODE_ID = 'desk:scrim';
@@ -55,7 +58,7 @@ function ScrimNode() {
       aria-label="Send the visiting windows back to their desks"
       title="Send the visiting windows back to their desks"
       onClick={() => getCanvasStore().sendBack()}
-      className="h-full w-full cursor-default rounded-3xl bg-background/70"
+      className="h-full w-full cursor-default rounded-xl bg-overlay"
     />
   );
 }
@@ -109,9 +112,11 @@ function visitorNode(node: Node): Node {
     draggable: false,
     // Selection commands (group, nudge, resize) would edit its own desk, out of sight.
     selectable: false,
+    // Raised above the scrim like a dialog: a firmer neutral edge and the overlay shadow (theme
+    // tokens; node style, because the merge below keeps a node's style but not its class).
     style: {
       borderRadius: 12,
-      boxShadow: '0 0 0 2px rgb(139 92 246 / 0.75), 0 24px 60px rgb(0 0 0 / 0.35)',
+      boxShadow: '0 0 0 1px var(--border-1), var(--em-shadow-overlay)',
     },
   };
 }
@@ -278,26 +283,28 @@ function mergeNodes(previous: Node[], next: Node[], settle = false): Node[] {
   });
 }
 
+/**
+ * Minimap fills in the state language: an agent that needs you in near-white, one at work in the
+ * accent, an error in red; everything else a quiet neutral, regions a faint wash of their colour.
+ */
 const minimapColor = (node: Node): string => {
   if (node.type === 'frame' || node.type === 'ghost') return 'transparent';
   const store = getCanvasStore();
   if (node.type === 'region') {
-    return regionStyle(store.regionEntry(node.id)?.color).fill;
+    return regionMinimapFill(store.regionEntry(node.id)?.color);
   }
   const entry = node.type === 'agent' ? store.entryForTile(node.id) : undefined;
   switch (entry?.status) {
     case 'working':
-      return '#3b82f6';
+      return 'var(--accent)';
     case 'awaiting-input':
-      return '#f59e0b';
+      return 'var(--foreground)';
     case 'error':
-      return '#ef4444';
+      return 'var(--foreground-error)';
     case 'completed':
-      return '#22c55e';
+      return 'var(--foreground-passive)';
     default:
-      if (node.type === 'browser') return '#8b5cf6';
-      if (node.type === 'doc') return '#14b8a6';
-      return node.type === 'note' ? '#d6b656' : '#8a8a8a';
+      return 'var(--border-1)';
   }
 };
 
@@ -658,15 +665,26 @@ const Board = observer(function Board({
       onlyRenderVisibleElements
       proOptions={{ hideAttribution: true }}
       className={cn(
-        // Canvas Pro: the desk's backdrop shows through the board.
-        store.proMode ? 'chorus-canvas bg-transparent' : 'chorus-canvas bg-background',
-        '[&_.chorus-flash]:rounded-2xl [&_.chorus-flash]:shadow-[0_0_0_4px_rgb(59_130_246/0.55),0_0_32px_rgb(59_130_246/0.35)]',
+        // Transparent: the pane under it paints the board (sunken) or Canvas Pro's desk backdrop.
+        'chorus-canvas bg-transparent',
+        // React Flow's own colours, from the theme: resize handles and lines in the accent, the
+        // box-select rectangle in a neutral wash.
+        '[--xy-resize-background-color:var(--focus-ring)] [--xy-selection-background-color:color-mix(in_oklab,var(--foreground)_5%,transparent)] [--xy-selection-border:1px_solid_var(--border-1)]',
+        // Windows a layout change just moved: a brief accent outline that follows each window's
+        // own corners.
+        '[&_.chorus-flash>div]:shadow-[0_0_0_2px_var(--focus-ring)]',
         animating &&
           'motion-safe:[&_.react-flow__node]:transition-[transform,width,height] motion-safe:[&_.react-flow__node]:duration-300 motion-safe:[&_.react-flow__node]:ease-out'
       )}
     >
       {!store.proMode && (
-        <Background variant={BackgroundVariant.Dots} gap={24} size={1.2} className="opacity-40" />
+        <Background
+          variant={BackgroundVariant.Dots}
+          gap={24}
+          size={1.2}
+          color="var(--border-1)"
+          className="opacity-50"
+        />
       )}
       {!multi && !store.focusedRegionId && !store.proMode && (
         <MiniMap
@@ -674,8 +692,9 @@ const Board = observer(function Board({
           zoomable
           nodeColor={minimapColor}
           nodeStrokeWidth={0}
-          maskColor="rgb(0 0 0 / 0.08)"
-          className="!rounded-lg !border !border-border !bg-background-secondary"
+          bgColor="var(--em-surface-elevated)"
+          maskColor="color-mix(in oklab, var(--em-surface-sunken) 70%, transparent)"
+          className="overflow-hidden rounded-lg border border-border-subtle"
           {...overlayProps}
         />
       )}
@@ -696,23 +715,20 @@ const GhostBanner = observer(function GhostBanner() {
   if (!ghost) return null;
   return (
     <Panel position="bottom-center" {...overlayProps}>
-      <div className="flex max-w-[720px] items-center gap-3 rounded-xl border border-blue-500/40 bg-background/95 px-4 py-2 text-sm shadow-lg backdrop-blur">
-        <span className="size-2 shrink-0 animate-pulse rounded-full bg-blue-500" />
+      <div
+        role="status"
+        className={cn(
+          FLOATING_LAYER,
+          'flex max-w-180 items-center gap-3 rounded-xl py-2 pr-2 pl-4 text-sm motion-safe:animate-in motion-safe:fade-in motion-safe:duration-200'
+        )}
+      >
         <span className="min-w-0 flex-1 text-foreground">{ghost.label}</span>
-        <button
-          type="button"
-          className="rounded-md bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-500"
-          onClick={() => store.applyGhost()}
-        >
-          Apply
-        </button>
-        <button
-          type="button"
-          className="rounded-md px-2 py-1 text-xs text-foreground-muted hover:bg-background-secondary hover:text-foreground"
-          onClick={() => store.clearGhost()}
-        >
+        <Button type="button" variant="ghost" size="sm" onClick={() => store.clearGhost()}>
           Cancel
-        </button>
+        </Button>
+        <Button type="button" variant="primary" size="sm" onClick={() => store.applyGhost()}>
+          Apply
+        </Button>
       </div>
     </Panel>
   );
@@ -741,15 +757,17 @@ const DeskBackdrop = observer(function DeskBackdrop() {
     );
   }, [index]);
   if (!desk) return null;
-  const fill = regionStyle(desk.color).fill;
   return (
     <div
       ref={ref}
       aria-hidden
-      className="pointer-events-none absolute inset-0"
-      style={{
-        background: `radial-gradient(80% 65% at 12% 0%, ${fill}, transparent 70%), radial-gradient(70% 60% at 100% 100%, ${fill}, transparent 65%)`,
-      }}
+      className={cn(
+        'pointer-events-none absolute inset-0',
+        regionTint(desk.color),
+        // Two soft pools of the desk's hue from opposite corners, faint enough that text on the
+        // desk keeps its contrast in both themes.
+        'bg-[radial-gradient(80%_65%_at_12%_0%,color-mix(in_oklab,var(--tint)_14%,transparent),transparent_70%),radial-gradient(70%_60%_at_100%_100%,color-mix(in_oklab,var(--tint)_10%,transparent),transparent_65%)]'
+      )}
     />
   );
 });
@@ -767,7 +785,8 @@ const DeskSignals = observer(function DeskSignals() {
       {(['left', 'right'] as const).map((side) => {
         const here = signals.filter((signal) => signal.side === side);
         if (here.length === 0) return null;
-        const tint = here.some((signal) => signal.waiting > 0) ? '245 158 11' : '244 63 94';
+        // Waiting work lights the edge in the foreground; only failures alone light it red.
+        const failedOnly = here.every((signal) => signal.waiting === 0);
         const Arrow = side === 'left' ? ChevronLeft : ChevronRight;
         return (
           <div
@@ -779,10 +798,11 @@ const DeskSignals = observer(function DeskSignals() {
           >
             <div
               aria-hidden
-              className="absolute inset-0 motion-safe:animate-pulse"
-              style={{
-                background: `linear-gradient(to ${side === 'left' ? 'right' : 'left'}, rgb(${tint} / 0.22), transparent)`,
-              }}
+              className={cn(
+                'absolute inset-0 to-transparent',
+                side === 'left' ? 'bg-linear-to-r' : 'bg-linear-to-l',
+                failedOnly ? 'from-foreground-error/15' : 'from-foreground/10'
+              )}
             />
             {here.map((signal) => (
               <button
@@ -791,15 +811,17 @@ const DeskSignals = observer(function DeskSignals() {
                 title={`Go to ${signal.name}`}
                 onClick={() => store.answerDesk(signal.regionId)}
                 className={cn(
-                  'pointer-events-auto relative mx-2 flex max-w-40 items-center gap-1.5 rounded-full border border-border bg-background/95 px-2.5 py-1.5 text-xs shadow-md backdrop-blur hover:bg-background-secondary',
+                  FLOATING_LAYER,
+                  'pointer-events-auto relative mx-2 flex max-w-40 items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition-colors hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
                   side === 'right' && 'flex-row-reverse'
                 )}
                 {...overlayProps}
               >
-                <Arrow className="size-3.5 shrink-0 text-foreground-muted" />
+                <Arrow className="size-3.5 shrink-0 text-foreground-passive" />
                 <span className="min-w-0 text-left">
-                  <span className="block truncate font-semibold text-foreground">
-                    {signal.name}
+                  <span className="flex items-center gap-1.5">
+                    <StateGlyph state={signal.waiting > 0 ? 'needs-you' : 'error'} size="sm" />
+                    <span className="truncate font-medium text-foreground">{signal.name}</span>
                   </span>
                   <span className="block truncate text-foreground-muted">
                     {signalLabel(signal)}
@@ -829,7 +851,7 @@ function BoardPane({ pane }: { pane: number }) {
   return (
     <div
       ref={setContainer}
-      className="relative min-h-0 min-w-0 overflow-hidden bg-background"
+      className="surface-sunken relative min-h-0 min-w-0 overflow-hidden bg-surface"
       onPointerDownCapture={() => store.activatePane(pane)}
     >
       <DeskBackdrop />

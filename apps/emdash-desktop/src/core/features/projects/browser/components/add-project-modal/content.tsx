@@ -1,5 +1,5 @@
-import { SettingsRow } from '@emdash/ui/react/patterns';
-import { Field, Input, Select, Separator, Switch } from '@emdash/ui/react/primitives';
+import { StateGlyph } from '@emdash/ui/react/components';
+import { Field, Input, Select, Switch } from '@emdash/ui/react/primitives';
 import { Github } from 'lucide-react';
 import { useId } from 'react';
 import { ProviderIdentityStrip } from '@core/features/integrations/contributions/browser/provider-identity-strip';
@@ -10,6 +10,12 @@ import { DirectoryField } from './local-directory-selector';
 import { type CloneModeState, type CreateRepositoryModeState, type PickModeState } from './modes';
 import { OwnerSelector } from './owner-selector';
 import { type ProjectDirectoryPickerClient } from './project-directory-picker';
+
+/**
+ * The three ways to add a project share one rhythm: labelled fields 20px apart, helper text
+ * under a field in the muted helper role, and problems said in words under the field they are
+ * about (an error line, never a red box).
+ */
 
 export function PickExistingPanel({
   strategy,
@@ -26,10 +32,11 @@ export function PickExistingPanel({
   inspectionError?: string;
   showInitializeGitPrompt: boolean;
 }) {
+  const initGitId = useId();
   return (
-    <Field.Group>
+    <>
       <Field.Root>
-        <Field.Label>Directory</Field.Label>
+        <Field.Label>Folder</Field.Label>
         <DirectoryField
           strategy={strategy}
           connectionId={connectionId}
@@ -38,36 +45,40 @@ export function PickExistingPanel({
           getProjectsClient={getProjectsClient}
           title="Select a local project"
           message="Select a project directory to open"
+          placeholder={
+            strategy === 'ssh' && !connectionId ? 'Choose a machine first' : 'Choose a folder'
+          }
+          invalid={Boolean(inspectionError)}
         />
+        {inspectionError ? (
+          <div role="alert" className="flex min-w-0 flex-col gap-1">
+            <p className="flex items-center gap-1.5 text-xs text-foreground-error">
+              <StateGlyph state="error" size="sm" />
+              Could not read this folder.
+            </p>
+            <p className="font-mono text-xs break-words text-foreground-muted">{inspectionError}</p>
+          </div>
+        ) : null}
       </Field.Root>
-      {inspectionError && (
-        <div className="border-destructive/40 overflow-hidden rounded-md border">
-          <p className="border-destructive/30 bg-destructive/10 text-destructive border-b px-2 py-1 text-xs">
-            Could not inspect this directory.
-          </p>
-          <p className="p-2 text-xs text-foreground-muted">{inspectionError}</p>
-        </div>
-      )}
       {showInitializeGitPrompt && (
-        <div className="overflow-hidden rounded-md border border-border">
-          <p className="border-b border-border bg-background-1 px-2 py-1 text-xs text-foreground-muted">
-            This directory is not a git repository.
-          </p>
-          <div className="p-2">
-            <Field.Root orientation="horizontal">
-              <Switch
-                checked={state.initGitRepository}
-                onCheckedChange={state.setinitGitRepository}
-              />
-              <Field.Label>Initialize git repository</Field.Label>
-            </Field.Root>
-            <p className="mt-1.5 text-xs text-foreground-muted">
-              You can also open this folder now and initialize Git later from the changes view.
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <label htmlFor={initGitId} className="text-sm text-foreground">
+              Initialize a Git repository here
+            </label>
+            <p className="text-xs text-foreground-muted">
+              This folder is not a Git repository yet. You can also open it as it is and initialize
+              Git later from the Changes panel.
             </p>
           </div>
+          <Switch
+            id={initGitId}
+            checked={state.initGitRepository}
+            onCheckedChange={state.setinitGitRepository}
+          />
         </div>
       )}
-    </Field.Group>
+    </>
   );
 }
 
@@ -96,6 +107,7 @@ export function CreateRepositoryPanel({
   ensureDefaultRoot: boolean;
 }) {
   const repositoryNameId = useId();
+  const visibilityId = useId();
 
   // No project exists yet, so the strip previews the same inference the
   // resolver would make (the default account) instead of resolver output;
@@ -110,8 +122,8 @@ export function CreateRepositoryPanel({
       : null;
 
   return (
-    <div className="flex flex-col gap-6">
-      <Field.Group>
+    <>
+      <div className="flex min-w-0 flex-col gap-1.5">
         <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,3fr)] items-end gap-2">
           <Field.Root className="min-w-0">
             <Field.Label>Owner</Field.Label>
@@ -124,7 +136,9 @@ export function CreateRepositoryPanel({
               onAccountChange={onAccountChange}
             />
           </Field.Root>
-          <span className="pb-2 text-sm text-foreground-muted">/</span>
+          <span aria-hidden className="pb-1.5 text-sm text-foreground-passive">
+            /
+          </span>
           <Field.Root className="min-w-0">
             <Field.Label htmlFor={repositoryNameId}>Repository name</Field.Label>
             <Input
@@ -136,44 +150,47 @@ export function CreateRepositoryPanel({
             />
           </Field.Root>
         </div>
-      </Field.Group>
-      <Separator className="w-full" />
-      <SettingsRow
-        label="Choose visibility"
-        description="Choose who can see and commit to this repository"
-        control={
-          <Select.Root
-            value={state.repositoryVisibility}
-            onValueChange={(value) => state.setRepositoryVisibility(value as 'public' | 'private')}
-          >
-            <Select.Trigger appearance="input" className="max-w-28 min-w-28">
-              {state.repositoryVisibility === 'private' ? 'Private' : 'Public'}
-            </Select.Trigger>
-            <Select.Content>
-              <Select.Item value="private">Private</Select.Item>
-              <Select.Item value="public">Public</Select.Item>
-            </Select.Content>
-          </Select.Root>
-        }
-      />
-      <Separator className="w-full" />
-      <Field.Group>
-        <Field.Root>
-          <Field.Label>
-            {strategy === 'local' ? 'Project Directory' : 'Remote Directory'}
-          </Field.Label>
-          <DirectoryField
-            strategy={strategy}
-            connectionId={connectionId}
-            path={state.path}
-            onPathChange={state.setPath}
-            getProjectsClient={getProjectsClient}
-            ensureDefaultRoot={ensureDefaultRoot}
-            title="Select a local project"
-            message="Select a project directory to open"
-          />
-        </Field.Root>
-      </Field.Group>
+        {state.repositoryOwnersErrorMessage ? (
+          <p role="alert" className="text-xs text-foreground-error">
+            {state.repositoryOwnersErrorMessage}
+          </p>
+        ) : null}
+      </div>
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <label htmlFor={visibilityId} className="text-sm text-foreground">
+            Visibility
+          </label>
+          <p className="text-xs text-foreground-muted">
+            Who can see and commit to this repository.
+          </p>
+        </div>
+        <Select.Root
+          value={state.repositoryVisibility}
+          onValueChange={(value) => state.setRepositoryVisibility(value as 'public' | 'private')}
+        >
+          <Select.Trigger id={visibilityId} appearance="input" className="w-32 shrink-0">
+            {state.repositoryVisibility === 'private' ? 'Private' : 'Public'}
+          </Select.Trigger>
+          <Select.Content>
+            <Select.Item value="private">Private</Select.Item>
+            <Select.Item value="public">Public</Select.Item>
+          </Select.Content>
+        </Select.Root>
+      </div>
+      <Field.Root>
+        <Field.Label>{strategy === 'local' ? 'Location' : 'Location on the machine'}</Field.Label>
+        <DirectoryField
+          strategy={strategy}
+          connectionId={connectionId}
+          path={state.path}
+          onPathChange={state.setPath}
+          getProjectsClient={getProjectsClient}
+          ensureDefaultRoot={ensureDefaultRoot}
+          title="Select a local project"
+          message="Select a project directory to open"
+        />
+      </Field.Root>
       <ProviderIdentityStrip
         providerName="GitHub"
         providerIcon={<Github className="size-4 text-foreground-muted" />}
@@ -191,7 +208,7 @@ export function CreateRepositoryPanel({
         onSelect={(account) => onAccountChange(account.accountId)}
         onConnect={onConnectGithub}
       />
-    </div>
+    </>
   );
 }
 
@@ -210,37 +227,31 @@ export function ClonePanel({
 }) {
   const repositoryUrlId = useId();
   return (
-    <div className="flex flex-col gap-6">
-      <Field.Group>
-        <Field.Root>
-          <Field.Label htmlFor={repositoryUrlId}>Repository URL</Field.Label>
-          <Input
-            id={repositoryUrlId}
-            autoFocus
-            placeholder="Enter a repository URL"
-            value={state.repositoryUrl}
-            onChange={(e) => state.handleRepositoryUrlChange(e.target.value)}
-          />
-        </Field.Root>
-      </Field.Group>
-      <Separator className="w-full" />
-      <Field.Group>
-        <Field.Root>
-          <Field.Label>
-            {strategy === 'local' ? 'Project Directory' : 'Remote Directory'}
-          </Field.Label>
-          <DirectoryField
-            strategy={strategy}
-            connectionId={connectionId}
-            path={state.path}
-            onPathChange={state.setPath}
-            getProjectsClient={getProjectsClient}
-            ensureDefaultRoot={ensureDefaultRoot}
-            title="Select a local project"
-            message="Select a project directory to open"
-          />
-        </Field.Root>
-      </Field.Group>
-    </div>
+    <>
+      <Field.Root>
+        <Field.Label htmlFor={repositoryUrlId}>Repository URL</Field.Label>
+        <Input
+          id={repositoryUrlId}
+          autoFocus
+          spellCheck={false}
+          placeholder="https://github.com/owner/repository"
+          value={state.repositoryUrl}
+          onChange={(e) => state.handleRepositoryUrlChange(e.target.value)}
+        />
+      </Field.Root>
+      <Field.Root>
+        <Field.Label>{strategy === 'local' ? 'Location' : 'Location on the machine'}</Field.Label>
+        <DirectoryField
+          strategy={strategy}
+          connectionId={connectionId}
+          path={state.path}
+          onPathChange={state.setPath}
+          getProjectsClient={getProjectsClient}
+          ensureDefaultRoot={ensureDefaultRoot}
+          title="Select a local project"
+          message="Select a project directory to open"
+        />
+      </Field.Root>
+    </>
   );
 }

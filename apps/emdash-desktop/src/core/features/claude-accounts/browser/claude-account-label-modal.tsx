@@ -1,4 +1,4 @@
-import { Button, Dialog, Field, Input } from '@emdash/ui/react/primitives';
+import { Button, Dialog, Field, Input, ModalLayout } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
 import { useCallback, useState } from 'react';
 import { useModalController } from '@core/manifests/browser/modal-api';
@@ -56,58 +56,55 @@ export const ClaudeAccountLabelModal = observer(function ClaudeAccountLabelModal
   }, [account, adding, canSubmit, complete, label, store]);
 
   return (
-    <>
-      <Dialog.Header showCloseButton={false}>
-        <Dialog.Title>{adding ? 'Add Claude account' : 'Rename account'}</Dialog.Title>
-      </Dialog.Header>
-      <Dialog.Body className="pt-0">
-        <Field.Group>
-          <Field.Root>
-            <Field.Label>Account name</Field.Label>
-            <Input
-              value={label}
-              maxLength={MAX_CLAUDE_ACCOUNT_LABEL_LENGTH}
-              placeholder="Work"
-              onChange={(e) => {
-                setLabel(e.target.value);
-                setError(null);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void handleSubmit();
-              }}
-              autoFocus
-            />
-            {adding && (
-              <Field.Description>
-                A name to tell your accounts apart. Next, you sign in to it.
-              </Field.Description>
-            )}
-            {touched && problem && (
-              <p className="mt-1 text-xs text-foreground-destructive">{problem}</p>
-            )}
-            {error && <p className="mt-1 text-xs text-foreground-destructive">{error}</p>}
-          </Field.Root>
-        </Field.Group>
+    <ModalLayout
+      title={adding ? 'Add Claude account' : 'Rename account'}
+      description={
+        adding ? 'A name to tell your accounts apart. Next, you sign in to it.' : undefined
+      }
+      showCloseButton={false}
+      actions={
+        <>
+          <Button variant="ghost" onClick={dismiss} disabled={isSubmitting}>
+            Cancel
+          </Button>
+          <ConfirmButton
+            variant="primary"
+            onClick={() => void handleSubmit()}
+            disabled={isSubmitting || unchanged}
+          >
+            {adding
+              ? isSubmitting
+                ? 'Adding…'
+                : 'Add and sign in'
+              : isSubmitting
+                ? 'Renaming…'
+                : 'Rename'}
+          </ConfirmButton>
+        </>
+      }
+    >
+      <Dialog.Body>
+        <Field.Root>
+          <Field.Label>Account name</Field.Label>
+          <Input
+            value={label}
+            maxLength={MAX_CLAUDE_ACCOUNT_LABEL_LENGTH}
+            placeholder="Work"
+            aria-invalid={touched && problem ? true : undefined}
+            onChange={(e) => {
+              setLabel(e.target.value);
+              setError(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void handleSubmit();
+            }}
+            autoFocus
+          />
+          {touched && problem && <p className="text-xs text-foreground-error">{problem}</p>}
+          {error && <p className="text-xs text-foreground-error">{error}</p>}
+        </Field.Root>
       </Dialog.Body>
-      <Dialog.Footer>
-        <Button variant="secondary" onClick={dismiss} disabled={isSubmitting}>
-          Cancel
-        </Button>
-        <ConfirmButton
-          variant="primary"
-          onClick={() => void handleSubmit()}
-          disabled={isSubmitting || unchanged}
-        >
-          {adding
-            ? isSubmitting
-              ? 'Adding…'
-              : 'Add and sign in'
-            : isSubmitting
-              ? 'Renaming…'
-              : 'Rename'}
-        </ConfirmButton>
-      </Dialog.Footer>
-    </>
+    </ModalLayout>
   );
 });
 

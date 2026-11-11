@@ -11,6 +11,12 @@ import { type PullRequest } from '@core/services/pull-requests/api';
 
 type PrStatusIconInput = Pick<PullRequest, 'status' | 'isDraft'>;
 
+/**
+ * A pull request's state as one glyph. The shape carries the state and the
+ * tooltip / label the words; tone only ranks it (design brief 2.6): an open PR
+ * reads in full strength, merged a step down, draft and closed passive. None
+ * of these is an error, so none takes colour.
+ */
 export function StatusIcon({
   pr,
   className,
@@ -33,24 +39,40 @@ export function StatusIcon({
 
   if (status === 'merged') {
     return renderTooltip(
-      <GitMerge className={cn('size-4 shrink-0 text-foreground-merged', className)} />,
+      <GitMerge
+        role="img"
+        aria-label="Merged"
+        className={cn('size-4 shrink-0 text-foreground-muted', className)}
+      />,
       'Merged'
     );
   }
   if (status === 'closed') {
     return renderTooltip(
-      <GitPullRequestClosed className={cn('size-4 shrink-0 text-foreground-error', className)} />,
+      <GitPullRequestClosed
+        role="img"
+        aria-label="Closed"
+        className={cn('size-4 shrink-0 text-foreground-passive', className)}
+      />,
       'Closed'
     );
   }
   if (status === 'open' && isDraft) {
     return renderTooltip(
-      <GitPullRequestDraft className={cn('size-4 shrink-0 text-foreground-muted', className)} />,
+      <GitPullRequestDraft
+        role="img"
+        aria-label="Draft"
+        className={cn('size-4 shrink-0 text-foreground-passive', className)}
+      />,
       'Draft'
     );
   }
   return renderTooltip(
-    <GitPullRequestArrow className={cn('size-4 shrink-0 text-foreground-success', className)} />,
+    <GitPullRequestArrow
+      role="img"
+      aria-label="Open"
+      className={cn('size-4 shrink-0 text-foreground', className)}
+    />,
     'Open'
   );
 }

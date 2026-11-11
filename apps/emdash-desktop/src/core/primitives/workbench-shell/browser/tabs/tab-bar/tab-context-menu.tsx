@@ -43,7 +43,7 @@ export const TabContextMenu = observer(function TabContextMenu({
       ? [
           {
             id: 'engine:keep-open',
-            label: 'Keep Open',
+            label: 'Keep open',
             group: 'close' as const,
             run: () => host.pin(tab.tabId),
           },
@@ -51,13 +51,13 @@ export const TabContextMenu = observer(function TabContextMenu({
       : []),
     {
       id: 'engine:close',
-      label: 'Close Tab',
+      label: 'Close tab',
       group: 'close' as const,
       run: () => host.requestCloseTab(tab.tabId),
     },
     {
       id: 'engine:close-others',
-      label: 'Close Other Tabs',
+      label: 'Close other tabs',
       group: 'close' as const,
       run: () => host.closeOthers(tab.tabId),
     },

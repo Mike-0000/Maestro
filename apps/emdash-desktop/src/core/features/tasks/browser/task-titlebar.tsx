@@ -1,9 +1,8 @@
 import {
   Badge,
   Button,
-  MicroLabel,
+  SectionLabel,
   Popover,
-  Separator,
   Toggle,
   ToggleGroup,
   Tooltip,
@@ -56,6 +55,10 @@ import { AutomationRunPill } from './components/automation-run-pill';
 import { IssueSelector, ProviderLogo } from './components/issue-selector/issue-selector';
 import { PreviewServerPills } from './components/preview-servers/preview-server-pills';
 
+/** The project crumb: quieter than the task, and a link back to the project. */
+const CRUMB_LINK =
+  'rounded-sm text-foreground-passive transition-colors outline-none hover:text-foreground-muted focus-visible:ring-1 focus-visible:ring-ring';
+
 export const TaskTitlebar = observer(function TaskTitlebar() {
   const { projectId, taskId } = useTaskViewContext();
   const taskStore = getTaskStore(projectId, taskId);
@@ -83,18 +86,18 @@ const PendingTaskTitlebar = observer(function PendingTaskTitlebar({
   return (
     <Titlebar
       leftSlot={
-        <div className="flex items-center gap-1 px-2 text-sm text-foreground-muted">
-          <span className="flex items-center gap-1">
-            <button
-              type="button"
-              className="text-sm text-foreground-passive hover:text-foreground"
-              onClick={() => navigate(projectViewDef({ projectId }))}
-            >
-              {projectName}
-            </button>
-            <span className="text-sm text-foreground-passive">/</span>
-            {name}
+        <div className="flex min-w-0 items-center gap-1.5 px-2 text-xs text-foreground-muted">
+          <button
+            type="button"
+            className={CRUMB_LINK}
+            onClick={() => navigate(projectViewDef({ projectId }))}
+          >
+            {projectName}
+          </button>
+          <span aria-hidden className="text-foreground-passive">
+            /
           </span>
+          <span className="max-w-56 truncate">{name}</span>
         </div>
       }
     />
@@ -144,48 +147,54 @@ const ActiveTaskTitlebar = observer(function ActiveTaskTitlebar({
   return (
     <Titlebar
       leftSlot={
-        <div className="flex items-center gap-1 px-2">
+        <div className="flex min-w-0 items-center gap-1.5 px-2 text-xs">
           <button
             type="button"
-            className="text-sm text-foreground-passive hover:text-foreground"
+            className={CRUMB_LINK}
             onClick={() => navigate(projectViewDef({ projectId }))}
           >
             {projectName}
           </button>
-          <span className="text-sm text-foreground-passive">/</span>
+          <span aria-hidden className="text-foreground-passive">
+            /
+          </span>
           <Popover.Root>
             <Tooltip.Root>
               <Tooltip.Trigger
                 render={
-                  <Popover.Trigger className="flex items-center gap-1 text-sm text-foreground-muted hover:text-foreground">
+                  <Popover.Trigger className="-mx-1 flex h-6 items-center gap-1 rounded-sm px-1 text-foreground-muted transition-colors outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring data-popup-open:text-foreground">
                     <span className="flex min-w-0 items-center gap-1.5">
                       <span className="max-w-56 truncate">{taskDisplayName(taskStore)}</span>
                       <ConnectionStatusDot state={workspace.connectionState} />
                     </span>
-                    <ChevronDown className="size-3.5 shrink-0" />
+                    <ChevronDown className="size-3 shrink-0 text-foreground-passive" />
                   </Popover.Trigger>
                 }
               />
               <Tooltip.Content>Link to issue</Tooltip.Content>
             </Tooltip.Root>
-            <Popover.Content align="start" className="flex w-96 flex-col gap-2 p-4">
-              <div className="flex w-full flex-col gap-1">
-                <MicroLabel className="flex items-center text-foreground-passive">Task</MicroLabel>
-                <span className="text-sm tracking-tight">{taskDisplayName(taskStore)}</span>
-              </div>
-              <div className="flex flex-col gap-1 rounded-md border border-border p-2">
-                <span className="flex items-center gap-1 text-foreground-muted">
-                  <GitBranch className="size-3.5" />
-                  <span>{gitCheckout.branchName}</span>
+            {/* The task card (design brief 2.10): name as the headline, the branch with its
+                sync actions as quiet ghost buttons, then the linked issue. Space, no boxes. */}
+            <Popover.Content align="start" className="w-96">
+              <div className="flex w-full min-w-0 flex-col gap-0.5">
+                <SectionLabel>Task</SectionLabel>
+                <span className="truncate text-sm font-semibold text-foreground">
+                  {taskDisplayName(taskStore)}
                 </span>
-                <div className="flex w-full items-center gap-1">
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <span className="flex min-w-0 items-center gap-1.5 text-xs text-foreground-muted">
+                  <GitBranch className="size-3.5 shrink-0 text-foreground-passive" />
+                  <span className="truncate font-mono">{gitCheckout.branchName}</span>
+                </span>
+                <div className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-1">
                   {isPublished ? (
                     <>
                       <Tooltip.Root>
                         <Tooltip.Trigger className="flex-1">
                           <Button
                             className="w-full"
-                            variant="secondary"
+                            variant="ghost"
                             size="xs"
                             disabled={isFetching}
                             onClick={() => fetch()}
@@ -202,7 +211,7 @@ const ActiveTaskTitlebar = observer(function ActiveTaskTitlebar({
                         <Tooltip.Trigger className="flex-1">
                           <Button
                             className="w-full"
-                            variant="secondary"
+                            variant="ghost"
                             disabled={isPulling || behindCount === 0}
                             size="xs"
                             onClick={() => pull()}
@@ -230,7 +239,7 @@ const ActiveTaskTitlebar = observer(function ActiveTaskTitlebar({
                         <Tooltip.Trigger className="flex-1">
                           <Button
                             className="w-full"
-                            variant="secondary"
+                            variant="ghost"
                             disabled={isPushing || aheadCount === 0}
                             size="xs"
                             onClick={() => push()}
@@ -260,7 +269,7 @@ const ActiveTaskTitlebar = observer(function ActiveTaskTitlebar({
                       <Tooltip.Trigger className="flex-1">
                         <Button
                           className="w-full"
-                          variant="secondary"
+                          variant="ghost"
                           disabled={isPublishing || gitCheckout.headKind !== 'branch'}
                           size="xs"
                           onClick={() => publish()}
@@ -295,16 +304,16 @@ const ActiveTaskTitlebar = observer(function ActiveTaskTitlebar({
           {taskPayload.linkedIssue ? <LinkedIssueBadge issue={taskPayload.linkedIssue} /> : null}
           {taskPayload.type === 'task' && (
             <button
+              type="button"
+              aria-label="Pin task"
+              aria-pressed={taskPayload.isPinned}
               className={cn(
-                'text-foreground-muted ml-1',
-                taskPayload.isPinned && 'text-muted-foreground'
+                'flex size-6 items-center justify-center rounded-sm transition-colors outline-none hover:bg-foreground/8 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring',
+                taskPayload.isPinned ? 'text-foreground-muted' : 'text-foreground-passive'
               )}
               onClick={() => taskStore.setPinned(!taskPayload.isPinned)}
             >
-              <Pin
-                className={cn('size-3.5', taskPayload.isPinned && 'text-foreground-muted')}
-                fill={taskPayload.isPinned ? 'currentColor' : 'none'}
-              />
+              <Pin className="size-3.5" fill={taskPayload.isPinned ? 'currentColor' : 'none'} />
             </button>
           )}
           {taskPayload.automationRunId && (
@@ -323,12 +332,14 @@ const ActiveTaskTitlebar = observer(function ActiveTaskTitlebar({
             isRemote={isRemoteProject}
             sshConnectionId={workspace.sshConnectionId}
           />
-          <Separator orientation="vertical" className="h-5 self-center!" />
+          {/* Groups are set apart by space, not rules. */}
+          <span aria-hidden className="w-1" />
           <Tooltip.Root>
             <Tooltip.Trigger>
               <Toggle
                 size="sm"
                 icon
+                aria-label="Toggle terminal"
                 pressed={taskView.isTerminalDrawerOpen}
                 onPressedChange={() => taskView.chrome.commands.toggleTerminalDrawer()}
               >
@@ -340,7 +351,7 @@ const ActiveTaskTitlebar = observer(function ActiveTaskTitlebar({
               <BoundShortcut command="task.toggleTerminalDrawer" variant="keycaps" />
             </Tooltip.Content>
           </Tooltip.Root>
-          <Separator orientation="vertical" className="h-5 self-center!" />
+          <span aria-hidden className="w-1" />
           <ToggleGroup.Root
             value={taskView.isSidebarCollapsed ? [] : [taskView.sidebarTab]}
             onValueChange={([tab]) => {
@@ -359,7 +370,7 @@ const ActiveTaskTitlebar = observer(function ActiveTaskTitlebar({
                     value="changes"
                     size="sm"
                     aria-label="Changes"
-                    className={cn('w-auto! min-w-7! gap-0', hasDiffStats && 'w-full px-2!')}
+                    className={cn('w-auto min-w-7 gap-0', hasDiffStats && 'px-2')}
                   >
                     <FileDiff className="size-3.5" />
                     <span
@@ -431,13 +442,13 @@ function LinkedIssueBadge({ issue }: { issue: LinkedIssue }) {
             onClick={() => {
               if (issue.url) void openExternal(issue.url);
             }}
-            className="hover:bg-muted/30 flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-xs text-foreground-muted disabled:cursor-default disabled:opacity-60"
+            className="flex h-6 items-center gap-1.5 rounded-sm px-1.5 text-xs text-foreground-muted transition-colors outline-none hover:bg-foreground/8 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-default disabled:opacity-60"
           >
             <ProviderLogo provider={issue.provider} className="h-3 w-3" />
             {displayIdentifier ? (
               <span className="font-sans">{displayIdentifier}</span>
             ) : (
-              <span className="max-w-[180px] truncate">{issue.title || 'Linked issue'}</span>
+              <span className="max-w-44 truncate">{issue.title || 'Linked issue'}</span>
             )}
           </button>
         }

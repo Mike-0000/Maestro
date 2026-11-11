@@ -91,6 +91,7 @@ import {
   type CompletedAgentReport,
 } from '../api/completion-follow-up';
 import { spokenConfirmation } from '../api/confirm-speech';
+import { announcementsLine, announcementsMode } from '../api/context-facts';
 import {
   DEFAULT_CONDUCTOR_SETTINGS,
   type ConductorError,
@@ -2340,6 +2341,7 @@ export class ConductorStore {
     const extra = [...this.ledger.contextLines(), ...this.requests.contextLines()];
     const planLine = this.plans.contextLine;
     if (planLine) extra.push(planLine);
+    extra.push(announcementsLine(announcementsMode(this.settings ?? DEFAULT_CONDUCTOR_SETTINGS)));
     const call = this.boundCall;
     if (call) {
       extra.push(
@@ -4171,6 +4173,7 @@ export class ConductorStore {
     const planLine = this.plans.contextLine;
     const extra = [...this.ledger.contextLines(), ...this.requests.contextLines()];
     if (planLine) extra.push(planLine);
+    extra.push(announcementsLine(announcementsMode(this.settings ?? DEFAULT_CONDUCTOR_SETTINGS)));
     if (hints) extra.push(hints);
     const investigator = this.status?.investigator;
     if (investigator?.state === 'ready') {
@@ -4229,6 +4232,7 @@ export class ConductorStore {
     const extra = [...this.ledger.contextLines(), ...this.requests.contextLines()];
     const planLine = this.plans.contextLine;
     if (planLine) extra.push(planLine);
+    extra.push(announcementsLine(announcementsMode(this.settings ?? DEFAULT_CONDUCTOR_SETTINGS)));
     return extra;
   }
 

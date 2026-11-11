@@ -1,10 +1,10 @@
 import { normalizeExclusionPatterns } from '@emdash/core/primitives/exclusion-policy/api';
-import { SettingsCard } from '@emdash/ui/react/patterns';
-import { SeparatedList, Textarea } from '@emdash/ui/react/primitives';
+import { Textarea } from '@emdash/ui/react/primitives';
 import React from 'react';
 import { useAppSettingsKey } from '@core/features/settings/api/browser/use-app-settings-key';
 import type { FilesSettings } from '@core/primitives/app-settings/api';
 import { ResetToDefaultButton } from './ResetToDefaultButton';
+import { SettingRow } from './SettingRow';
 
 type ExclusionField = keyof FilesSettings;
 
@@ -41,43 +41,41 @@ const FilesSettingsCard: React.FC = () => {
   };
 
   return (
-    <SettingsCard>
-      <SeparatedList gap="1rem" direction="column">
-        <ExclusionListEditor
-          title="File tree exclusions"
-          description="Hide matching files or folders from the editor file tree."
-          field="treeExclude"
-          value={current.treeExclude}
-          loading={loading}
-          saving={saving}
-          overridden={isFieldOverridden('treeExclude')}
-          onCommit={commitField}
-          onReset={resetField}
-        />
-        <ExclusionListEditor
-          title="Search exclusions"
-          description="Exclude matching files or folders from file and content search."
-          field="searchExclude"
-          value={current.searchExclude}
-          loading={loading}
-          saving={saving}
-          overridden={isFieldOverridden('searchExclude')}
-          onCommit={commitField}
-          onReset={resetField}
-        />
-        <ExclusionListEditor
-          title="Watcher exclusions"
-          description="Folders the file watcher skips for the editor, Git status, and workspace tracking. Watching dependency or build folders can use tens of thousands of native watches. Changes apply after restart."
-          field="watcherExclude"
-          value={current.watcherExclude}
-          loading={loading}
-          saving={saving}
-          overridden={isFieldOverridden('watcherExclude')}
-          onCommit={commitField}
-          onReset={resetField}
-        />
-      </SeparatedList>
-    </SettingsCard>
+    <>
+      <ExclusionListEditor
+        title="File tree exclusions"
+        description="Hidden from the editor's file tree."
+        field="treeExclude"
+        value={current.treeExclude}
+        loading={loading}
+        saving={saving}
+        overridden={isFieldOverridden('treeExclude')}
+        onCommit={commitField}
+        onReset={resetField}
+      />
+      <ExclusionListEditor
+        title="Search exclusions"
+        description="Left out of file and content search."
+        field="searchExclude"
+        value={current.searchExclude}
+        loading={loading}
+        saving={saving}
+        overridden={isFieldOverridden('searchExclude')}
+        onCommit={commitField}
+        onReset={resetField}
+      />
+      <ExclusionListEditor
+        title="Watcher exclusions"
+        description="Folders the file watcher skips for the editor, Git status and workspace tracking. Watching dependency or build folders can use tens of thousands of native watches. Applies after a restart."
+        field="watcherExclude"
+        value={current.watcherExclude}
+        loading={loading}
+        saving={saving}
+        overridden={isFieldOverridden('watcherExclude')}
+        onCommit={commitField}
+        onReset={resetField}
+      />
+    </>
   );
 };
 
@@ -92,6 +90,7 @@ function ExclusionListEditor({
   onCommit,
   onReset,
 }: ExclusionListEditorProps): React.JSX.Element {
+  const inputId = React.useId();
   const serialized = value.join('\n');
   const [draft, setDraft] = React.useState(serialized);
 
@@ -107,30 +106,33 @@ function ExclusionListEditor({
   };
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-sm text-foreground">{title}</div>
-          <div className="text-muted-foreground text-xs">{description}</div>
+    <SettingRow
+      layout="stacked"
+      title={title}
+      description={description}
+      htmlFor={inputId}
+      control={
+        <div className="flex w-full min-w-0 items-start gap-1">
+          <Textarea
+            id={inputId}
+            value={draft}
+            placeholder="One pattern per line"
+            rows={3}
+            disabled={loading || saving}
+            spellCheck={false}
+            className="field-sizing-content max-h-60 min-h-20 flex-1 font-mono text-xs"
+            onChange={(event) => setDraft(event.currentTarget.value)}
+            onBlur={commit}
+          />
+          <ResetToDefaultButton
+            visible={overridden}
+            defaultLabel="defaults"
+            onReset={() => onReset(field)}
+            disabled={loading || saving}
+          />
         </div>
-        <ResetToDefaultButton
-          visible={overridden}
-          defaultLabel="defaults"
-          onReset={() => onReset(field)}
-          disabled={loading || saving}
-        />
-      </div>
-      <Textarea
-        value={draft}
-        placeholder="One pattern per line"
-        rows={4}
-        disabled={loading || saving}
-        spellCheck={false}
-        className="font-mono text-xs"
-        onChange={(event) => setDraft(event.currentTarget.value)}
-        onBlur={commit}
-      />
-    </div>
+      }
+    />
   );
 }
 

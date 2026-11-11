@@ -9,9 +9,16 @@ export const root = style({
   minWidth: 0,
   flexDirection: 'column',
   overflow: 'hidden',
+  // A dense browser table (design brief 2.2): one card on the emphasis step with
+  // a subtle hairline; rows divide with the subtle hairline only.
   borderRadius: tokenVars.radiusLg,
-  border: `1px solid ${vars.border}`,
-  backgroundColor: vars.surfaceBase,
+  border: `1px solid ${vars.borderSubtle}`,
+  backgroundColor: vars.surfaceEmphasis,
+  vars: {
+    [vars.surface]: vars.surfaceEmphasis,
+    [vars.surfaceHover]: vars.surfaceEmphasisHover,
+    [vars.surfaceSelected]: vars.surfaceEmphasisSelected,
+  },
 });
 
 export const header = style({
@@ -19,7 +26,6 @@ export const header = style({
   minWidth: 0,
   alignItems: 'center',
   gap: '0.5rem',
-  borderBottom: `1px solid ${vars.border}`,
   padding: '0.5rem',
 });
 
@@ -59,10 +65,10 @@ export const columnHeader = style({
   gridTemplateColumns: columns,
   alignItems: 'center',
   gap: '0.625rem',
-  borderBottom: `1px solid ${vars.border}`,
+  borderBottom: `1px solid ${vars.borderSubtle}`,
   padding: '0.375rem 0.75rem',
-  fontSize: tokenVars.textXs,
-  color: vars.foregroundMuted,
+  fontSize: tokenVars.textTiny,
+  color: vars.foregroundPassive,
 });
 
 export const row = style({
@@ -72,7 +78,7 @@ export const row = style({
   alignItems: 'center',
   gap: '0.625rem',
   border: 0,
-  borderBottom: `1px solid ${vars.border}`,
+  borderBottom: `1px solid ${vars.borderSubtle}`,
   backgroundColor: 'transparent',
   padding: '0.5625rem 0.75rem',
   color: vars.foreground,
@@ -87,7 +93,7 @@ export const row = style({
       backgroundColor: vars.surfaceHover,
     },
     '&:not(:disabled):focus-visible': {
-      boxShadow: `inset 0 0 0 1px ${vars.borderFocus}`,
+      boxShadow: `inset 0 0 0 1px ${vars.focusRing}`,
     },
     '&[data-selected]': {
       backgroundColor: vars.surfaceSelected,
@@ -105,7 +111,7 @@ export const draftRow = style({
   gridTemplateColumns: columns,
   alignItems: 'center',
   gap: '0.625rem',
-  borderBottom: `1px solid ${vars.border}`,
+  borderBottom: `1px solid ${vars.borderSubtle}`,
   padding: '0.5625rem 0.75rem',
   backgroundColor: vars.surfaceSelected,
 });
@@ -130,7 +136,7 @@ export const draftInput = style({
 export const rowIcon = style({
   width: '1rem',
   height: '1rem',
-  color: vars.foregroundMuted,
+  color: vars.foregroundPassive,
 });
 
 export const rowName = style({
@@ -144,7 +150,7 @@ export const rowName = style({
 export const rowMeta = style({
   flexShrink: 0,
   fontSize: tokenVars.textXs,
-  color: vars.foregroundMuted,
+  color: vars.foregroundPassive,
   fontVariantNumeric: 'tabular-nums',
 });
 
@@ -164,7 +170,7 @@ export const state = style({
 });
 
 export const stateError = style({
-  color: vars.foregroundDestructive,
+  color: vars.foregroundError,
 });
 
 const spin = keyframes({
@@ -179,7 +185,7 @@ export const spinner = style({
 
 export const footer = style({
   minWidth: 0,
-  borderTop: `1px solid ${vars.border}`,
+  borderTop: `1px solid ${vars.borderSubtle}`,
   padding: '0.5rem 0.75rem',
 });
 

@@ -65,13 +65,13 @@ export function KeyCaptureControl({
 
   return (
     <div className="flex flex-col items-end gap-1">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-4">
         <Button
           type="button"
           variant="secondary"
-          size="xs"
+          size="sm"
           aria-label={ariaLabel}
-          className={recording ? 'min-w-[120px] animate-pulse' : 'min-w-[120px]'}
+          className={recording ? 'min-w-30 motion-safe:animate-pulse' : 'min-w-30'}
           disabled={disabled}
           onClick={() => {
             setError(null);
@@ -83,7 +83,7 @@ export function KeyCaptureControl({
         {onClear && label !== null && !recording && (
           <Button
             type="button"
-            variant="ghost"
+            variant="text"
             size="xs"
             disabled={disabled}
             onClick={() => {
@@ -96,7 +96,7 @@ export function KeyCaptureControl({
         )}
       </div>
       {error && (
-        <span role="alert" className="max-w-64 text-right text-xs text-foreground-destructive">
+        <span role="alert" className="max-w-64 text-right text-xs text-foreground-error">
           {error}
         </span>
       )}

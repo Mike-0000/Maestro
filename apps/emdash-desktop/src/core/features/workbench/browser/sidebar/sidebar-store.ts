@@ -1,4 +1,5 @@
 import { computed, makeAutoObservable, observable } from 'mobx';
+import { isSidebarTaskYours } from '@core/features/conductor/contributions/browser/task-ownership';
 import { type ProjectStore } from '@core/features/projects/api/browser/stores/project';
 import type { ProjectManagerStore } from '@core/features/projects/api/browser/stores/project-manager';
 import { asAvailableProject } from '@core/features/projects/api/browser/stores/project-selectors';
@@ -302,7 +303,16 @@ export class SidebarStore {
     }));
   }
 
+  /**
+   * Orders tasks that are not in a hand-dragged order: tasks that are the developer's first (the
+   * ownership line's rule, `isSidebarTaskYours`: an agent waits for input, or finished or failed
+   * unseen), then by the sort key. A manual order wins over this: it is used for a project with no
+   * manual order, for the pinned list, and for a project's tasks not yet in its manual order
+   * (which `mergeTaskOrder` puts above the hand-ordered ones). Hand-ordered tasks keep their place.
+   */
   private compareSidebarTasks(a: TaskStore, b: TaskStore): number {
+    const needs = Number(isSidebarTaskYours(b.data.id)) - Number(isSidebarTaskYours(a.data.id));
+    if (needs !== 0) return needs;
     const kind = sortKindFor(this.taskSortBy);
     const ia = getSortInstant(a, kind) ?? '';
     const ib = getSortInstant(b, kind) ?? '';

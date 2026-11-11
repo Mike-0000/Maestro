@@ -99,13 +99,14 @@ describe('ActivityBadgeView', () => {
       step('create-worktree', 'succeeded'),
       step('push-branch', 'failed', { message: 'no upstream' }),
     ]);
+    // Error emphasis is the error dot (the shared state glyph), not a tinted badge.
     expect(badge()!.dataset.activityState).toBe('failed');
-    expect(badge()!.className).toContain('destructive');
+    expect(badge()!.querySelector('[data-slot="state-glyph"][data-state="error"]')).not.toBeNull();
 
     // Everything settled: quiet badge, still reachable.
     await render([step('create-worktree', 'succeeded')]);
     expect(badge()!.dataset.activityState).toBe('settled');
-    expect(badge()!.className).not.toContain('destructive');
+    expect(badge()!.querySelector('[data-slot="state-glyph"][data-state="error"]')).toBeNull();
   });
 
   it('lists steps in order with derived copy, relative dates, and a started time for run', async () => {

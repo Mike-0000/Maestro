@@ -34,12 +34,22 @@ const buttonBase = style({
   alignItems: 'center',
   justifyContent: 'center',
   opacity: 0,
-  transition: 'opacity 150ms ease',
+  transition: 'opacity 150ms ease, color 150ms ease, background-color 150ms ease',
   userSelect: 'none',
+  // Own reset: hosts without a preflight (Storybook) must render the same button.
+  border: 0,
+  background: 'transparent',
+  font: 'inherit',
   color: vars.fgPassive,
+  borderRadius: vars.radiusSm,
+  outline: 'none',
   selectors: {
-    '&:hover': { color: vars.fg },
-    '&:focus-visible': { opacity: 1 },
+    '&:hover': { color: vars.fg, background: vars.surfaceHover },
+    '&:focus-visible': {
+      opacity: 1,
+      color: vars.fg,
+      boxShadow: `0 0 0 2px ${vars.focusRing}`,
+    },
   },
 });
 
@@ -50,8 +60,10 @@ export const copyButtonOverlay = style([
     top: '6px',
     right: '6px',
     zIndex: 10,
-    borderRadius: '4px',
-    padding: '2px',
+    padding: '4px',
+    // Sits on the code well: take the well's surface so it never sits on top of
+    // a token mid-line unreadably.
+    background: vars.surfaceEmphasis,
     selectors: {
       [`${codeGroup}:hover &`]: { opacity: 1 },
     },
@@ -62,6 +74,8 @@ export const copyButtonInline = style([
   buttonBase,
   {
     gap: '4px',
+    padding: '2px 4px',
+    marginLeft: '-4px',
     fontSize: '0.75rem',
     selectors: {
       [`${messageGroup}:hover &`]: { opacity: 1 },

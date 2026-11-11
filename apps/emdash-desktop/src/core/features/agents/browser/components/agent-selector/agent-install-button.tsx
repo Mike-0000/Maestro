@@ -54,17 +54,15 @@ export function AgentInstallButton({
             disabled={disabled || state.disabled}
             aria-label={state.label}
             onClick={onInstall}
-            className={cn('ml-auto cursor-pointer', className)}
+            className={cn('ml-auto', className)}
           >
             <InstallIcon
-              className={cn('h-3 w-3', state.installing && 'animate-spin')}
+              className={cn('size-3.5', state.installing && 'motion-safe:animate-spin')}
               aria-hidden="true"
             />
           </Button>
         </Tooltip.Trigger>
-        <Tooltip.Content side={tooltipSide} className="text-xs">
-          {state.label}
-        </Tooltip.Content>
+        <Tooltip.Content side={tooltipSide}>{state.label}</Tooltip.Content>
       </Tooltip.Root>
     </Tooltip.Provider>
   );

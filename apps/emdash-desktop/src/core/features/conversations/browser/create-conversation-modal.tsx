@@ -1,5 +1,5 @@
 import { formatHostRef } from '@emdash/core/primitives/host/api';
-import { Dialog, Field, Select, Switch } from '@emdash/ui/react/primitives';
+import { Button, Dialog, Field, ModalLayout, Select, Switch } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
 import { useCallback, useState } from 'react';
 import { hostRefFromConnectionId } from '@core/features/agents/api/browser/client';
@@ -39,7 +39,7 @@ export const CreateConversationModal = observer(function CreateConversationModal
   projectId: string;
   taskId: string;
 }) {
-  const { complete } = useModalController('createConversationModal');
+  const { complete, dismiss } = useModalController('createConversationModal');
   const connectionId = getProjectSshConnectionId(projectId);
   const { providerId, setProviderOverride, createDisabled } = useEffectiveProvider(connectionId);
   const conversationMgr = conversationRegistry.get(taskId);
@@ -171,10 +171,24 @@ export const CreateConversationModal = observer(function CreateConversationModal
   ]);
 
   return (
-    <>
-      <Dialog.Header>
-        <Dialog.Title>Create Conversation</Dialog.Title>
-      </Dialog.Header>
+    <ModalLayout
+      title="New conversation"
+      description="Start another agent in this task's worktree."
+      actions={
+        <>
+          <Button variant="ghost" onClick={dismiss} disabled={isSubmitting}>
+            Cancel
+          </Button>
+          <ConfirmButton
+            variant="primary"
+            onClick={() => void handleCreateConversation()}
+            disabled={Boolean(liveActionDisabledReason) || createDisabled || isSubmitting}
+          >
+            {isSubmitting ? 'Starting…' : 'Start'}
+          </ConfirmButton>
+        </>
+      }
+    >
       <Dialog.Body>
         <Field.Group>
           <Field.Root>
@@ -217,27 +231,46 @@ export const CreateConversationModal = observer(function CreateConversationModal
               </Select.Root>
             </Field.Root>
           ) : null}
-          {showAutoApproveToggle ? (
-            <Field.Root>
-              <div className="flex items-center gap-2">
-                <Switch
-                  checked={skipPermissions}
-                  disabled={!providerId || taskSettings.loading || taskSettings.saving}
-                  onCheckedChange={setAutoApproveOverride}
-                />
-                <Field.Label>Auto-approve permissions</Field.Label>
-              </div>
-            </Field.Root>
+          {showAutoApproveToggle || showAcpToggle ? (
+            // Two on/off options: label on the left, the switch on the right, a muted line under.
+            <div className="flex flex-col gap-4">
+              {showAutoApproveToggle ? (
+                <Field.Root>
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <Field.Label>Auto-approve permissions</Field.Label>
+                      <p className="mt-0.5 text-xs text-foreground-muted">
+                        The agent runs commands and edits files without asking first.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={skipPermissions}
+                      disabled={!providerId || taskSettings.loading || taskSettings.saving}
+                      onCheckedChange={setAutoApproveOverride}
+                    />
+                  </div>
+                </Field.Root>
+              ) : null}
+              {showAcpToggle ? (
+                <Field.Root>
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <Field.Label>Use chat UI</Field.Label>
+                      <p className="mt-0.5 text-xs text-foreground-muted">
+                        A chat view with a composer, instead of the agent's terminal.
+                      </p>
+                    </div>
+                    <Switch checked={useAcp} onCheckedChange={setUseChatUiPreference} />
+                  </div>
+                </Field.Root>
+              ) : null}
+            </div>
           ) : null}
-          {showAcpToggle ? (
-            <Field.Root>
-              <div className="flex items-center gap-2">
-                <Switch checked={useAcp} onCheckedChange={setUseChatUiPreference} />
-                <Field.Label>Use chat UI</Field.Label>
-              </div>
-            </Field.Root>
-          ) : null}
-          {error && <p className="text-destructive text-xs">{error}</p>}
+          {error && (
+            <p className="text-xs text-foreground-error" role="alert">
+              {error}
+            </p>
+          )}
           {liveActionDisabledReason && (
             <p className="text-xs text-foreground-muted" role="note" tabIndex={0}>
               {liveActionDisabledReason}
@@ -245,16 +278,7 @@ export const CreateConversationModal = observer(function CreateConversationModal
           )}
         </Field.Group>
       </Dialog.Body>
-      <Dialog.Footer>
-        <ConfirmButton
-          variant="primary"
-          onClick={() => void handleCreateConversation()}
-          disabled={Boolean(liveActionDisabledReason) || createDisabled || isSubmitting}
-        >
-          {isSubmitting ? 'Creating...' : 'Create'}
-        </ConfirmButton>
-      </Dialog.Footer>
-    </>
+    </ModalLayout>
   );
 });
 
@@ -264,5 +288,6 @@ export const createConversationModal = defineModal<{
 }>()({
   id: 'createConversationModal',
   component: CreateConversationModal,
+  size: 'md',
   ignoreOutsidePressAfterWindowBlur: true,
 });

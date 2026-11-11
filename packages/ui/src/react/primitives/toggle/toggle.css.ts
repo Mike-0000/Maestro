@@ -7,7 +7,8 @@ export const toggleGroup = style({
   display: 'inline-flex',
   alignItems: 'center',
   gap: '0.125rem',
-  borderRadius: tokenVars.radiusMd,
-  backgroundColor: vars.surface,
+  // A quiet track, like the PillTabs segmented control.
+  borderRadius: `calc(${tokenVars.radiusMd} + 2px)`,
+  backgroundColor: `color-mix(in srgb, ${vars.foreground} 5%, transparent)`,
   padding: '0.125rem',
 });

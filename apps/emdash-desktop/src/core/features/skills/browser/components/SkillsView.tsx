@@ -7,7 +7,7 @@ export const SkillsView: React.FC = () => (
     host={LOCAL_HOST_REF}
     header={{
       title: 'Skills',
-      description: 'Extend your agents with reusable skill modules',
+      description: 'Teach your agents reusable know-how they load when a task needs it.',
     }}
   />
 );

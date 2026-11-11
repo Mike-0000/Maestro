@@ -75,7 +75,10 @@ export function LinkedIssueIndicator({ linkedTo }: { linkedTo: LinkedIssueInfo }
     <Tooltip.Root>
       <Tooltip.Trigger
         render={
-          <span className="ml-auto flex shrink-0 items-center text-foreground-info">
+          <span
+            aria-label={`Already linked to task: ${linkedTo.taskName}`}
+            className="flex shrink-0 items-center text-foreground-passive"
+          >
             <Link className="size-3.5" />
           </span>
         }
@@ -87,8 +90,8 @@ export function LinkedIssueIndicator({ linkedTo }: { linkedTo: LinkedIssueInfo }
 
 export function IssueRow({ issue, linkedTo }: { issue: LinkedIssue; linkedTo?: LinkedIssueInfo }) {
   return (
-    <span className="flex w-full min-w-0 items-center justify-between gap-2">
-      <div className="flex min-w-0 items-center gap-2">
+    <span className="flex w-full min-w-0 items-center justify-between gap-3">
+      <span className="flex min-w-0 items-center gap-2">
         {issue.status ? (
           <Tooltip.Root>
             <Tooltip.Trigger
@@ -98,11 +101,11 @@ export function IssueRow({ issue, linkedTo }: { issue: LinkedIssue; linkedTo?: L
           </Tooltip.Root>
         ) : null}
         <span className="flex min-w-0 items-center gap-2">
-          {issue.title ? <span className="truncate text-foreground">{issue.title}</span> : null}
+          {issue.title ? <span className="truncate">{issue.title}</span> : null}
           {linkedTo ? <LinkedIssueIndicator linkedTo={linkedTo} /> : null}
         </span>
-      </div>
-      <IssueIdentifier issue={issue} />
+      </span>
+      <IssueIdentifier issue={issue} className="text-foreground-passive" />
     </span>
   );
 }
@@ -125,6 +128,11 @@ export interface IssueSelectorProps {
   disabled?: boolean;
   renderSelectedValue?: (issue: LinkedIssue) => ReactNode;
   renderPlaceholder?: (ctx: IssueSelectorTriggerContext) => ReactNode;
+  /**
+   * Classes for the trigger button itself, for callers that make the whole trigger one field
+   * (its border, fill and focus ring) and render bare content.
+   */
+  triggerClassName?: string;
 }
 
 export const IssueSelector = observer(function IssueSelector({
@@ -137,6 +145,7 @@ export const IssueSelector = observer(function IssueSelector({
   disabled,
   renderSelectedValue,
   renderPlaceholder,
+  triggerClassName,
 }: IssueSelectorProps) {
   const linkedIssueMap = getLinkedIssueMap(projectId, excludeTaskId);
   const { integrationById, integrations } = useIntegrationsContext();
@@ -199,11 +208,8 @@ export const IssueSelector = observer(function IssueSelector({
           }
         }}
       >
-        <Select.Trigger
-          aria-label="Select issue provider"
-          className="h-6 gap-1 border-none bg-transparent px-1.5 shadow-none focus:ring-0"
-        >
-          <ProviderLogo provider={issueProvider} className="h-3.5 w-3.5" />
+        <Select.Trigger aria-label="Select issue provider" size="xs" className="gap-1 px-1.5">
+          <ProviderLogo provider={issueProvider} className="size-3.5" />
         </Select.Trigger>
         <Select.Content>
           {issueProviderOrder.map((p) => (
@@ -228,11 +234,13 @@ export const IssueSelector = observer(function IssueSelector({
     setSelectedIssueProvider,
   };
 
+  // Default faces (the title bar's task popover): the linked issue as plain text that comes
+  // to full strength on hover, or a muted "Link an issue" action. No dashed boxes, no shadows.
   const selectedContent = value ? (
     renderSelectedValue ? (
       renderSelectedValue(value)
     ) : (
-      <div className="hover:bg-muted/30 flex w-full min-w-0 items-start rounded-md border border-border p-3 text-left text-sm hover:shadow-xs">
+      <div className="flex w-full min-w-0 items-start py-1 text-left text-sm">
         <SelectedIssueValue issue={value} />
       </div>
     )
@@ -241,13 +249,15 @@ export const IssueSelector = observer(function IssueSelector({
   const placeholderContent = renderPlaceholder ? (
     renderPlaceholder(triggerContext)
   ) : (
-    <div className="hover:bg-muted/30 flex h-6 w-full items-center justify-center gap-1 rounded-md border border-dashed border-border p-3 text-center text-sm text-foreground-passive hover:shadow-xs">
-      Click to link an issue
-    </div>
+    <span className="flex h-7 items-center gap-2 text-sm text-foreground-muted transition-colors hover:text-foreground">
+      <Link className="size-3.5 shrink-0 text-foreground-passive" />
+      Link an issue
+    </span>
   );
 
+  // No overflow clipping here: it would cut the trigger's focus ring. Rows truncate their text.
   return (
-    <div className="max-w-full min-w-0 overflow-hidden">
+    <div className="max-w-full min-w-0">
       {hasAnyIntegration ? (
         <Combobox.Root
           autoHighlight
@@ -270,7 +280,13 @@ export const IssueSelector = observer(function IssueSelector({
         >
           <Combobox.Trigger
             render={
-              <button className="flex w-full min-w-0 text-left outline-none">
+              <button
+                type="button"
+                className={cn(
+                  'flex w-full min-w-0 text-left outline-none',
+                  triggerClassName ?? 'rounded-sm focus-visible:ring-2 focus-visible:ring-ring'
+                )}
+              >
                 <Combobox.Value placeholder={placeholderContent}>
                   {value ? selectedContent : null}
                 </Combobox.Value>
@@ -279,14 +295,15 @@ export const IssueSelector = observer(function IssueSelector({
           />
           <Combobox.Content
             side="bottom"
-            className="min-w-(--anchor-width) pb-1"
+            width="content-at-least-trigger"
+            className="max-w-[min(32rem,var(--available-width))]"
             collisionAvoidance={{ side: 'shift' }}
           >
             <Combobox.Input
               leftAddon={leftAddon}
               rightAddon={
                 isProviderLoading ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-foreground/60" />
+                  <Loader2 className="size-3.5 text-foreground-passive motion-safe:animate-spin" />
                 ) : undefined
               }
               inputRef={inputRef}
@@ -294,7 +311,7 @@ export const IssueSelector = observer(function IssueSelector({
               showTrigger={false}
               placeholder={`Search ${
                 issueProvider ? getIntegrationName(integrationById, issueProvider) : 'issues'
-              }...`}
+              }…`}
               disabled={!hasAnyIntegration}
             />
             <Combobox.Empty>
@@ -305,22 +322,20 @@ export const IssueSelector = observer(function IssueSelector({
                   providerId={issueProvider ?? ''}
                   providerName={accountProviderName}
                 />
-              ) : (
-                <span className={cn(error && 'text-foreground-error')}>
-                  {error ?? 'No issues found'}
+              ) : error ? (
+                <span className="flex items-center gap-2 px-3 text-foreground-muted">
+                  <span aria-hidden className="size-2 shrink-0 rounded-full bg-foreground-error" />
+                  {error}
                 </span>
+              ) : (
+                <span>No issues found</span>
               )}
             </Combobox.Empty>
             <Combobox.List>
               {(issue: LinkedIssue) => {
                 const linkedTo = linkedIssueMap.get(issue.url);
                 return (
-                  <Combobox.Item
-                    key={issue.identifier}
-                    value={issue}
-                    className="pr-2"
-                    showCheck={false}
-                  >
+                  <Combobox.Item key={issue.identifier} value={issue} showCheck={false}>
                     <IssueRow issue={issue} linkedTo={linkedTo} />
                   </Combobox.Item>
                 );
@@ -329,12 +344,14 @@ export const IssueSelector = observer(function IssueSelector({
           </Combobox.Content>
         </Combobox.Root>
       ) : error ? (
-        <span role="alert" className="text-sm text-foreground-error">
+        <span role="alert" className="flex items-center gap-2 text-sm text-foreground-muted">
+          <span aria-hidden className="size-2 shrink-0 rounded-full bg-foreground-error" />
           {error}
         </span>
       ) : isProviderLoading ? (
         <span role="status" className="flex items-center gap-2 text-sm text-foreground-muted">
-          <Loader2 className="size-3.5 animate-spin" /> Loading integration accounts…
+          <Loader2 className="size-3.5 text-foreground-passive motion-safe:animate-spin" /> Loading
+          integration accounts…
         </span>
       ) : (
         <ConnectIssueIntegrationPlaceholder />
@@ -343,46 +360,58 @@ export const IssueSelector = observer(function IssueSelector({
   );
 });
 
+/**
+ * A linked issue in two lines: status mark, title and its tracker id, then one line of the
+ * description in the helper role. The open-in-browser glyph shows on hover or focus.
+ */
 export function SelectedIssueValue({ issue }: { issue: LinkedIssue }) {
   return (
-    <div className="flex w-full flex-col gap-1">
-      <div className="flex w-full items-center">
-        <div className="flex w-full min-w-0 gap-2">
-          {issue.status ? (
-            <span className="mt-1 flex size-3.5 shrink-0 items-center justify-center">
-              <IssueStatusIndicator status={toIssueStatus(issue.status)} />
+    <div className="flex w-full min-w-0 gap-2">
+      {issue.status ? (
+        <span className="mt-0.5 flex h-5 shrink-0 items-center">
+          <IssueStatusIndicator status={toIssueStatus(issue.status)} />
+        </span>
+      ) : null}
+      <div className="flex w-full min-w-0 flex-col gap-0.5">
+        <span className="flex min-w-0 items-center justify-between gap-3">
+          <span className="group/issue-title flex min-w-0 items-center gap-1.5">
+            <span className="min-w-0 truncate text-foreground">{issue.title}</span>
+            <span
+              role="link"
+              tabIndex={issue.url ? 0 : -1}
+              aria-label="Open issue in browser"
+              aria-disabled={!issue.url || undefined}
+              className="shrink-0 rounded-xs text-foreground-passive opacity-0 transition-opacity outline-none group-hover/issue-title:opacity-100 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={(event) => {
+                event.stopPropagation();
+                if (issue.url) void openExternal(issue.url);
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' || !issue.url) return;
+                event.stopPropagation();
+                void openExternal(issue.url);
+              }}
+            >
+              <ExternalLink className="size-3" />
             </span>
-          ) : null}
-          <div className="flex w-full min-w-0 flex-col gap-1 pr-1.5">
-            <span className="mt-0.5 flex items-center justify-between gap-2">
-              <span className="group flex min-w-0 items-center gap-1">
-                <div className="text-muted-foreground min-w-0 truncate">{issue.title}</div>
-                <button
-                  className="opacity-0 group-hover:opacity-100"
-                  disabled={!issue.url}
-                  onClick={() => issue.url && openExternal(issue.url)}
-                >
-                  <ExternalLink className="size-3" />
-                </button>
-              </span>
-              <span className="flex items-center gap-1">
-                <ProviderLogo provider={issue.provider} className="size-3 opacity-40" />
-                <IssueIdentifier issue={issue} />
-              </span>
-            </span>
-            {issue.description ? (
-              <InlineMarkdown
-                content={issue.description}
-                className="line-clamp-1 min-w-0 text-xs text-foreground-muted"
-              />
-            ) : null}
-          </div>
-        </div>
+          </span>
+          <span className="flex shrink-0 items-center gap-1.5 text-foreground-passive">
+            <ProviderLogo provider={issue.provider} className="size-3 opacity-60" />
+            <IssueIdentifier issue={issue} className="text-foreground-passive" />
+          </span>
+        </span>
+        {issue.description ? (
+          <InlineMarkdown
+            content={issue.description}
+            className="line-clamp-1 min-w-0 text-xs text-foreground-muted"
+          />
+        ) : null}
       </div>
     </div>
   );
 }
 
+/** No issue tracker connected: the trackers' marks and one text action to connect one. */
 export function ConnectIssueIntegrationPlaceholder() {
   const { navigate } = useNavigate();
   const { integrations } = useIntegrationsContext();
@@ -391,22 +420,21 @@ export function ConnectIssueIntegrationPlaceholder() {
     .map((integration) => integration.id);
 
   return (
-    <div className="flex w-full flex-col items-center justify-center gap-2 rounded-md border border-dashed border-border p-4">
-      <div className="flex items-center justify-center [&>span]:ring-2 [&>span]:ring-background-quaternary [&>span:not(:first-child)]:-ml-1.5">
+    <div className="flex min-h-8 w-full flex-wrap items-center gap-x-3 gap-y-1">
+      <div className="flex items-center [&>span]:ring-2 [&>span]:ring-(--em-surface) [&>span:not(:first-child)]:-ml-1">
         {issueProviderOrder.map((provider) => (
           <span
             key={provider}
-            className="relative flex size-5 items-center justify-center overflow-hidden rounded-full bg-background-quaternary-2"
+            className="relative flex size-5 items-center justify-center overflow-hidden rounded-full bg-surface-emphasis"
           >
             <ProviderLogo provider={provider} className="size-3" />
           </span>
         ))}
       </div>
-
+      <span className="text-sm text-foreground-muted">No issue tracker connected.</span>
       <Button
-        variant="link"
+        variant="text"
         size="xs"
-        className="w-fit"
         onClick={() => navigate(settingsViewDef({ tab: 'integrations' }))}
       >
         Configure integrations

@@ -1,21 +1,20 @@
-import { AgentStatus, BrailleSpinner } from '@emdash/ui/react/components';
-import { RelativeTime, Tooltip } from '@emdash/ui/react/primitives';
+import { StateGlyph, type StateGlyphState } from '@emdash/ui/react/components';
+import { RelativeTime } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
-import { taskAgentStatus } from '@core/features/conversations/api/browser/conversation-selectors';
+import { sidebarTaskStatus } from '@core/features/conductor/contributions/browser/task-ownership';
 import { type TaskStore } from '@core/features/tasks/api/browser/stores/task-store';
 import { getSidebarStore } from '@core/features/workbench/contributions/browser/app-stores';
+import type { AgentStatus } from '@core/primitives/agents/api/agent-events';
 import { useDelayedBoolean } from '@core/primitives/react-hooks/browser/use-delay-boolean';
 import { getSortInstant, sortKindFor } from './sidebar-store';
 
 /**
- * Sidebar trailing slot: spinner while bootstrapping, the live agent status
- * indicator while an agent is active (non-idle), otherwise the relative
- * timestamp. The whole metadata cluster is right-aligned by the parent, so
- * the slot just hugs its content — no fixed width to avoid an empty gap
- * between the timestamp and the line-changes / PR icon to its left.
+ * Sidebar trailing slot: the setting-up mark while bootstrapping, the task's state glyph while
+ * an agent is active or unread, otherwise the relative timestamp. The whole metadata cluster is
+ * right-aligned by the parent, so the slot just hugs its content.
  */
 function Slot({ children }: { children: React.ReactNode }) {
-  return <span className="flex w-[3ch] shrink-0 items-center justify-end">{children}</span>;
+  return <span className="flex h-4 w-[3ch] shrink-0 items-center justify-end">{children}</span>;
 }
 
 export const TaskSidebarTrailingSlot = observer(function TaskSidebarTrailingSlot({
@@ -30,24 +29,18 @@ export const TaskSidebarTrailingSlot = observer(function TaskSidebarTrailingSlot
   if (delayedIsBootstrapping) {
     return (
       <Slot>
-        <Tooltip.Root>
-          <Tooltip.Trigger>
-            <span className="flex size-6 items-center justify-center">
-              <BrailleSpinner variant="wave" />
-            </span>
-          </Tooltip.Trigger>
-          <Tooltip.Content>Creating workspace...</Tooltip.Content>
-        </Tooltip.Root>
+        <StateGlyph state="setting-up" label="Creating workspace…" />
       </Slot>
     );
   }
 
-  // Show the agent status indicator for any active/unseen state; fall back to timestamp for null (idle).
-  const status = taskAgentStatus(task);
-  if (status !== null) {
+  // The state glyph while the task is yours or at work (the ownership line's rule: a waiting
+  // agent stays marked after it is seen); the timestamp once the task is quiet.
+  const status = sidebarTaskStatus(task.data.id);
+  if (status !== null && status !== 'idle') {
     return (
       <Slot>
-        <AgentStatus status={status} tooltip />
+        <StateGlyph state={GLYPH_FOR_STATUS[status]} label data-status={status} />
       </Slot>
     );
   }
@@ -61,9 +54,22 @@ export const TaskSidebarTrailingSlot = observer(function TaskSidebarTrailingSlot
     <Slot>
       <RelativeTime
         value={instant}
-        className="font-sans text-xs text-foreground-passive tabular-nums"
+        className="font-sans text-tiny leading-4 text-foreground-passive tabular-nums"
         compact
       />
     </Slot>
   );
 });
+
+/**
+ * The kit's one set of state marks (the conductor screen draws the same): a filled near-white
+ * dot when the task waits on the developer, a softly pulsing accent dot while it works, a bright
+ * ring for a finish not looked at yet, and the error dot. Each announces its words and shows
+ * them in a tooltip.
+ */
+const GLYPH_FOR_STATUS: Record<Exclude<AgentStatus, 'idle'>, StateGlyphState> = {
+  'awaiting-input': 'needs-you',
+  working: 'working',
+  completed: 'unread',
+  error: 'error',
+};

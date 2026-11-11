@@ -76,7 +76,7 @@ describe.each([
       renderState({ kind: 'disabled', message: `${providerName} is disabled for this project.` });
       expect(container.textContent).toContain(`${providerName} is disabled for this project.`);
       expect(container.querySelector('button')).toBeNull();
-      expect(container.querySelector('.text-foreground-error')).toBeNull();
+      expect(container.querySelector('[data-slot="state-glyph"][data-state="error"]')).toBeNull();
     });
 
     it('renders connect with a provider connection affordance', () => {
@@ -104,7 +104,9 @@ describe.each([
       expect(container.textContent).toContain(
         `The selected ${providerName} account is no longer connected.`
       );
-      expect(container.querySelector('.text-foreground-error')).not.toBeNull();
+      expect(
+        container.querySelector('[data-slot="state-glyph"][data-state="error"]')
+      ).not.toBeNull();
       const button = [...container.querySelectorAll('button')].find((candidate) =>
         candidate.textContent?.includes('Open project settings')
       );

@@ -155,7 +155,7 @@ function DropdownMenuCheckboxItem({
     >
       <span className={styles.menuItemIndicator} data-slot="dropdown-menu-checkbox-item-indicator">
         <MenuPrimitive.CheckboxItemIndicator>
-          <CheckIcon strokeWidth={3} absoluteStrokeWidth />
+          <CheckIcon strokeWidth={2} absoluteStrokeWidth />
         </MenuPrimitive.CheckboxItemIndicator>
       </span>
       {children}
@@ -184,7 +184,7 @@ function DropdownMenuRadioItem({
     >
       <span className={styles.menuItemIndicator} data-slot="dropdown-menu-radio-item-indicator">
         <MenuPrimitive.RadioItemIndicator>
-          <CheckIcon strokeWidth={3} absoluteStrokeWidth />
+          <CheckIcon strokeWidth={2} absoluteStrokeWidth />
         </MenuPrimitive.RadioItemIndicator>
       </span>
       {children}

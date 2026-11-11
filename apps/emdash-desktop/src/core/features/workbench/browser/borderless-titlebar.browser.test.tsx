@@ -1,4 +1,10 @@
-import { act, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import {
+  act,
+  cloneElement,
+  type ButtonHTMLAttributes,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -18,14 +24,17 @@ vi.mock('@emdash/ui/react/primitives', () => ({
   Button: ({
     variant: _variant,
     size: _size,
+    icon: _icon,
     ...props
   }: ButtonHTMLAttributes<HTMLButtonElement> & {
     variant?: string;
     size?: string;
+    icon?: boolean;
   }) => <button {...props} />,
   Tooltip: {
     Root: ({ children }: { children: ReactNode }) => <>{children}</>,
-    Trigger: ({ children }: { children: ReactNode }) => <>{children}</>,
+    Trigger: ({ children, render }: { children: ReactNode; render?: ReactElement }) =>
+      render ? cloneElement(render, undefined, children) : <>{children}</>,
     Content: () => null,
   },
 }));

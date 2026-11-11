@@ -74,8 +74,8 @@ export default async function jevRouting({ app, page, shot, log }) {
     await page.waitForTimeout(6000);
     await page.keyboard.press('Control+Shift+A');
     await page.waitForTimeout(3000);
-    await page.getByRole('button', { name: 'Type a command' }).click();
-    const input = page.getByRole('textbox', { name: 'Command' });
+    const input = page.getByRole('combobox', { name: 'Command' });
+    await input.click();
     await input.fill('can you bring up the codecs agent for me');
     await input.press('Enter');
     await page.waitForTimeout(2500);

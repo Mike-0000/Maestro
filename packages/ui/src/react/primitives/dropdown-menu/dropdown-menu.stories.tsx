@@ -15,9 +15,7 @@ type Story = StoryObj;
 export const Default: Story = {
   render: () => (
     <DropdownMenu.Root>
-      <DropdownMenu.Trigger>
-        <Button variant="ghost">Open menu</Button>
-      </DropdownMenu.Trigger>
+      <DropdownMenu.Trigger render={<Button variant="ghost" />}>Open menu</DropdownMenu.Trigger>
       <DropdownMenu.Content>
         <DropdownMenu.Group>
           <DropdownMenu.Item>
@@ -41,9 +39,7 @@ export const Default: Story = {
 export const WithLabel: Story = {
   render: () => (
     <DropdownMenu.Root>
-      <DropdownMenu.Trigger>
-        <Button variant="ghost">Open menu</Button>
-      </DropdownMenu.Trigger>
+      <DropdownMenu.Trigger render={<Button variant="ghost" />}>Open menu</DropdownMenu.Trigger>
       <DropdownMenu.Content>
         <DropdownMenu.Group>
           <DropdownMenu.Label>Text formatting</DropdownMenu.Label>
@@ -75,8 +71,8 @@ export const WithCheckboxItems: Story = {
     const [italic, setItalic] = useState(false);
     return (
       <DropdownMenu.Root>
-        <DropdownMenu.Trigger>
-          <Button variant="ghost">Text options</Button>
+        <DropdownMenu.Trigger render={<Button variant="ghost" />}>
+          Text options
         </DropdownMenu.Trigger>
         <DropdownMenu.Content>
           <DropdownMenu.Group>
@@ -98,8 +94,8 @@ export const WithRadioItems: Story = {
     const [position, setPosition] = useState('center');
     return (
       <DropdownMenu.Root>
-        <DropdownMenu.Trigger>
-          <Button variant="ghost">Alignment: {position}</Button>
+        <DropdownMenu.Trigger render={<Button variant="ghost" />}>
+          Alignment: {position}
         </DropdownMenu.Trigger>
         <DropdownMenu.Content>
           <DropdownMenu.RadioGroup value={position} onValueChange={setPosition}>
@@ -116,9 +112,7 @@ export const WithRadioItems: Story = {
 export const WithSubMenu: Story = {
   render: () => (
     <DropdownMenu.Root>
-      <DropdownMenu.Trigger>
-        <Button variant="ghost">Open menu</Button>
-      </DropdownMenu.Trigger>
+      <DropdownMenu.Trigger render={<Button variant="ghost" />}>Open menu</DropdownMenu.Trigger>
       <DropdownMenu.Content>
         <DropdownMenu.Item>Profile</DropdownMenu.Item>
         <DropdownMenu.Sub>
@@ -138,8 +132,8 @@ export const WithSubMenu: Story = {
 export const TriggerWidth: Story = {
   render: () => (
     <DropdownMenu.Root>
-      <DropdownMenu.Trigger>
-        <Button variant="ghost">Wide trigger menu</Button>
+      <DropdownMenu.Trigger render={<Button variant="ghost" />}>
+        Wide trigger menu
       </DropdownMenu.Trigger>
       <DropdownMenu.Content width="trigger">
         <DropdownMenu.Item>Matches trigger width</DropdownMenu.Item>

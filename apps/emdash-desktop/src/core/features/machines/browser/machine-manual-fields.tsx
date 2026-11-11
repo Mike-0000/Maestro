@@ -10,7 +10,7 @@ function FieldInfoTooltip({ label, children }: { label: string; children: ReactN
         render={
           <button
             type="button"
-            className="focus-visible:ring-primary/30 relative inline-flex size-4 shrink-0 items-center justify-center rounded-full text-foreground-passive transition-colors before:absolute before:-inset-2.5 before:content-[''] hover:text-foreground focus-visible:ring-2 focus-visible:outline-none"
+            className="relative inline-flex size-4 shrink-0 items-center justify-center rounded-full text-foreground-passive transition-colors before:absolute before:-inset-2.5 before:content-[''] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             aria-label={`About ${label}`}
           >
             <InfoIcon className="size-3.5" aria-hidden="true" />
@@ -20,7 +20,7 @@ function FieldInfoTooltip({ label, children }: { label: string; children: ReactN
       <Tooltip.Content
         side="top"
         align="start"
-        className="max-w-[240px] items-start text-left leading-relaxed whitespace-normal"
+        className="max-w-60 text-left text-xs whitespace-normal"
       >
         {children}
       </Tooltip.Content>
@@ -40,7 +40,7 @@ function FieldLabelWithInfo({ label, info }: { label: string; info: ReactNode })
 export function MachineManualFields({ form }: { form: MachineEditorForm }) {
   return (
     <>
-      <div className="grid grid-cols-[1fr_6rem] gap-3">
+      <div className="grid grid-cols-[minmax(0,1fr)_6rem] gap-3">
         <form.AppField name="manual.host">
           {(field) => <field.TextField label="Host" placeholder="203.0.113.10" />}
         </form.AppField>
@@ -60,9 +60,11 @@ export function MachineManualRouting({ form }: { form: MachineEditorForm }) {
   return (
     <Collapsible.Root open={isAdvancedOpen} onOpenChange={setIsAdvancedOpen}>
       <div className="w-fit">
-        <Collapsible.Trigger type="button">Advanced settings</Collapsible.Trigger>
+        <Collapsible.Trigger type="button" variant="text">
+          Advanced settings
+        </Collapsible.Trigger>
       </div>
-      <Collapsible.Panel className="grid gap-3 pt-2">
+      <Collapsible.Panel className="grid gap-5 pt-3">
         <form.AppField name="manual.proxyJump">
           {(field) => (
             <field.TextField

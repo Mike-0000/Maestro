@@ -1,7 +1,7 @@
 import { Markdown } from '@emdash/ui/react/components';
-import { RelativeTime } from '@emdash/ui/react/primitives';
+import { Button, RelativeTime } from '@emdash/ui/react/primitives';
 import { ExternalLink, MessageSquare } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { openExternal } from '@core/primitives/desktop-host/browser/host-client';
 import { useMarkdownLinkOpener } from '@core/primitives/external-links/browser';
 import { cn } from '@core/primitives/styling/browser/cn';
@@ -30,7 +30,7 @@ function CommentItem({ comment }: { comment: PullRequestConversationItem }) {
   const openLink = useMarkdownLinkOpener();
 
   return (
-    <div className="group relative flex w-full min-w-0 gap-2 rounded-md px-3 py-2 text-left hover:bg-background-1">
+    <div className="group/comment flex w-full min-w-0 gap-2 rounded-md px-2 py-2 text-left transition-colors hover:bg-surface-hover">
       {comment.author?.avatarUrl ? (
         <img
           src={comment.author.avatarUrl}
@@ -39,8 +39,9 @@ function CommentItem({ comment }: { comment: PullRequestConversationItem }) {
         />
       ) : (
         <div
+          aria-hidden
           className={cn(
-            'mt-0.5 flex size-5 shrink-0 items-center justify-center bg-background-2 text-foreground-muted',
+            'mt-0.5 flex size-5 shrink-0 items-center justify-center bg-surface-emphasis text-foreground-passive',
             avatarRadiusClass
           )}
         >
@@ -48,39 +49,46 @@ function CommentItem({ comment }: { comment: PullRequestConversationItem }) {
         </div>
       )}
       <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-1.5 text-xs text-foreground-muted">
-          <span className="truncate font-medium text-foreground">{author}</span>
-          <span className="shrink-0 text-foreground-passive">/</span>
-          <RelativeTime compact value={comment.createdAt} className="shrink-0" />
-          {comment.isResolved && (
-            <>
-              <span className="shrink-0 text-foreground-passive">/</span>
-              <span className="shrink-0 text-foreground-passive">Resolved</span>
-            </>
-          )}
+        <div className="flex min-w-0 items-baseline gap-1.5">
+          <span className="truncate text-xs font-medium text-foreground">{author}</span>
+          <span className="flex min-w-0 shrink-0 items-baseline gap-1 text-tiny text-foreground-passive tabular-nums">
+            <RelativeTime compact value={comment.createdAt} />
+            {comment.isResolved && <span>· Resolved</span>}
+            {comment.isOutdated && <span>· Outdated</span>}
+          </span>
         </div>
         {location && (
-          <div className="mt-0.5 truncate font-mono text-[11px] text-foreground-passive">
+          <div className="mt-0.5 truncate font-mono text-tiny text-foreground-passive">
             {location}
           </div>
         )}
         <div
           className={cn(
-            'mt-1 break-words text-xs leading-relaxed text-foreground-muted [&_*:last-child]:mb-0 [&_p]:mb-1.5',
-            comment.isOutdated && 'text-foreground-passive'
+            'mt-1 text-xs leading-relaxed break-words [&_*:last-child]:mb-0 [&_p]:mb-1.5',
+            comment.isOutdated || comment.isResolved
+              ? 'text-foreground-passive'
+              : 'text-foreground-body'
           )}
         >
           <Markdown content={comment.body} variant="compact" allowHtml onOpenLink={openLink} />
         </div>
       </div>
-      <button
-        className="absolute top-2 right-3 hidden items-center justify-center rounded bg-background-1 px-1 py-0.5 text-foreground-muted group-hover:flex hover:text-foreground"
+      <Button
+        variant="ghost"
+        size="xs"
+        icon
+        aria-label="Open comment on GitHub"
+        className="-mt-0.5 shrink-0 opacity-0 transition-opacity group-hover/comment:opacity-100 focus-visible:opacity-100"
         onClick={() => void openExternal(comment.url)}
       >
         <ExternalLink className="size-3.5" />
-      </button>
+      </Button>
     </div>
   );
+}
+
+function CommentsNote({ children }: { children: ReactNode }) {
+  return <p className="px-2 py-1.5 text-xs text-foreground-passive">{children}</p>;
 }
 
 export function CommentsList({
@@ -95,28 +103,24 @@ export function CommentsList({
   const sorted = useMemo(() => [...comments].sort(sortPullRequestConversationItems), [comments]);
 
   if (isLoading && sorted.length === 0) {
-    return <div className="px-3 py-2 text-xs text-foreground-passive">Loading comments...</div>;
+    return <CommentsNote>Loading comments…</CommentsNote>;
   }
 
   if (error && sorted.length === 0) {
-    return <div className="px-3 py-2 text-xs text-foreground-passive">Unable to load comments</div>;
+    return <CommentsNote>Unable to load comments</CommentsNote>;
   }
 
   if (sorted.length === 0) {
-    return <div className="px-3 py-2 text-xs text-foreground-passive">No comments available</div>;
+    return <CommentsNote>No comments yet</CommentsNote>;
   }
 
   return (
-    <div className="flex flex-col gap-[1px]">
+    <div className="flex flex-col">
       {sorted.map((comment) => (
         <CommentItem key={comment.id} comment={comment} />
       ))}
-      {isLoading && (
-        <div className="px-3 py-2 text-xs text-foreground-passive">Loading comments...</div>
-      )}
-      {error && (
-        <div className="px-3 py-2 text-xs text-foreground-passive">Unable to load comments</div>
-      )}
+      {isLoading && <CommentsNote>Loading comments…</CommentsNote>}
+      {error && <CommentsNote>Unable to load comments</CommentsNote>}
     </div>
   );
 }

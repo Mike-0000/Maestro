@@ -1,181 +1,75 @@
-import { EmptyState, Markdown } from '@emdash/ui/react/components';
-import {
-  Button,
-  DropdownMenu,
-  Spinner,
-  Switch,
-  Textarea,
-  Tooltip,
-} from '@emdash/ui/react/primitives';
-import {
-  ChevronRight,
-  CircleAlert,
-  CircleSlash,
-  CornerDownLeft,
-  Ellipsis,
-  Hand,
-  Plus,
-  Send,
-  ShieldCheck,
-  Trash2,
-  type LucideIcon,
-} from 'lucide-react';
+import { EmptyState } from '@emdash/ui/react/components';
+import { Button, Spinner } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { settingsViewDef } from '@core/features/settings/contributions/views';
-import { useMarkdownLinkOpener } from '@core/primitives/external-links/browser';
 import { getNavigation } from '@core/primitives/navigation/browser/navigation-selectors';
 import { cn } from '@core/primitives/styling/browser/cn';
-import type { ChatConductorEntry } from '../../api/chat-conductor/thread';
 import { useHudClearance } from '../hud/hud-clearance';
-import { withoutImages } from './safe-markdown';
 import type { ChatConductorSession } from './session';
-import { ChatSubAgents } from './sub-agents';
+import { ChatHelpers } from './sub-agents';
+import { composerPlaceholder } from './view/composer-placeholder';
+import { ComposerTools, ConductorComposer } from './view/conductor-composer';
+import { ConductorStateGlyph } from './view/status-strip';
+import { ThreadBlocks } from './view/thread-blocks';
+import { buildThreadView } from './view/thread-view';
+import { useBusySince } from './view/use-busy-since';
+import { useNow } from './view/use-now';
+import { conductorVitals } from './view/vitals';
+import { VitalsFooter } from './view/vitals-footer';
 
 /**
  * The thread and the composer span the pane. Each sits in a box that keeps a scrollbar's width
  * free on both edges, so the thread's scrollbar never moves it off the composer's edges.
  */
 const GUTTER = '[scrollbar-gutter:stable_both-edges]';
-/** Their shared side padding grows with the pane: 16px in a narrow split, 48px from about 1900px. */
-const COLUMN = 'w-full px-[clamp(1rem,2.5%,3rem)]';
+/**
+ * Their shared column: the app's reading measure, centred, with side padding that grows with the
+ * pane from 16px in a narrow split to 48px in a wide one.
+ */
+const COLUMN = 'reading-column';
 /** Closer to the end than this and the thread follows new entries. */
 const FOLLOW_SLACK_PX = 64;
-
-type ActionEntry = Extract<ChatConductorEntry, { kind: 'action' }>;
-
-const ACTION_ICONS: Record<string, LucideIcon> = {
-  send_to_agent: Send,
-  interrupt_agent: Hand,
-  answer_prompt: ShieldCheck,
-  start_agent: Plus,
-};
-
-function entryTime(at: string): string | undefined {
-  const date = new Date(at);
-  return Number.isNaN(date.getTime()) ? undefined : date.toLocaleString();
-}
-
-const ConductorMessage = observer(function ConductorMessage({ text }: { text: string }) {
-  const openLink = useMarkdownLinkOpener();
-  // Markdown ends every block with a margin; -mb-2 takes the last one back, so the thread's gap
-  // alone spaces a message from the entry after it.
-  return (
-    <div className="-mb-2 min-w-0 text-sm leading-relaxed text-foreground select-text">
-      <Markdown content={withoutImages(text)} variant="compact" onOpenLink={openLink} />
-    </div>
-  );
-});
-
-function DeveloperMessage({ text }: { text: string }) {
-  return (
-    <div className="flex justify-end">
-      <div className="max-w-[85%] rounded-lg bg-background-2 px-3 py-2 text-sm leading-relaxed break-words whitespace-pre-wrap text-foreground select-text">
-        {text}
-      </div>
-    </div>
-  );
-}
-
-/** What the conductor did: one quiet line, opening to the exact text it sent. */
-function ActionRow({ entry }: { entry: ActionEntry }) {
-  const [open, setOpen] = useState(false);
-  const Icon = entry.status === 'refused' ? CircleSlash : (ACTION_ICONS[entry.tool] ?? Send);
-  const tone =
-    entry.status === 'failed'
-      ? 'text-foreground-error'
-      : entry.status === 'refused'
-        ? 'text-foreground-warning'
-        : 'text-foreground-muted';
-  const line = (
-    <>
-      <Icon aria-hidden className="mt-0.5 size-3.5 shrink-0" />
-      <span className="min-w-0 flex-1 text-left break-words">{entry.summary}</span>
-    </>
-  );
-  if (!entry.detail) {
-    return <div className={cn('flex items-start gap-2 text-xs', tone)}>{line}</div>;
-  }
-  return (
-    <div className="text-xs">
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-        className={cn(
-          '-mx-1.5 flex w-[calc(100%+0.75rem)] items-start gap-2 rounded-md px-1.5 py-1 outline-none hover:bg-background-1 focus-visible:bg-background-1',
-          tone
-        )}
-      >
-        {line}
-        <ChevronRight
-          aria-hidden
-          className={cn('mt-0.5 size-3.5 shrink-0 transition-transform', open && 'rotate-90')}
-        />
-      </button>
-      {open && (
-        <pre className="mt-1 ml-[1.375rem] max-h-80 overflow-auto rounded-md border border-border bg-background-1 px-3 py-2 font-mono text-xs leading-relaxed break-words whitespace-pre-wrap text-foreground select-text">
-          {entry.detail}
-        </pre>
-      )}
-    </div>
-  );
-}
-
-function EventDivider({ text }: { text: string }) {
-  return (
-    <div className="flex items-center gap-3 text-[11px] text-foreground-passive" role="separator">
-      <span className="h-px flex-1 bg-border" />
-      <span className="shrink-0">{text}</span>
-      <span className="h-px flex-1 bg-border" />
-    </div>
-  );
-}
-
-function ErrorRow({ text }: { text: string }) {
-  return (
-    <div
-      role="alert"
-      className="flex items-start gap-2 rounded-md border border-border-destructive bg-background-destructive px-3 py-2 text-sm text-foreground-destructive select-text"
-    >
-      <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
-      <span className="min-w-0 flex-1 break-words whitespace-pre-wrap">{text}</span>
-    </div>
-  );
-}
-
-function ThreadEntry({ entry }: { entry: ChatConductorEntry }) {
-  switch (entry.kind) {
-    case 'conductor':
-      return <ConductorMessage text={entry.text} />;
-    case 'developer':
-      return <DeveloperMessage text={entry.text} />;
-    case 'action':
-      return <ActionRow entry={entry} />;
-    case 'event':
-      return <EventDivider text={entry.text} />;
-    case 'error':
-      return <ErrorRow text={entry.text} />;
-  }
-}
 
 function openConductorSettings(): void {
   getNavigation().navigate(settingsViewDef({ tab: 'chorus' }));
 }
 
 /** Why the conductor cannot run, and where to fix it. */
-function setupCopy(enabled: boolean): { label: string; description: string } {
+function setupCopy(enabled: boolean): { title: string; description: string } {
   return enabled
     ? {
-        label: 'The chat conductor needs an API key',
+        title: 'The conductor needs an API key',
         description:
-          'It reads this chat for you and can direct the agent. Add a key for the conductor in Settings, under Voice & Conductor. The Raw view works as always.',
+          "It reads this task's chats for you and can direct their agents. Add a key for the conductor in Settings, under Voice & Conductor. The Raw view works as always.",
       }
     : {
-        label: 'Chat conductors are turned off',
+        title: 'Chat conductors are turned off',
         description:
-          'A chat conductor reads this chat for you and can direct the agent. Turn it on in Settings, under Voice & Conductor. The Raw view works as always.',
+          "A conductor reads this task's chats for you and can direct their agents. Turn it on in Settings, under Voice & Conductor. The Raw view works as always.",
       };
+}
+
+/** A centred title, one sentence and one action: the thread before anything is in it. */
+function ConductorEmpty({
+  title,
+  description,
+  action,
+}: {
+  title: string;
+  description: string;
+  action: ReactNode;
+}) {
+  return (
+    <EmptyState
+      size="page"
+      bare
+      label={title}
+      description={description}
+      action={action}
+      className="min-h-full px-6 py-12"
+    />
+  );
 }
 
 export interface ChatConductorPanelProps {
@@ -187,11 +81,33 @@ export interface ChatConductorPanelProps {
   /** Put the cursor in the composer when the panel shows. */
   autoFocus: boolean;
   onFocus?: () => void;
+  /** Flips the chat to its Raw view. */
+  onShowRaw: () => void;
+  /**
+   * Archives the task, which leaves its view. While a returned promise is pending, Done stays
+   * disabled.
+   */
+  onDone: () => Promise<void> | void;
+  /** Opens the merge dialog; null when the task cannot be integrated. */
+  onMerge: (() => void) | null;
+  /** Opens an address beside the view; only addresses `digestActions` let through reach it. */
+  onOpenApp: (url: string) => void;
+  /** The task's dev server origins, the addresses a report may open. */
+  devServerOrigins: readonly string[];
+  /** The agent of the chat on screen ("Claude"). */
+  providerLabel: string | null;
+  /** The Claude account that agent runs on, when there is more than one to tell apart. */
+  accountLabel: string | null;
+  /** The effort the conductor's turns run at. */
+  conductorEffort: string | null;
+  /** The task's diff size, drawn by the caller; nothing when it has none. */
+  diffStat?: ReactNode;
 }
 
 /**
- * A chat's thread with its conductor: what the conductor told the developer and what it did, and
- * the composer the developer directs it from.
+ * A task's thread with its conductor, as one calm reading column: the developer's words on the
+ * right, the conductor's lines with the newest in large type, its reports in a fixed shape, and
+ * what it did folded away. Under it one line of quiet facts and the composer.
  */
 export const ChatConductorPanel = observer(function ChatConductorPanel({
   session,
@@ -199,6 +115,15 @@ export const ChatConductorPanel = observer(function ChatConductorPanel({
   enabled,
   autoFocus,
   onFocus,
+  onShowRaw,
+  onDone,
+  onMerge,
+  onOpenApp,
+  devServerOrigins,
+  providerLabel,
+  accountLabel,
+  conductorEffort,
+  diffStat,
 }: ChatConductorPanelProps) {
   const [panel, setPanel] = useState<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -206,7 +131,11 @@ export const ChatConductorPanel = observer(function ChatConductorPanel({
   /** The developer is reading the end of the thread, so new entries scroll into view. */
   const followingRef = useRef(true);
 
-  const { entries, busy, activity, loaded, draft } = session;
+  const { entries, busy, activity, loaded, draft, status } = session;
+  const blocks = useMemo(() => buildThreadView(entries), [entries]);
+  const busySince = useBusySince(busy);
+  // Running clocks move every second; ages ("6m ago") only need a slower beat.
+  const nowMs = useNow(busy || status?.state === 'needs_you' ? 1_000 : 15_000);
   const canSend = ready && loaded && draft.trim().length > 0;
   /** The setup screen stands in for the thread and the composer. */
   const needsSetup = !ready && entries.length === 0;
@@ -241,15 +170,14 @@ export const ChatConductorPanel = observer(function ChatConductorPanel({
     session.setDraft('');
   };
 
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
-    event.preventDefault();
-    send();
+  const catchUp = () => {
+    followingRef.current = true;
+    session.catchUp();
   };
 
   if (!loaded) {
     return (
-      <div className="flex h-full items-center justify-center text-foreground-muted">
+      <div className="flex h-full items-center justify-center text-foreground-passive">
         <Spinner size="md" aria-label="Loading the thread" />
       </div>
     );
@@ -257,57 +185,95 @@ export const ChatConductorPanel = observer(function ChatConductorPanel({
 
   if (needsSetup) {
     return (
-      <EmptyState
-        {...setupCopy(enabled)}
-        action={
-          <Button type="button" variant="secondary" size="sm" onClick={openConductorSettings}>
-            Open settings
-          </Button>
-        }
-      />
+      <div className="h-full overflow-y-auto">
+        <ConductorEmpty
+          {...setupCopy(enabled)}
+          action={
+            <Button type="button" variant="secondary" size="sm" onClick={openConductorSettings}>
+              Open settings
+            </Button>
+          }
+        />
+      </div>
     );
   }
 
+  const last = entries.at(-1) ?? null;
+  const vitals = conductorVitals({
+    state: status?.state ?? null,
+    busy,
+    activity,
+    busySinceMs: busySince,
+    lastEntryAt: last?.at ?? null,
+    lastEntryKind: last?.kind ?? null,
+    nowMs,
+    providerLabel,
+    accountLabel,
+    conductorEffort,
+  });
+
   return (
-    <div ref={setPanel} className="flex h-full min-h-0 flex-col" onFocus={onFocus}>
-      <div
-        ref={scrollRef}
-        className={cn('min-h-0 flex-1 overflow-y-auto', GUTTER)}
-        onScroll={(event) => {
-          const element = event.currentTarget;
-          followingRef.current =
-            element.scrollHeight - element.scrollTop - element.clientHeight < FOLLOW_SLACK_PX;
-        }}
-      >
-        {entries.length === 0 && !busy ? (
-          <EmptyState
-            bare
-            label="Nothing here yet"
-            description="Write to the conductor to direct this chat's agent, or ask it to catch you up on where the chat stands."
-            action={
-              <Button type="button" variant="secondary" size="sm" onClick={() => session.catchUp()}>
-                Catch me up
-              </Button>
-            }
-          />
-        ) : (
-          <div className={cn(COLUMN, 'flex flex-col gap-3 py-3')} aria-live="polite">
-            {entries.map((entry) => (
-              <div key={entry.id} title={entryTime(entry.at)}>
-                <ThreadEntry entry={entry} />
+    <div
+      ref={setPanel}
+      className="@container/conductor flex h-full min-h-0 flex-col"
+      onFocus={onFocus}
+    >
+      <div className="relative min-h-0 flex-1">
+        <div
+          ref={scrollRef}
+          className={cn('h-full overflow-y-auto', GUTTER)}
+          onScroll={(event) => {
+            const element = event.currentTarget;
+            followingRef.current =
+              element.scrollHeight - element.scrollTop - element.clientHeight < FOLLOW_SLACK_PX;
+          }}
+        >
+          {entries.length === 0 ? (
+            busy ? (
+              <div className="flex min-h-full items-center justify-center gap-2.5 px-6 text-sm text-foreground-muted">
+                <ConductorStateGlyph glyph="working" />
+                <span>Catching you up…</span>
               </div>
-            ))}
-            {busy && (
-              <div className="flex min-h-6 items-center gap-2 text-xs text-foreground-muted">
-                <Spinner size="sm" />
-                <span className="min-w-0 flex-1 truncate">{activity ?? 'Working…'}</span>
-                <Button type="button" variant="ghost" size="xs" onClick={() => session.stop()}>
-                  Stop
-                </Button>
-              </div>
-            )}
-          </div>
-        )}
+            ) : (
+              <ConductorEmpty
+                title="Nothing here yet"
+                description="Tell the conductor what you want from this task, or ask it to catch you up on where things stand."
+                action={
+                  <Button type="button" variant="secondary" size="sm" onClick={catchUp}>
+                    Catch me up
+                  </Button>
+                }
+              />
+            )
+          ) : (
+            <div className={cn(COLUMN, 'flex flex-col gap-6 pt-8 pb-10')} aria-live="polite">
+              <ThreadBlocks
+                blocks={blocks}
+                nowMs={nowMs}
+                devServerOrigins={devServerOrigins}
+                onDone={onDone}
+                onMerge={onMerge}
+                onOpenApp={onOpenApp}
+                onShowRaw={onShowRaw}
+              />
+              {busy && (
+                // Where the conductor's next words will appear; what it is doing is in the footer.
+                <div aria-hidden className="mt-4 flex h-7 items-center">
+                  <ConductorStateGlyph glyph="working" />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        {/* The thread fades into the strip above and the footer below instead of being cut. */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute top-0 right-2 left-0 h-5 bg-linear-to-b from-surface to-transparent"
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute right-2 bottom-0 left-0 h-8 bg-linear-to-t from-surface to-transparent"
+        />
       </div>
 
       <div className={cn('shrink-0 overflow-hidden', GUTTER)}>
@@ -318,102 +284,50 @@ export const ChatConductorPanel = observer(function ChatConductorPanel({
           )}
           style={{ paddingBottom: `max(0.75rem, ${hudClearance}px)` }}
         >
-          {!ready && (
-            <div className="mb-2 flex items-center gap-2 rounded-md border border-border-warning bg-background-warning px-3 py-1.5 text-xs text-foreground-warning">
-              <span className="min-w-0 flex-1">
-                {enabled
-                  ? 'The conductor has no API key, so it cannot run.'
-                  : 'Chat conductors are turned off, so this one is not following the chat.'}
-              </span>
-              <Button type="button" variant="ghost" size="xs" onClick={openConductorSettings}>
-                Open settings
-              </Button>
-            </div>
-          )}
-          <Textarea
-            ref={composerRef}
-            value={draft}
-            rows={2}
-            disabled={!ready}
-            aria-label="Message the conductor"
-            placeholder={
-              busy
-                ? 'Write to the conductor. It is sent when this turn ends.'
-                : 'Tell the conductor what you want from this chat'
-            }
-            className="max-h-60 w-full resize-none text-sm"
-            onChange={(event) => session.setDraft(event.currentTarget.value)}
-            onKeyDown={onKeyDown}
-          />
-          <div className="mt-1.5 flex items-center gap-1">
-            <Tooltip.Root>
-              <Tooltip.Trigger
-                render={
-                  <span className="flex h-6 items-center gap-2 rounded-md px-1 text-xs text-foreground-muted" />
-                }
-              >
-                <Switch
-                  size="sm"
-                  checked={session.autonomy}
-                  onCheckedChange={(on) => session.setAutonomy(on)}
-                  aria-label="Act on my behalf"
-                />
-                <span
-                  className="cursor-pointer select-none"
-                  onClick={() => session.setAutonomy(!session.autonomy)}
-                >
-                  Act on my behalf
+          <div className="mb-1.5">
+            {ready ? (
+              <VitalsFooter
+                vitals={vitals}
+                onStop={busy ? () => session.stop() : null}
+                helpers={<ChatHelpers conversationIds={session.chatIds} />}
+                diffStat={diffStat}
+              />
+            ) : (
+              <div className="flex h-6 min-w-0 items-center gap-1.5 text-tiny text-foreground-warning">
+                <span className="min-w-0 truncate">
+                  {enabled
+                    ? 'The conductor has no API key, so it cannot run.'
+                    : 'Chat conductors are turned off, so this one is not following the task.'}
                 </span>
-              </Tooltip.Trigger>
-              <Tooltip.Content side="top" align="start" className="max-w-xs">
-                On: when the agent finishes or asks something while you are away, the conductor may
-                prompt it, answer it or interrupt it, within what you asked for. Off: it only tells
-                you what happened and what it would do. What you ask for directly is always done.
-              </Tooltip.Content>
-            </Tooltip.Root>
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              disabled={!ready}
-              onClick={() => {
-                followingRef.current = true;
-                session.catchUp();
-              }}
-            >
-              Catch me up
-            </Button>
-            <ChatSubAgents conversationIds={session.chatIds} />
-            <DropdownMenu.Root>
-              <DropdownMenu.Trigger
-                render={
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="xs"
-                    icon
-                    aria-label="Thread options"
-                  />
-                }
-              >
-                <Ellipsis aria-hidden />
-              </DropdownMenu.Trigger>
-              <DropdownMenu.Content align="end" side="top" width="content">
-                <DropdownMenu.Item
-                  variant="destructive"
-                  disabled={entries.length === 0 && !busy}
-                  onClick={() => void session.reset()}
+                <Button
+                  type="button"
+                  variant="text"
+                  size="xs"
+                  onClick={openConductorSettings}
+                  className="text-tiny underline-offset-2"
                 >
-                  <Trash2 aria-hidden />
-                  Clear thread
-                </DropdownMenu.Item>
-              </DropdownMenu.Content>
-            </DropdownMenu.Root>
-            <Button type="button" variant="primary" size="xs" disabled={!canSend} onClick={send}>
-              Send
-              <CornerDownLeft aria-hidden />
-            </Button>
+                  Open settings
+                </Button>
+              </div>
+            )}
           </div>
+          <ConductorComposer
+            textareaRef={composerRef}
+            value={draft}
+            placeholder={composerPlaceholder({ ready, busy, state: status?.state ?? null })}
+            disabled={!ready}
+            canSend={canSend}
+            onChange={(text) => session.setDraft(text)}
+            onSend={send}
+          />
+          <ComposerTools
+            ready={ready}
+            autonomy={session.autonomy}
+            onAutonomyChange={(on) => session.setAutonomy(on)}
+            onCatchUp={catchUp}
+            canClear={entries.length > 0 || busy}
+            onClear={() => void session.reset()}
+          />
         </div>
       </div>
     </div>

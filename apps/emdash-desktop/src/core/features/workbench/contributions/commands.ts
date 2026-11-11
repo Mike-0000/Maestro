@@ -34,7 +34,7 @@ export const newTaskCommand = defineCommand({
 export const giveFeedbackCommand = defineCommand({
   id: 'app.giveFeedback',
   title: 'Give Feedback',
-  description: 'Send feedback to the emdash team',
+  description: 'Send feedback about Maestro',
   category: 'App',
   icon: 'message-square-share',
 });

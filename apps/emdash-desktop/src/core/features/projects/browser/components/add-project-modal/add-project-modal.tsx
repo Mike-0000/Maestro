@@ -1,8 +1,9 @@
-import { Dialog, Input, ModalLayout, SelectableCard, toast } from '@emdash/ui/react/primitives';
+import { getPillTabId, PillTabs, type PillTab } from '@emdash/ui/react/patterns';
+import { Button, Dialog, Field, Input, ModalLayout, toast } from '@emdash/ui/react/primitives';
 import { useQuery } from '@tanstack/react-query';
 import { DownloadIcon, FolderOpenIcon, PlusIcon } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useId, useMemo, useState } from 'react';
 import { useAccounts } from '@core/features/integrations/api/browser/use-provider-accounts';
 import { deriveConnectionMachineStatusKind } from '@core/features/machines/api/browser/machine-status-kind';
 import { getMachinesStore } from '@core/features/machines/contributions/app-stores';
@@ -49,6 +50,7 @@ export const AddProjectModal = observer(function AddProjectModal({
   connectionId: connectionIdProp,
 }: AddProjectModalProps) {
   const modal = useModalController('addProjectModal');
+  const projectNameId = useId();
   const [strategy, setStrategy] = useState<Strategy>(strategyProp ?? 'local');
   const [mode, setMode] = useState<Mode>(modeProp ?? 'pick');
   const [connectionId, setConnectionId] = useState<string | undefined>(connectionIdProp);
@@ -267,38 +269,47 @@ export const AddProjectModal = observer(function AddProjectModal({
     }
   };
 
+  const creating = submitState === 'creating';
+
   return (
     <ModalLayout
       header={
-        <Dialog.Header showCloseButton={submitState === 'idle'}>
-          <Dialog.Title>Add Project</Dialog.Title>
+        <Dialog.Header showCloseButton={!creating}>
+          <Dialog.Title>Add a project</Dialog.Title>
+          <Dialog.Description>
+            Open a folder you already have, start a new GitHub repository, or clone one.
+          </Dialog.Description>
         </Dialog.Header>
       }
       footer={
         <Dialog.Footer>
+          <Button type="button" variant="ghost" disabled={creating} onClick={modal.dismiss}>
+            Cancel
+          </Button>
           <ConfirmButton
             variant="primary"
             type="button"
             onClick={() => void handleSubmit()}
             disabled={!canSubmit}
           >
-            {submitState === 'creating' ? 'Creating...' : 'Create'}
+            {creating ? 'Adding…' : 'Add project'}
           </ConfirmButton>
         </Dialog.Footer>
       }
     >
-      <Dialog.Body className="gap-4">
+      <Dialog.Body className="gap-5">
         {/* Initial-focus target: keeps the modal from auto-focusing the first input. */}
-        <div data-autofocus tabIndex={-1} className="flex flex-col gap-4 outline-none">
-          <div className="flex items-center gap-2">
-            <Input
-              bare
-              autoFocus
-              value={projectName.name}
-              placeholder={projectName.placeholder}
-              className="min-w-0 flex-1 px-0 text-lg!"
-              onChange={(e) => projectName.handleNameChange(e.target.value)}
-            />
+        <div data-autofocus tabIndex={-1} className="flex min-w-0 flex-col gap-5 outline-none">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+            <div className="min-w-0 flex-1 basis-80">
+              <PillTabs
+                items={MODE_TABS}
+                value={mode}
+                onValueChange={setMode}
+                ariaLabel="How to add the project"
+                panelId={MODE_PANEL_ID}
+              />
+            </div>
             <LocationSelector
               strategy={strategy}
               connectionId={selectedConnectionId}
@@ -319,68 +330,62 @@ export const AddProjectModal = observer(function AddProjectModal({
               }}
             />
           </div>
-          <div className="flex w-full gap-2">
-            <ModeCard
-              mode="pick"
-              selected={mode === 'pick'}
-              icon={<FolderOpenIcon className="size-3" />}
-              label="Pick Directory"
-              onSelect={setMode}
-            />
-            <ModeCard
-              mode="create"
-              selected={mode === 'create'}
-              icon={<PlusIcon className="size-3" />}
-              label="Create Repository"
-              onSelect={setMode}
-            />
-            <ModeCard
-              mode="clone"
-              selected={mode === 'clone'}
-              icon={<DownloadIcon className="size-2" />}
-              label="Clone Repository"
-              onSelect={setMode}
-            />
+          <div
+            role="tabpanel"
+            id={MODE_PANEL_ID}
+            aria-labelledby={getPillTabId(MODE_PANEL_ID, mode)}
+            className="flex min-w-0 flex-col gap-5"
+          >
+            {mode === 'pick' && (
+              <PickExistingPanel
+                strategy={strategy}
+                connectionId={selectedConnectionId}
+                state={pickState}
+                getProjectsClient={getProjectsClient}
+                inspectionError={pickPathInspectionError?.message}
+                showInitializeGitPrompt={requiresGitInitialization}
+              />
+            )}
+            {mode === 'create' && (
+              <CreateRepositoryPanel
+                strategy={strategy}
+                connectionId={selectedConnectionId}
+                state={createRepositoryState}
+                getProjectsClient={getProjectsClient}
+                accounts={githubAccountSelect.accounts}
+                selectedAccount={githubAccountSelect.selectedAccount}
+                defaultAccount={defaultGitHubAccountSelect.selectedAccount}
+                onAccountChange={setGithubAccountOverride}
+                onConnectGithub={() => void openIntegrationSetup({ integration: 'github' })}
+                ensureDefaultRoot={
+                  defaultRepositoriesRootQuery.data !== undefined &&
+                  createRepositoryState.path === defaultRepositoriesRootQuery.data
+                }
+              />
+            )}
+            {mode === 'clone' && (
+              <ClonePanel
+                strategy={strategy}
+                connectionId={selectedConnectionId}
+                state={cloneState}
+                getProjectsClient={getProjectsClient}
+                ensureDefaultRoot={
+                  defaultRepositoriesRootQuery.data !== undefined &&
+                  cloneState.path === defaultRepositoriesRootQuery.data
+                }
+              />
+            )}
+            <Field.Root>
+              <Field.Label htmlFor={projectNameId}>Name</Field.Label>
+              <Input
+                id={projectNameId}
+                value={projectName.name}
+                placeholder={projectName.placeholder}
+                onChange={(e) => projectName.handleNameChange(e.target.value)}
+              />
+              <Field.Description>{PROJECT_NAME_HINT[mode]}</Field.Description>
+            </Field.Root>
           </div>
-          {mode === 'pick' && (
-            <PickExistingPanel
-              strategy={strategy}
-              connectionId={selectedConnectionId}
-              state={pickState}
-              getProjectsClient={getProjectsClient}
-              inspectionError={pickPathInspectionError?.message}
-              showInitializeGitPrompt={requiresGitInitialization}
-            />
-          )}
-          {mode === 'create' && (
-            <CreateRepositoryPanel
-              strategy={strategy}
-              connectionId={selectedConnectionId}
-              state={createRepositoryState}
-              getProjectsClient={getProjectsClient}
-              accounts={githubAccountSelect.accounts}
-              selectedAccount={githubAccountSelect.selectedAccount}
-              defaultAccount={defaultGitHubAccountSelect.selectedAccount}
-              onAccountChange={setGithubAccountOverride}
-              onConnectGithub={() => void openIntegrationSetup({ integration: 'github' })}
-              ensureDefaultRoot={
-                defaultRepositoriesRootQuery.data !== undefined &&
-                createRepositoryState.path === defaultRepositoriesRootQuery.data
-              }
-            />
-          )}
-          {mode === 'clone' && (
-            <ClonePanel
-              strategy={strategy}
-              connectionId={selectedConnectionId}
-              state={cloneState}
-              getProjectsClient={getProjectsClient}
-              ensureDefaultRoot={
-                defaultRepositoriesRootQuery.data !== undefined &&
-                cloneState.path === defaultRepositoriesRootQuery.data
-              }
-            />
-          )}
         </div>
       </Dialog.Body>
     </ModalLayout>
@@ -390,33 +395,19 @@ export const AddProjectModal = observer(function AddProjectModal({
 export const addProjectModal = defineModal<void>()({
   id: 'addProjectModal',
   component: AddProjectModal,
+  size: 'lg',
 });
 
-function ModeCard({
-  mode,
-  selected,
-  icon,
-  label,
-  onSelect,
-}: {
-  mode: Mode;
-  selected: boolean;
-  icon: ReactNode;
-  label: string;
-  onSelect: (mode: Mode) => void;
-}) {
-  return (
-    <SelectableCard
-      padding="2"
-      borderRadius="md"
-      className="flex-1"
-      selected={selected}
-      onClick={() => onSelect(mode)}
-    >
-      <span className="flex w-full items-center justify-center gap-2">
-        {icon}
-        <span className="text-xs">{label}</span>
-      </span>
-    </SelectableCard>
-  );
-}
+const MODE_PANEL_ID = 'add-project-mode-panel';
+
+const MODE_TABS: readonly PillTab<Mode>[] = [
+  { value: 'pick', label: 'Open a folder', icon: <FolderOpenIcon /> },
+  { value: 'create', label: 'New repository', icon: <PlusIcon /> },
+  { value: 'clone', label: 'Clone', icon: <DownloadIcon /> },
+];
+
+const PROJECT_NAME_HINT: Record<Mode, string> = {
+  pick: 'How the project reads in the sidebar. Leave it empty to use the folder name.',
+  create: 'How the project reads in the sidebar. Leave it empty to use the repository name.',
+  clone: 'How the project reads in the sidebar. Leave it empty to use the repository name.',
+};

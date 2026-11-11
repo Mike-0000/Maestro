@@ -1,5 +1,4 @@
 import type { TerminalShellAvailability } from '@emdash/core/primitives/terminal-shell/api';
-import { Badge } from '@emdash/ui/react/primitives';
 import { Terminal } from 'lucide-react';
 import fishIcon from '@/assets/images/shells/fish.svg?raw';
 import { cn } from '@core/primitives/styling/browser/cn';
@@ -22,7 +21,7 @@ function TerminalShellIcon({ shell }: { shell: string }) {
   if (svgIcon) {
     return (
       <span
-        className="size-4 shrink-0 text-foreground-muted [&>svg]:size-4"
+        className="size-4 shrink-0 text-foreground-passive [&>svg]:size-4"
         dangerouslySetInnerHTML={{ __html: svgIcon }}
         aria-hidden="true"
       />
@@ -33,16 +32,13 @@ function TerminalShellIcon({ shell }: { shell: string }) {
   if (deviconClass) {
     return (
       <i
-        className={cn(
-          deviconClass,
-          'size-4 shrink-0 text-[15px] leading-none text-foreground-muted'
-        )}
+        className={cn(deviconClass, 'size-4 shrink-0 text-lg leading-none text-foreground-passive')}
         aria-hidden="true"
       />
     );
   }
 
-  return <Terminal className="size-4 shrink-0 text-foreground-muted" aria-hidden="true" />;
+  return <Terminal className="size-4 shrink-0 text-foreground-passive" aria-hidden="true" />;
 }
 
 export function TerminalShellOptionLabel({
@@ -56,7 +52,9 @@ export function TerminalShellOptionLabel({
     <span className="flex min-w-0 flex-1 items-center gap-2">
       <TerminalShellIcon shell={entry.id === 'system' ? entry.label : entry.id} />
       <span className="truncate">{entry.label}</span>
-      {showSystemBadge && entry.isSystemDefault ? <Badge>system</Badge> : null}
+      {showSystemBadge && entry.isSystemDefault ? (
+        <span className="ml-auto shrink-0 text-tiny text-foreground-passive">System default</span>
+      ) : null}
     </span>
   );
 }

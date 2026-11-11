@@ -6,19 +6,17 @@ import { cn } from '@core/primitives/styling/browser/cn';
 import { MIN_TILE_SIZE } from '../../api/canvas-model';
 import { getCanvasStore } from '../../contributions/browser/app-stores';
 import { useIsLivePane } from '../canvas-pane-context';
+import { NOTE_SURFACE, NOTE_SWATCH, RESIZE_HANDLE_CLASS } from '../canvas-styles';
+import { TileIconButton } from './tile-icon-button';
 
 export type NoteTileData = { tileId: string; noteId: string };
 
-const NOTE_COLORS: Record<NoteTileEntry['color'], string> = {
-  yellow: 'bg-amber-100 dark:bg-amber-950/70',
-  blue: 'bg-sky-100 dark:bg-sky-950/70',
-  green: 'bg-emerald-100 dark:bg-emerald-950/70',
-  pink: 'bg-pink-100 dark:bg-pink-950/70',
-  gray: 'bg-background-secondary',
-};
-
 const COLOR_ORDER: NoteTileEntry['color'][] = ['yellow', 'blue', 'green', 'pink', 'gray'];
 
+/**
+ * A sticky note: a card tinted with the colour the user gave it, its text, and quiet controls
+ * (colour swatches and delete) that show while the note is hovered or holds focus.
+ */
 export const NoteTileNode = observer(function NoteTileNode({ data, selected }: NodeProps) {
   const { tileId, noteId } = data as NoteTileData;
   const store = getCanvasStore();
@@ -30,48 +28,43 @@ export const NoteTileNode = observer(function NoteTileNode({ data, selected }: N
   return (
     <div
       className={cn(
-        'flex h-full w-full flex-col overflow-hidden rounded-lg border border-border shadow-md',
-        NOTE_COLORS[note.color]
+        'group/window flex h-full w-full flex-col overflow-hidden rounded-lg border border-border-subtle',
+        NOTE_SURFACE[note.color]
       )}
     >
       <NodeResizer
         isVisible={selected}
         minWidth={MIN_TILE_SIZE.w / 2}
         minHeight={MIN_TILE_SIZE.h / 2}
-        lineClassName="!border-blue-500/60"
-        handleClassName="!size-2.5 !rounded-sm !border-blue-500 !bg-background"
+        handleClassName={RESIZE_HANDLE_CLASS}
         onResizeEnd={(_event, params) =>
           store.resizeTile(tileId, { x: params.x, y: params.y, w: params.width, h: params.height })
         }
       />
-      <div className="flex h-7 shrink-0 items-center gap-1 px-2">
+      <div className="flex h-8 shrink-0 items-center gap-1.5 pr-1 pl-3 opacity-0 transition-opacity group-focus-within/window:opacity-100 group-hover/window:opacity-100">
         {COLOR_ORDER.map((color) => (
           <button
             key={color}
             type="button"
             aria-label={`Color ${color}`}
+            aria-pressed={note.color === color}
             onClick={() => store.updateNote(noteId, { color })}
             className={cn(
-              'nodrag size-3 rounded-full border border-foreground/20',
-              NOTE_COLORS[color],
-              note.color === color && 'ring-2 ring-blue-500'
+              'nodrag size-3 rounded-full ring-offset-1 ring-offset-transparent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+              NOTE_SWATCH[color],
+              note.color === color && 'ring-2 ring-foreground-muted'
             )}
           />
         ))}
         <span className="flex-1" />
-        <button
-          type="button"
-          aria-label="Delete note"
-          onClick={() => store.removeNote(noteId)}
-          className="nodrag flex size-5 items-center justify-center rounded text-foreground-muted hover:text-foreground"
-        >
+        <TileIconButton label="Delete note" onClick={() => store.removeNote(noteId)}>
           <Trash2 className="size-3.5" />
-        </button>
+        </TileIconButton>
       </div>
       <textarea
         key={live ? 'live' : note.text}
         readOnly={!live}
-        className="nodrag nowheel min-h-0 flex-1 resize-none bg-transparent px-3 pb-3 text-sm text-foreground outline-none placeholder:text-foreground-muted"
+        className="nodrag nowheel min-h-0 flex-1 resize-none bg-transparent px-3 pb-3 text-sm text-foreground outline-none placeholder:text-foreground-passive"
         placeholder="Write a goal, a plan, or a prompt…"
         defaultValue={note.text}
         onBlur={(event) => {

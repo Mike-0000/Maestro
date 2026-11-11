@@ -5,6 +5,7 @@ import { useAgents } from '@core/features/agents/api/browser/use-agents';
 import { AgentSelector } from '@core/features/agents/contributions/browser/agent-selector';
 import { useAppSettingsKey } from '@core/features/settings/api/browser/use-app-settings-key';
 import type { AppSettings } from '@core/services/settings/api';
+import { SettingRow } from '../components/SettingRow';
 
 export const DefaultAgentSelector: React.FC = () => {
   const {
@@ -26,21 +27,19 @@ export const DefaultAgentSelector: React.FC = () => {
   };
 
   return (
-    <div className="flex items-center justify-between gap-4 rounded-lg border bg-background-1 p-3 px-4">
-      <div className="flex flex-col gap-1">
-        <span className="text-sm text-foreground">Default agent</span>
-        <span className="text-xs text-foreground-muted">
-          Selected by default when creating a new task.
-        </span>
-      </div>
-      <div className="w-44 shrink-0">
-        <AgentSelector
-          value={defaultAgent}
-          onChange={handleChange}
-          disabled={isLoading || isSaving}
-          className="w-full"
-        />
-      </div>
-    </div>
+    <SettingRow
+      title="Default agent"
+      description="Selected by default when creating a new task."
+      control={
+        <div className="w-56 shrink-0">
+          <AgentSelector
+            value={defaultAgent}
+            onChange={handleChange}
+            disabled={isLoading || isSaving}
+            className="w-full"
+          />
+        </div>
+      }
+    />
   );
 };

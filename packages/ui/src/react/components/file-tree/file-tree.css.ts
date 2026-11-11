@@ -31,7 +31,6 @@ export const header = style({
   minWidth: 0,
   alignItems: 'center',
   gap: '0.5rem',
-  borderBottom: `1px solid ${vars.border}`,
   padding: '0.5rem',
 });
 
@@ -54,11 +53,11 @@ export const headerActions = style({
 
 export const toolbar = style({
   display: 'flex',
-  height: '41px',
+  // A toolbar strip (h-9) separated from the tree by space, not a rule.
+  height: '2.25rem',
   flexShrink: 0,
   alignItems: 'center',
   gap: '0.25rem',
-  borderBottom: `1px solid ${vars.border}`,
   padding: '0 0.5rem',
   backgroundColor: vars.surface,
 });
@@ -114,7 +113,7 @@ export const icon = style({
   flexShrink: 0,
   alignItems: 'center',
   justifyContent: 'center',
-  color: vars.foregroundMuted,
+  color: vars.foregroundPassive,
 });
 
 export const fileIcon = style({
@@ -148,7 +147,7 @@ export const strikethrough = style({
 });
 
 export const draftRow = style({
-  backgroundColor: vars.background2,
+  backgroundColor: vars.surfaceSelected,
 });
 
 export const draftInput = style({
@@ -159,7 +158,7 @@ export const draftInput = style({
   padding: 0,
   color: vars.foreground,
   font: 'inherit',
-  fontSize: '13px',
+  fontSize: tokenVars.textSm,
   outline: 'none',
   selectors: {
     '&::placeholder': {

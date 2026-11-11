@@ -1,13 +1,16 @@
 import { getAgentUpdateActionState } from '@core/features/agents/api/browser/components/agent-selector/agent-install';
-import { AgentCapabilityIcons } from '@core/features/agents/contributions/browser/agent-capability-icons';
 import { AgentIcon } from '@core/features/agents/contributions/browser/agent-icon';
 import { UpdateAvailableBadge } from '@core/features/settings/browser/agents-page/agent-status-badge';
 import { agentSupportsAcp, type AgentPayload } from '@core/primitives/agents/api';
 
-/** Row content (icon tile + name + capability cluster) — the CollectionView shell owns interaction. */
+/**
+ * Row content (icon, name, and the facts that differ between agents, in words) — the
+ * CollectionView shell owns interaction. Installed state is not repeated here: the list
+ * sections already group by it. Every agent runs in a terminal, so only chat support is named.
+ */
 export const AgentRow = ({ agent }: { agent: AgentPayload }) => {
-  // Installed state is not repeated here: the list sections already group by it.
   const supportsChatUi = agentSupportsAcp(agent.capabilities);
+  const installed = agent.status === 'available';
 
   const updates = agent.capabilities.hostDependency.updates;
   const updateStrategyKind = updates.kind === 'supported' ? updates.update.kind : 'none';
@@ -19,18 +22,23 @@ export const AgentRow = ({ agent }: { agent: AgentPayload }) => {
     isUpdating: false,
   });
 
+  const facts = [
+    supportsChatUi ? 'Chat and terminal' : 'Terminal',
+    installed && agent.version ? `v${agent.version}` : null,
+  ].filter(Boolean);
+
   return (
-    <div className="group flex w-full items-center gap-3">
-      <div className="flex size-6 items-center justify-center rounded-lg bg-background-1 p-1.5 group-hover:bg-background-2">
+    <div className="flex w-full min-w-0 items-center gap-3">
+      <span className="flex size-5 shrink-0 items-center justify-center">
         <AgentIcon id={agent.id} size={16} />
-      </div>
-      <div className="flex w-full items-center justify-between">
-        <span className="text-sm text-foreground">{agent.name}</span>
-        <div className="flex items-center gap-2">
-          {updateState.render && <UpdateAvailableBadge />}
-          <AgentCapabilityIcons supportsChatUi={supportsChatUi} />
-        </div>
-      </div>
+      </span>
+      <span className="min-w-24 flex-1 truncate text-sm text-foreground">{agent.name}</span>
+      <span className="flex min-w-0 items-center gap-3">
+        {updateState.render && <UpdateAvailableBadge />}
+        <span className="min-w-0 truncate text-xs text-foreground-passive tabular-nums">
+          {facts.join(' · ')}
+        </span>
+      </span>
     </div>
   );
 };

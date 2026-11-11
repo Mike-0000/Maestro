@@ -4,7 +4,7 @@ import { Popover } from '@react/primitives/popover';
 import { Surface } from '@react/primitives/surface/surface';
 import { Text } from '@react/primitives/typography/Text';
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AnimatedHeight } from '.';
 
 const meta: Meta = {
@@ -78,6 +78,73 @@ export const OverflowReleased: Story = {
           </AnimatedHeight>
         </Surface>
       </Box>
+    );
+  },
+};
+
+const LONG_PATH =
+  '/Users/someone/Library/Application-Support/very-long-organisation-name/monorepo-with-a-long-name/packages/a-deeply-nested-package/src/components/feature-folder';
+
+/**
+ * A long unbreakable value inside the animated box. The grid's one column is
+ * `minmax(0, 1fr)`, so the box keeps its width and the value truncates inside
+ * its field instead of pushing the content past the container's edge.
+ */
+export const LongUnbreakableValue: Story = {
+  render: () => (
+    <Surface
+      level="elevated"
+      style={{ width: '22rem', padding: '0.75rem', borderRadius: '0.5rem' }}
+    >
+      <AnimatedHeight>
+        <Box display="flex" flexDirection="column" gap="2">
+          <Text variant="description" tone="muted">
+            Folder
+          </Text>
+          <Text
+            variant="description"
+            style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          >
+            {LONG_PATH}
+          </Text>
+        </Box>
+      </AnimatedHeight>
+    </Surface>
+  ),
+};
+
+/**
+ * The content swaps from a short loading line to the real body right after
+ * mount, between the initial measurement and ResizeObserver's first callback.
+ * The box follows the new height instead of staying at the loading height.
+ */
+export const LoadsRightAfterMount: Story = {
+  render: function LoadsRightAfterMountStory() {
+    const [loaded, setLoaded] = useState(false);
+    // A parent effect runs after AnimatedHeight's own effects (it has measured
+    // and started observing), but before the first ResizeObserver callback.
+    useEffect(() => setLoaded(true), []);
+    return (
+      <Surface
+        level="elevated"
+        style={{ width: '22rem', padding: '0.75rem', borderRadius: '0.5rem' }}
+      >
+        <AnimatedHeight>
+          {loaded ? (
+            <Box display="flex" flexDirection="column" gap="2">
+              {PARAGRAPHS.map((paragraph) => (
+                <Text key={paragraph} as="p" variant="description">
+                  {paragraph}
+                </Text>
+              ))}
+            </Box>
+          ) : (
+            <Text variant="description" tone="muted">
+              Loading…
+            </Text>
+          )}
+        </AnimatedHeight>
+      </Surface>
     );
   },
 };

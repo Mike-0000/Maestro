@@ -52,7 +52,7 @@ export function CreateTaskOptionState({
       <div className={styles.state} role="alert">
         <span>{state.message}</span>
         {state.retryable && onRetry && (
-          <Button size="sm" onClick={onRetry}>
+          <Button variant="text" size="sm" onClick={onRetry}>
             <RotateCw />
             Retry
           </Button>
@@ -65,7 +65,7 @@ export function CreateTaskOptionState({
       <div className={styles.notice} role="alert">
         {state.message}
         {state.retryable && onRetry && (
-          <Button size="xs" onClick={onRetry}>
+          <Button variant="text" size="xs" onClick={onRetry}>
             Retry
           </Button>
         )}

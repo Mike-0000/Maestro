@@ -1,5 +1,4 @@
 import { Collapsible, Tabs } from '@emdash/ui/react/primitives';
-import { ChevronRight } from 'lucide-react';
 import { CheckoutPrPanel } from '@core/features/tasks/browser/task-config/checkout-pr-panel';
 import { NewWorktreePanel } from '@core/features/tasks/browser/task-config/new-worktree-panel';
 import type { WorkspacePanelProps } from '@core/features/tasks/browser/task-config/new-worktree-panel';
@@ -8,7 +7,6 @@ import { UseExistingPanel } from '@core/features/tasks/browser/task-config/use-e
 import { WorkspacePresetPicker } from '@core/features/tasks/browser/task-config/workspace-preset-picker';
 import { WorktreeDestinationPreview } from '@core/features/tasks/browser/task-config/worktree-destination-preview';
 import { useTaskState } from '@core/features/tasks/contributions/browser/task-config/task-state-context';
-import { cn } from '@core/primitives/styling/browser/cn';
 import type { WorkspacePresetId } from '@core/primitives/workspaces/api';
 
 const PRESET_PANELS: Record<
@@ -28,6 +26,11 @@ interface WorkspaceSettingsSectionProps {
   defaultOpen?: boolean;
 }
 
+/**
+ * Where the conductor works: the preset as one field line, then a quiet "Branch and setup"
+ * disclosure for the preset's details (with the checkout / new-branch choice as underline text
+ * tabs on the same line), then the resolved worktree path in the caption role.
+ */
 export function WorkspaceSettingsSection({ defaultOpen = true }: WorkspaceSettingsSectionProps) {
   const { workspaceConfig, projectId, isUnborn, hasRepository, hasPR } = useTaskState();
 
@@ -43,7 +46,7 @@ export function WorkspaceSettingsSection({ defaultOpen = true }: WorkspaceSettin
   const Panel = PRESET_PANELS[presetId as Exclude<WorkspacePresetId, 'repo-root'>];
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex min-w-0 flex-col gap-3">
       <WorkspacePresetPicker
         value={presetId}
         onValueChange={workspaceConfig.setPresetId}
@@ -53,44 +56,41 @@ export function WorkspaceSettingsSection({ defaultOpen = true }: WorkspaceSettin
         )}
         worktreesDisabledReason={worktreesDisabledReason}
       />
-      <Collapsible.Root
-        key={presetId}
-        defaultOpen={hasSettings && defaultOpen}
-        disabled={!hasSettings}
-        className="group flex flex-col gap-1.5"
-      >
-        <div className="grid h-9 grid-cols-[minmax(0,1fr)_auto] items-center">
-          <Collapsible.Trigger
-            hideChevron
-            className={cn(
-              'flex w-full items-center gap-2 text-sm outline-none',
-              !hasSettings && 'cursor-not-allowed opacity-40'
+      {hasSettings && (
+        <Collapsible.Root
+          key={presetId}
+          // Reusing a workspace needs the pick itself, so that panel never starts hidden.
+          defaultOpen={defaultOpen || presetId === 'use-existing'}
+          className="flex flex-col"
+        >
+          <div className="grid min-h-7 grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
+            <Collapsible.Trigger variant="text">
+              {presetId === 'use-existing' ? 'Which workspace' : 'Branch and setup'}
+            </Collapsible.Trigger>
+            {presetId === 'new-worktree' && (
+              <Tabs.Root
+                value={createBranchAndWorktree ? 'create' : 'checkout'}
+                onValueChange={(v) => setCreateBranchAndWorktree(v === 'create')}
+              >
+                <Tabs.List variant="underline" aria-label="Branch">
+                  <Tabs.Tab value="checkout" size="xs">
+                    Checkout branch
+                  </Tabs.Tab>
+                  <Tabs.Tab value="create" size="xs">
+                    Create new branch
+                  </Tabs.Tab>
+                </Tabs.List>
+              </Tabs.Root>
             )}
-          >
-            <span className="flex items-center gap-2">
-              <span className="text-foreground-muted">Settings</span>
-              <ChevronRight className="ml-auto size-3.5 shrink-0 text-foreground-passive transition-transform duration-150 group-data-open:rotate-90" />
-            </span>
-          </Collapsible.Trigger>
-          {presetId === 'new-worktree' && (
-            <Tabs.Root
-              value={createBranchAndWorktree ? 'create' : 'checkout'}
-              onValueChange={(v) => setCreateBranchAndWorktree(v === 'create')}
-            >
-              <Tabs.List>
-                <Tabs.Tab value="checkout">Checkout branch</Tabs.Tab>
-                <Tabs.Tab value="create">Create new branch</Tabs.Tab>
-              </Tabs.List>
-            </Tabs.Root>
-          )}
-        </div>
+          </div>
 
-        {hasSettings && (
-          <Collapsible.Panel className="flex flex-col gap-3">
-            <Panel workspaceConfig={workspaceConfig} projectId={projectId} isUnborn={isUnborn} />
+          <Collapsible.Panel className="flex flex-col">
+            <div className="pt-3 pb-1">
+              <Panel workspaceConfig={workspaceConfig} projectId={projectId} isUnborn={isUnborn} />
+            </div>
           </Collapsible.Panel>
-        )}
-      </Collapsible.Root>
+        </Collapsible.Root>
+      )}
       {projectId ? (
         <WorktreeDestinationPreview
           projectId={projectId}

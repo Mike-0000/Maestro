@@ -26,6 +26,10 @@ import { resolveDetailLevels, type ResolvedDetailLevel } from './settings-detail
 const LOCAL_SECTION: PageNavSection = { kind: 'section', id: 'local', label: 'Local' };
 const REMOTE_SECTION: PageNavSection = { kind: 'section', id: 'remote', label: 'Remote' };
 const SETTINGS_SEARCH_HOTKEY = chord('Mod+F');
+// The measure for every settings page (slice-contributed pages inherit it): 48rem keeps a row's
+// label and its control within one glance while leaving the label column room beside the kit's
+// 16rem control slot.
+const CONTENT_WIDTH = '3xl';
 
 const SIDEBAR_ITEMS: PageSidebarMenuItem[] = [
   navItemFor('general'),
@@ -34,6 +38,8 @@ const SIDEBAR_ITEMS: PageSidebarMenuItem[] = [
   navItemFor('browser'),
   navItemFor('repository'),
   navItemFor('prompts'),
+  // Reached from the voice bar too; listed here so the page shows where it sits.
+  navItemFor('chorus'),
   LOCAL_SECTION,
   navItemFor('system'),
   navItemFor('workspaces-local'),
@@ -177,11 +183,12 @@ export const SettingsPage = observer(function SettingsPage({
             footer={
               <button
                 type="button"
-                className="flex h-8 w-full items-center gap-2 rounded-md px-3 text-sm font-normal text-foreground-muted transition-colors hover:bg-background-1 hover:text-foreground"
+                className="flex h-8 w-full items-center gap-2 rounded-md px-3 text-sm text-foreground-muted transition-colors outline-none hover:bg-surface-hover hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
                 onClick={() => void openExternal('https://docs.emdash.sh')}
               >
-                <Icon name="external-link" size="sm" />
-                <span>View Docs</span>
+                <Icon name="book-open" size="sm" />
+                <span className="flex-1 text-left">Documentation</span>
+                <Icon name="arrow-up-right" size="xs" className="text-foreground-passive" />
               </button>
             }
             onSelect={(item) => {
@@ -192,8 +199,9 @@ export const SettingsPage = observer(function SettingsPage({
         }
       >
         {detailView ? (
-          <PageLayout.Content>
-            <div className="sticky top-0 z-10 bg-background pt-10 pb-4">
+          <PageLayout.Content maxWidth={CONTENT_WIDTH}>
+            {/* Fades into the rows under it, like PageLayout.Header's sticky variant. */}
+            <div className="sticky top-0 z-10 bg-background pt-10 pb-8 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-5 after:bg-linear-to-b after:from-background after:to-transparent">
               <Breadcrumbs
                 items={[
                   {
@@ -219,7 +227,7 @@ export const SettingsPage = observer(function SettingsPage({
             />
           </PageLayout.Content>
         ) : PageComponent ? (
-          <PageLayout.Content>
+          <PageLayout.Content maxWidth={CONTENT_WIDTH}>
             <PageComponent openDetail={openDetail} />
           </PageLayout.Content>
         ) : null}

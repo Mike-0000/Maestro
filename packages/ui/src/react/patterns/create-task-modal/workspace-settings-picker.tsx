@@ -83,7 +83,7 @@ export function WorkspaceSettingsPicker({
       {state.kind === 'inspectable' && (
         <Popover.Content align="end" className={styles.workspacePopup}>
           <div className={styles.popupHeader}>
-            <Popover.Title>Workspace Settings</Popover.Title>
+            <Popover.Title>Workspace settings</Popover.Title>
           </div>
           <div className={styles.workspaceBody}>
             <Tabs.Root

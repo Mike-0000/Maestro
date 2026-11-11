@@ -26,6 +26,7 @@ export { Text, type TextProps } from './typography/Text';
 export { AbsoluteTime, type AbsoluteTimeProps } from './time/absolute-time';
 export { RelativeTime, type RelativeTimeProps } from './time/relative-time';
 export { Heading, type HeadingProps } from './typography/Heading';
+export { SectionLabel, type SectionLabelProps } from './typography/SectionLabel';
 export { textVariants, type TextVariantProps } from './typography/typography.variants';
 
 // ── Toggle (standalone) + ToggleGroup namespace ───────────────────────────────
@@ -41,7 +42,7 @@ export { Tooltip } from './tooltip';
 export { DropdownMenu } from './dropdown-menu';
 export { ContextMenu } from './context-menu';
 export { Combobox, useComboboxAnchor } from './combobox/combobox';
-export { Tabs, type TabsTabProps } from './tabs/tabs';
+export { Tabs, type TabsListProps, type TabsTabProps, type TabsVariant } from './tabs/tabs';
 export { Collapsible, type CollapsibleTriggerProps } from './collapsible';
 export { InputGroup, type InputGroupAddonAlign } from './input-group';
 export { Alert, type AlertProps } from './alert';

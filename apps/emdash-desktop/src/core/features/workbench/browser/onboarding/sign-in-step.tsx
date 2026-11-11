@@ -1,13 +1,17 @@
-import { Button } from '@emdash/ui/react/primitives';
-import { AlertCircle, CheckCircle, Github, LogIn, User } from 'lucide-react';
+import { Button, Spinner } from '@emdash/ui/react/primitives';
+import { Github, User } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { useAccountSession, useAccountSignIn } from '@core/features/account/api/browser/useAccount';
+import { useDelayedBoolean } from '@core/primitives/react-hooks/browser/use-delay-boolean';
+import { OnboardingError, OnboardingStepHeading } from './components/step-heading';
 
 export function SignInStep({ onComplete }: { onComplete: () => void }) {
   const { data: session, isLoading: sessionLoading } = useAccountSession();
   const signInMutation = useAccountSignIn();
   const skippedSignInRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  // A fast session check never flashes a spinner.
+  const showLoading = useDelayedBoolean(sessionLoading, 400);
 
   const handleSignIn = async () => {
     skippedSignInRef.current = false;
@@ -36,8 +40,13 @@ export function SignInStep({ onComplete }: { onComplete: () => void }) {
 
   if (sessionLoading) {
     return (
-      <div className="flex items-center justify-center py-12 text-sm text-foreground-muted">
-        Loading...
+      <div role="status" className="flex min-h-48 flex-col items-center justify-center gap-3">
+        {showLoading && (
+          <>
+            <Spinner className="text-foreground-passive" />
+            <span className="text-sm text-foreground-muted">Checking your account…</span>
+          </>
+        )}
       </div>
     );
   }
@@ -45,30 +54,25 @@ export function SignInStep({ onComplete }: { onComplete: () => void }) {
   if (session?.isSignedIn && session.user) {
     const { user } = session;
     return (
-      <div className="flex max-w-sm flex-col space-y-8">
-        <div className="flex flex-col items-center justify-center gap-6">
-          <div className="relative">
-            {user.avatarUrl ? (
-              <img
-                src={user.avatarUrl}
-                alt={user.username}
-                className="h-14 w-14 rounded-full border border-border"
-              />
-            ) : (
-              <div className="flex h-14 w-14 items-center justify-center rounded-full border border-border bg-background-1">
-                <User className="h-7 w-7 text-foreground-muted" />
-              </div>
-            )}
-            <CheckCircle className="text-primary absolute -right-1 -bottom-1 h-5 w-5 fill-background" />
-          </div>
-          <div className="flex flex-col items-center justify-center gap-1">
-            <h1 className="text-center text-xl">Connected as @{user.username}</h1>
-            {user.email && (
-              <p className="text-center text-sm text-foreground-muted">{user.email}</p>
-            )}
-          </div>
+      <div className="flex w-full flex-col items-center">
+        {user.avatarUrl ? (
+          <img
+            src={user.avatarUrl}
+            alt=""
+            className="size-12 rounded-full bg-surface-emphasis ring-1 ring-border-subtle"
+          />
+        ) : (
+          <span className="flex size-12 items-center justify-center rounded-full bg-surface-emphasis ring-1 ring-border-subtle">
+            <User className="size-5 text-foreground-passive" aria-hidden />
+          </span>
+        )}
+        <div className="mt-6">
+          <OnboardingStepHeading
+            title={`Connected as @${user.username}`}
+            description={user.email ?? 'Your GitHub account is ready to use.'}
+          />
         </div>
-        <Button variant="primary" size="lg" onClick={onComplete}>
+        <Button variant="primary" className="mt-8 min-w-40" onClick={onComplete}>
           Continue
         </Button>
       </div>
@@ -76,36 +80,28 @@ export function SignInStep({ onComplete }: { onComplete: () => void }) {
   }
 
   return (
-    <div className="flex max-w-sm flex-col space-y-8">
-      <div className="flex flex-col items-center justify-center gap-6">
-        <Github className="h-10 w-10" absoluteStrokeWidth strokeWidth={1.5} />
-        <div className="flex flex-col items-center justify-center gap-2">
-          <h1 className="text-center text-xl">Connect GitHub</h1>
-          <p className="text-md text-center text-foreground-muted">
-            Emdash uses GitHub for git operations, pull requests and issues.
-          </p>
+    <div className="flex w-full flex-col items-center">
+      <OnboardingStepHeading
+        title="Connect GitHub"
+        description="Maestro uses GitHub to clone repositories, open pull requests and read issues. You can also connect it later in Settings."
+      />
+      <Button
+        variant="primary"
+        className="mt-8 min-w-56"
+        onClick={handleSignIn}
+        disabled={signInMutation.isPending}
+      >
+        {signInMutation.isPending ? <Spinner size="sm" /> : <Github className="size-4" />}
+        {signInMutation.isPending ? 'Signing in…' : 'Sign in with GitHub'}
+      </Button>
+      {error && (
+        <div className="mt-4">
+          <OnboardingError>{error}</OnboardingError>
         </div>
-      </div>
-      <div className="flex w-full flex-col gap-2">
-        <Button
-          variant="primary"
-          size="lg"
-          onClick={handleSignIn}
-          disabled={signInMutation.isPending}
-        >
-          <LogIn className="h-4 w-4" />
-          {signInMutation.isPending ? 'Signing in…' : 'Sign in with GitHub'}
-        </Button>
-        {error && (
-          <div className="bg-destructive/10 text-destructive flex items-start gap-1.5 rounded-md px-2.5 py-2 text-xs">
-            <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
-        <Button size="lg" variant="secondary" onClick={handleSkip}>
-          Skip for now
-        </Button>
-      </div>
+      )}
+      <Button variant="text" className="mt-5" onClick={handleSkip}>
+        Skip for now
+      </Button>
     </div>
   );
 }

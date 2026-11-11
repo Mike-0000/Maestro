@@ -45,13 +45,11 @@ import * as styles from './prompt-editor.css';
 
 // ── Icon helpers for the popup ────────────────────────────────────────────────
 
-const ICON_SIZE_MD = { width: '0.875rem', height: '0.875rem' };
-
 const KIND_POPUP_ICONS: Record<MentionKind, React.ReactNode> = {
-  file: <File style={ICON_SIZE_MD} />,
-  issue: <CircleDot style={ICON_SIZE_MD} />,
-  symbol: <Braces style={ICON_SIZE_MD} />,
-  custom: <AtSign style={ICON_SIZE_MD} />,
+  file: <File className={styles.popupKindIcon} />,
+  issue: <CircleDot className={styles.popupKindIcon} />,
+  symbol: <Braces className={styles.popupKindIcon} />,
+  custom: <AtSign className={styles.popupKindIcon} />,
 };
 
 function mentionToPopupItem(item: MentionItem): ComboboxPopupItem {
@@ -59,11 +57,7 @@ function mentionToPopupItem(item: MentionItem): ComboboxPopupItem {
   if (!icon) {
     if (item.kind === 'file') {
       const cls = fileIconClass(item.label);
-      icon = cls ? (
-        <i className={cls} style={{ fontSize: '13px', lineHeight: 1 }} />
-      ) : (
-        KIND_POPUP_ICONS.file
-      );
+      icon = cls ? <i className={cx(cls, styles.popupFileIcon)} /> : KIND_POPUP_ICONS.file;
     } else {
       icon = KIND_POPUP_ICONS[item.kind] ?? KIND_POPUP_ICONS.custom;
     }

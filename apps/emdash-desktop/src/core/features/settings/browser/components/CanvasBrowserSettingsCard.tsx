@@ -1,5 +1,5 @@
-import { SettingsCard, SettingsSection } from '@emdash/ui/react/patterns';
-import { SeparatedList, Switch } from '@emdash/ui/react/primitives';
+import { SettingsSection } from '@emdash/ui/react/patterns';
+import { Switch } from '@emdash/ui/react/primitives';
 import { useAppSettingsKey } from '@core/features/settings/api/browser/use-app-settings-key';
 import { SettingRow } from './SettingRow';
 
@@ -10,55 +10,55 @@ export function CanvasBrowserSettingsCard() {
   const off = disabled || value?.enabled === false;
 
   return (
-    <SettingsSection title="Canvas app browser" bare>
-      <SettingsCard>
-        <SeparatedList>
-          <SettingRow
-            title="App browsers on the canvas"
-            description="Show a task's running app in a browser tile next to its agents (Run app, Show app)."
-            control={
-              <Switch
-                checked={value?.enabled ?? true}
-                disabled={disabled}
-                onCheckedChange={(next) => update({ enabled: next })}
-              />
-            }
+    <SettingsSection title="Canvas app browser">
+      <SettingRow
+        title="App browsers on the canvas"
+        description="Show a task's running app in a browser tile next to its agents (Run app, Show app)."
+        control={
+          <Switch
+            checked={value?.enabled ?? true}
+            disabled={disabled}
+            aria-label="App browsers on the canvas"
+            onCheckedChange={(next) => update({ enabled: next })}
           />
-          <SettingRow
-            title="Coding agents can use their task's app"
-            description="Agents get Chorus browser tools for their own task's tile: screenshots and page structure any time, clicking and typing once the tile is set to Agents. New agent sessions pick this up."
-            control={
-              <Switch
-                checked={value?.agentControl ?? true}
-                disabled={off}
-                onCheckedChange={(next) => update({ agentControl: next })}
-              />
-            }
+        }
+      />
+      <SettingRow
+        title="Coding agents can use their task's app"
+        description="Agents get Maestro browser tools for their own task's tile: screenshots and page structure any time, clicking and typing once the tile is set to Agents. New agent sessions pick this up."
+        control={
+          <Switch
+            checked={value?.agentControl ?? true}
+            disabled={off}
+            aria-label="Coding agents can use their task's app"
+            onCheckedChange={(next) => update({ agentControl: next })}
           />
-          <SettingRow
-            title="Conductor can use apps"
-            description="The conductor can look at and use apps in tiles set to Agents."
-            control={
-              <Switch
-                checked={value?.conductorControl ?? true}
-                disabled={off}
-                onCheckedChange={(next) => update({ conductorControl: next })}
-              />
-            }
+        }
+      />
+      <SettingRow
+        title="Conductor can use apps"
+        description="The conductor can look at and use apps in tiles set to Agents."
+        control={
+          <Switch
+            checked={value?.conductorControl ?? true}
+            disabled={off}
+            aria-label="Conductor can use apps"
+            onCheckedChange={(next) => update({ conductorControl: next })}
           />
-          <SettingRow
-            title="Conductor can open public websites"
-            description="When you ask for one, the conductor can open an https site on the public internet in a task's browser tile. You confirm each new site, private-network addresses stay blocked, and coding agents never get this. Tiles use their own profile, without your logins."
-            control={
-              <Switch
-                checked={value?.conductorPublicWeb ?? false}
-                disabled={off || value?.conductorControl === false}
-                onCheckedChange={(next) => update({ conductorPublicWeb: next })}
-              />
-            }
+        }
+      />
+      <SettingRow
+        title="Conductor can open public websites"
+        description="When you ask for one, the conductor can open an https site on the public internet in a task's browser tile. You confirm each new site, private-network addresses stay blocked, and coding agents never get this. Tiles use their own profile, without your logins."
+        control={
+          <Switch
+            checked={value?.conductorPublicWeb ?? false}
+            disabled={off || value?.conductorControl === false}
+            aria-label="Conductor can open public websites"
+            onCheckedChange={(next) => update({ conductorPublicWeb: next })}
           />
-        </SeparatedList>
-      </SettingsCard>
+        }
+      />
     </SettingsSection>
   );
 }

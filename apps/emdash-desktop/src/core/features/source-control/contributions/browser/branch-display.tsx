@@ -7,25 +7,22 @@ interface BranchDisplayProps {
   className?: string;
 }
 
+/**
+ * A branch that is fixed for this form: the field label above, then the branch
+ * in a read-only field (a hairline box with no fill, muted text) so it lines
+ * up with the editable selects beside it without inviting a click.
+ */
 export function BranchDisplay({ label, branchName, className }: BranchDisplayProps) {
   return (
-    <div
-      className={cn(
-        'flex w-full items-center gap-2 justify-between p-2 opacity-60 cursor-not-allowed',
-        className
-      )}
-    >
-      <div className="flex flex-col gap-0.5 text-left text-sm">
-        <span className="text-xs text-foreground-passive">{label}</span>
-        <span className="flex items-center gap-1">
-          <GitBranch
-            absoluteStrokeWidth
-            strokeWidth={2}
-            className="size-3.5 shrink-0 text-foreground-muted"
-          />
-          <span>{branchName}</span>
-        </span>
-      </div>
+    <div className={cn('flex w-full min-w-0 flex-col gap-1.5', className)}>
+      <span className="text-xs text-foreground-muted">{label}</span>
+      <span
+        title={branchName}
+        className="flex h-8 min-w-0 cursor-default items-center gap-2 rounded-md border border-border-subtle px-2.5 text-sm text-foreground-muted"
+      >
+        <GitBranch aria-hidden className="size-3.5 shrink-0 text-foreground-passive" />
+        <span className="min-w-0 truncate">{branchName}</span>
+      </span>
     </div>
   );
 }

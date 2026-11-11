@@ -95,7 +95,7 @@ function getIcon(key: string): string | undefined {
 
 function renderSvgMarkup(svgContent: string): React.ReactNode {
   const processed = prepareInlineSvgMarkup(svgContent);
-  return <div className="size-5" dangerouslySetInnerHTML={{ __html: processed }} />;
+  return <div className="size-4" dangerouslySetInnerHTML={{ __html: processed }} />;
 }
 
 export const McpServerIcon: React.FC<{ name: string; iconKey?: string }> = ({ name, iconKey }) => {
@@ -104,7 +104,8 @@ export const McpServerIcon: React.FC<{ name: string; iconKey?: string }> = ({ na
   const svgContent = icon ?? fallbackSvg;
 
   return (
-    <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-background-2 transition-colors group-hover:bg-background-3">
+    // A small tile one step up from the row, so brand marks of any colour sit on the same ground.
+    <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-surface-hover transition-colors group-hover:bg-surface-selected">
       {svgContent ? renderSvgMarkup(svgContent) : null}
     </div>
   );

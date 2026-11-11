@@ -622,10 +622,10 @@ on, except the consent rules, which are always on.
 | Phase | State | How to turn it on |
 | --- | --- | --- |
 | 0. Fixes | Done: provider detection no longer stalls a command, the system prompt is cached through OpenRouter for Anthropic models, each model round trip is traced with its time and cached tokens. Not done: streaming a reply into speech; changing the default transcription model | Always on |
-| 1a. Pick-up | Done | Settings → Voice & Conductor → **Calls from agents** (Shown or Spoken) |
+| 1a. Pick-up | Done | Settings → Voice & Conductor → **Calls from agents** (Show on screen or Read aloud) |
 | 1b. Consent and control | Done | Always on |
 | S. Code checks | Built, hidden. The runner, the service, the `investigate` tool, the HUD card and the settings group exist | `CODE_CHECKS_UI` in `conductor/api/contract.ts` is `false` until that plan's gates pass |
-| 2 and 3. Realtime line | Built on Grok Voice 3.0 (moved from OpenAI on 2026-10-14), never run against the provider | Settings → Voice & Conductor → **Realtime voice conductor (experimental)**, with an xAI API key |
+| 2 and 3. Realtime line | Built on Grok Voice 3.0 (moved from OpenAI on 2026-10-14), never run against the provider | Settings → Voice & Conductor → **Live voice conductor**, with an xAI API key |
 | 4. Code checks on the line | Built: the Voice gets `investigate` when checks are ready; its finding goes with the next two conductor turns, which ask before acting; the conductor can ask one question while a check runs | With S and the line |
 | 5. Later | Not built | |
 

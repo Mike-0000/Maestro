@@ -1,10 +1,12 @@
-import { CheckCircle2, CircleDashed, GitMerge, Loader2, Play, X, XCircle } from 'lucide-react';
+import { StateGlyph, type StateGlyphState } from '@emdash/ui/react/components';
+import { Button, Spinner } from '@emdash/ui/react/primitives';
+import { AlertTriangle, GitMerge, Play } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { AgentIcon } from '@core/features/agents/contributions/browser/agent-icon';
 import { getCanvasStore } from '@core/features/canvas/contributions/browser/app-stores';
-import { cn } from '@core/primitives/styling/browser/cn';
 import { getConductorStore } from '../../contributions/browser/app-stores';
 import type { PlannedSubtask, SubtaskState } from '../plan-store';
+import { HudCard, HudCardHeader } from './hud-card';
 
 /** The active plan: approval before it starts, then live progress and the conflict radar. */
 export const PlanPanel = observer(function PlanPanel() {
@@ -17,59 +19,70 @@ export const PlanPanel = observer(function PlanPanel() {
   );
 
   return (
-    <section
-      aria-label="Conductor plan"
-      className="pointer-events-auto w-full max-w-[560px] rounded-2xl border border-border bg-background/95 p-3 shadow-xl backdrop-blur"
-    >
-      <header className="mb-2 flex items-start gap-2">
-        <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-medium tracking-wide text-foreground-muted uppercase">
-            {plan.status === 'proposed'
-              ? `Plan · ${plan.subtasks.length} agents in ${plan.projectName}`
-              : plan.status === 'running'
-                ? 'Plan running'
-                : 'Plan finished'}
-          </p>
-          <p className="text-sm font-medium text-foreground">{plan.goal}</p>
-        </div>
-        {plan.status !== 'running' && (
-          <button
-            type="button"
-            aria-label={plan.status === 'proposed' ? 'Discard plan' : 'Dismiss plan'}
-            onClick={() => (plan.status === 'proposed' ? plans.cancel() : plans.dismiss())}
-            className="flex size-6 items-center justify-center rounded text-foreground-muted hover:bg-background-secondary hover:text-foreground"
-          >
-            <X className="size-3.5" />
-          </button>
-        )}
-      </header>
+    <HudCard label="Conductor plan" className="pt-2.5">
+      <HudCardHeader
+        glyph={
+          <StateGlyph
+            state={
+              plan.status === 'proposed'
+                ? 'needs-you'
+                : plan.status === 'running'
+                  ? 'working'
+                  : 'done'
+            }
+          />
+        }
+        title={
+          plan.status === 'proposed'
+            ? 'Plan to approve'
+            : plan.status === 'running'
+              ? 'Plan running'
+              : 'Plan finished'
+        }
+        meta={
+          plan.status === 'proposed'
+            ? `${plan.subtasks.length} agents in ${plan.projectName}`
+            : undefined
+        }
+        onClose={
+          plan.status === 'running'
+            ? undefined
+            : () => (plan.status === 'proposed' ? plans.cancel() : plans.dismiss())
+        }
+        closeLabel={plan.status === 'proposed' ? 'Discard plan' : 'Dismiss plan'}
+      />
+      <p className="mt-0.5 pl-6 text-sm text-pretty text-foreground-body">{plan.goal}</p>
 
-      <ol className="max-h-64 space-y-1.5 overflow-y-auto">
+      <ol className="mt-3 max-h-64 space-y-0.5 overflow-y-auto">
         {plan.subtasks.map((subtask) => (
           <SubtaskRow key={subtask.title} subtask={subtask} />
         ))}
       </ol>
 
       {conflicted.length > 0 && (
-        <div className="mt-2 rounded-lg border border-red-500/40 bg-red-500/10 px-2.5 py-1.5 text-xs text-foreground">
-          {conflicted.map((pair) => (
-            <p key={`${pair.a}|${pair.b}`}>
-              <strong>{pair.a}</strong> and <strong>{pair.b}</strong> would conflict in{' '}
-              {pair.files.slice(0, 3).join(', ')}
-              {pair.files.length > 3 ? ` and ${pair.files.length - 3} more` : ''}.
-            </p>
-          ))}
+        <div className="mt-3 flex gap-2 text-xs text-foreground">
+          <AlertTriangle aria-hidden className="mt-0.5 size-3.5 shrink-0 text-foreground-warning" />
+          <div className="min-w-0 space-y-0.5">
+            {conflicted.map((pair) => (
+              <p key={`${pair.a}|${pair.b}`}>
+                <span className="font-medium">{pair.a}</span> and{' '}
+                <span className="font-medium">{pair.b}</span> would conflict in{' '}
+                {pair.files.slice(0, 3).join(', ')}
+                {pair.files.length > 3 ? ` and ${pair.files.length - 3} more` : ''}.
+              </p>
+            ))}
+          </div>
         </div>
       )}
 
-      <footer className="mt-3 flex items-center gap-2">
+      <footer className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
         {plan.status === 'proposed' ? (
           <>
-            <span className="flex-1 text-xs text-foreground-muted">
+            <span className="min-w-0 flex-1 text-xs text-foreground-muted">
               Each agent gets its own worktree and branch. Say “yes” to start.
               {plans.estimatedTokens && (
                 <span
-                  className="ml-1 tabular-nums"
+                  className="ml-1 text-foreground-passive tabular-nums"
                   title="Rough estimate from Jev's size rating of each subtask; agents bill to their own provider accounts."
                 >
                   Est. {formatTokens(plans.estimatedTokens[0])}–
@@ -77,25 +90,17 @@ export const PlanPanel = observer(function PlanPanel() {
                 </span>
               )}
             </span>
-            <button
-              type="button"
-              onClick={() => plans.cancel()}
-              className="rounded-md px-2.5 py-1.5 text-xs text-foreground-muted hover:bg-background-secondary hover:text-foreground"
-            >
+            <Button type="button" variant="text" size="xs" onClick={() => plans.cancel()}>
               Discard
-            </button>
-            <button
-              type="button"
-              onClick={() => void plans.approve()}
-              className="flex items-center gap-1.5 rounded-md bg-foreground px-3 py-1.5 text-xs font-medium text-background hover:opacity-90"
-            >
-              <Play className="size-3.5" />
+            </Button>
+            <Button type="button" variant="primary" size="sm" onClick={() => void plans.approve()}>
+              <Play aria-hidden className="size-3.5" />
               Start {plan.subtasks.length} agents
-            </button>
+            </Button>
           </>
         ) : (
           <>
-            <span className="flex-1 text-xs text-foreground-muted">
+            <span className="min-w-0 flex-1 text-xs text-foreground-muted">
               {plans.conflictsCheckedAt
                 ? conflicted.length === 0
                   ? 'No conflicts predicted between branches.'
@@ -103,46 +108,47 @@ export const PlanPanel = observer(function PlanPanel() {
                 : 'Conflict radar checks branches as agents work.'}
             </span>
             {awaitingIntegration && (
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="xs"
                 disabled={plans.deliveryStatusRefreshing}
+                aria-busy={plans.deliveryStatusRefreshing || undefined}
                 onClick={() => void plans.refreshDeliveryReadiness()}
-                className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-foreground hover:bg-background-secondary disabled:opacity-50"
               >
-                {plans.deliveryStatusRefreshing ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <GitMerge className="size-3.5" />
-                )}
+                {plans.deliveryStatusRefreshing ? <Spinner size="sm" /> : <GitMerge aria-hidden />}
                 Check handoffs
-              </button>
+              </Button>
             )}
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="xs"
               disabled={plans.checkingConflicts}
+              aria-busy={plans.checkingConflicts || undefined}
               onClick={() => void plans.checkConflicts()}
-              className="flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs text-foreground hover:bg-background-secondary disabled:opacity-50"
             >
-              {plans.checkingConflicts ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : (
-                <GitMerge className="size-3.5" />
-              )}
+              {plans.checkingConflicts ? <Spinner size="sm" /> : <GitMerge aria-hidden />}
               Check conflicts
-            </button>
+            </Button>
           </>
         )}
       </footer>
-    </section>
+    </HudCard>
   );
 });
 
 const SubtaskRow = observer(function SubtaskRow({ subtask }: { subtask: PlannedSubtask }) {
   const canvas = getCanvasStore();
   const name = subtask.conversationId ? canvas.spokenName(subtask.conversationId) : null;
+  const where =
+    subtask.error ??
+    (subtask.sequential_after
+      ? `After “${subtask.sequential_after}” · ${subtask.owned_paths.join(', ')}`
+      : subtask.owned_paths.join(', '));
   return (
-    <li className="flex items-start gap-2 rounded-lg bg-background-secondary/60 px-2 py-1.5">
-      <span className="mt-0.5">
+    <li className="-mx-2 flex items-start gap-2.5 rounded-md px-2 py-1.5 hover:bg-surface-hover">
+      <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center">
         <AgentIcon id={subtask.provider} size={14} />
       </span>
       <div className="min-w-0 flex-1">
@@ -152,27 +158,30 @@ const SubtaskRow = observer(function SubtaskRow({ subtask }: { subtask: PlannedS
           onClick={() =>
             subtask.conversationId && canvas.requestFocus(`agent:${subtask.conversationId}`)
           }
-          className="block max-w-full truncate text-left text-xs font-medium text-foreground enabled:hover:underline"
+          className="block max-w-full truncate rounded-sm text-left text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring enabled:hover:underline enabled:hover:decoration-foreground-passive enabled:hover:underline-offset-4"
         >
           {subtask.title}
-          {name && <span className="ml-1.5 font-normal text-foreground-muted">· {name}</span>}
+          {name && <span className="ml-1.5 text-foreground-muted">· {name}</span>}
         </button>
-        <p className="truncate text-[11px] text-foreground-muted">
-          {subtask.error ??
-            (subtask.sequential_after
-              ? `After “${subtask.sequential_after}” · ${subtask.owned_paths.join(', ')}`
-              : subtask.owned_paths.join(', '))}
+        <p
+          className={
+            subtask.error
+              ? 'truncate text-xs text-foreground-error'
+              : 'truncate text-tiny text-foreground-passive'
+          }
+        >
+          {where}
         </p>
       </div>
       {subtask.size && (
         <span
           title="Jev's size estimate"
-          className="shrink-0 rounded-full bg-foreground/5 px-1.5 py-0.5 text-[10px] font-medium text-foreground-muted uppercase"
+          className="mt-0.5 shrink-0 text-tiny text-foreground-passive tabular-nums"
         >
-          {subtask.size[0]}
+          {subtask.size[0]?.toUpperCase()}
         </span>
       )}
-      <StateChip state={subtask.state} />
+      <SubtaskStateLabel state={subtask.state} />
     </li>
   );
 });
@@ -187,29 +196,27 @@ const STATE_LABELS: Record<SubtaskState, string> = {
   failed: 'Failed',
 };
 
-function StateChip({ state }: { state: SubtaskState }) {
-  const icon =
-    state === 'done' ? (
-      <CheckCircle2 className="size-3" />
-    ) : state === 'failed' ? (
-      <XCircle className="size-3" />
-    ) : state === 'running' || state === 'spawning' ? (
-      <Loader2 className="size-3 animate-spin" />
-    ) : (
-      <CircleDashed className="size-3" />
-    );
+const STATE_GLYPHS: Record<SubtaskState, StateGlyphState> = {
+  pending: 'idle',
+  waiting: 'idle',
+  'awaiting-integration': 'needs-you',
+  spawning: 'setting-up',
+  running: 'working',
+  done: 'done',
+  failed: 'error',
+};
+
+/** A subtask's state in words, with the shared state mark. */
+function SubtaskStateLabel({ state }: { state: SubtaskState }) {
   return (
     <span
-      className={cn(
-        'flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium',
-        state === 'done' && 'bg-green-500/15 text-green-700 dark:text-green-300',
-        state === 'failed' && 'bg-red-500/15 text-red-700 dark:text-red-300',
-        (state === 'running' || state === 'spawning') &&
-          'bg-blue-500/15 text-blue-700 dark:text-blue-300',
-        (state === 'pending' || state === 'waiting') && 'bg-foreground/5 text-foreground-muted'
-      )}
+      className={
+        state === 'failed'
+          ? 'mt-0.5 flex w-20 shrink-0 items-center gap-1.5 text-xs text-foreground-error'
+          : 'mt-0.5 flex w-20 shrink-0 items-center gap-1.5 text-xs text-foreground-muted'
+      }
     >
-      {icon}
+      <StateGlyph state={STATE_GLYPHS[state]} size="sm" />
       {STATE_LABELS[state]}
     </span>
   );

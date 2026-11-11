@@ -30,15 +30,16 @@ export function ProjectSettingsFooter({
   const saveDisabled = saving || !dirty;
 
   return (
-    <div className="sticky bottom-0 z-10 flex items-center gap-2 bg-background py-3">
+    // Pinned to the bottom of the scrolling settings on the page surface; no rule above it.
+    <div className="sticky bottom-0 z-10 flex items-center gap-2 bg-background px-0.5 py-3">
       <Tooltip.Provider delay={150}>
         <Tooltip.Root>
           <Tooltip.Trigger
             render={
               <Button
                 type="button"
-                variant="secondary"
-                className="shrink-0 gap-1.5"
+                variant="text"
+                className="shrink-0"
                 disabled={shareDisabled}
                 hidden={!canShareConfig && !hostActionReason}
                 aria-disabled={hostActionReason !== null}
@@ -60,9 +61,10 @@ export function ProjectSettingsFooter({
 
       <div className="ml-auto flex items-center gap-2">
         <Button
-          variant="secondary"
+          variant="ghost"
           icon
           aria-label="Reset changes"
+          title="Reset changes"
           onClick={onUndo}
           disabled={!dirty || saving}
         >
@@ -70,7 +72,7 @@ export function ProjectSettingsFooter({
         </Button>
         <ConfirmButton variant="primary" onClick={onSave} disabled={saveDisabled}>
           <span className="inline-flex min-w-22 items-center justify-center gap-1.5">
-            {saving && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
+            {saving && <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden="true" />}
             {!saving && saved && <Check className="size-4" aria-hidden="true" />}
             {saving ? 'Saving…' : saved ? 'Saved' : 'Save settings'}
           </span>

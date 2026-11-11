@@ -166,7 +166,7 @@ export const TerminalPtyContent = observer(function TerminalPtyContent({
                   </div>
                   {disabledReason && (
                     <div
-                      className="absolute inset-x-2 top-2 z-20 rounded-md border bg-background/95 px-2 py-1 text-center text-xs text-foreground-muted shadow-sm"
+                      className="surface-elevated absolute inset-x-3 top-3 z-20 rounded-lg border border-border-subtle bg-(--em-surface) px-3 py-1.5 text-center text-xs text-foreground-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                       tabIndex={0}
                       role="note"
                     >

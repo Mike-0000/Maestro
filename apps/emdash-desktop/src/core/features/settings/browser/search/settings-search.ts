@@ -23,8 +23,8 @@ export function slugifySettingLabel(label: string): string {
 
 const trayIconLabel =
   detectPlatformContext().os === 'mac'
-    ? 'Show Emdash in the menu bar'
-    : 'Show Emdash in the system tray';
+    ? 'Show Maestro in the menu bar'
+    : 'Show Maestro in the system tray';
 
 export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   // Voice & Conductor
@@ -56,11 +56,11 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   },
   {
     id: 'chorus-spoken-output',
-    label: 'Spoken output',
+    label: 'Voice for replies',
     tab: 'chorus',
-    description:
-      'Speak replies with Windows, offline Kitten Mini, or Gemini Flash / Flash-Lite (direct, via OpenRouter, or via Google Cloud).',
+    description: 'Read replies aloud with the Windows voice, Kitten Mini, or a Gemini voice.',
     keywords: [
+      'spoken output',
       'tts',
       'text to speech',
       'gemini',
@@ -83,10 +83,10 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   },
   {
     id: 'spawn-windows-in-a-project-sub-canvas',
-    label: 'Spawn windows in a project sub-canvas',
+    // The id keeps the old label's slug, so links to this entry still resolve.
+    label: "Open new windows in their project's region",
     tab: 'chorus',
-    description:
-      "New agents and app browsers open in that project's main sub-canvas. Turn off to place them on the board.",
+    description: 'New agents and browsers go to a region named after their project.',
     keywords: ['canvas', 'region', 'sub-canvas', 'subcanvas', 'project', 'spawn', 'group'],
   },
   // General
@@ -98,11 +98,11 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     keywords: ['update', 'upgrade', 'restart', 'release'],
   },
   {
-    id: 'privacy-telemetry',
-    label: 'Privacy & Telemetry',
+    id: 'usage-data',
+    label: 'Usage data',
     tab: 'general',
-    description: 'Help improve Chorus by sending anonymous usage data.',
-    keywords: ['analytics', 'posthog', 'usage data', 'tracking'],
+    description: 'Help improve Maestro by sending anonymous usage data.',
+    keywords: ['analytics', 'posthog', 'privacy', 'telemetry', 'tracking'],
   },
   {
     id: 'auto-generate-task-names',
@@ -188,7 +188,7 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   },
   {
     id: 'emdash-account',
-    label: 'Emdash Account',
+    label: 'Emdash account',
     tab: 'general',
     description: 'Create an Emdash account to automatically connect GitHub using OAuth2.',
     keywords: ['sign in', 'sign out', 'login', 'logout', 'oauth'],
@@ -352,14 +352,14 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     id: slugifySettingLabel(trayIconLabel),
     label: trayIconLabel,
     tab: 'interface',
-    description: 'Keep quick access to Emdash while agents run in the background.',
+    description: 'Keep quick access to Maestro while agents run in the background.',
     keywords: ['menu bar', 'system tray', 'task bar', 'icon', 'hide', 'disable'],
   },
   {
     id: 'color-mode',
     label: 'Color mode',
     tab: 'interface',
-    description: 'Choose how Emdash looks.',
+    description: 'Choose how Maestro looks.',
     keywords: ['theme', 'dark mode', 'light mode', 'appearance', 'system'],
   },
   {
@@ -399,21 +399,21 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   },
   {
     id: 'left-sidebar-line-changes',
-    label: 'Left sidebar line changes',
+    label: 'Sidebar line changes',
     tab: 'interface',
     description: 'Show added and removed line counts for tasks in the left sidebar.',
     keywords: ['diff'],
   },
   {
     id: 'left-sidebar-pr-status',
-    label: 'Left sidebar PR status',
+    label: 'Sidebar pull request status',
     tab: 'interface',
-    description: 'Show GitHub PR merge and status icons for tasks in the left sidebar.',
-    keywords: ['pull request'],
+    description: 'Show the merge and check state of task pull requests in the left sidebar.',
+    keywords: ['pull request', 'pr', 'github'],
   },
   {
     id: 'left-sidebar-timestamps',
-    label: 'Left sidebar timestamps',
+    label: 'Sidebar timestamps',
     tab: 'interface',
     description: 'Show the relative task timestamp in the left sidebar.',
     keywords: ['time'],
@@ -427,9 +427,10 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   },
   {
     id: 'context-bar',
-    label: 'Context bar',
+    label: 'Hide the context bar',
     tab: 'interface',
-    description: 'Hide the on-screen context trigger.',
+    description: 'Remove the on-screen context trigger.',
+    keywords: ['context bar'],
   },
   {
     id: 'keyboard-shortcuts',
@@ -440,9 +441,9 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
   },
   {
     id: 'open-in-tools',
-    label: 'Tools',
+    label: 'Open in menu',
     tab: 'interface',
-    description: 'Show or hide detected "Open in" apps in menus.',
+    description: 'Show or hide installed editors and tools in the Open in menu.',
     keywords: ['open in', 'editor', 'hidden tools'],
   },
   // Browser
@@ -457,7 +458,7 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     id: 'disable-cors-for-localhost',
     label: 'Disable CORS for localhost',
     tab: 'browser',
-    description: 'Allow localhost pages in Emdash browser tabs to call APIs without CORS headers.',
+    description: 'Allow localhost pages in Maestro browser tabs to call APIs without CORS headers.',
     keywords: ['cross-origin'],
   },
   {

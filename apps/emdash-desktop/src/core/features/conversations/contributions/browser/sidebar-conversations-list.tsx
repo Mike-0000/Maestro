@@ -1,11 +1,11 @@
-import { AgentStatus, ListPopoverCard } from '@emdash/ui/react/components';
+import { ListPopoverCard, StateGlyph, type StateGlyphState } from '@emdash/ui/react/components';
 import { createListView, defineSelection, ListView } from '@emdash/ui/react/patterns';
 import {
   Button,
   Checkbox,
   ContextMenu,
-  MicroLabel,
   RelativeTime,
+  SectionLabel,
   Spinner,
   toast,
 } from '@emdash/ui/react/primitives';
@@ -42,8 +42,17 @@ import {
 import { useTabSelection } from '@core/features/workbench/api/browser/task-tab-registry';
 import { useOpenModal } from '@core/manifests/browser/modal-api';
 import { projectAvailabilityUi } from '@core/manifests/browser/project-availability-ui';
+import type { AgentStatus } from '@core/primitives/agents/api';
 import { MAX_CONVERSATION_TITLE_LENGTH } from '@core/primitives/conversations/api';
 import { cn } from '@core/primitives/styling/browser/cn';
+
+/** The kit's one set of state marks, as the workbench sidebar's task rows draw them. */
+const GLYPH_FOR_STATUS: Record<Exclude<AgentStatus, 'idle'>, StateGlyphState> = {
+  'awaiting-input': 'needs-you',
+  working: 'working',
+  completed: 'unread',
+  error: 'error',
+};
 
 const ROW_HEIGHT = 32;
 const SECTION_HEADER_HEIGHT = 32;
@@ -203,8 +212,8 @@ const ConversationRow = observer(function ConversationRow({
             }
           }}
           className={cn(
-            'group/conversation flex h-8 w-full items-center gap-2 rounded-md pl-2 text-left text-sm text-foreground-muted transition-colors hover:bg-background-1 hover:text-foreground',
-            isActive && 'bg-background-2 text-foreground hover:bg-background-2'
+            'group/conversation flex h-8 w-full items-center gap-2 rounded-md pl-2 text-left text-sm text-foreground-muted transition-colors outline-none hover:bg-surface-hover hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset',
+            isActive && 'bg-surface-selected text-foreground hover:bg-surface-selected'
           )}
         >
           <ConversationAgentIcon
@@ -216,7 +225,7 @@ const ConversationRow = observer(function ConversationRow({
           {isEditing ? (
             <input
               ref={handleRenameInputRef}
-              className="min-w-0 flex-1 rounded bg-background-1 px-1.5 py-0.5 text-sm text-foreground ring-1 ring-foreground/20 outline-none focus:ring-foreground/40"
+              className="h-6 min-w-0 flex-1 rounded-sm bg-surface-emphasis px-1.5 text-sm text-foreground ring-1 ring-border-1 outline-none focus:ring-ring"
               defaultValue={rawTitle}
               maxLength={MAX_CONVERSATION_TITLE_LENGTH}
               onClick={(e) => e.stopPropagation()}
@@ -247,12 +256,12 @@ const ConversationRow = observer(function ConversationRow({
             onRangeStep={(direction) => onRangeStep(conversationId, direction)}
             selectionId={conversationId}
           >
-            {conversation.indicatorStatus ? (
-              <AgentStatus status={conversation.indicatorStatus} />
+            {conversation.indicatorStatus && conversation.indicatorStatus !== 'idle' ? (
+              <StateGlyph state={GLYPH_FOR_STATUS[conversation.indicatorStatus]} label />
             ) : (
               <RelativeTime
                 value={conversation.data.lastInteractedAt ?? ''}
-                className="flex h-full items-center font-sans text-xs text-foreground-passive"
+                className="flex h-full items-center font-sans text-tiny text-foreground-passive tabular-nums"
                 compact
               />
             )}
@@ -333,7 +342,7 @@ const ConversationSectionHeader = observer(function ConversationSectionHeader({
 
   return (
     <div className="group/section flex h-8 items-end justify-between pb-1 pl-2">
-      <MicroLabel className="text-foreground-passive">{section.key}</MicroLabel>
+      <SectionLabel as="h3">{section.key}</SectionLabel>
       <span
         className={cn(
           'flex h-7 w-7 items-center justify-center transition-opacity',
@@ -516,12 +525,13 @@ const SidebarConversationsListContent = observer(function SidebarConversationsLi
   return (
     <div ref={listRootRef} className="relative flex h-full w-full flex-col">
       <div className="flex shrink-0 items-center justify-between pt-2 pr-2 pb-1 pl-4">
-        <MicroLabel className="font-medium">Conversations</MicroLabel>
+        <SectionLabel as="h2">Conversations</SectionLabel>
         <projectAvailabilityUi.LiveActionGuard projectId={projectId}>
           <Button
             size="sm"
             icon
             variant="ghost"
+            aria-label="New conversation"
             disabled={Boolean(liveActionDisabledReason)}
             onClick={handleCreate}
           >

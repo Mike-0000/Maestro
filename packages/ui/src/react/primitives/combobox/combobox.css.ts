@@ -1,6 +1,8 @@
 import { globalStyle, style } from '@vanilla-extract/css';
 import { svgDefaultSize } from '@styles/effects/svg-helpers.css';
-import { menuItemBase } from '@styles/recipes/menu-item.css';
+import { recipesLayer } from '@styles/layers.css';
+import { fieldFocusRing } from '@styles/recipes/field-shell.css';
+import { menuGroupLabel, menuItemBase, menuSeparatorLine } from '@styles/recipes/menu-item.css';
 import { popupSurface, popupShadowSm } from '@styles/recipes/popup-surface.css';
 import { vars } from '@theme/core/contract/contract.css';
 import { tokenVars } from '@theme/tokens.css';
@@ -12,6 +14,14 @@ export const positioner = style({
 
 export const comboboxTrigger = style([svgDefaultSize, {}]);
 
+/** `appearance="input"`: the value truncates; the field takes the width its caller gives it. */
+export const comboboxTriggerInput = style({
+  '@layer': { [recipesLayer]: { minWidth: 0 } },
+  selectors: {
+    '&[aria-invalid="true"]': { borderColor: vars.borderDestructive, boxShadow: 'none' },
+  },
+});
+
 export const comboboxContent = style([
   popupSurface,
   popupShadowSm,
@@ -19,7 +29,7 @@ export const comboboxContent = style([
     maxHeight: 'var(--available-height)',
     maxWidth: 'var(--available-width)',
     overflow: 'hidden',
-    padding: '2px',
+    padding: '0.25rem',
     selectors: {
       '&[data-width="trigger"]': {
         width: 'var(--anchor-width)',
@@ -49,17 +59,17 @@ export const comboboxListViewport = style({
 });
 
 export const comboboxList = style({
-  scrollPaddingTop: '2px',
-  scrollPaddingBottom: '2px',
+  scrollPaddingTop: '0.25rem',
+  scrollPaddingBottom: '0.25rem',
 });
 
 export const comboboxItem = style([
   menuItemBase({ trailingIndicator: true, fullWidth: true }),
   {
     selectors: {
-      '&[data-highlighted]:not([data-selected])': { backgroundColor: vars.surfaceHover },
-      '&[data-selected]': { backgroundColor: vars.surfaceSelected },
-      '&[data-highlighted]': { color: vars.foreground },
+      // The chosen value reads at full strength with its check; only the
+      // highlighted row takes a fill.
+      '&[data-selected]': { color: vars.foreground },
       '&[data-disabled]': { pointerEvents: 'none', opacity: 0.5 },
       '&[data-disabled][data-hoverable-when-disabled]': {
         pointerEvents: 'auto',
@@ -78,26 +88,20 @@ export const comboboxItemIndicator = style({
   height: '0.875rem',
   alignItems: 'center',
   justifyContent: 'center',
+  color: vars.foreground,
 });
 
-export const comboboxLabel = style({
-  paddingLeft: '0.5rem',
-  paddingRight: '0.5rem',
-  paddingTop: '0.375rem',
-  paddingBottom: '0.375rem',
-  fontSize: tokenVars.textXs,
-  color: vars.foregroundMuted,
-});
+export const comboboxLabel = menuGroupLabel;
 
 export const comboboxEmpty = style({
   display: 'none',
   width: '100%',
   justifyContent: 'center',
-  paddingTop: '0.5rem',
-  paddingBottom: '0.5rem',
+  paddingTop: '0.75rem',
+  paddingBottom: '0.75rem',
   textAlign: 'center',
   fontSize: tokenVars.textSm,
-  color: vars.foregroundMuted,
+  color: vars.foregroundPassive,
   selectors: {
     // show when data-empty is on the parent popup
     '[data-slot="combobox-content"][data-empty] &': {
@@ -106,14 +110,10 @@ export const comboboxEmpty = style({
   },
 });
 
-export const comboboxSeparator = style({
-  marginLeft: '-0.25rem',
-  marginRight: '-0.25rem',
-  marginTop: '0.25rem',
-  marginBottom: '0.25rem',
-  height: '1px',
-  backgroundColor: vars.border,
-});
+export const comboboxSeparator = style([
+  menuSeparatorLine,
+  { marginLeft: '-0.25rem', marginRight: '-0.25rem' },
+]);
 
 export const comboboxChips = style({
   display: 'flex',
@@ -123,24 +123,18 @@ export const comboboxChips = style({
   gap: '0.375rem',
   borderRadius: tokenVars.radiusMd,
   border: `1px solid ${vars.border}`,
-  backgroundColor: 'transparent',
+  backgroundColor: vars.surfaceInput,
   backgroundClip: 'padding-box',
   paddingLeft: '0.625rem',
   paddingRight: '0.625rem',
   paddingTop: '0.375rem',
   paddingBottom: '0.375rem',
   fontSize: tokenVars.textSm,
-  boxShadow: '0 1px 2px 0 rgba(0,0,0,0.05)',
-  transition: 'color 150ms, box-shadow 150ms',
+  transition: 'color 150ms, box-shadow 150ms, border-color 150ms',
   selectors: {
-    '&:focus-within': {
-      borderColor: vars.borderPrimary,
-      boxShadow: `0 0 0 3px color-mix(in srgb, ${vars.borderPrimary} 30%, transparent)`,
-    },
-    '&:has([aria-invalid="true"])': {
-      borderColor: vars.borderDestructive,
-      boxShadow: `0 0 0 3px color-mix(in srgb, ${vars.borderDestructive} 20%, transparent)`,
-    },
+    '&:hover': { borderColor: vars.border1 },
+    '&:focus-within': fieldFocusRing,
+    '&:has([aria-invalid="true"])': { borderColor: vars.borderDestructive },
     '&:has([data-slot="combobox-chip"])': {
       paddingLeft: '0.375rem',
     },
@@ -155,7 +149,7 @@ export const comboboxChip = style({
   justifyContent: 'center',
   gap: '0.25rem',
   borderRadius: tokenVars.radiusSm,
-  backgroundColor: vars.surfaceHover,
+  backgroundColor: `color-mix(in srgb, ${vars.foreground} 8%, transparent)`,
   paddingLeft: '0.375rem',
   paddingRight: '0.375rem',
   fontSize: tokenVars.textXs,

@@ -13,8 +13,8 @@ const machineStore = vi.hoisted(() => ({
 }));
 
 vi.mock('@emdash/ui/react/components', () => ({
+  EmptyState: ({ label }: { label: string }) => <div>{label}</div>,
   MachineStatus: () => <span data-machine-status />,
-  McpIcon: () => <span data-mcp-icon />,
 }));
 
 vi.mock('@core/features/agents/api/browser/client', () => ({
@@ -125,7 +125,7 @@ describe('MachineDetailsPage tabs', () => {
     host.remove();
   });
 
-  it('switches machine sections and keeps the panel labelled by the active pill', async () => {
+  it('switches machine sections and keeps the panel labelled by the active tab', async () => {
     await act(async () => {
       root.render(
         <MachineDetailsPage
@@ -138,8 +138,9 @@ describe('MachineDetailsPage tabs', () => {
     });
 
     const tabs = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
-    const system = tabs.find((tab) => tab.getAttribute('aria-label') === 'System');
-    const workspaces = tabs.find((tab) => tab.getAttribute('aria-label') === 'Workspaces');
+    // Tabs are plain words now (no icon-only pills), so their text is their name.
+    const system = tabs.find((tab) => tab.textContent === 'System');
+    const workspaces = tabs.find((tab) => tab.textContent === 'Workspaces');
     const panel = host.querySelector<HTMLElement>('[role="tabpanel"]');
 
     expect(tabs).toHaveLength(6);

@@ -41,7 +41,7 @@ export function createMainWindow(): BrowserWindow {
     // appears before the splash paints is not a white flash. System-theme
     // heuristic: the DB-backed app theme is not readable this early; the
     // splash corrects to the persisted theme as soon as index.html parses.
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#111111' : '#fcfcfc',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#121a1e' : '#fafcfd',
     // In production, electron-builder injects the icon from the app bundle.
     ...(import.meta.env.DEV && { icon: devIcon }),
     webPreferences: {

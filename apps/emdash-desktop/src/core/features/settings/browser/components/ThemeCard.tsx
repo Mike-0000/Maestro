@@ -12,8 +12,8 @@ const themeOptions: Array<{
   icon: LucideIcon;
 }> = [
   { value: null, label: 'System', ariaLabel: 'Set theme to system preference', icon: Monitor },
-  { value: 'emlight', label: 'Chorus Light', ariaLabel: 'Set theme to Chorus Light', icon: Sun },
-  { value: 'emdark', label: 'Chorus Dark', ariaLabel: 'Set theme to Chorus Dark', icon: Moon },
+  { value: 'emlight', label: 'Light', ariaLabel: 'Set theme to Maestro Light', icon: Sun },
+  { value: 'emdark', label: 'Dark', ariaLabel: 'Set theme to Maestro Dark', icon: Moon },
 ];
 
 const ThemeCard: React.FC = () => {
@@ -27,7 +27,7 @@ const ThemeCard: React.FC = () => {
   };
 
   return (
-    <div className="grid grid-cols-[repeat(auto-fit,minmax(6.5rem,1fr))] gap-2 text-sm">
+    <div className="grid grid-cols-3 gap-2">
       {themeOptions.map(({ value, label, ariaLabel, icon: Icon }) => (
         <SelectableCard
           key={label}
@@ -35,10 +35,10 @@ const ThemeCard: React.FC = () => {
           onClick={() => handleSetTheme(value)}
           aria-label={ariaLabel}
           aria-pressed={theme === value}
-          className="min-h-24"
+          className="min-h-20"
         >
-          <span className="flex flex-col items-center justify-center gap-2 px-2 py-2.5 text-sm font-medium sm:px-3">
-            <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="flex flex-col items-center justify-center gap-2 px-2 py-3 text-sm">
+            <Icon className="size-4 shrink-0" aria-hidden="true" />
             <span className="text-center">{label}</span>
           </span>
         </SelectableCard>

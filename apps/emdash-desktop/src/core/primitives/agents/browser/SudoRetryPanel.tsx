@@ -1,6 +1,7 @@
 import { formatCommandOutputTail } from '@emdash/core/primitives/host-dependencies/api';
 import type { PermissionDeniedError } from '@emdash/core/primitives/host-dependencies/api';
-import { Loader2, TriangleAlert, X } from 'lucide-react';
+import { Button } from '@emdash/ui/react/primitives';
+import { TriangleAlert, X } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@core/primitives/styling/browser/cn';
 import { CommandActionButton, CommandRow } from './install-command-row';
@@ -31,23 +32,26 @@ export function SudoRetryPanel({
   return (
     <div
       className={cn(
-        'space-y-2 rounded-lg border border-foreground-warning/30 bg-background-warning/30 p-3',
+        'flex flex-col gap-2 rounded-lg border border-border-subtle p-3',
         compact && 'p-2.5'
       )}
       role="alert"
     >
-      <div className="flex items-center gap-2 text-sm">
-        <TriangleAlert className="h-4 w-4 shrink-0 text-foreground-warning" />
-        <span className="font-medium">Permission denied</span>
+      <div className="flex items-center gap-2">
+        <TriangleAlert className="size-3.5 shrink-0 text-foreground-warning" aria-hidden />
+        <span className="text-sm font-medium text-foreground">Permission denied</span>
         {onDismiss ? (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="xs"
+            icon
             aria-label="Dismiss permission error"
-            className="ml-auto rounded p-0.5 text-foreground-passive hover:bg-background-2 hover:text-foreground"
+            className="ml-auto"
             onClick={onDismiss}
           >
-            <X className="size-3.5" />
-          </button>
+            <X className="size-3.5" aria-hidden />
+          </Button>
         ) : null}
       </div>
 
@@ -68,7 +72,7 @@ export function SudoRetryPanel({
           action={
             error.canRetryWithSudo ? (
               <CommandActionButton disabled={isRetrying} onClick={onRetry}>
-                {isRetrying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Retry with sudo'}
+                {isRetrying ? 'Retrying…' : 'Retry with sudo'}
               </CommandActionButton>
             ) : null
           }
@@ -77,15 +81,18 @@ export function SudoRetryPanel({
 
       {output ? (
         <>
-          <button
+          <Button
             type="button"
+            variant="text"
+            size="xs"
+            className="self-start"
+            aria-expanded={showOutput}
             onClick={() => setShowOutput((visible) => !visible)}
-            className="text-xs text-foreground-passive hover:text-foreground"
           >
             {showOutput ? 'Hide output' : 'Show output'}
-          </button>
+          </Button>
           {showOutput ? (
-            <pre className="max-h-40 overflow-auto rounded bg-background-quaternary-1 p-2 font-mono text-[11px] whitespace-pre-wrap text-foreground-muted">
+            <pre className="max-h-40 overflow-auto rounded-md bg-surface-emphasis p-2 font-mono text-tiny whitespace-pre-wrap text-foreground-muted">
               {output}
             </pre>
           ) : null}

@@ -1,14 +1,6 @@
 import { SettingsCard, SettingsSection } from '@emdash/ui/react/patterns';
-import {
-  Button,
-  DropdownMenu,
-  Input,
-  Select,
-  SeparatedList,
-  Switch,
-  toast,
-} from '@emdash/ui/react/primitives';
-import { Check, ChevronDown, Ellipsis, Eraser, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { Button, DropdownMenu, Input, Select, Switch, toast } from '@emdash/ui/react/primitives';
+import { Check, ChevronDown, Ellipsis, Eraser, Pencil, Trash2, X } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { browserControlsRegistry } from '@core/features/browser/api/browser/browser-controls-registry';
 import { browserSessionStore } from '@core/features/browser/api/browser/browser-session-store';
@@ -75,7 +67,7 @@ export function BrowserSettingsCard() {
       title: `Clear ${profile.name} browser storage?`,
       description:
         'This clears cookies, local storage, IndexedDB, and cache for this profile. Browser tabs using it will be signed out.',
-      confirmLabel: 'Clear Storage',
+      confirmLabel: 'Clear storage',
       variant: 'destructive',
     }).then((outcome) => {
       if (outcome.success) void clearProfileStorageAndReload(profile.id);
@@ -116,7 +108,7 @@ export function BrowserSettingsCard() {
       title: `Delete ${profile.name} browser profile?`,
       description:
         'This removes the profile and clears its cookies, local storage, IndexedDB, and cache.',
-      confirmLabel: 'Delete Profile',
+      confirmLabel: 'Delete profile',
       variant: 'destructive',
     }).then((outcome) => {
       if (!outcome.success) return;
@@ -135,59 +127,64 @@ export function BrowserSettingsCard() {
   };
 
   return (
-    <div className="flex flex-col gap-8">
-      <SettingsCard>
-        <SeparatedList gap="1rem" direction="column">
-          <SettingRow
-            title="Default browser profile"
-            description="New browser tabs open with this profile. You can switch an individual tab's profile from its toolbar menu."
-            control={
-              <Select.Root
-                value={selectedDefault}
-                onValueChange={(next) => {
-                  if (next) update({ defaultProfileId: next });
-                }}
-                disabled={disabled}
+    <>
+      <SettingsSection title="Tabs">
+        <SettingRow
+          title="Default browser profile"
+          description="New browser tabs open with this profile. You can switch a tab's profile from its toolbar menu."
+          control={
+            <Select.Root
+              value={selectedDefault}
+              onValueChange={(next) => {
+                if (next) update({ defaultProfileId: next });
+              }}
+              disabled={disabled}
+            >
+              <Select.Trigger
+                appearance="input"
+                className="w-56"
+                aria-label="Default browser profile"
               >
-                <Select.Trigger className="w-[190px] shrink-0 gap-2">
-                  <Select.Value>{browserProfileLabel(selectedDefault, profiles)}</Select.Value>
-                </Select.Trigger>
-                <Select.Content align="end">
-                  {profiles.map((profile) => (
-                    <Select.Item key={profile.id} value={profile.id}>
-                      {profile.name}
-                    </Select.Item>
-                  ))}
-                  <Select.Item value={BROWSER_ISOLATED_PROFILE_ID}>Isolated per task</Select.Item>
-                </Select.Content>
-              </Select.Root>
-            }
-          />
+                <Select.Value>{browserProfileLabel(selectedDefault, profiles)}</Select.Value>
+              </Select.Trigger>
+              <Select.Content align="end" width="trigger">
+                {profiles.map((profile) => (
+                  <Select.Item key={profile.id} value={profile.id}>
+                    {profile.name}
+                  </Select.Item>
+                ))}
+                <Select.Item value={BROWSER_ISOLATED_PROFILE_ID}>Isolated per task</Select.Item>
+              </Select.Content>
+            </Select.Root>
+          }
+        />
 
-          <SettingRow
-            title="Disable CORS for localhost"
-            description="Allows pages opened from localhost in Chorus browser tabs to call APIs that do not send matching CORS headers."
-            control={
-              <Switch
-                checked={browserSettings?.relaxCorsForLocalhost ?? false}
-                disabled={disabled}
-                onCheckedChange={(next) => update({ relaxCorsForLocalhost: next })}
-              />
-            }
-          />
-        </SeparatedList>
-      </SettingsCard>
+        <SettingRow
+          title="Disable CORS for localhost"
+          description="Lets pages opened from localhost call APIs that do not send matching CORS headers."
+          control={
+            <Switch
+              checked={browserSettings?.relaxCorsForLocalhost ?? false}
+              disabled={disabled}
+              aria-label="Disable CORS for localhost"
+              onCheckedChange={(next) => update({ relaxCorsForLocalhost: next })}
+            />
+          }
+        />
+      </SettingsSection>
 
-      <SettingsSection title="Browser profiles" bare>
-        <SettingsCard>
-          <div className="text-xs text-foreground-passive">
-            Each profile keeps its own cookies and logins, shared across tasks. Profiles do not
-            import anything from your system browser.
-          </div>
-
-          <div className="mt-2 flex flex-col divide-y divide-border/40">
+      <SettingsSection
+        title="Profiles"
+        description="Each profile keeps its own cookies and logins, shared across tasks. Nothing is imported from your system browser."
+        bare
+      >
+        <SettingsCard padding="rows">
+          <ul className="flex flex-col" aria-label="Browser profiles">
             {profiles.map((profile) => (
-              <div key={profile.id} className="flex h-9 items-center gap-2">
+              <li
+                key={profile.id}
+                className="group/row -mx-2 flex h-10 items-center gap-2 rounded-md px-2 transition-colors hover:bg-surface-hover"
+              >
                 {editingProfileId === profile.id ? (
                   <>
                     <Input
@@ -207,8 +204,9 @@ export function BrowserSettingsCard() {
                     <Button
                       type="button"
                       variant="ghost"
+                      size="sm"
                       icon
-                      className="size-7 shrink-0 text-foreground-muted"
+                      className="shrink-0"
                       disabled={disabled}
                       aria-label={`Save ${profile.name} browser profile name`}
                       onClick={() => renameProfile(profile.id, renameInputRef.current?.value ?? '')}
@@ -218,8 +216,9 @@ export function BrowserSettingsCard() {
                     <Button
                       type="button"
                       variant="ghost"
+                      size="sm"
                       icon
-                      className="size-7 shrink-0 text-foreground-muted"
+                      className="shrink-0"
                       disabled={disabled}
                       aria-label={`Cancel renaming ${profile.name} browser profile`}
                       onClick={() => setEditingProfileId(null)}
@@ -232,14 +231,18 @@ export function BrowserSettingsCard() {
                     <span className="min-w-0 flex-1 truncate text-sm text-foreground">
                       {profile.name}
                     </span>
+                    {profile.id === selectedDefault ? (
+                      <span className="shrink-0 text-xs text-foreground-passive">Default</span>
+                    ) : null}
                     <DropdownMenu.Root>
                       <DropdownMenu.Trigger
                         render={
                           <Button
                             type="button"
                             variant="ghost"
+                            size="sm"
                             icon
-                            className="size-7 shrink-0 text-foreground-muted"
+                            className="shrink-0 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 data-[popup-open]:opacity-100"
                             disabled={disabled}
                             aria-label={`${profile.name} browser profile actions`}
                           />
@@ -273,11 +276,11 @@ export function BrowserSettingsCard() {
                     </DropdownMenu.Root>
                   </>
                 )}
-              </div>
+              </li>
             ))}
-          </div>
+          </ul>
 
-          <div className="mt-2 flex h-7 items-center">
+          <div className="flex h-10 items-center">
             {isAdding ? (
               <div className="flex w-full items-center gap-2">
                 <Input
@@ -295,8 +298,9 @@ export function BrowserSettingsCard() {
                 <Button
                   type="button"
                   variant="ghost"
+                  size="sm"
                   icon
-                  className="size-7 shrink-0 text-foreground-muted"
+                  className="shrink-0"
                   disabled={disabled}
                   aria-label="Save new browser profile"
                   onClick={() => addProfile(addInputRef.current?.value ?? '')}
@@ -306,8 +310,9 @@ export function BrowserSettingsCard() {
                 <Button
                   type="button"
                   variant="ghost"
+                  size="sm"
                   icon
-                  className="size-7 shrink-0 text-foreground-muted"
+                  className="shrink-0"
                   disabled={disabled}
                   aria-label="Cancel adding profile"
                   onClick={() => setIsAdding(false)}
@@ -318,13 +323,10 @@ export function BrowserSettingsCard() {
             ) : (
               <Button
                 type="button"
-                variant="ghost"
-                size="sm"
-                className="text-foreground-muted"
+                variant="text"
                 disabled={disabled}
                 onClick={() => setIsAdding(true)}
               >
-                <Plus className="size-4" />
                 Add profile
               </Button>
             )}
@@ -332,31 +334,26 @@ export function BrowserSettingsCard() {
         </SettingsCard>
       </SettingsSection>
 
-      <SettingsSection title="Browsing data" bare>
-        <SettingsCard>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <div className="flex min-w-0 flex-1 basis-64 flex-col gap-0.5">
-              <div className="text-xs text-foreground-passive">
-                Clear cookies, cached files, and site data from the in-app browser.
-              </div>
-            </div>
-            <div className="ml-auto flex shrink-0 items-center gap-1">
+      <SettingsSection title="Browsing data">
+        <SettingRow
+          title="Clear browsing data"
+          description="Cookies, cached files and site data of every in-app browser profile."
+          control={
+            <>
               <Button
                 type="button"
-                variant="ghost"
-                size="sm"
-                className="text-foreground-muted"
+                variant="text"
                 disabled={disabled || isClearingBrowsingData}
                 onClick={() => clearBrowsingData('all', 'All browsing data')}
               >
-                Clear all browsing data
+                Clear all
               </Button>
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
                 icon
-                className="shrink-0 text-foreground-muted"
+                className="ml-1 shrink-0"
                 aria-expanded={isBrowsingDataExpanded}
                 aria-label={
                   isBrowsingDataExpanded
@@ -367,38 +364,38 @@ export function BrowserSettingsCard() {
               >
                 <ChevronDown
                   className={cn(
-                    'size-4 transition-transform',
+                    'size-4 transition-transform motion-reduce:transition-none',
                     isBrowsingDataExpanded && 'rotate-180'
                   )}
                 />
               </Button>
-            </div>
-          </div>
+            </>
+          }
+        />
 
-          {isBrowsingDataExpanded && (
-            <div className="mt-2 flex flex-col divide-y divide-border/40">
-              {BROWSING_DATA_CATEGORIES.map((category) => (
-                <div key={category.kind} className="flex h-9 items-center gap-2">
-                  <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-                    {category.label}
-                  </span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="shrink-0 text-foreground-muted"
-                    disabled={disabled || isClearingBrowsingData}
-                    onClick={() => clearBrowsingData(category.kind, category.label)}
-                  >
-                    {category.actionLabel}
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
-        </SettingsCard>
+        {isBrowsingDataExpanded && (
+          <div className="flex flex-col">
+            {BROWSING_DATA_CATEGORIES.map((category) => (
+              <div key={category.kind} className="flex h-9 items-center gap-2">
+                <span className="min-w-0 flex-1 truncate text-sm text-foreground-muted">
+                  {category.label}
+                </span>
+                <Button
+                  type="button"
+                  variant="text"
+                  size="xs"
+                  className="shrink-0"
+                  disabled={disabled || isClearingBrowsingData}
+                  onClick={() => clearBrowsingData(category.kind, category.label)}
+                >
+                  {category.actionLabel}
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
       </SettingsSection>
-    </div>
+    </>
   );
 }
 

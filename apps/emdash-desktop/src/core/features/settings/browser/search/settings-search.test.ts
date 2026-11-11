@@ -136,7 +136,7 @@ describe('SETTINGS_SEARCH_INDEX integrity', () => {
     // These entries correspond to SettingRow titles rendered as plain strings,
     // so their id must equal slugifySettingLabel(label) for stable search targets.
     const rowBackedIds = [
-      'privacy-telemetry',
+      'usage-data',
       'auto-generate-task-names',
       'enable-tmux',
       'terminal-font-size',

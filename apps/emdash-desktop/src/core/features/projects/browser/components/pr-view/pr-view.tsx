@@ -1,8 +1,8 @@
+import { EmptyState } from '@emdash/ui/react/components';
 import { CollectionToolbar, CollectionView, SortSelect } from '@emdash/ui/react/patterns';
 import { Button, ContextMenu, Input, Popover, ToggleGroup } from '@emdash/ui/react/primitives';
 import { CheckIcon, ChevronDownIcon, Github, RefreshCw, X } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
-import { motion } from 'motion/react';
 import { useState } from 'react';
 import { providerAccountReportingState } from '@core/features/integrations/api/account-reporting';
 import { useProjectAccount } from '@core/features/integrations/api/browser/use-project-account';
@@ -18,6 +18,7 @@ import { projectViewDef } from '@core/features/projects/contributions/views';
 import { getGitRepositoryStore } from '@core/features/source-control/api/browser/stores/source-control-selectors';
 import { useSearchFocusHotkeys } from '@core/primitives/keybindings/browser';
 import { useCurrentViewParams } from '@core/primitives/navigation/browser/navigation-hooks';
+import { cn } from '@core/primitives/styling/browser/cn';
 import {
   usePullRequestsStore,
   type PullRequestListView,
@@ -25,6 +26,10 @@ import {
 import { PrRow } from './pr-row';
 import { ProjectPullRequestsProvider } from './pr-store-provider';
 import { PrSyncStatusCard } from './pr-sync-status-card';
+
+/** One row in a filter popover: the menu-row rhythm (32px, rounded, hover one step up). */
+const FILTER_ROW_CLASS =
+  'flex h-8 w-full items-center gap-2 rounded-md px-2 text-sm text-foreground-muted transition-colors hover:bg-surface-hover hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none';
 
 function FilterButton({
   label,
@@ -41,15 +46,16 @@ function FilterButton({
     <Popover.Root>
       <Popover.Trigger
         disabled={disabled}
-        className={
-          'flex items-center gap-1 text-sm hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40' +
-          (active ? 'font-medium text-foreground' : 'text-foreground-muted')
-        }
+        className={cn(
+          'flex h-7 items-center gap-1 rounded-md px-1.5 text-sm transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40',
+          'focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+          active ? 'text-foreground' : 'text-foreground-muted'
+        )}
       >
         {label}
-        <ChevronDownIcon className="size-3.5" />
+        <ChevronDownIcon className="size-3.5 text-foreground-passive" />
       </Popover.Trigger>
-      <Popover.Content align="start" className="w-56 gap-0 p-2">
+      <Popover.Content align="start" className="w-60 gap-0 p-1">
         {children}
       </Popover.Content>
     </Popover.Root>
@@ -73,7 +79,8 @@ function UserFilterPopover({
   return (
     <FilterButton label={label} active={selected !== null} disabled={items.length === 0}>
       <Input
-        className="mb-1 h-7 text-xs"
+        className="mb-1"
+        aria-label={`Search ${label.toLowerCase()}`}
         placeholder={`Search ${label.toLowerCase()}…`}
         value={search}
         onChange={(e) => setSearch(e.target.value)}
@@ -83,7 +90,7 @@ function UserFilterPopover({
         {filtered.map((item) => (
           <li key={item.value}>
             <button
-              className="hover:bg-muted flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm"
+              className={FILTER_ROW_CLASS}
               onClick={() => onChange(selected === item.value ? null : item.value)}
             >
               {item.avatarUrl ? (
@@ -93,7 +100,7 @@ function UserFilterPopover({
                   className="size-4 shrink-0 rounded-full"
                 />
               ) : (
-                <span className="bg-muted-foreground/20 size-4 shrink-0 rounded-full" />
+                <span className="size-4 shrink-0 rounded-full bg-surface-selected" />
               )}
               <span className="flex-1 truncate text-left">{item.label}</span>
               {selected === item.value && (
@@ -103,7 +110,7 @@ function UserFilterPopover({
           </li>
         ))}
         {filtered.length === 0 && (
-          <li className="text-muted-foreground px-2 py-3 text-center text-xs">No results</li>
+          <li className="px-2 py-3 text-center text-xs text-foreground-muted">No matches</li>
         )}
       </ul>
     </FilterButton>
@@ -128,7 +135,8 @@ function LabelFilterPopover({
   return (
     <FilterButton label="Label" active={selected.length > 0} disabled={items.length === 0}>
       <Input
-        className="mb-1 h-7 text-xs"
+        className="mb-1"
+        aria-label="Search labels"
         placeholder="Search labels…"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
@@ -137,17 +145,14 @@ function LabelFilterPopover({
       <ul className="max-h-52 overflow-y-auto">
         {filtered.map((item) => (
           <li key={item.value}>
-            <button
-              className="hover:bg-muted flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm"
-              onClick={() => toggle(item.value)}
-            >
+            <button className={FILTER_ROW_CLASS} onClick={() => toggle(item.value)}>
               {item.color ? (
                 <span
                   className="size-3 shrink-0 rounded-full"
                   style={{ backgroundColor: `#${item.color}` }}
                 />
               ) : (
-                <span className="bg-muted-foreground/20 size-3 shrink-0 rounded-full" />
+                <span className="size-3 shrink-0 rounded-full bg-surface-selected" />
               )}
               <span className="flex-1 truncate text-left">{item.label}</span>
               {selected.includes(item.value) && (
@@ -157,7 +162,7 @@ function LabelFilterPopover({
           </li>
         ))}
         {filtered.length === 0 && (
-          <li className="text-muted-foreground px-2 py-3 text-center text-xs">No results</li>
+          <li className="px-2 py-3 text-center text-xs text-foreground-muted">No matches</li>
         )}
       </ul>
     </FilterButton>
@@ -176,18 +181,19 @@ function FilterPill({
   onRemove: () => void;
 }) {
   return (
-    <span className="bg-muted inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs">
+    <span className="inline-flex h-6 items-center gap-1.5 rounded-full bg-surface-emphasis pr-1 pl-2 text-tiny text-foreground-muted">
       {avatarUrl && <img src={avatarUrl} alt={label} className="size-3.5 rounded-full" />}
       {color && (
         <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: `#${color}` }} />
       )}
       {label}
       <button
-        className="text-muted-foreground ml-0.5 rounded-full hover:text-foreground"
+        type="button"
+        className="flex size-4 items-center justify-center rounded-full text-foreground-passive hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none"
         onClick={onRemove}
         aria-label={`Remove ${label} filter`}
       >
-        <X className="size-2.5" />
+        <X className="size-3" />
       </button>
     </span>
   );
@@ -227,10 +233,10 @@ export const PullRequestView = observer(function PullRequestView() {
   if (!repositoryUrl) {
     return (
       <div className="flex h-full min-h-0 w-full flex-col">
-        <p className="text-muted-foreground py-4 text-center text-sm">
-          Pull requests are currently available only for configured GitHub remotes. You can change
-          the remote in the project settings.
-        </p>
+        <EmptyState
+          label="Pull requests need a GitHub remote"
+          description="Pull requests show here for projects whose base remote is on GitHub. You can change the remote in this project's settings."
+        />
       </div>
     );
   }
@@ -250,10 +256,12 @@ const PrSortSelect = observer(function PrSortSelect({ view }: { view: PullReques
 
 function PrErrorState({ error }: { error: string | null }) {
   return (
-    <div className="flex flex-col items-center gap-1 p-6 text-center">
-      <p className="text-sm font-medium">Could not load pull requests</p>
-      {error && <p className="text-sm text-foreground-muted">{error}</p>}
-    </div>
+    <EmptyState
+      bare
+      tone="error"
+      label="Could not load pull requests"
+      details={error ?? undefined}
+    />
   );
 }
 
@@ -337,12 +345,11 @@ const PullRequestViewContent = observer(function PullRequestViewContent({
           error ? (
             <PrErrorState error={error} />
           ) : (
-            <div className="flex flex-col items-center gap-1 p-6 text-center">
-              <p className="text-sm font-medium">No pull requests</p>
-              <p className="text-sm text-foreground-muted">
-                No pull requests available or none that match this filter
-              </p>
-            </div>
+            <EmptyState
+              bare
+              label="No pull requests"
+              description="There are none here yet, or none match these filters."
+            />
           )
         }
       />
@@ -420,13 +427,18 @@ const PrToolbar = observer(function PrToolbar({
         <CollectionToolbar.Group>
           <ContextMenu.Root>
             <ContextMenu.Trigger>
-              <Button variant="secondary" icon onClick={onRefresh} disabled={syncing}>
-                <motion.div
-                  animate={syncing ? { rotate: 360 } : {}}
-                  transition={syncing ? { repeat: Infinity, duration: 0.8, ease: 'linear' } : {}}
-                >
-                  <RefreshCw className="size-3.5" />
-                </motion.div>
+              <Button
+                variant="ghost"
+                icon
+                aria-label="Refresh pull requests"
+                title="Refresh pull requests (right-click for PR history)"
+                onClick={onRefresh}
+                disabled={syncing}
+              >
+                <RefreshCw
+                  className={cn('size-3.5', syncing && 'motion-safe:animate-spin')}
+                  aria-hidden
+                />
               </Button>
             </ContextMenu.Trigger>
             <ContextMenu.Content>
@@ -442,11 +454,11 @@ const PrToolbar = observer(function PrToolbar({
       {/* Secondary row: sort and filters. */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1.5">
-          <span className="text-sm text-foreground-passive">Sort</span>
+          <span className="text-xs text-foreground-passive">Sort</span>
           <PrSortSelect view={view} />
         </div>
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-foreground-passive">Filter by</span>
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-foreground-passive">Filter by</span>
           <UserFilterPopover
             label="Author"
             items={authorItems}

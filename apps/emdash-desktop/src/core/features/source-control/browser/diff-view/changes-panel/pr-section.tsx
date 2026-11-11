@@ -84,7 +84,7 @@ function usePullRequestsSectionModel() {
     currentPr,
     branchCommitRange,
     showBranchCommits,
-    sectionLabel: showBranchCommits ? 'Branch Commits' : 'Pull Requests',
+    sectionLabel: showBranchCommits ? 'Branch commits' : 'Pull requests',
     sectionCount: showBranchCommits ? (branchCommitCount ?? 0) : pullRequests.length,
   };
 }
@@ -200,41 +200,47 @@ export const PullRequestsSectionHeader = observer(function PullRequestsSectionHe
               label="Pull request files"
             />
           )}
-          <Tooltip.Root>
-            <Tooltip.Trigger
-              render={
-                <SplitButton
-                  variant="secondary"
-                  size="xs"
-                  options={prActions.map(({ id, label }) => ({ id, label }))}
-                  selectedId={selectedPrActionId}
-                  onSelectedChange={setSelectedPrActionId}
-                  commitOnSelect={false}
-                  onAction={(id) => {
-                    if (!hostActionDisabled) prActions.find((a) => a.id === id)?.action();
-                  }}
-                  disabled={hasOpenPr || !onCreatePr || !onCreateDraftPr}
-                  aria-disabled={hostActionDisabled}
-                  aria-description={hostActionReason ?? undefined}
-                  icon={<Plus className="size-3" />}
-                />
-              }
-            />
-            <Tooltip.Content>{createPrTooltip}</Tooltip.Content>
-          </Tooltip.Root>
+          {/* Once a PR is open there is nothing to create: the control steps aside. */}
+          {!hasOpenPr && (
+            <Tooltip.Root>
+              <Tooltip.Trigger
+                render={
+                  <SplitButton
+                    variant="ghost"
+                    size="xs"
+                    options={prActions.map(({ id, label }) => ({ id, label }))}
+                    selectedId={selectedPrActionId}
+                    onSelectedChange={setSelectedPrActionId}
+                    commitOnSelect={false}
+                    onAction={(id) => {
+                      if (!hostActionDisabled) prActions.find((a) => a.id === id)?.action();
+                    }}
+                    disabled={hasOpenPr || !onCreatePr || !onCreateDraftPr}
+                    aria-disabled={hostActionDisabled}
+                    aria-description={hostActionReason ?? undefined}
+                    icon={<Plus className="size-3.5" />}
+                  />
+                }
+              />
+              <Tooltip.Content>{createPrTooltip}</Tooltip.Content>
+            </Tooltip.Root>
+          )}
           <Tooltip.Root>
             <Tooltip.Trigger
               render={
                 <Button
-                  variant="secondary"
+                  variant="ghost"
                   size="xs"
                   icon
+                  aria-label="Refresh pull requests"
                   onClick={() => void handleRefresh()}
                   disabled={isRefreshing}
                   aria-disabled={hostActionDisabled}
                   aria-description={hostActionReason ?? undefined}
                 >
-                  <RefreshCw className={cn('size-3', isRefreshing && 'animate-spin')} />
+                  <RefreshCw
+                    className={cn('size-3.5', isRefreshing && 'motion-safe:animate-spin')}
+                  />
                 </Button>
               }
             />
@@ -265,10 +271,7 @@ export const PullRequestsSectionBody = observer(function PullRequestsSectionBody
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {pullRequestsObservation.kind === 'stale' ? (
-        <p
-          role="status"
-          className="border-t border-border px-2.5 py-2 text-xs text-foreground-muted"
-        >
+        <p role="status" className="shrink-0 px-4 pb-1 text-tiny text-foreground-passive">
           Showing previously observed pull requests
         </p>
       ) : null}
@@ -278,21 +281,26 @@ export const PullRequestsSectionBody = observer(function PullRequestsSectionBody
         <BranchCommitsEntry range={branchCommitRange} />
       ) : providerRepositoryObservation.kind === 'unavailable' ? (
         <EmptyState
+          bare
           label="Repository details unavailable"
           description="Provider repository data has not been observed for this Project yet."
         />
       ) : !repositoryUrl ? (
         <EmptyState
+          bare
           label="Pull requests unavailable"
           description="Pull requests are currently available only for configured GitHub remotes."
         />
       ) : pullRequestsObservation.kind === 'unavailable' ? (
         <EmptyState
+          bare
           label="Pull requests unavailable"
           description="Pull request data has not been observed for this Project yet."
         />
       ) : pullRequests.length === 0 ? (
         <EmptyState
+          bare
+          tone={syncError ? 'error' : 'default'}
           label={syncError ? 'Could not load pull requests' : 'No pull requests'}
           description={syncError ?? 'Push your branch and create a PR to start a review.'}
         />
@@ -303,8 +311,8 @@ export const PullRequestsSectionBody = observer(function PullRequestsSectionBody
 
 function BranchCommitsEntry({ range }: { range: CommitRange }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col border-t border-border">
-      <div className="min-h-0 flex-1 px-2.5">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="min-h-0 flex-1 px-2">
         <CommitRangeCommitsList range={range} emptyState={BRANCH_COMMITS_EMPTY_STATE} />
       </div>
     </div>

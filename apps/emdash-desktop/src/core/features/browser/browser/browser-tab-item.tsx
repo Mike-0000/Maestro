@@ -37,8 +37,12 @@ export const BrowserTabBarItem = observer(function BrowserTabBarItem({
       ctx={ctx}
       label={label}
       preSlot={
-        <span className="shrink-0 text-foreground-muted [&>svg]:h-3 [&>svg]:w-3">
-          {session?.isLoading ? <Loader2 className="animate-spin" /> : <Globe />}
+        <span className="flex size-3.5 shrink-0 items-center justify-center [&>svg]:size-3.5">
+          {session?.isLoading ? (
+            <Loader2 className="animate-spin text-foreground-passive" />
+          ) : (
+            <Globe />
+          )}
         </span>
       }
       hasError={!!session?.loadError}
@@ -50,7 +54,7 @@ export function BrowserTabBarItemDragPreview({ tab }: { tab: ResolvedTab<Browser
   const label = browserTabLabel(tab.resource.session);
   return (
     <GenericTabDragPreview
-      preSlot={<Globe className="size-3 shrink-0 text-foreground-muted" />}
+      preSlot={<Globe className="size-3.5 shrink-0 text-foreground-passive" />}
       label={label}
     />
   );

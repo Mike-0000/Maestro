@@ -1,6 +1,5 @@
-import { Button, Spinner } from '@emdash/ui/react/primitives';
-import { FileQuestion, FileX, FileX2, ShieldAlert } from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
+import { EmptyState } from '@emdash/ui/react/components';
+import { Button } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
 import type { FileTabResource } from '@core/features/editor/api/browser/task-editor/stores/file-tab-resource';
 import { openWithOS } from '@core/features/workbench/api/browser/open-with-os';
@@ -9,6 +8,9 @@ import { openWithOS } from '@core/features/workbench/api/browser/open-with-os';
  * Placeholder for a file tab whose OpenFileStore entry is not ready: the
  * bounded loading state, the retryable seam errors, and the orphaned state
  * (which auto-recovers when the store transitions back to ready).
+ *
+ * One kit EmptyState on the editor's paper: what happened in a few words, the
+ * file name under it, and at most one text action.
  */
 export const FileStatusPlaceholder = observer(function FileStatusPlaceholder({
   resource,
@@ -21,118 +23,83 @@ export const FileStatusPlaceholder = observer(function FileStatusPlaceholder({
   if (status.kind === 'ready') return null;
 
   if (status.kind === 'loading') {
-    return (
-      <Shell>
-        <Spinner size="sm" />
-        <span className="text-xs text-foreground-passive">Loading file...</span>
-      </Shell>
-    );
+    // The store bounds the loading state itself, so the line shows straight away.
+    return <EmptyState bare tone="loading" delayMs={0} label="Loading file…" />;
   }
 
   if (status.kind === 'orphaned') {
     return (
-      <Shell>
-        <Notice
-          icon={FileX2}
-          fileName={fileName}
-          message="File was deleted on disk"
-          detail="The content comes back automatically if the file is restored."
-        />
-      </Shell>
+      <EmptyState
+        bare
+        label="File was deleted on disk"
+        description={`${fileName} comes back here by itself if the file is restored.`}
+      />
     );
   }
 
   const openInDefaultApp = () => {
     if (resource.ref) void openWithOS(resource.ref);
   };
-  const retry = () => resource.retryLoad();
+  const retry = (
+    <Button variant="text" onClick={() => resource.retryLoad()}>
+      Try again
+    </Button>
+  );
+  const openAction =
+    resource.ref?.host.type === 'local' ? (
+      <Button variant="text" onClick={openInDefaultApp}>
+        Open in default app
+      </Button>
+    ) : undefined;
 
   switch (status.code) {
     case 'not-found':
       return (
-        <Shell>
-          <Notice icon={FileX2} fileName={fileName} message="File not found" />
-          <RetryButton onRetry={retry} />
-        </Shell>
+        <EmptyState
+          bare
+          tone="error"
+          label="File not found"
+          description={fileName}
+          action={retry}
+        />
       );
     case 'no-permissions':
       return (
-        <Shell>
-          <Notice icon={ShieldAlert} fileName={fileName} message="Permission denied" />
-          <RetryButton onRetry={retry} />
-        </Shell>
+        <EmptyState
+          bare
+          tone="error"
+          label="Permission denied"
+          description={`${fileName} cannot be read with your permissions.`}
+          action={retry}
+        />
       );
     case 'too-large':
       return (
-        <Shell>
-          <Notice
-            icon={FileX}
-            fileName={fileName}
-            message="File too large to display in the editor"
-          />
-          {resource.ref?.host.type === 'local' && (
-            <Button variant="secondary" size="sm" onClick={openInDefaultApp}>
-              Open in default app
-            </Button>
-          )}
-        </Shell>
+        <EmptyState
+          bare
+          label="File too large to display in the editor"
+          description={fileName}
+          action={openAction}
+        />
       );
     case 'binary':
       return (
-        <Shell>
-          <Notice icon={FileQuestion} fileName={fileName} message="Binary file — no preview" />
-          {resource.ref?.host.type === 'local' && (
-            <Button variant="secondary" size="sm" onClick={openInDefaultApp}>
-              Open in default app
-            </Button>
-          )}
-        </Shell>
+        <EmptyState
+          bare
+          label="Binary file, no preview"
+          description={fileName}
+          action={openAction}
+        />
       );
     case 'unavailable':
       return (
-        <Shell>
-          <Notice icon={FileX2} fileName={fileName} message="Could not load file" />
-          <RetryButton onRetry={retry} />
-        </Shell>
+        <EmptyState
+          bare
+          tone="error"
+          label="Could not load file"
+          description={fileName}
+          action={retry}
+        />
       );
   }
 });
-
-function Shell({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-(--em-surface)">
-      {children}
-    </div>
-  );
-}
-
-function Notice({
-  icon: Icon,
-  fileName,
-  message,
-  detail,
-}: {
-  icon: LucideIcon;
-  fileName: string;
-  message: string;
-  detail?: string;
-}) {
-  return (
-    <div className="text-muted-foreground flex flex-col items-center gap-3">
-      <Icon className="h-10 w-10 opacity-30" />
-      <div className="text-center">
-        <p className="text-sm font-medium">{fileName}</p>
-        <p className="mt-1 text-xs opacity-70">{message}</p>
-        {detail ? <p className="mt-0.5 text-xs opacity-50">{detail}</p> : null}
-      </div>
-    </div>
-  );
-}
-
-function RetryButton({ onRetry }: { onRetry: () => void }) {
-  return (
-    <Button variant="secondary" size="sm" onClick={onRetry}>
-      Retry
-    </Button>
-  );
-}

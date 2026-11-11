@@ -11,20 +11,26 @@ export type ToolStyleVars = { rowH: number };
 export const toolVars = createVariableThemeContract<ToolStyleVars>({ rowH: null });
 
 export const toolRoot = style([
-  sx({ display: 'flex', alignItems: 'center', borderColor: 'border' }),
+  sx({ display: 'flex', alignItems: 'center' }),
   // overflow:hidden ensures content never escapes the reserved rowH.
   { height: toolVars.rowH, overflow: 'hidden' },
 ]);
 
+/**
+ * One quiet line per step: the tool's name in the muted tone, what it worked on
+ * in the passive tone after it, and status only when it needs the developer.
+ */
 export const toolRow = style([
   sx({ display: 'flex', alignItems: 'center', gap: '1.5', color: 'fgPassive', userSelect: 'none' }),
   // min-width:0 lets flex children shrink below their intrinsic width so
   // text-overflow ellipsis can take effect on the name and summary spans.
-  { minWidth: 0 },
+  // flex:1 lets the status mark reach the row's right edge.
+  { minWidth: 0, flex: '1 1 auto' },
 ]);
 
 export const toolName = style({
   fontSize: vars.typeBodyFontSize,
+  color: vars.fgMuted,
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
@@ -33,32 +39,9 @@ export const toolName = style({
 });
 
 export const toolSummary = style([
-  {
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    opacity: 0.75,
-  },
   toolName,
-]);
-
-export const toolStatusIcon = style({
-  marginLeft: 'auto',
-  display: 'inline-flex',
-  flexShrink: 0,
-});
-
-export const toolPermissionIcon = style([
-  toolStatusIcon,
   {
-    color: '#eab308',
-  },
-]);
-
-export const toolErrorIcon = style([
-  toolStatusIcon,
-  {
-    color: vars.fgError,
+    color: vars.fgPassive,
   },
 ]);
 

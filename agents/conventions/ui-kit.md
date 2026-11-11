@@ -24,6 +24,104 @@ old APIs.
   (`@core/primitives/styling/browser/cn`). It is the only sanctioned class-merging helper
   app-side; `packages/ui` does not use it.
 
+## Building blocks (compose these; do not re-invent them)
+
+The redesign's shared pieces. Each has stories in dark and light (`pnpm --filter @emdash/ui
+storybook`, port 6006) and follows the rules in [UI styling](ui-styling.md). Feature code
+composes them instead of hand-rolling an equivalent with Tailwind.
+
+| Block | Import | Use it for |
+|---|---|---|
+| `Button variant="text"` | `@emdash/ui/react/primitives` | quiet underlined text actions (Merge…, Open app, Learn more) |
+| `StateGlyph` | `@emdash/ui/react/components` | every state mark: needs-you, working, unread, done, idle, error, setting-up |
+| `EmptyState` | `@emdash/ui/react/components` | empty, loading and error states (`size`, `tone`) |
+| `FactGrid` | `@emdash/ui/react/patterns` | label / value detail grids (machine, workspace, PR, agent, report) |
+| `MetaLine` | `@emdash/ui/react/patterns` | caption-role footer lines (state · age … facts) |
+| `SectionLabel` | `@emdash/ui/react/primitives` | the group label over a set of rows ("Pinned", "Local") |
+| `ModalLayout` | `@emdash/ui/react/primitives` | every dialog's header / body / footer |
+| `Tabs` `List variant="underline"` | `@emdash/ui/react/primitives` | text tabs with a 1px underline (Conductor \| Raw) |
+| `PillTabs` | `@emdash/ui/react/patterns` | the segmented control |
+| `Alert` | `@emdash/ui/react/primitives` | the quiet notice (neutral card, glyph carries error / warning) |
+| `Badge`, `Pill`, `Kbd` | `@emdash/ui/react/primitives`, `.../components` | quiet chips and keycaps |
+| `SettingsSection` / `SettingsCard` / `SettingsRow` | `@emdash/ui/react/patterns` | settings pages (`layout="stacked"` for long values) |
+| `PageLayout.Header` | `@emdash/ui/react/patterns` | page title + one sentence, no rule |
+| `CollectionView` | `@emdash/ui/react/patterns` | page-level lists (flat, rounded hover rows) |
+| `Shortcut` / `BoundShortcut` | `@core/primitives/keybindings/browser/shortcut` (app) | shortcut hints and keycaps |
+| `bg-surface*`, `bg-overlay`, `reading-column` | app Tailwind (`src/renderer/index.css`) | surface steps, the scrim, the reading measure |
+
+```tsx
+import { Button, ModalLayout, Dialog, SectionLabel, Tabs } from '@emdash/ui/react/primitives';
+import { EmptyState, StateGlyph } from '@emdash/ui/react/components';
+import { FactGrid, MetaLine } from '@emdash/ui/react/patterns';
+
+// One calm primary, the rest text actions.
+<div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+  <Button variant="primary" size="sm">Done</Button>
+  <Button variant="text" onClick={merge}>Merge…</Button>
+  <Button variant="text" onClick={openApp}>Open app</Button>
+</div>
+
+// The state mark. Decorative next to words; `label` announces it with a tooltip.
+<StateGlyph state="working" label />                 // tooltip + aria "Working"
+<StateGlyph state="error" label="Build failed" />
+<StateGlyph state="done" size="sm" /> Finished · 6m ago
+
+// Empty / loading / error.
+<EmptyState size="page" label="Nothing needs you" description="Three tasks are at work."
+  action={<Button variant="primary">New task</Button>} />
+<EmptyState label="No servers yet" action={<Button variant="text">Add one</Button>} bare />
+<EmptyState tone="loading" label="Loading branches…" />
+<EmptyState tone="error" label="Could not load branches" details={String(error)}
+  action={<Button variant="text" onClick={retry}>Try again</Button>} />
+
+// Details and meta.
+<FactGrid>
+  <FactGrid.Row label="Branch">fix/hang-up, pushed</FactGrid.Row>
+  <FactGrid.Row label="Your move" emphasis>Try it in Katana Dev</FactGrid.Row>
+</FactGrid>
+<MetaLine glyph={<StateGlyph state="done" size="sm" />} start={['Finished', '6m ago']}
+  end={['Claude', 'work account']} />
+
+// Group label and underline tabs.
+<SectionLabel as="h3">Recent</SectionLabel>
+<Tabs.Root value={view} onValueChange={setView}>
+  <Tabs.List variant="underline" aria-label="Chat view">
+    <Tabs.Tab value="conductor" size="sm">Conductor</Tabs.Tab>
+    <Tabs.Tab value="raw" size="sm">Raw</Tabs.Tab>
+  </Tabs.List>
+</Tabs.Root>
+
+// A dialog: size comes from the modal definition (sm 400, md 520, lg 680, xl 880).
+<ModalLayout
+  title="Rename project"
+  description="The folder on disk keeps its name."
+  leading={<Button variant="text">Learn more</Button>}
+  actions={<>
+    <Button variant="ghost" onClick={() => modal.dismiss()}>Cancel</Button>
+    <ConfirmButton variant="primary" onClick={rename}>Rename</ConfirmButton>
+  </>}
+>
+  <Dialog.Body>{/* fields, gap-5 */}</Dialog.Body>
+</ModalLayout>
+```
+
+Kit behaviour feature workers should know:
+
+- The control recipe (Button, SplitButton, TriggerButton, Toggle, Tabs) sits in `@layer recipes`,
+  so Tailwind classes on a kit Button now apply (`className="h-7 px-2"` used to be ignored without
+  `!`). Remove `!` overrides when you touch a call site, and check classes that were silently
+  ignored before.
+- Ghost icon buttons (`variant="ghost" icon`) render their glyph in the passive tone and come to
+  full strength on hover; menu rows are muted until highlighted.
+- `Tooltip.Content` has no arrow by default (`showArrow` to opt in) and sits on the
+  elevated-emphasis surface with foreground text; do not style tooltip content for an inverted
+  (dark-on-light) pill any more.
+- `PageLayout.Header` draws no rule (opt in with `separator`); `SettingsSection` separates rows
+  by space (opt in to hairlines with `separated`).
+- `CollectionView` has no outer card; grouped layout cards read like settings cards.
+- `Badge`, `Pill`, `StatusIcon` and toast icons only colour error and warning; success reads in
+  full strength and info muted.
+
 ## Choosing a popup control
 
 - **`Select`** is for a short, bounded set of mutually exclusive values. Its popup is detached
@@ -58,8 +156,9 @@ The reference renderings are the stories in
 `packages/ui/src/react/patterns/collection-view/collection-view.stories.tsx`; the full
 locked spec lives with the unify-list-views effort.
 
-- **One shell, two row styles**: every list is the same rounded card surface with soft
-  dividers, hover/selected states, and always-on virtualization. Row content is either
+- **One shell, two row styles**: every list is the same flat surface on the page (no outer
+  card, no row rules) with rounded hover/selected steps and always-on virtualization; the
+  `grouped` layout puts each section in a settings-style card. Row content is either
   tabular `columns` (`CollectionViewColumn[]`, with `CollectionViewCell` for two-line
   text cells) or freeform `renderRow` — exactly one of the two. There is no header row.
 - **State is opt-in**: pass `view` (a `createListView` instance, rendered inside its
@@ -109,17 +208,20 @@ Settings pages follow one canonical anatomy, built from the settings pattern fam
 `packages/ui/src/react/patterns/settings/settings.stories.tsx`.
 
 - **Header**: every settings page starts with `PageLayout.Header sticky` with a `title`
-  and a `description`. If the page needs an Electron window drag region, use its
+  (page-title role) and a one-sentence `description`; no rule under it. If the page needs an Electron window drag region, use its
   `draggable` prop; do not hand-roll `WebkitAppRegion` divs.
 - **Section stack**: the page owns the spacing between sections (a vertical stack with
-  `space-y-8` or equivalent). Sections do not space themselves.
+  `gap-10` / `space-y-10`). Sections do not space themselves.
 - **Sections**: each group of settings is a `SettingsSection`. The optional `title`
-  renders the inset level-3 heading; children are wrapped in `SettingsCard` +
-  `SeparatedList` (row gap via `gap`, default `1rem`). Content that brings its own
+  renders the inset section-title heading (13px semibold) and `description` one muted
+  sentence; children are wrapped in a `SettingsCard` (the emphasis surface, rounded-lg, one
+  subtle hairline) and separated by space (`gap`, default `1.25rem`; `separated` opts back
+  into hairlines). Content that brings its own
   surface — a custom card component, a tile grid — uses the `bare` prop and renders its
   surface itself. Do not compose raw `h3` headings or ad-hoc bordered divs.
 - **Rows**: each setting is a `SettingsRow` (label, optional description, right-aligned
-  control). The desktop app's local `SettingRow` wrapper (settings feature slice) adapts
+  control; `layout="stacked"` puts a full-width control under the label for paths, URLs and
+  keys). The desktop app's local `SettingRow` wrapper (settings feature slice) adapts
   the `title` prop name; either is fine app-side. Controls come from `@emdash/ui`
   primitives (`Switch`, `Select`, `Input`, `Button`, …).
 - **Tile pickers**: a small set of visual, mutually exclusive choices rendered as tiles

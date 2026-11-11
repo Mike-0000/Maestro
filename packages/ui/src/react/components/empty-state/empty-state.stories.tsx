@@ -34,7 +34,48 @@ export const WithAction: Story = {
   args: {
     label: 'No terminals open',
     description: 'Open a terminal to run commands in this workspace.',
-    action: <Button variant="primary">New terminal</Button>,
+    action: <Button variant="text">New terminal</Button>,
+  },
+};
+
+/**
+ * `size="page"`: a whole view or pane (the conductor's empty screen): the hero
+ * title, one sentence, and the screen's one move.
+ */
+export const Page: Story = {
+  args: {
+    size: 'page',
+    label: 'Nothing needs you right now.',
+    description: 'Three tasks are at work. You will hear from them when one is ready to try.',
+    action: <Button variant="primary">New task</Button>,
+  },
+  decorators: [
+    (Story) => (
+      <div style={{ height: '28rem', display: 'flex', flex: 1 }}>
+        <Story />
+      </div>
+    ),
+  ],
+};
+
+/** `tone="error"`: the error dot, plain words, Try again, details behind a disclosure. */
+export const ErrorState: Story = {
+  args: {
+    tone: 'error',
+    label: 'Could not load branches',
+    description: 'The remote did not answer. Check the connection and try again.',
+    action: <Button variant="text">Try again</Button>,
+    details:
+      "fatal: unable to access 'https://github.com/acme/app.git/': Could not resolve host: github.com",
+  },
+};
+
+/** `tone="loading"`: a passive spinner and one muted line, after a 400ms delay. */
+export const LoadingState: Story = {
+  args: {
+    tone: 'loading',
+    label: 'Loading branches…',
+    delayMs: 0,
   },
 };
 

@@ -1,5 +1,11 @@
 import type { AttachmentRef } from '@emdash/core/services/attachments/api';
-import { ChatComposer, ImageViewerDialog, MermaidViewerDialog } from '@emdash/ui/react/components';
+import {
+  ChatComposer,
+  EmptyState,
+  ImageViewerDialog,
+  MermaidViewerDialog,
+  StateGlyph,
+} from '@emdash/ui/react/components';
 import type {
   CommandItem,
   ComposerAgentOption,
@@ -575,15 +581,24 @@ const ComposerForStore = observer(function ComposerForStore({
   return createPortal(
     <>
       <input ref={fileInputRef} type="file" multiple hidden onChange={handleFileInputChange} />
-      {!disabledReason && store.loadError && (
-        <div className="border-destructive/30 bg-destructive/5 mx-3 mb-1 flex items-center justify-between gap-2 rounded-md border px-2 py-1 text-xs">
-          <span className="truncate text-foreground-muted">{store.loadError.message}</span>
-          <Button variant="secondary" size="sm" onClick={() => store.retry()}>
-            Retry
-          </Button>
-        </div>
-      )}
-      <div>
+      {!disabledReason &&
+        store.loadError && (
+          // One quiet line above the composer, the conductor's vitals shape: the error dot, the
+          // reason in words, and a text action. No tinted panel.
+          <div
+            role="alert"
+            className="mb-2 flex min-w-0 items-center gap-2 pr-1 pl-3 text-xs text-foreground-muted"
+          >
+            <StateGlyph state="error" size="sm" />
+            <span className="min-w-0 flex-1 truncate" title={store.loadError.message}>
+              {store.loadError.message}
+            </span>
+            <Button variant="text" size="xs" className="shrink-0" onClick={() => store.retry()}>
+              Try again
+            </Button>
+          </div>
+        )}
+      <div className="min-w-0">
         <ChatComposer
           model={store.composerModel}
           isWorking={a.isWorking}
@@ -878,53 +893,54 @@ export const AcpChatPanel = observer(function AcpChatPanel() {
         createPortal(
           <div
             // The library-owned overlay slot is pointer-events: none by design;
-            // opt back in so the Sign in / Retry buttons are clickable.
-            className={`pointer-events-auto absolute inset-0 flex items-center justify-center text-sm text-foreground-muted ${
-              showBlockingOverlay ? 'bg-(--em-surface)' : ''
-            }`}
+            // opt back in so the Sign in / Try again buttons are clickable.
+            className="pointer-events-auto absolute inset-0 bg-(--em-surface)"
             aria-live="polite"
           >
             {store.loadError?.kind === 'unavailable' ? (
-              <div className="flex max-w-md flex-col items-center gap-2 px-6 text-center">
-                <span className="text-foreground">Chat unavailable</span>
-                <span className="text-xs text-foreground-muted">{store.loadError.message}</span>
-              </div>
+              <EmptyState
+                size="page"
+                bare
+                label="This chat is unavailable"
+                description={store.loadError.message}
+              />
             ) : store.loadError !== null ? (
               store.loadError.kind === 'auth_required' ? (
-                <div className="flex max-w-md flex-col items-center gap-2 px-6 text-center">
-                  <span className="text-foreground">
-                    {agent?.name ?? 'This agent'} needs you to sign in.
-                  </span>
-                  <span className="text-xs text-foreground-muted">
-                    {cliAuthMethod?.description ?? store.loadError.message}
-                  </span>
-                  <div className="mt-1 flex gap-2">
-                    {cliAuthMethod && (
-                      <Button variant="primary" size="sm" onClick={openSignInModal}>
-                        Sign in
+                // The pane's one move is signing in; trying again is the quiet alternative.
+                <EmptyState
+                  size="page"
+                  bare
+                  label={`${agent?.name ?? 'This agent'} needs you to sign in.`}
+                  description={cliAuthMethod?.description ?? store.loadError.message}
+                  action={
+                    <>
+                      {cliAuthMethod && (
+                        <Button variant="primary" onClick={openSignInModal}>
+                          Sign in
+                        </Button>
+                      )}
+                      <Button variant="text" onClick={() => store.retry()}>
+                        Try again
                       </Button>
-                    )}
-                    <Button variant="secondary" size="sm" onClick={() => store.retry()}>
-                      Retry
-                    </Button>
-                  </div>
-                </div>
+                    </>
+                  }
+                />
               ) : (
-                <div className="flex max-w-md flex-col items-center gap-2 px-6 text-center">
-                  <span className="text-foreground">Failed to load chat.</span>
-                  <span className="text-xs text-foreground-muted">{store.loadError.message}</span>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    className="mt-1"
-                    onClick={() => store.retry()}
-                  >
-                    Retry
-                  </Button>
-                </div>
+                <EmptyState
+                  size="page"
+                  tone="error"
+                  bare
+                  label="This chat did not load"
+                  description={store.loadError.message}
+                  action={
+                    <Button variant="text" onClick={() => store.retry()}>
+                      Try again
+                    </Button>
+                  }
+                />
               )
             ) : (
-              'Loading chat...'
+              <EmptyState tone="loading" bare label="Loading chat…" />
             )}
           </div>,
           overlaySlot
@@ -933,8 +949,10 @@ export const AcpChatPanel = observer(function AcpChatPanel() {
       {showHero &&
         heroSlot &&
         createPortal(
-          <div className="px-4 text-center">
-            <h1 className="text-2xl tracking-tight text-foreground">What are we building today?</h1>
+          <div className="px-4 pb-2 text-center">
+            <h1 className="text-2xl font-medium text-balance text-foreground">
+              What are we building today?
+            </h1>
           </div>,
           heroSlot
         )}
@@ -953,12 +971,15 @@ export const AcpChatPanel = observer(function AcpChatPanel() {
         !atBottom &&
         createPortal(
           <div className="pointer-events-none absolute inset-x-0 bottom-full mb-2 flex justify-center">
+            {/* A floating layer over the transcript: the elevated step and one hairline. */}
             <Button
-              variant="secondary"
+              variant="ghost"
+              size="sm"
               icon
               aria-label="Scroll to bottom"
+              title="Scroll to bottom"
               onClick={() => viewRef.current?.scrollToBottom({ behavior: 'smooth' })}
-              className="pointer-events-auto rounded-full shadow-md"
+              className="surface-elevated pointer-events-auto rounded-full border-border-subtle bg-surface text-foreground-muted hover:bg-surface-hover hover:text-foreground motion-safe:animate-in motion-safe:fade-in"
             >
               <ArrowDown />
             </Button>

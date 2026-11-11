@@ -88,17 +88,17 @@ export const NewAgentSheet = observer(function NewAgentSheet() {
       }
     >
       {!overview ? (
-        <div className="text-fg-passive flex h-40 items-center justify-center">
+        <div className="flex h-40 items-center justify-center text-foreground-passive">
           <Spinner className="size-5" />
         </div>
       ) : projects.length === 0 ? (
-        <p className="text-fg-muted py-8 text-center text-[14.5px]">
+        <p className="text-body py-8 text-center text-balance text-foreground-muted">
           There are no projects on {app.hostName} yet. Add one in Maestro on your computer first.
         </p>
       ) : (
-        <form id={formId} onSubmit={(event) => void start(event)} className="flex flex-col gap-4">
+        <form id={formId} onSubmit={(event) => void start(event)} className="flex flex-col gap-5">
           <div>
-            <label htmlFor={promptId} className="text-fg-muted text-[13px] font-medium">
+            <label htmlFor={promptId} className="text-body text-foreground">
               What should it do?
             </label>
             <textarea
@@ -107,9 +107,10 @@ export const NewAgentSheet = observer(function NewAgentSheet() {
               onChange={(event) => setPrompt(event.target.value.slice(0, PROMPT_MAX))}
               rows={5}
               autoFocus
+              data-autofocus
               placeholder="Describe the task…"
               autoCapitalize="sentences"
-              className="border-line-strong bg-canvas text-fg placeholder:text-fg-passive focus:border-focus focus:ring-focus/25 mt-1.5 block w-full resize-none rounded-xl border px-3.5 py-3 leading-[22px] outline-none focus:ring-2"
+              className="field text-reading mt-1.5 block w-full resize-none rounded-md px-3.5 py-3"
             />
           </div>
 
@@ -132,10 +133,7 @@ export const NewAgentSheet = observer(function NewAgentSheet() {
           ) : null}
 
           {error ? (
-            <p
-              role="alert"
-              className="bg-danger-soft text-danger rounded-xl px-3.5 py-2.5 text-[14px]"
-            >
+            <p role="alert" className="text-detail -mt-2 text-foreground-error">
               {error}
             </p>
           ) : null}
@@ -158,7 +156,7 @@ function Picker({ label, value, options, onChange, hint }: PickerProps) {
   const id = useId();
   return (
     <div>
-      <label htmlFor={id} className="text-fg-muted text-[13px] font-medium">
+      <label htmlFor={id} className="text-body text-foreground">
         {label}
       </label>
       <div className="relative mt-1.5">
@@ -166,7 +164,7 @@ function Picker({ label, value, options, onChange, hint }: PickerProps) {
           id={id}
           value={value}
           onChange={(event) => onChange(event.target.value)}
-          className="border-line-strong bg-canvas text-fg focus:border-focus focus:ring-focus/25 h-12 w-full appearance-none truncate rounded-xl border pr-10 pl-3.5 outline-none focus:ring-2"
+          className="field text-reading h-12 w-full appearance-none truncate rounded-md pr-10 pl-3.5"
         >
           {options.map((option) => (
             <option key={option.value} value={option.value}>
@@ -175,7 +173,7 @@ function Picker({ label, value, options, onChange, hint }: PickerProps) {
           ))}
         </select>
         <ChevronDown
-          className="text-fg-passive pointer-events-none absolute top-1/2 right-3.5 size-[18px] -translate-y-1/2"
+          className="pointer-events-none absolute top-1/2 right-3.5 size-4 -translate-y-1/2 text-foreground-passive"
           aria-hidden="true"
         />
       </div>

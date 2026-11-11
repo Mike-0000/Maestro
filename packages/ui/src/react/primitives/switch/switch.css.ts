@@ -1,7 +1,13 @@
 import { globalStyle, style } from '@vanilla-extract/css';
 import { recipe } from '@vanilla-extract/recipes';
 import type { RecipeVariants } from '@vanilla-extract/recipes';
+import { LIGHT_THEME_SCOPE } from '@styles/recipes/field-shell.css';
 import { vars } from '@theme/core/contract/contract.css';
+
+// A switch (design brief 2.8): the off track is the findable control edge tone
+// (border-1), on is the accent; the thumb is a near-white knob in both themes
+// (a soft shadow lifts it off the track in light). Keyboard focus draws the
+// shared accent outline.
 
 // Pre-created base so the thumb and hidden-input selectors can reference it.
 const switchBase = style({
@@ -13,14 +19,18 @@ const switchBase = style({
   border: '1px solid transparent',
   outline: 'none',
   transition: 'background-color 150ms, border-color 150ms',
-  backgroundColor: vars.surfaceHover,
+  backgroundColor: vars.border1,
   selectors: {
+    '&:hover': { backgroundColor: vars.border2 },
     '&:focus-visible': {
-      borderColor: vars.borderPrimary,
-      boxShadow: `0 0 0 3px color-mix(in srgb, ${vars.borderPrimary} 30%, transparent)`,
+      outline: `2px solid ${vars.focusRing}`,
+      outlineOffset: '2px',
     },
     '&[data-checked]': {
       backgroundColor: vars.primaryButtonBackground,
+    },
+    '&[data-checked]:hover': {
+      backgroundColor: vars.primaryButtonBackgroundHover,
     },
     '&[data-disabled]': {
       pointerEvents: 'none',
@@ -51,9 +61,13 @@ export const switchThumb = style({
   height: '0.75rem',
   borderRadius: '9999px',
   backgroundColor: vars.foreground,
-  transition: 'left 150ms',
+  transition: 'left 150ms cubic-bezier(0.22, 1, 0.36, 1)',
   pointerEvents: 'none',
   selectors: {
+    [`${LIGHT_THEME_SCOPE} &`]: {
+      backgroundColor: vars.surfaceElevated,
+      boxShadow: `0 1px 2px color-mix(in srgb, ${vars.foreground} 25%, transparent)`,
+    },
     [`${switchBase}[data-checked] &`]: {
       left: 'calc(100% - 0.125rem - 0.75rem)',
     },
@@ -64,6 +78,9 @@ export const switchThumb = style({
     [`${switchBase}[data-size="sm"][data-checked] &`]: {
       left: 'calc(100% - 0.125rem - 0.625rem)',
     },
+  },
+  '@media': {
+    '(prefers-reduced-motion: reduce)': { transition: 'none' },
   },
 });
 

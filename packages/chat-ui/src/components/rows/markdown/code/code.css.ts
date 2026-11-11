@@ -10,16 +10,21 @@
 import { globalStyle, style } from '@vanilla-extract/css';
 import { vars } from '@styles/theme.css';
 
-/** Scroll + card container (inner div, no .pblock so overflow-x-auto wins). */
+/**
+ * Scroll + well container (inner div, no .pblock so overflow-x-auto wins).
+ * A code block is a well: one surface step above the ground, a hairline only
+ * in light. The 1px edge is measured (CODE_BLOCK_BORDER) so it keeps its width.
+ */
 export const codeWrapper = style({
   position: 'absolute',
   inset: 0,
   overflowX: 'auto',
   overflowY: 'hidden',
-  borderRadius: vars.radiusLg,
-  border: `1px solid ${vars.border}`,
-  paddingLeft: '8px',
-  background: 'transparent',
+  borderRadius: vars.radiusMd,
+  border: `1px solid ${vars.wellBorder}`,
+  paddingLeft: '12px',
+  paddingRight: '12px',
+  background: vars.codeBg,
   // Thin scrollbar
   scrollbarWidth: 'thin',
 });

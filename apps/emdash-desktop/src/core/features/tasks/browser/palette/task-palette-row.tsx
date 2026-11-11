@@ -1,4 +1,4 @@
-import { AgentStatus } from '@emdash/ui/react/components';
+import { STATE_GLYPH_LABELS, StateGlyph, type StateGlyphState } from '@emdash/ui/react/components';
 import { Command } from 'cmdk';
 import { GitBranch, MessageSquare } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
@@ -9,12 +9,34 @@ import { conversationRegistry } from '@core/features/conversations/api/browser/s
 import { getTaskStore } from '@core/features/tasks/api/browser/task-state/task-selectors';
 import { taskViewDef } from '@core/features/tasks/contributions/views';
 import { getTaskComposition } from '@core/features/workbench/api/browser/task-composition-selectors';
+import type { AgentStatus } from '@core/primitives/agents/api/agent-events';
 import { useNavigate } from '@core/primitives/navigation/browser/navigation-hooks';
 import type { PaletteProviderRenderProps } from '@core/primitives/palette/api';
+import { PALETTE_ITEM_CLASS } from '@core/primitives/palette/browser/palette-item-styles';
 import type { TaskPaletteMatch } from './task-palette-provider';
 
-const PALETTE_ITEM_CLASS =
-  'flex cursor-pointer items-center gap-2.5 text-foreground-muted aria-selected:text-foreground rounded-md px-2 py-2 text-sm aria-selected:bg-background-2';
+const STATE_FOR_STATUS: Record<Exclude<AgentStatus, 'idle'>, StateGlyphState> = {
+  'awaiting-input': 'needs-you',
+  working: 'working',
+  completed: 'unread',
+  error: 'error',
+};
+
+/**
+ * The shared state mark (design brief 2.6) for an agent status; nothing while idle. The
+ * wrapper keeps the status on `data-status` for tests and styling hooks.
+ */
+function PaletteStateMark({ status }: { status: AgentStatus | null | undefined }) {
+  if (!status || status === 'idle') return null;
+  const state = STATE_FOR_STATUS[status];
+  if (!state) return null;
+  return (
+    <span data-status={status} className="flex shrink-0">
+      <StateGlyph state={state} />
+      <span className="sr-only">{STATE_GLYPH_LABELS[state]}</span>
+    </span>
+  );
+}
 
 export const TaskPaletteRow = observer(function TaskPaletteRow({
   match,
@@ -47,9 +69,9 @@ export const TaskPaletteRow = observer(function TaskPaletteRow({
     if (taskStore) {
       return (
         <Command.Item value={value} onSelect={handleSelect} className={PALETTE_ITEM_CLASS}>
-          <GitBranch size={14} className="shrink-0 text-foreground/40" />
-          <span className="flex-1 truncate">{taskStore.data.name}</span>
-          <AgentStatus status={taskAgentStatus(taskStore)} />
+          <GitBranch className="size-4 shrink-0 text-foreground-passive" />
+          <span className="min-w-0 flex-1 truncate">{taskStore.data.name}</span>
+          <PaletteStateMark status={taskAgentStatus(taskStore)} />
         </Command.Item>
       );
     }
@@ -61,13 +83,13 @@ export const TaskPaletteRow = observer(function TaskPaletteRow({
       return (
         <Command.Item value={value} onSelect={handleSelect} className={PALETTE_ITEM_CLASS}>
           <AgentIcon id={conversation.data.providerId} size={16} />
-          <span className="flex-1 truncate">
+          <span className="min-w-0 flex-1 truncate">
             {formatConversationTitleForDisplay(
               conversation.data.providerId,
               conversation.data.title ?? ''
             )}
           </span>
-          <AgentStatus status={conversation.indicatorStatus} />
+          <PaletteStateMark status={conversation.indicatorStatus} />
         </Command.Item>
       );
     }
@@ -76,11 +98,11 @@ export const TaskPaletteRow = observer(function TaskPaletteRow({
   const Icon = target.kind === 'task' ? GitBranch : MessageSquare;
   return (
     <Command.Item value={value} onSelect={handleSelect} className={PALETTE_ITEM_CLASS}>
-      <Icon size={14} className="shrink-0 text-foreground/40" />
+      <Icon className="size-4 shrink-0 text-foreground-passive" />
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate">{match.title}</span>
         {match.subtitle && (
-          <span className="truncate text-xs text-foreground/40">{match.subtitle}</span>
+          <span className="truncate text-xs text-foreground-passive">{match.subtitle}</span>
         )}
       </span>
     </Command.Item>

@@ -1,6 +1,5 @@
 import type { GitRemote } from '@emdash/core/runtimes/git/api';
 import type { Result } from '@emdash/shared';
-import { Field } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
 import { getGitRepositoryStore } from '@core/features/source-control/api/browser/stores/source-control-selectors';
 import type {
@@ -69,57 +68,53 @@ export const ProjectSettingsForm = observer(function ProjectSettingsForm({
 
   return (
     <div className="flex w-full flex-col">
-      <div className="px-0.5 py-2">
+      {/* The settings-page anatomy: a gap-10 stack of sections, each one card of rows. */}
+      <div className="flex flex-col gap-10 px-0.5 pt-1 pb-6">
         {hostObservationKind === 'stale' ? (
-          <p role="status" className="pb-2 text-xs text-foreground-muted">
+          <p role="status" className="-mb-6 px-4 text-xs text-foreground-muted">
             {projectType === 'local'
               ? 'Repository-backed settings may be out of date while the local runtime is unavailable.'
               : 'Repository-backed settings may be out of date while this Project’s Machine is unavailable.'}
           </p>
         ) : null}
-        <Field.Group>
-          <BaseProjectSettingsSection
-            projectId={projectId}
-            gitIdentityForm={formModel.form.gitIdentity}
-            integrationAccountsForm={formModel.form.integrationAccounts}
-            placementForm={formModel.form.placement}
-            placement={domains.placement}
-            projectType={projectType}
-            remotes={remotes}
-            worktreeDirectoryError={formModel.worktreeDirectoryError}
-            updateGitIdentity={formModel.updateGitIdentity}
-            updateIntegrationAccounts={formModel.updateIntegrationAccounts}
-            updatePlacement={formModel.updatePlacement}
+        <BaseProjectSettingsSection
+          projectId={projectId}
+          gitIdentityForm={formModel.form.gitIdentity}
+          integrationAccountsForm={formModel.form.integrationAccounts}
+          placementForm={formModel.form.placement}
+          placement={domains.placement}
+          projectType={projectType}
+          remotes={remotes}
+          worktreeDirectoryError={formModel.worktreeDirectoryError}
+          updateGitIdentity={formModel.updateGitIdentity}
+          updateIntegrationAccounts={formModel.updateIntegrationAccounts}
+          updatePlacement={formModel.updatePlacement}
+          hostActionReason={hostActionReason}
+          hostObservationKind={hostObservationKind}
+        />
+        {hostObservationKind === 'unavailable' ? (
+          <div role="status" className="px-4 text-sm text-foreground-muted">
+            {projectType === 'local'
+              ? 'Repository-backed settings are unavailable until the local runtime is ready.'
+              : 'Repository-backed settings are unavailable until this Project’s Machine is ready.'}
+          </div>
+        ) : (
+          <ShareableSettingsSection
+            lifecycleForm={formModel.form.lifecycle}
+            fileHandlingForm={formModel.form.fileHandling}
+            environmentForm={formModel.form.environment}
+            updateLifecycle={formModel.updateLifecycle}
+            updateFileHandling={formModel.updateFileHandling}
+            updateEnvironment={formModel.updateEnvironment}
+            getOverrideSources={formModel.getOverrideSources}
+            lifecycle={domains.lifecycle}
+            fileHandling={domains.fileHandling}
+            configMigrations={formModel.configMigrations}
+            importDisabled={formModel.importDisabled}
+            openImportConfigModal={formModel.openImportConfigModal}
             hostActionReason={hostActionReason}
-            hostObservationKind={hostObservationKind}
           />
-          {hostObservationKind === 'unavailable' ? (
-            <div
-              role="status"
-              className="border-t border-border py-6 text-sm text-foreground-muted"
-            >
-              {projectType === 'local'
-                ? 'Repository-backed settings are unavailable until the local runtime is ready.'
-                : 'Repository-backed settings are unavailable until this Project’s Machine is ready.'}
-            </div>
-          ) : (
-            <ShareableSettingsSection
-              lifecycleForm={formModel.form.lifecycle}
-              fileHandlingForm={formModel.form.fileHandling}
-              environmentForm={formModel.form.environment}
-              updateLifecycle={formModel.updateLifecycle}
-              updateFileHandling={formModel.updateFileHandling}
-              updateEnvironment={formModel.updateEnvironment}
-              getOverrideSources={formModel.getOverrideSources}
-              lifecycle={domains.lifecycle}
-              fileHandling={domains.fileHandling}
-              configMigrations={formModel.configMigrations}
-              importDisabled={formModel.importDisabled}
-              openImportConfigModal={formModel.openImportConfigModal}
-              hostActionReason={hostActionReason}
-            />
-          )}
-        </Field.Group>
+        )}
       </div>
       <ProjectSettingsFooter
         dirty={formModel.dirty}

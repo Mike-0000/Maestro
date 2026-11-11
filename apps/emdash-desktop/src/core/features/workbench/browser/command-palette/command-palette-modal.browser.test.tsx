@@ -328,6 +328,53 @@ describe('CommandPaletteView', () => {
       'Second command'
     );
   });
+
+  it('opens with the first row selected when slower idle results rank above the rest', async () => {
+    let resolveConversations: ((matches: PaletteProviderMatch[]) => void) | undefined;
+    const recentConversations = new Promise<PaletteProviderMatch[]>((resolve) => {
+      resolveConversations = resolve;
+    });
+    const catalog = definePaletteProviderCatalog([
+      rowProvider({
+        kind: 'commands',
+        keyword: '@commands',
+        idle: () => [
+          {
+            ...match('new-conversation', 'New conversation'),
+            relevance: { band: 'secondary', score: 1 },
+          },
+          { ...match('view-changes', 'View changes'), relevance: { band: 'secondary', score: 1 } },
+        ],
+        search: () => [],
+      }),
+      rowProvider({
+        kind: 'conversations',
+        keyword: '@conversations',
+        idle: () => recentConversations,
+        search: () => [],
+      }),
+    ]);
+
+    await act(async () => {
+      root.render(
+        <CommandPaletteView providerCatalog={catalog} context={{ taskId: 't' }} onClose={vi.fn()} />
+      );
+    });
+    await vi.waitFor(() => expect(host.textContent).toContain('New conversation'));
+    expect(host.querySelector('[cmdk-item][aria-selected="true"]')?.textContent).toBe(
+      'New conversation'
+    );
+
+    resolveConversations?.([match('cedar', 'Cedar')]);
+    await vi.waitFor(() => expect(host.textContent).toContain('Cedar'));
+    const items = [...host.querySelectorAll<HTMLElement>('[cmdk-item]')];
+    expect(items.map((item) => item.textContent)).toEqual([
+      'Cedar',
+      'New conversation',
+      'View changes',
+    ]);
+    expect(host.querySelector('[cmdk-item][aria-selected="true"]')?.textContent).toBe('Cedar');
+  });
 });
 
 function capitalize(value: string): string {

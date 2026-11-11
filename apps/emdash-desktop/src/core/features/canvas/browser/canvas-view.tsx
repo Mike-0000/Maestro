@@ -1,3 +1,4 @@
+import { Button } from '@emdash/ui/react/primitives';
 import { ArrowLeft, ArrowRight, ChevronRight } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { type ReactNode } from 'react';
@@ -38,16 +39,16 @@ const CanvasTitlebar = observer(function CanvasTitlebar() {
             const last = index === crumbs.length - 1;
             return (
               <span key={`${index}:${crumb.label}`} className="flex min-w-0 items-center">
-                {index > 0 && <ChevronRight className="size-3.5 shrink-0 text-foreground-muted" />}
+                {index > 0 && (
+                  <ChevronRight className="size-3.5 shrink-0 text-foreground-passive" />
+                )}
                 <button
                   type="button"
                   disabled={last}
                   onClick={() => (index === 0 ? store.home() : store.navigate(crumb.location))}
                   className={cn(
-                    'truncate rounded-sm px-1 py-0.5 text-sm',
-                    last
-                      ? 'font-medium text-foreground'
-                      : 'text-foreground-muted hover:bg-background-secondary hover:text-foreground'
+                    'truncate rounded-sm px-1 py-0.5 text-sm transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+                    last ? 'text-foreground' : 'text-foreground-muted hover:text-foreground'
                   )}
                 >
                   {crumb.label}
@@ -73,16 +74,18 @@ function NavButton({
   children: ReactNode;
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="xs"
+      icon
       aria-label={label}
       title={label}
       disabled={disabled}
       onClick={onClick}
-      className="flex size-6 shrink-0 items-center justify-center rounded text-foreground-muted hover:bg-background-secondary hover:text-foreground disabled:opacity-30 disabled:hover:bg-transparent"
     >
       {children}
-    </button>
+    </Button>
   );
 }
 

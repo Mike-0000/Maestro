@@ -36,7 +36,7 @@ const MarkdownTabBarItem = observer(function MarkdownTabBarItem({
       ctx={ctx}
       label={doc.title}
       tooltip={doc.path}
-      preSlot={<BookOpenText className="size-3 shrink-0 text-foreground-muted" />}
+      preSlot={<BookOpenText className="size-3.5 shrink-0 text-foreground-passive" aria-hidden />}
     />
   );
 });
@@ -44,7 +44,7 @@ const MarkdownTabBarItem = observer(function MarkdownTabBarItem({
 function MarkdownTabBarItemDragPreview({ tab }: { tab: ResolvedTab<MarkdownTabResource> }) {
   return (
     <GenericTabDragPreview
-      preSlot={<BookOpenText className="size-3 shrink-0 text-foreground-muted" />}
+      preSlot={<BookOpenText className="size-3.5 shrink-0 text-foreground-passive" aria-hidden />}
       label={tab.resource.doc.title}
     />
   );

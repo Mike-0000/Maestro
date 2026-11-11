@@ -62,11 +62,11 @@ export const MarkdownEditorRenderer = observer(function MarkdownEditorRenderer({
   const openLink = useMarkdownLinkOpener(openWorkspaceLink);
 
   return (
-    <div className="relative h-full overflow-y-auto bg-(--em-surface)">
+    <div className="relative h-full overflow-y-auto">
       <Markdown
         content={content}
         variant="full"
-        className="w-full max-w-3xl px-8 py-8"
+        className="reading-column pt-6 pb-16"
         resolveImage={resolveImage}
         onOpenLink={openLink}
       />

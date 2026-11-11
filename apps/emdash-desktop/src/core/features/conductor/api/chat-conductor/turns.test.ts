@@ -71,6 +71,7 @@ describe('chat conductor tools', () => {
       'navigate_browser',
       'list_browsers',
       'close_browser',
+      'post_digest',
     ]);
     for (const tool of tools) {
       expect(tool.input_schema.type).toBe('object');

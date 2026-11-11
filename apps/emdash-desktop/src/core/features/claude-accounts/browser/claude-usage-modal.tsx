@@ -1,4 +1,4 @@
-import { Button, Dialog } from '@emdash/ui/react/primitives';
+import { Button, Dialog, ModalLayout } from '@emdash/ui/react/primitives';
 import { settingsViewDef } from '@core/features/settings/contributions/views';
 import { useModalController } from '@core/manifests/browser/modal-api';
 import { defineModal } from '@core/primitives/modals/react';
@@ -14,17 +14,11 @@ export function ClaudeUsageModal() {
   const now = useNow();
 
   return (
-    <>
-      <Dialog.Header>
-        <Dialog.Title>Claude usage</Dialog.Title>
-      </Dialog.Header>
-      <Dialog.Body className="flex flex-col gap-3 pt-0">
-        <ClaudeUsageRefresh now={now} className="justify-between" />
-        <ClaudeUsagePanel now={now} />
-      </Dialog.Body>
-      <Dialog.Footer>
+    <ModalLayout
+      title="Claude usage"
+      leading={
         <Button
-          variant="ghost"
+          variant="text"
           onClick={() => {
             modal.dismiss();
             navigate(settingsViewDef({ tab: 'claude-accounts' }));
@@ -32,11 +26,18 @@ export function ClaudeUsageModal() {
         >
           Manage accounts
         </Button>
-        <Button variant="secondary" onClick={modal.dismiss}>
+      }
+      actions={
+        <Button variant="ghost" onClick={modal.dismiss}>
           Close
         </Button>
-      </Dialog.Footer>
-    </>
+      }
+    >
+      <Dialog.Body className="gap-4">
+        <ClaudeUsageRefresh now={now} className="-mt-2 -mr-1.5 justify-end" />
+        <ClaudeUsagePanel now={now} />
+      </Dialog.Body>
+    </ModalLayout>
   );
 }
 

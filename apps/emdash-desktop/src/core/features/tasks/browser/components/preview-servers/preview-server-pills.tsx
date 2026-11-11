@@ -20,7 +20,11 @@ export const PreviewServerPills = observer(function PreviewServerPills() {
 
   if (previews.observation.kind === 'unavailable') {
     return (
-      <span className="rounded-md px-2 py-1 text-xs text-foreground-muted" tabIndex={0} role="note">
+      <span
+        className="rounded-sm px-2 text-xs text-foreground-passive outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        tabIndex={0}
+        role="note"
+      >
         Preview unavailable
         <span className="sr-only">
           {liveActionDisabledReason ?? 'Preview servers have not been observed.'}
@@ -39,7 +43,7 @@ export const PreviewServerPills = observer(function PreviewServerPills() {
       {isRemoteWorkspace ? <ManualForwardButton /> : null}
       {previews.observation.kind === 'stale' && liveActionDisabledReason ? (
         <span
-          className="max-w-48 truncate px-1 text-xs text-foreground-muted"
+          className="max-w-48 truncate rounded-sm px-1 text-xs text-foreground-passive outline-none focus-visible:ring-2 focus-visible:ring-ring"
           title={liveActionDisabledReason}
           tabIndex={0}
           role="note"

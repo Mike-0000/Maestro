@@ -356,7 +356,7 @@ describe('news waits for the developer', () => {
     // Zulu's prompt was answered while the conductor was still talking.
     entries[0] = agent({ status: 'working' });
     speech.replying(false);
-    expect(speech.heard).toEqual(['Yankee needs you.']);
+    expect(speech.heard).toEqual(['PCB order review needs you, on Yankee.']);
     await speech.endSpeech();
 
     const now = vi.spyOn(Date, 'now');
@@ -368,7 +368,7 @@ describe('news waits for the developer', () => {
     } finally {
       now.mockRestore();
     }
-    expect(speech.heard).toEqual(['Yankee needs you.']);
+    expect(speech.heard).toEqual(['PCB order review needs you, on Yankee.']);
     store.dispose();
   });
 

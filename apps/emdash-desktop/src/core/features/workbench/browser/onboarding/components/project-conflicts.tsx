@@ -1,4 +1,5 @@
-import { Check } from 'lucide-react';
+import { RadioGroup, SectionLabel } from '@emdash/ui/react/primitives';
+import { useId } from 'react';
 import {
   type LegacyImportSource,
   type LegacyProjectConflict,
@@ -6,47 +7,43 @@ import {
 import { cn } from '@core/primitives/styling/browser/cn';
 import { formatCount, sourceLabel } from './import-format';
 
+/** One copy of a project: a radio, the version and its task count, the folder in a caption. */
 function ConflictChoice({
   source,
   conflict,
-  selected,
   disabled,
-  onSelect,
 }: {
   source: LegacyImportSource;
   conflict: LegacyProjectConflict;
-  selected: boolean;
   disabled: boolean;
-  onSelect: () => void;
 }) {
   const details = source === 'v0' ? conflict.v0 : conflict.v1Beta;
+  const id = useId();
 
   return (
-    <button
-      type="button"
-      aria-pressed={selected}
-      disabled={disabled}
-      onClick={onSelect}
+    <label
+      htmlFor={id}
       className={cn(
-        'flex min-w-0 flex-1 flex-col gap-1 border p-2.5 text-left',
-        selected ? 'border-primary bg-background' : 'border-border bg-background-1',
-        disabled && 'cursor-not-allowed opacity-60'
+        'flex min-w-0 items-start gap-2.5 rounded-md px-2 py-1.5 transition-colors',
+        disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-surface-hover'
       )}
     >
-      <span className="flex items-center justify-between gap-2">
-        <span className="truncate text-sm font-medium">
-          {sourceLabel(source)} · {formatCount(details.taskCount, 'task')}
+      <RadioGroup.Item id={id} value={source} disabled={disabled} className="mt-0.5" />
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span className="truncate text-sm text-foreground">
+          {sourceLabel(source)}
+          <span className="text-foreground-muted"> · {formatCount(details.taskCount, 'task')}</span>
         </span>
-        {selected && <Check className="h-4 w-4 shrink-0" />}
+        <span className="truncate text-tiny text-foreground-passive" title={details.path}>
+          {details.path}
+        </span>
       </span>
-      <span className="truncate text-xs text-foreground-muted" title={details.path}>
-        {details.path}
-      </span>
-    </button>
+    </label>
   );
 }
 
-function ConflictCard({
+/** A project both versions hold: its name, then a choice of which copy to keep. */
+function ConflictRow({
   conflict,
   selectedSource,
   disabled,
@@ -58,29 +55,22 @@ function ConflictCard({
   onSelect: (source: LegacyImportSource) => void;
 }) {
   return (
-    <div className="flex flex-col gap-2 border p-2.5">
-      <div className="flex min-w-0 items-center justify-between gap-3">
-        <span className="truncate text-sm font-medium">{conflict.v1Beta.name}</span>
-        <span className="shrink-0 text-xs text-foreground-muted">
+    <div className="flex flex-col gap-1 px-1 py-2">
+      <div className="flex min-w-0 items-baseline justify-between gap-3 px-2">
+        <span className="truncate text-sm font-medium text-foreground">{conflict.v1Beta.name}</span>
+        <span className="shrink-0 text-tiny text-foreground-passive">
           {conflict.kind === 'ssh' ? 'SSH' : 'Local'}
         </span>
       </div>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <ConflictChoice
-          source="v0"
-          conflict={conflict}
-          selected={selectedSource === 'v0'}
-          disabled={disabled}
-          onSelect={() => onSelect('v0')}
-        />
-        <ConflictChoice
-          source="v1-beta"
-          conflict={conflict}
-          selected={selectedSource === 'v1-beta'}
-          disabled={disabled}
-          onSelect={() => onSelect('v1-beta')}
-        />
-      </div>
+      <RadioGroup.Root
+        aria-label={`Copy of ${conflict.v1Beta.name} to keep`}
+        value={selectedSource}
+        onValueChange={(value) => onSelect(value as LegacyImportSource)}
+        disabled={disabled}
+      >
+        <ConflictChoice source="v1-beta" conflict={conflict} disabled={disabled} />
+        <ConflictChoice source="v0" conflict={conflict} disabled={disabled} />
+      </RadioGroup.Root>
     </div>
   );
 }
@@ -99,16 +89,16 @@ export function ProjectConflicts({
   if (conflicts.length === 0) return null;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2.5">
-      <div className="flex shrink-0 flex-col gap-1">
-        <h2 className="text-base font-medium">Project conflicts</h2>
-        <p className="text-sm text-foreground-muted">
-          These projects exist in both selected versions. Choose which version to keep.
+    <section className="flex min-h-0 w-full flex-col gap-3">
+      <div className="flex flex-col gap-1 px-1">
+        <SectionLabel as="h2">In both versions</SectionLabel>
+        <p className="text-xs text-foreground-muted">
+          These projects exist in both versions. Choose which copy of each to keep.
         </p>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
+      <div className="surface-emphasis flex max-h-72 min-h-0 flex-col divide-y divide-border-subtle overflow-y-auto rounded-lg bg-surface ring-1 ring-border-subtle">
         {conflicts.map((conflict) => (
-          <ConflictCard
+          <ConflictRow
             key={conflict.identityKey}
             conflict={conflict}
             selectedSource={choices[conflict.identityKey] ?? 'v1-beta'}
@@ -117,6 +107,6 @@ export function ProjectConflicts({
           />
         ))}
       </div>
-    </div>
+    </section>
   );
 }

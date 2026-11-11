@@ -20,13 +20,11 @@ import * as styles from './mention-pill.css';
 
 // ── Kind → fallback lucide icon ───────────────────────────────────────────────
 
-const ICON_SIZE_SM = { width: '0.75rem', height: '0.75rem' };
-
 const KIND_ICONS: Record<MentionKind, React.ReactNode> = {
-  file: <File style={ICON_SIZE_SM} />,
-  issue: <CircleDot style={ICON_SIZE_SM} />,
-  symbol: <Braces style={ICON_SIZE_SM} />,
-  custom: <AtSign style={ICON_SIZE_SM} />,
+  file: <File className={styles.pillKindIcon} />,
+  issue: <CircleDot className={styles.pillKindIcon} />,
+  symbol: <Braces className={styles.pillKindIcon} />,
+  custom: <AtSign className={styles.pillKindIcon} />,
 };
 
 function PillIcon({
@@ -45,7 +43,7 @@ function PillIcon({
 
   if (kind === 'file') {
     const cls = fileIconClass(label);
-    if (cls) return <i className={cls} style={{ fontSize: '12px', lineHeight: 1 }} />;
+    if (cls) return <i className={cx(cls, styles.pillFileIcon)} />;
   }
   return KIND_ICONS[kind] ?? KIND_ICONS.custom;
 }
@@ -87,7 +85,7 @@ export function MentionPill({
             aria-label={`Remove @${name}`}
             className={styles.pillRemoveBtn}
           >
-            <X style={{ width: '0.625rem', height: '0.625rem' }} />
+            <X className={styles.pillRemoveIcon} />
           </button>
         </span>
         {/* Display name */}

@@ -49,6 +49,17 @@ const splitFontFamilies = (fontFamily: string) => {
   return families.filter(Boolean);
 };
 
+/**
+ * The font the default family chain actually lands on for a platform, for labels such as
+ * "Default (Consolas)". Menlo ships with macOS, Consolas with Windows; other systems fall
+ * through to the generic monospace face.
+ */
+export const defaultTerminalFontName = (os: 'mac' | 'windows' | 'linux' | string): string => {
+  if (os === 'mac') return 'Menlo';
+  if (os === 'windows') return 'Consolas';
+  return 'System monospace';
+};
+
 export const buildTerminalFontFamily = (fontFamily?: string) => {
   const customFontFamily = fontFamily?.trim();
   const families = customFontFamily

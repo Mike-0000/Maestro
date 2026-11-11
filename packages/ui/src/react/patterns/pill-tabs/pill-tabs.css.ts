@@ -1,7 +1,7 @@
 import { style } from '@vanilla-extract/css';
 import { recipe } from '@vanilla-extract/recipes';
 import { svgContainer, svgSmSize } from '@styles/effects/svg-helpers.css';
-import { sx } from '@styles/utilities/sprinkles.css';
+import { LIGHT_THEME_SCOPE } from '@styles/recipes/field-shell.css';
 import { vars } from '@theme/core/contract/contract.css';
 import { tokenVars } from '@theme/tokens.css';
 
@@ -15,13 +15,18 @@ const motion = {
   },
 } as const;
 
+// PillTabs is the segmented control (design brief 2.13.12): one quiet track,
+// the chosen segment lifted one surface step with full-strength text.
 export const list = style({
   '@layer': {
     recipes: {
       display: 'flex',
       width: '100%',
       alignItems: 'stretch',
-      gap: '0.5rem',
+      gap: '2px',
+      padding: '2px',
+      borderRadius: `calc(${tokenVars.radiusMd} + 2px)`,
+      backgroundColor: `color-mix(in srgb, ${vars.foreground} 5%, transparent)`,
     },
   },
 });
@@ -65,39 +70,44 @@ export const slot = recipe({
 });
 
 export const tab = style([
-  sx({ px: '5', py: '2' }),
   {
     '@layer': {
       recipes: {
         display: 'inline-flex',
         width: '100%',
         minWidth: 0,
+        height: '1.75rem',
+        paddingInline: '0.75rem',
         alignItems: 'center',
         justifyContent: 'center',
-        border: `1px solid ${vars.border}`,
-        borderRadius: tokenVars.radiusFull,
-        backgroundColor: vars.surfaceElevated,
+        border: 'none',
+        borderRadius: tokenVars.radiusMd,
+        backgroundColor: 'transparent',
         color: vars.foregroundMuted,
         font: 'inherit',
         cursor: 'pointer',
-        transition: 'background-color 150ms, border-color 150ms, color 150ms',
+        outline: 'none',
+        transition: 'background-color 150ms, box-shadow 150ms, color 150ms',
         selectors: {
           '&:hover:not([data-disabled]):not([aria-disabled="true"])': {
-            backgroundColor: vars.surfaceElevatedHover,
+            color: vars.foreground,
           },
           '&[data-selected], &[aria-selected="true"]': {
-            borderColor: vars.borderPrimary,
-            backgroundColor: vars.surfaceElevatedSelected,
+            backgroundColor: vars.surfaceElevatedEmphasis,
+            boxShadow: `0 0 0 1px ${vars.borderSubtle}`,
             color: vars.foreground,
+          },
+          [`${LIGHT_THEME_SCOPE} &[data-selected], ${LIGHT_THEME_SCOPE} &[aria-selected="true"]`]: {
+            backgroundColor: vars.surfaceElevated,
+            boxShadow: `${vars.shadowSm}, 0 0 0 1px ${vars.borderSubtle}`,
           },
           '&:disabled, &[data-disabled], &[aria-disabled="true"]': {
             cursor: 'not-allowed',
             opacity: 0.5,
           },
           '&:focus-visible': {
-            outline: 'none',
-            borderColor: vars.borderPrimary,
-            boxShadow: `0 0 0 3px color-mix(in srgb, ${vars.borderPrimary} 30%, transparent)`,
+            outline: `2px solid ${vars.focusRing}`,
+            outlineOffset: '1px',
           },
         },
       },
@@ -138,7 +148,7 @@ export const label = recipe({
       recipes: {
         minWidth: 0,
         overflow: 'hidden',
-        fontSize: tokenVars.textXs,
+        fontSize: tokenVars.textSm,
         lineHeight: 1.25,
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
@@ -153,7 +163,7 @@ export const label = recipe({
         '@layer': {
           recipes: {
             maxWidth: '16rem',
-            marginLeft: '0.5rem',
+            marginLeft: '0.375rem',
             opacity: 1,
           },
         },

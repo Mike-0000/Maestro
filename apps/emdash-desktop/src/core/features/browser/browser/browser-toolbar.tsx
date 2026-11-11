@@ -45,11 +45,8 @@ import { browserUrlInputText } from './browser-url-input';
 import type { BrowserWebviewAdapter } from './browser-webview-types';
 
 // Selection is conveyed by the checkmark alone (matching SelectItem); the base
-// radio item pins a background on the checked row and mutes unchecked rows.
-const PROFILE_RADIO_ITEM_CLASS = 'text-foreground data-checked:bg-transparent';
-
-// Inline because the Input recipe's own padding beats Tailwind's layered pl-*/pr-* utilities.
-const URL_INPUT_PADDING = { paddingLeft: '1.75rem', paddingRight: '2rem' } as const;
+// radio item pins a background on the checked row.
+const PROFILE_RADIO_ITEM_CLASS = 'data-checked:bg-transparent';
 
 export function BrowserToolbar({
   session,
@@ -154,7 +151,9 @@ export function BrowserToolbar({
   const zoomFactor = session.zoomFactor;
 
   return (
-    <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border bg-(--em-surface) px-2">
+    // One quiet strip on the paper, no rule under it: three history glyphs, the address field
+    // (the toolbar's one control with an edge), then screenshot and the overflow menu.
+    <div className="flex h-10 shrink-0 items-center gap-0.5 px-2">
       <ToolbarIconButton
         label="Back"
         disabled={!adapter || !session.canGoBack}
@@ -173,7 +172,7 @@ export function BrowserToolbar({
         {session.isLoading ? <Square className="size-3.5" /> : <RefreshCw className="size-4" />}
       </ToolbarIconButton>
       <form
-        className="min-w-0 flex-1"
+        className="mx-1.5 min-w-0 flex-1"
         onSubmit={(event) => {
           event.preventDefault();
           navigate();
@@ -184,12 +183,12 @@ export function BrowserToolbar({
             <img
               src={faviconUrl}
               alt=""
-              className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 rounded-sm"
+              className="pointer-events-none absolute top-1/2 left-2 z-10 size-3.5 -translate-y-1/2 rounded-xs"
               draggable={false}
               onError={() => setFailedFaviconUrl(faviconUrl)}
             />
           ) : (
-            <Globe className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-foreground-muted" />
+            <Globe className="pointer-events-none absolute top-1/2 left-2 z-10 size-3.5 -translate-y-1/2 text-foreground-passive" />
           )}
           <Input
             ref={urlInputRef}
@@ -199,15 +198,14 @@ export function BrowserToolbar({
               if (urlError) setUrlError(null);
             }}
             onFocus={(event) => event.currentTarget.select()}
-            className="h-7 truncate border-0 text-sm shadow-none hover:border-0 focus-visible:border-0 focus-visible:ring-0"
-            style={URL_INPUT_PADDING}
+            className="h-7 truncate pr-8 pl-7"
             aria-label="Browser URL"
             placeholder="Search or enter URL"
             spellCheck={false}
             autoCapitalize="none"
           />
           {session.isLoading && (
-            <Loader2 className="pointer-events-none absolute top-1/2 right-2 size-3.5 -translate-y-1/2 animate-spin text-foreground-muted" />
+            <Loader2 className="pointer-events-none absolute top-1/2 right-2 size-3.5 -translate-y-1/2 animate-spin text-foreground-passive" />
           )}
         </div>
         {urlError && (
@@ -234,15 +232,16 @@ export function BrowserToolbar({
             <Button
               type="button"
               variant="ghost"
+              size="sm"
               icon
-              className="size-7 shrink-0"
+              className="shrink-0"
               aria-label="Browser actions"
             />
           }
         >
           <Ellipsis className="size-4" />
         </DropdownMenu.Trigger>
-        <DropdownMenu.Content align="end" className="min-w-56">
+        <DropdownMenu.Content align="end" width="content" className="min-w-56">
           <DropdownMenu.Item disabled={!canOpenExternal} onClick={openExternal}>
             Open externally
           </DropdownMenu.Item>
@@ -287,29 +286,31 @@ export function BrowserToolbar({
             </DropdownMenu.Sub>
           )}
           <DropdownMenu.Separator />
-          <div className="flex items-center justify-between gap-2 px-2 py-1.5 text-sm">
+          <div className="flex h-8 items-center justify-between gap-2 px-2 text-sm text-foreground-muted">
             <span>Zoom</span>
-            <div className="flex items-center gap-1">
-              <div className="flex items-center rounded-md bg-background-quaternary-1">
+            <div className="flex items-center gap-0.5">
+              <div className="flex items-center">
                 <Button
                   type="button"
                   variant="ghost"
+                  size="xs"
                   icon
-                  className="size-6"
+                  className="shrink-0"
                   aria-label="Zoom out"
                   disabled={!canZoomOut(zoomFactor)}
                   onClick={() => onSetZoomFactor?.(previousBrowserZoomFactor(zoomFactor))}
                 >
                   <Minus className="size-3.5" />
                 </Button>
-                <span className="min-w-11 text-center text-xs text-foreground-muted tabular-nums">
+                <span className="min-w-11 text-center text-xs text-foreground tabular-nums">
                   {formatBrowserZoomPercent(zoomFactor)}
                 </span>
                 <Button
                   type="button"
                   variant="ghost"
+                  size="xs"
                   icon
-                  className="size-6"
+                  className="shrink-0"
                   aria-label="Zoom in"
                   disabled={!canZoomIn(zoomFactor)}
                   onClick={() => onSetZoomFactor?.(nextBrowserZoomFactor(zoomFactor))}
@@ -320,8 +321,9 @@ export function BrowserToolbar({
               <Button
                 type="button"
                 variant="ghost"
+                size="xs"
                 icon
-                className="size-6"
+                className="shrink-0"
                 aria-label="Reset zoom"
                 disabled={isDefaultBrowserZoomFactor(zoomFactor)}
                 onClick={() => onSetZoomFactor?.(BROWSER_DEFAULT_ZOOM_FACTOR)}
@@ -388,8 +390,9 @@ function ToolbarIconButton({
           <Button
             type="button"
             variant="ghost"
+            size="sm"
             icon
-            className="size-7 shrink-0"
+            className="shrink-0"
             disabled={disabled}
             aria-label={label}
             onClick={onClick}

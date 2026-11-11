@@ -1,7 +1,9 @@
 import { useCaches } from '@components/contexts/CachesContext';
 import { useCommands } from '@components/contexts/CommandsContext';
 import { cancelIdle, scheduleIdle } from '@components/engine/dom-utils';
-import { GenericFileIcon, IconError, IconShieldAlert } from '@components/primitives/icons';
+import { activateOnKey } from '@components/primitives/activate-on-key';
+import { GenericFileIcon } from '@components/primitives/icons';
+import { StatusMark } from '@components/primitives/StatusMark';
 import { applyTokensToElement } from '@core/highlight/apply-tokens';
 import type { CodeToken } from '@core/highlight/highlighter';
 import { resolveFileIconClass } from '@lib/file-icons';
@@ -15,11 +17,10 @@ import {
   diffBodyCard,
   diffCardVars,
   diffDelsCount,
-  diffErrorIcon,
+  diffFileIcon,
   diffFileName,
   diffHeader,
   diffLineContent,
-  diffPermissionIcon,
   diffRowClasses,
   diffSpacer,
   pdiffBody,
@@ -60,14 +61,12 @@ export function DiffHeader(props: DiffHeaderProps) {
       class={diffHeader({ hasBody: props.hasBody })}
       style={assignInlineVars({ [diffCardVars.headerH]: `${props.headerH}px` })}
       role="button"
+      tabIndex={0}
       onClick={handleClick}
+      onKeyDown={activateOnKey}
     >
       {iconClass() ? (
-        <i
-          class={`${iconClass()} shrink-0`}
-          style={{ 'font-size': '12px', 'line-height': '1' }}
-          aria-hidden="true"
-        />
+        <i class={`${iconClass()} ${diffFileIcon}`} aria-hidden="true" />
       ) : (
         <GenericFileIcon />
       )}
@@ -79,24 +78,11 @@ export function DiffHeader(props: DiffHeaderProps) {
         <span class={diffDelsCount}>−{props.dels}</span>
       </Show>
       <span class={diffSpacer} />
-      <Show
-        when={props.item.awaitingPermission}
-        fallback={
-          <Show when={props.item.status === 'error'}>
-            <span class={diffErrorIcon} title={props.item.error ?? 'Failed'} aria-label="error">
-              <IconError />
-            </span>
-          </Show>
-        }
-      >
-        <span
-          class={diffPermissionIcon}
-          title="Awaiting permission"
-          aria-label="awaiting permission"
-        >
-          <IconShieldAlert />
-        </span>
-      </Show>
+      <StatusMark
+        awaitingPermission={props.item.awaitingPermission}
+        error={props.item.status === 'error'}
+        errorTitle={props.item.error}
+      />
     </div>
   );
 }

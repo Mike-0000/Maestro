@@ -11,16 +11,18 @@ function InfoTooltip({ label, content }: { label: string; content: React.ReactNo
   return (
     <Tooltip.Provider delay={150}>
       <Tooltip.Root>
-        <Tooltip.Trigger>
-          <button
-            type="button"
-            className="text-muted-foreground inline-flex h-4 w-4 items-center justify-center hover:text-foreground"
-            aria-label={label}
-          >
-            <Info className="h-3.5 w-3.5" />
-          </button>
-        </Tooltip.Trigger>
-        <Tooltip.Content side="top" className="max-w-xs text-xs">
+        <Tooltip.Trigger
+          render={
+            <button
+              type="button"
+              className="inline-flex size-4 items-center justify-center rounded-xs text-foreground-passive transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={label}
+            >
+              <Info className="size-3.5" aria-hidden />
+            </button>
+          }
+        />
+        <Tooltip.Content side="top" className="max-w-xs">
           {content}
         </Tooltip.Content>
       </Tooltip.Root>
@@ -86,13 +88,13 @@ export const AutoTrustWorktreesRow: React.FC = () => {
   return (
     <SettingRow
       title={
-        <div className="flex items-center gap-1.5">
+        <span className="flex items-center gap-1.5">
           Auto-trust worktree directories
           <InfoTooltip
             label="More info about auto-trust worktrees"
-            content="For agents that support workspace trust, Chorus writes trust entries before launching."
+            content="For agents that support workspace trust, Maestro writes trust entries before launching."
           />
-        </div>
+        </span>
       }
       description="Skip the folder trust prompt in supported CLIs for new tasks."
       control={

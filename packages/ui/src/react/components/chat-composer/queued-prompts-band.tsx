@@ -15,17 +15,25 @@ export interface QueuedPromptsBandProps {
   onDelete: (id: string) => void;
   onReorder: (ids: string[]) => void;
   onSendNow: (id: string) => void;
+  /**
+   * @deprecated No effect. Inside ChatComposer the band is a section at the top of the field and
+   * the field separates it from whatever follows.
+   */
   connectToBandBelow?: boolean;
   className?: string;
 }
 
+/**
+ * QueuedPromptsBand — prompts accepted while the agent is busy, sent in order when the turn
+ * ends. Inside ChatComposer it is a section at the top of the field: a caption, then one quiet
+ * row per prompt (click to edit, drag the number to reorder, send now or delete on hover).
+ */
 export function QueuedPromptsBand({
   prompts,
   onEdit,
   onDelete,
   onReorder,
   onSendNow,
-  connectToBandBelow = false,
   className,
 }: QueuedPromptsBandProps) {
   const [editingId, setEditingId] = React.useState<string | null>(null);
@@ -107,12 +115,14 @@ export function QueuedPromptsBand({
   if (prompts.length === 0) return null;
 
   return (
-    <div className={cx(styles.band, connectToBandBelow && styles.bandConnectedBelow, className)}>
-      <div className={styles.header}>
+    <div className={cx(styles.band, className)} data-slot="queued-prompts-band">
+      <p className={styles.header}>
         <span>
-          <span className={styles.headerStrong}>Queued prompts</span> ({prompts.length})
+          <span className={styles.headerStrong}>Queued</span>{' '}
+          <span className={styles.headerCount}>· {prompts.length}</span>
         </span>
-      </div>
+        <span className={styles.headerHint}>Sent in order when this turn ends</span>
+      </p>
 
       <div className={styles.list}>
         {prompts.map((prompt, index) => {
@@ -211,7 +221,7 @@ export function QueuedPromptsBand({
                     size="xs"
                     icon
                     aria-label="Send queued prompt now"
-                    title="Send now - cancels the active turn"
+                    title="Send now (stops the current turn)"
                     onClick={(event) => {
                       event.stopPropagation();
                       onSendNow(prompt.id);
@@ -222,7 +232,6 @@ export function QueuedPromptsBand({
                   <Button
                     type="button"
                     variant="ghost"
-                    tone="destructive"
                     size="xs"
                     icon
                     aria-label="Delete queued prompt"

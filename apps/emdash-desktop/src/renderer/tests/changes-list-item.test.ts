@@ -112,6 +112,6 @@ describe('ChangesListItem', () => {
       root.render(React.createElement(ChangesListItem, { change, isActive: true }));
     });
 
-    expect(container.querySelector('button')?.classList.contains('bg-background-2')).toBe(true);
+    expect(container.querySelector('button')?.classList.contains('bg-surface-selected')).toBe(true);
   });
 });

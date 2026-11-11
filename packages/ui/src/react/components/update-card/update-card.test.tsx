@@ -104,4 +104,16 @@ describe('UpdateCard', () => {
     expect(view.queryByText("You're up to date")).toBeNull();
     expect(view.getByText('Could not check for updates')).toBeTruthy();
   });
+
+  it('renders as a plain row when bare, with the glyph only when something needs attention', () => {
+    const view = render(<UpdateCard {...props} bare status={{ type: 'up-to-date' }} />);
+    const root = view.container.querySelector('[data-slot="update-card"]');
+    expect(root?.hasAttribute('data-bare')).toBe(true);
+    expect(view.container.querySelector('svg')).toBeNull();
+    expect(view.getByRole('button', { name: 'Check for updates' })).toBeTruthy();
+
+    view.rerender(<UpdateCard {...props} bare />);
+    expect(view.getByText('An update is available')).toBeTruthy();
+    expect(view.container.querySelector('svg')).not.toBeNull();
+  });
 });

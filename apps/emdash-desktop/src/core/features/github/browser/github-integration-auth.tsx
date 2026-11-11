@@ -1,13 +1,6 @@
-import { Button, Dialog, useToast } from '@emdash/ui/react/primitives';
-import {
-  AlertCircle,
-  ArrowRight,
-  Github,
-  KeyRound,
-  Loader2,
-  type LucideIcon,
-  Terminal,
-} from 'lucide-react';
+import { StateGlyph } from '@emdash/ui/react/components';
+import { Button, Dialog, Spinner, useToast } from '@emdash/ui/react/primitives';
+import { ChevronRight, Github, KeyRound, type LucideIcon, Terminal } from 'lucide-react';
 import { useState } from 'react';
 import {
   useAccountLinkProvider,
@@ -20,6 +13,7 @@ import {
 } from '@core/features/github/api/browser/use-github-auth';
 import type { IntegrationAuthUiProps } from '@core/features/integrations/api/browser/integration-auth-ui';
 import { useOpenModal } from '@core/manifests/browser/modal-api';
+import { PRODUCT_NAME } from '@core/primitives/app-identity/api/app-identity';
 import { cn } from '@core/primitives/styling/browser/cn';
 
 type MethodError = {
@@ -110,8 +104,8 @@ export function GitHubIntegrationAuth({ metadata, onSuccess, onClose }: Integrat
       toast('GitHub CLI accounts imported', {
         description:
           result.importedAccountIds.length === 1
-            ? '1 account is available in Emdash.'
-            : `${result.importedAccountIds.length} accounts are available in Emdash.`,
+            ? `1 account is available in ${PRODUCT_NAME}.`
+            : `${result.importedAccountIds.length} accounts are available in ${PRODUCT_NAME}.`,
       });
       onSuccess();
     } finally {
@@ -135,7 +129,8 @@ export function GitHubIntegrationAuth({ metadata, onSuccess, onClose }: Integrat
 
   return (
     <>
-      <Dialog.Body className="gap-3">
+      <Dialog.Body className="gap-1">
+        <p className="mb-3 text-sm text-foreground-muted">Choose how Maestro signs in to GitHub.</p>
         {hasMethod('oauth') ? (
           <ConnectMethodCard
             icon={Github}
@@ -179,7 +174,7 @@ export function GitHubIntegrationAuth({ metadata, onSuccess, onClose }: Integrat
         )}
       </Dialog.Body>
       <Dialog.Footer>
-        <Button variant="secondary" onClick={onClose} disabled={anyLoading}>
+        <Button variant="ghost" onClick={onClose} disabled={anyLoading}>
           Cancel
         </Button>
       </Dialog.Footer>
@@ -209,31 +204,33 @@ function ConnectMethodCard({
   error?: string;
 }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-border">
+    <div className="flex flex-col">
       <button
         type="button"
         onClick={onClick}
         disabled={disabled}
         aria-label={loading ? loadingLabel : label}
         className={cn(
-          'group flex w-full items-center gap-3 p-3 text-left transition-colors',
-          'hover:bg-background-2',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
-          'disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent'
+          'group/method -mx-3 flex items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors outline-none',
+          'hover:bg-surface-hover focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset',
+          'disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent'
         )}
       >
-        <Icon className="text-muted-foreground h-4 w-4 shrink-0" />
-        <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-medium text-foreground">{title}</h3>
-          <p className="text-muted-foreground mt-0.5 text-xs">{description}</p>
-        </div>
+        <Icon className="size-4 shrink-0 text-foreground-passive" aria-hidden />
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm text-foreground">{title}</span>
+          <span className="mt-0.5 block text-xs text-foreground-muted">{description}</span>
+        </span>
         {loading ? (
-          <Loader2 className="text-muted-foreground h-4 w-4 shrink-0 animate-spin" />
+          <Spinner size="sm" className="shrink-0 text-foreground-passive" />
         ) : (
-          <ArrowRight className="text-muted-foreground h-4 w-4 shrink-0 transition-transform group-hover:translate-x-0.5" />
+          <ChevronRight
+            className="size-4 shrink-0 text-foreground-passive transition-[color,transform] group-hover/method:translate-x-0.5 group-hover/method:text-foreground-muted motion-reduce:transform-none"
+            aria-hidden
+          />
         )}
       </button>
-      {error && <InlineError message={error} className="mx-3 mt-2 mb-3" />}
+      {error && <InlineError message={error} className="mb-2 ml-7" />}
     </div>
   );
 }
@@ -267,14 +264,12 @@ function getOAuthContent({ isSignedIn, hasAccount }: { isSignedIn: boolean; hasA
 
 function InlineError({ message, className }: { message: string; className?: string }) {
   return (
-    <div
-      className={cn(
-        'bg-destructive/10 text-destructive flex items-start gap-1.5 rounded-md px-2.5 py-2 text-xs',
-        className
-      )}
+    <p
+      role="alert"
+      className={cn('flex items-start gap-2 text-xs text-foreground-muted', className)}
     >
-      <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" />
+      <StateGlyph state="error" size="sm" className="mt-0.5" />
       <span>{message}</span>
-    </div>
+    </p>
   );
 }

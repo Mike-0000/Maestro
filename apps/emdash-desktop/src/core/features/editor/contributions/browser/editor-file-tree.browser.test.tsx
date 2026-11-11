@@ -63,7 +63,8 @@ describe('FileTreeHeaderBar layout', () => {
     expect(input).not.toBeNull();
     expect(icon).not.toBeNull();
     expect(toolbar).not.toBeNull();
-    expect(getComputedStyle(toolbar!).borderBottomStyle).toBe('solid');
+    // The redesign draws no rule under toolbars; the tree starts on the same surface.
+    expect(getComputedStyle(toolbar!).borderBottomStyle).toBe('none');
 
     const inputBox = input!.getBoundingClientRect();
     const iconBox = icon!.getBoundingClientRect();

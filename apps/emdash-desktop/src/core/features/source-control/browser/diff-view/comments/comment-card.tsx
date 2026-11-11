@@ -39,7 +39,9 @@ const CommentRoot = forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivEleme
     <div
       ref={ref}
       className={cn(
-        'flex h-[140px] w-full flex-col rounded-lg border border-border bg-background text-foreground shadow-sm',
+        // Fixed height: the Monaco view zone that hosts it is sized to match
+        // (COMMENT_ZONE_HEIGHT_PX). An elevated card with one hairline, no shadow.
+        'surface-elevated flex h-[140px] w-full flex-col rounded-lg border border-border-subtle bg-surface text-foreground',
         className
       )}
       {...props}
@@ -53,7 +55,7 @@ const CommentHeader = forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivEle
     <div
       ref={ref}
       className={cn(
-        'flex flex-row items-center justify-between space-y-0 px-6 py-4 pb-3',
+        'flex flex-row items-center justify-between gap-2 pt-2 pr-2 pb-1 pl-4',
         className
       )}
       {...props}
@@ -64,7 +66,14 @@ CommentHeader.displayName = 'CommentHeader';
 
 const CommentTitle = forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
-    <div ref={ref} className={cn('text-sm font-semibold leading-none', className)} {...props} />
+    <div
+      ref={ref}
+      className={cn(
+        'flex min-w-0 items-baseline gap-2 text-xs font-medium text-foreground',
+        className
+      )}
+      {...props}
+    />
   )
 );
 CommentTitle.displayName = 'CommentTitle';
@@ -73,7 +82,7 @@ const CommentMeta = forwardRef<HTMLSpanElement, React.HTMLAttributes<HTMLSpanEle
   ({ className, ...props }, ref) => (
     <span
       ref={ref}
-      className={cn('text-xs font-normal text-muted-foreground', className)}
+      className={cn('text-tiny font-normal text-foreground-passive tabular-nums', className)}
       {...props}
     />
   )
@@ -82,28 +91,26 @@ CommentMeta.displayName = 'CommentMeta';
 
 const CommentActions = forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
-    <div ref={ref} className={cn('flex items-center gap-1.5', className)} {...props} />
+    <div ref={ref} className={cn('flex items-center gap-0.5', className)} {...props} />
   )
 );
 CommentActions.displayName = 'CommentActions';
 
 const CommentBody = forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => (
-    <div ref={ref} className={cn('flex-1 overflow-hidden px-6 pb-5 pt-0', className)} {...props} />
+    <div
+      ref={ref}
+      className={cn('min-h-0 flex-1 overflow-hidden px-3 pb-3', className)}
+      {...props}
+    />
   )
 );
 CommentBody.displayName = 'CommentBody';
 
 const CommentTextarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
   ({ className, ...props }, ref) => (
-    <Textarea
-      ref={ref}
-      className={cn(
-        'h-full resize-none border-border bg-background px-4 py-3 text-sm shadow-none focus-visible:ring-0 focus-visible:border-border focus-visible:outline-none',
-        className
-      )}
-      {...props}
-    />
+    // The kit textarea grows with its text; here it fills the fixed-height card instead.
+    <Textarea ref={ref} className={cn('h-full resize-none text-sm', className)} {...props} />
   )
 );
 CommentTextarea.displayName = 'CommentTextarea';

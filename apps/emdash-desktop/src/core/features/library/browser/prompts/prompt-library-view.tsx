@@ -1,3 +1,4 @@
+import { EmptyState } from '@emdash/ui/react/components';
 import {
   CollectionToolbar,
   CollectionView,
@@ -5,7 +6,7 @@ import {
   useQueryListSource,
 } from '@emdash/ui/react/patterns';
 import { Button, DropdownMenu, toast } from '@emdash/ui/react/primitives';
-import { EllipsisIcon, LibraryIcon, Pencil, Plus, Trash2 } from 'lucide-react';
+import { EllipsisIcon, Pencil, Plus, Trash2 } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useState } from 'react';
 import { usePromptLibrary } from '@core/features/library/api/browser/prompts/use-prompt-library';
@@ -34,18 +35,16 @@ function PromptRow({
   onDelete: () => void;
 }) {
   return (
-    <div className="group flex w-full items-center">
-      <div className="min-w-0 flex-1">
-        <div className="text-md truncate text-foreground">{item.title}</div>
-        <div className="mt-1 line-clamp-1 text-xs leading-relaxed text-foreground-muted">
-          {item.prompt}
-        </div>
+    <div className="group flex w-full min-w-0 items-center gap-3">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-sm text-foreground">{item.title}</span>
+        <span className="line-clamp-1 text-xs text-foreground-muted">{item.prompt}</span>
       </div>
       {/* Trailing actions are explicit controls — clicks must not reach the row. */}
       <div
         onClick={(e) => e.stopPropagation()}
         onPointerDown={(e) => e.stopPropagation()}
-        className="flex shrink-0 items-center gap-1 opacity-100 sm:opacity-0 sm:transition-opacity sm:group-focus-within:opacity-100 sm:group-hover:opacity-100"
+        className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
       >
         <Button
           variant="ghost"
@@ -159,11 +158,11 @@ export function PromptLibraryView() {
   };
 
   return (
-    <div className="flex min-h-0 flex-col gap-8 text-foreground">
+    <div className="flex min-h-0 flex-col pb-16 text-foreground">
       <PageLayout.Header
         sticky
         title="Prompts"
-        description="Manage reusable prompts that can be sent from task prompt menus."
+        description="Reusable prompts you can send from a task's prompt menu."
       />
       <view.Root>
         <CollectionView
@@ -208,29 +207,27 @@ const PromptsToolbar = observer(function PromptsToolbar({
       />
       <CollectionToolbar.Spacer />
       <CollectionToolbar.Group>
-        <Button variant="primary" onClick={onNewPrompt} disabled={disabled} aria-label="New Prompt">
-          <Plus className="size-4" />
-          <span className="[@container(max-width:520px)]:hidden">New Prompt</span>
+        <Button variant="primary" onClick={onNewPrompt} disabled={disabled} aria-label="New prompt">
+          <Plus className="size-4" aria-hidden />
+          <span className="[@container(max-width:520px)]:hidden">New prompt</span>
         </Button>
       </CollectionToolbar.Group>
     </CollectionToolbar.Root>
   );
 });
 
-// Icon-bearing empty state — `EmptyState` has no icon slot, so this stays
-// custom under the rich-states carve-out.
+/** The list's empty state: nothing saved yet, or nothing matching the search. */
 function PromptsEmptyState({ hasPrompts }: { hasPrompts: boolean }) {
   return (
-    <div className="flex min-h-48 flex-col items-center justify-center p-8 text-center">
-      <LibraryIcon className="mb-3 size-8 text-foreground-passive" />
-      <div className="text-sm text-foreground">
-        {hasPrompts ? 'No prompts match your search' : 'No prompts'}
-      </div>
-      <p className="mt-1 max-w-sm text-xs text-foreground-passive">
-        {hasPrompts
-          ? 'Try a different title or prompt text.'
-          : 'Add a prompt to reuse it from task prompt menus.'}
-      </p>
-    </div>
+    <EmptyState
+      bare
+      className="min-h-48"
+      label={hasPrompts ? 'No prompts match' : 'No prompts yet'}
+      description={
+        hasPrompts
+          ? 'Try a different title or words from the prompt.'
+          : 'Save a prompt here to send it from any task.'
+      }
+    />
   );
 }

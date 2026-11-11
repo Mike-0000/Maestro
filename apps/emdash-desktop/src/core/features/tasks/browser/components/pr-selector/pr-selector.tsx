@@ -2,7 +2,7 @@ import { ListPopoverCard } from '@emdash/ui/react/components';
 import { Button, Combobox, Select } from '@emdash/ui/react/primitives';
 import { remote, type RemoteModel } from '@emdash/wire/state';
 import { useQuery } from '@tanstack/react-query';
-import { AlertCircle, Github } from 'lucide-react';
+import { Github } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { type ReactNode, useState } from 'react';
 import { providerAccountReportingState } from '@core/features/integrations/api/account-reporting';
@@ -40,6 +40,8 @@ export interface PrSelectorProps {
   disabled?: boolean;
   renderSelectedValue?: (pr: PullRequest) => ReactNode;
   renderPlaceholder?: () => ReactNode;
+  /** Classes for the trigger button itself, for callers that make the whole trigger one field. */
+  triggerClassName?: string;
 }
 
 export function PrRow({ pr }: { pr: PullRequest }) {
@@ -61,7 +63,7 @@ export function PrRow({ pr }: { pr: PullRequest }) {
           {pr.author && (
             <>
               <span className="shrink-0">{pr.author.userName}</span>
-              <span className="shrink-0">·</span>
+              <span className="shrink-0">Â·</span>
             </>
           )}
           <code className="truncate text-xs">{pr.headRefName}</code>
@@ -83,6 +85,7 @@ export const PrSelector = observer(function PrSelector({
   disabled,
   renderSelectedValue,
   renderPlaceholder,
+  triggerClassName,
 }: PrSelectorProps) {
   const openIntegrationSetup = useOpenModal('integrationSetupModal');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('open');
@@ -90,8 +93,8 @@ export const PrSelector = observer(function PrSelector({
   const debouncedQuery = useDebounce(query.trim(), 200);
   const searchQuery = query.trim() ? debouncedQuery : '';
 
-  // §7 reporting matrix over the resolver provenance (spec:
-  // github-git-settings §7): an explicitly disabled project or an
+  // Â§7 reporting matrix over the resolver provenance (spec:
+  // github-git-settings Â§7): an explicitly disabled project or an
   // unresolvable pin must not trigger syncs — fail closed instead of
   // proceeding as another identity.
   const account = useProjectAccount(projectId ?? '', 'github', { repository: { kind: 'project' } });
@@ -149,11 +152,11 @@ export const PrSelector = observer(function PrSelector({
   const githubAuthDescription =
     error?.type === 'github_account_not_found'
       ? 'The selected GitHub account is no longer connected. Reconnect GitHub to show pull requests for this repository.'
-      : 'Chorus needs a connected GitHub account before it can show pull requests for this repository.';
+      : 'Maestro needs a connected GitHub account before it can show pull requests for this repository.';
   const connectGitHubButton = (
     <Button
       type="button"
-      variant="secondary"
+      variant="text"
       size="xs"
       onClick={() => void openIntegrationSetup({ integration: 'github' })}
     >
@@ -161,10 +164,11 @@ export const PrSelector = observer(function PrSelector({
     </Button>
   );
 
+  // Default faces: plain text rows, no dashed boxes or shadows (design brief 2.2).
   const selectedContent = renderSelectedValue ? (
     renderSelectedValue(value!)
   ) : (
-    <div className="hover:bg-muted/30 flex w-full min-w-0 items-start rounded-md border border-border p-3 text-left text-sm hover:shadow-xs">
+    <div className="flex w-full min-w-0 items-start py-1 text-left text-sm">
       <SelectedPrValue pr={value!} />
     </div>
   );
@@ -172,9 +176,9 @@ export const PrSelector = observer(function PrSelector({
   const placeholderContent = renderPlaceholder ? (
     renderPlaceholder()
   ) : (
-    <div className="hover:bg-muted/30 flex h-6 w-full items-center justify-center gap-1 rounded-md border border-dashed border-border p-3 text-center text-sm text-foreground-passive hover:shadow-xs">
-      Click to select a pull request
-    </div>
+    <span className="flex h-7 items-center text-sm text-foreground-muted transition-colors hover:text-foreground">
+      Select a pull request
+    </span>
   );
 
   const statusAddon = (
@@ -187,10 +191,7 @@ export const PrSelector = observer(function PrSelector({
         }
       }}
     >
-      <Select.Trigger
-        aria-label="Filter by status"
-        className="h-6 gap-1 border-none bg-transparent px-1.5 text-xs text-foreground-muted shadow-none hover:text-foreground focus:ring-0"
-      >
+      <Select.Trigger aria-label="Filter by status" size="xs" className="gap-1 px-1.5">
         {statusFilter === 'open' ? 'Open' : 'Closed'}
       </Select.Trigger>
       <Select.Content align="end">
@@ -201,7 +202,8 @@ export const PrSelector = observer(function PrSelector({
   );
 
   return (
-    <div className={cn('max-w-full min-w-0 overflow-hidden')}>
+    // No overflow clipping here: it would cut the trigger's focus ring. Rows truncate their text.
+    <div className="max-w-full min-w-0">
       <Combobox.Root
         autoHighlight
         items={prs}
@@ -222,7 +224,13 @@ export const PrSelector = observer(function PrSelector({
       >
         <Combobox.Trigger
           render={
-            <button className="flex w-full min-w-0 text-left outline-none">
+            <button
+              type="button"
+              className={cn(
+                'flex w-full min-w-0 text-left outline-none',
+                triggerClassName ?? 'rounded-sm focus-visible:ring-2 focus-visible:ring-ring'
+              )}
+            >
               <Combobox.Value placeholder={placeholderContent}>
                 {value ? selectedContent : null}
               </Combobox.Value>
@@ -231,7 +239,8 @@ export const PrSelector = observer(function PrSelector({
         />
         <Combobox.Content
           side="bottom"
-          className="min-w-(--anchor-width) pb-1"
+          width="content-at-least-trigger"
+          className="max-w-[min(32rem,var(--available-width))]"
           collisionAvoidance={{ side: 'shift' }}
         >
           <Combobox.Input
@@ -251,42 +260,41 @@ export const PrSelector = observer(function PrSelector({
                 icon={<Github className="size-4 text-foreground-muted" />}
               />
             ) : isGitHubAuthError ? (
-              <div className="flex flex-col items-center gap-3 px-4 py-6 text-center">
-                <span className="flex size-8 items-center justify-center rounded-full bg-background-2">
-                  <Github className="size-4 text-foreground-muted" />
-                </span>
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-foreground">Connect GitHub to load PRs</p>
-                  <p className="max-w-64 text-xs text-foreground-muted">{githubAuthDescription}</p>
-                </div>
-                {connectGitHubButton}
+              <div className="flex flex-col items-center gap-2 px-4 py-5 text-center">
+                <Github className="size-4 text-foreground-passive" />
+                <p className="text-sm font-medium text-foreground">Connect GitHub to load PRs</p>
+                <p className="max-w-64 text-xs text-pretty text-foreground-muted">
+                  {githubAuthDescription}
+                </p>
+                <div className="mt-1">{connectGitHubButton}</div>
               </div>
+            ) : errorMessage ? (
+              <span className="flex items-center gap-2 px-3 text-foreground-muted">
+                <span aria-hidden className="size-2 shrink-0 rounded-full bg-foreground-error" />
+                {errorMessage}
+              </span>
             ) : (
-              <span className={cn(errorMessage && 'text-foreground-error')}>
-                {errorMessage ??
-                  (enabled && (isLoading || sync.isLoading || sync.value?.phase === 'running')
-                    ? 'Loading pull requests…'
-                    : statusFilter === 'open'
-                      ? 'No open pull requests'
-                      : 'No closed pull requests')}
+              <span>
+                {enabled && (isLoading || sync.isLoading || sync.value?.phase === 'running')
+                  ? 'Loading pull requests…'
+                  : statusFilter === 'open'
+                    ? 'No open pull requests'
+                    : 'No closed pull requests'}
               </span>
             )}
           </Combobox.Empty>
           <Combobox.List>
             {(pr: PullRequest) => (
-              <Combobox.Item key={pr.url} value={pr} className="pr-2" showCheck={false}>
+              <Combobox.Item key={pr.url} value={pr} showCheck={false}>
                 <PrRow pr={pr} />
               </Combobox.Item>
             )}
           </Combobox.List>
           {errorMessage && prs.length > 0 && (
-            <ListPopoverCard status="destructive" className="text-foreground-destructive">
-              <AlertCircle className="size-3.5 shrink-0 text-foreground-destructive" />
-              <span className="shrink-0 font-medium text-foreground-destructive">Sync failed</span>
-              <span
-                className="min-w-0 grow truncate text-foreground-destructive/80"
-                title={errorMessage}
-              >
+            <ListPopoverCard status="destructive">
+              <span aria-hidden className="size-2 shrink-0 rounded-full bg-foreground-error" />
+              <span className="shrink-0 font-medium text-foreground">Sync failed</span>
+              <span className="min-w-0 grow truncate text-foreground-muted" title={errorMessage}>
                 {errorMessage}
               </span>
               {isGitHubAuthError && connectGitHubButton}

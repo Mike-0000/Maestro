@@ -19,7 +19,7 @@ export const root = style({
       display: 'inline-flex',
       alignItems: 'center',
       gap: '0.375rem',
-      padding: '0.125rem 0.75rem',
+      padding: '0.125rem 0.625rem',
       borderRadius: '9999px',
       fontSize: 'var(--em-text-xs)',
       fontWeight: 500,
@@ -65,20 +65,24 @@ export const pulsingDot = style({
   },
 });
 
+// Quiet pills (design brief 2.13.11): one neutral surface step for every tone;
+// only an error and a warning colour the words and the dot (brief 2.6).
+const quietFill = `color-mix(in srgb, ${vars.foreground} 7%, transparent)`;
+
 export const variant = {
   neutral: style({
     '@layer': {
       recipes: {
         color: vars.foregroundMuted,
-        backgroundColor: `color-mix(in srgb, ${vars.foregroundMuted} 10%, transparent)`,
+        backgroundColor: quietFill,
       },
     },
   }),
   success: style({
     '@layer': {
       recipes: {
-        color: vars.foregroundSuccess,
-        backgroundColor: `color-mix(in srgb, ${vars.foregroundSuccess} 12%, transparent)`,
+        color: vars.foreground,
+        backgroundColor: quietFill,
       },
     },
   }),
@@ -86,7 +90,7 @@ export const variant = {
     '@layer': {
       recipes: {
         color: vars.foregroundWarning,
-        backgroundColor: `color-mix(in srgb, ${vars.foregroundWarning} 12%, transparent)`,
+        backgroundColor: quietFill,
       },
     },
   }),
@@ -94,15 +98,15 @@ export const variant = {
     '@layer': {
       recipes: {
         color: vars.foregroundError,
-        backgroundColor: `color-mix(in srgb, ${vars.foregroundError} 12%, transparent)`,
+        backgroundColor: quietFill,
       },
     },
   }),
   info: style({
     '@layer': {
       recipes: {
-        color: vars.foregroundInfo,
-        backgroundColor: `color-mix(in srgb, ${vars.foregroundInfo} 12%, transparent)`,
+        color: vars.foregroundMuted,
+        backgroundColor: quietFill,
       },
     },
   }),

@@ -1,6 +1,6 @@
 import type { HostRef } from '@emdash/core/primitives/host/api';
 import { isValidSkillName } from '@emdash/core/primitives/skills/api';
-import { Button, Dialog, Input, Label, Textarea } from '@emdash/ui/react/primitives';
+import { Button, Dialog, Field, Input, ModalLayout, Textarea } from '@emdash/ui/react/primitives';
 import { useQueryClient } from '@tanstack/react-query';
 import React, { useState } from 'react';
 import { useModalController } from '@core/manifests/browser/modal-api';
@@ -60,82 +60,74 @@ export function CreateSkillModal({ host }: { host: HostRef }) {
   };
 
   return (
-    <>
-      <Dialog.Header>
-        <div className="flex flex-col gap-0.5">
-          <Dialog.Title>New Skill</Dialog.Title>
-        </div>
-      </Dialog.Header>
-
+    <ModalLayout
+      title="New skill"
+      description="Agents load a skill when a task calls for it. Write when to use it and how."
+      actions={
+        <>
+          <Button type="button" variant="ghost" onClick={dismiss} disabled={isCreating}>
+            Cancel
+          </Button>
+          <ConfirmButton
+            variant="primary"
+            type="button"
+            onClick={() => void handleCreateSkill()}
+            disabled={isCreating}
+          >
+            {isCreating ? 'Creating…' : 'Create skill'}
+          </ConfirmButton>
+        </>
+      }
+    >
       <Dialog.Body>
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="skill-name">Name</Label>
-            <Input
-              id="skill-name"
-              placeholder="my-skill"
-              value={name}
-              onChange={(e) => {
-                setName(e.target.value);
-                setCreateError(null);
-              }}
-              className="text-sm"
-            />
-            <p className="text-muted-foreground text-[10px]">
-              Lowercase letters, numbers, and hyphens
-            </p>
-          </div>
+        <Field.Root>
+          <Field.Label htmlFor="skill-name">Name</Field.Label>
+          <Input
+            id="skill-name"
+            placeholder="my-skill"
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value);
+              setCreateError(null);
+            }}
+            className="font-mono"
+          />
+          <Field.Description>Lowercase letters, numbers and hyphens.</Field.Description>
+        </Field.Root>
 
-          <div className="space-y-2">
-            <Label htmlFor="skill-desc">Description</Label>
-            <Input
-              id="skill-desc"
-              placeholder="What does this skill do?"
-              value={description}
-              onChange={(e) => {
-                setDescription(e.target.value);
-                setCreateError(null);
-              }}
-              className="text-sm"
-            />
-          </div>
+        <Field.Root>
+          <Field.Label htmlFor="skill-desc">Description</Field.Label>
+          <Input
+            id="skill-desc"
+            placeholder="What does this skill do, and when should an agent use it?"
+            value={description}
+            onChange={(e) => {
+              setDescription(e.target.value);
+              setCreateError(null);
+            }}
+          />
+        </Field.Root>
 
-          <div className="space-y-2">
-            <Label htmlFor="skill-content">Instructions</Label>
-            <Textarea
-              id="skill-content"
-              placeholder="Write the skill instructions here. The YAML frontmatter (name and description) will be added automatically."
-              value={content}
-              onChange={(e) => {
-                setContent(e.target.value);
-                setCreateError(null);
-              }}
-              className="field-sizing-fixed h-64 max-h-[40dvh] resize-y overflow-y-auto font-mono text-sm"
-            />
-            <p className="text-muted-foreground text-[10px]">
-              Define what this skill does and how agents should use it
-            </p>
-          </div>
+        <Field.Root>
+          <Field.Label htmlFor="skill-content">Instructions</Field.Label>
+          <Textarea
+            id="skill-content"
+            placeholder="Write the skill's instructions. The name and description are added as its front matter."
+            value={content}
+            onChange={(e) => {
+              setContent(e.target.value);
+              setCreateError(null);
+            }}
+            className="field-sizing-fixed h-64 max-h-[40dvh] resize-y overflow-y-auto font-mono text-xs leading-relaxed"
+          />
+          <Field.Description>
+            What the skill does and how agents should use it, in Markdown.
+          </Field.Description>
+        </Field.Root>
 
-          {createError && <p className="text-destructive text-xs">{createError}</p>}
-        </div>
+        {createError && <p className="text-xs text-foreground-error">{createError}</p>}
       </Dialog.Body>
-
-      <Dialog.Footer className="gap-2 sm:gap-2">
-        <Button type="button" variant="secondary" size="sm" onClick={dismiss} disabled={isCreating}>
-          Cancel
-        </Button>
-        <ConfirmButton
-          variant="primary"
-          type="button"
-          onClick={() => void handleCreateSkill()}
-          size="sm"
-          disabled={isCreating}
-        >
-          {isCreating ? 'Creating...' : 'Create'}
-        </ConfirmButton>
-      </Dialog.Footer>
-    </>
+    </ModalLayout>
   );
 }
 

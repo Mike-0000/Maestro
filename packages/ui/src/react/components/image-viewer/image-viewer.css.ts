@@ -17,9 +17,8 @@ export const toolbarGroup = style({
   alignItems: 'center',
   overflow: 'hidden',
   borderRadius: tokenVars.radiusMd,
-  border: `1px solid ${vars.border}`,
-  backgroundColor: vars.surface,
-  boxShadow: vars.shadowSm,
+  backgroundColor: vars.surfaceEmphasis,
+  boxShadow: `${vars.shadowSm}, 0 0 0 1px ${vars.borderSubtle}`,
 });
 
 // Buttons sit flush inside the bordered group; the group's overflow clipping
@@ -42,8 +41,8 @@ export const viewerBody = style({
 // Sizing is owned by the inline wrapperStyle passed to TransformComponent
 // (react-zoom-pan-pinch defaults the wrapper to fit-content otherwise).
 export const transformWrapper = style({
-  borderRadius: tokenVars.radiusMd,
-  backgroundColor: vars.background1,
+  borderRadius: tokenVars.radiusLg,
+  backgroundColor: vars.surfaceEmphasis,
 });
 
 export const unavailable = style({
@@ -90,8 +89,8 @@ export const expandButton = style({
   zIndex: 10,
   opacity: 0,
   transition: 'opacity 150ms',
-  backgroundColor: vars.surface,
-  boxShadow: `${vars.shadowSm}, 0 0 0 1px color-mix(in srgb, ${vars.border} 80%, transparent)`,
+  backgroundColor: vars.surfaceElevated,
+  boxShadow: `${vars.shadowSm}, 0 0 0 1px ${vars.borderSubtle}`,
   selectors: {
     [`${expandableContainer}:hover &`]: { opacity: 1 },
     '&:focus-visible': { opacity: 1 },

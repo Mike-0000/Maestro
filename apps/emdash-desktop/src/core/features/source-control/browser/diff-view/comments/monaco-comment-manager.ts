@@ -166,7 +166,7 @@ export class MonacoCommentManager {
           existing.domNode.dataset.lineNumber = String(comment.lineNumber);
           existing.domNode.style.padding = '12px';
           existing.domNode.style.boxSizing = 'border-box';
-          existing.domNode.className = 'comment-view-zone bg-muted/40 border border-border';
+          existing.domNode.className = 'comment-view-zone';
 
           existing.root.render(
             React.createElement(CommentWidget, {
@@ -197,7 +197,7 @@ export class MonacoCommentManager {
         const domNode = document.createElement('div');
         domNode.style.padding = '12px';
         domNode.style.boxSizing = 'border-box';
-        domNode.className = 'comment-view-zone bg-muted/40 border border-border';
+        domNode.className = 'comment-view-zone';
         domNode.style.pointerEvents = 'auto';
         domNode.style.position = 'relative';
         domNode.style.zIndex = '10';
@@ -266,7 +266,7 @@ export class MonacoCommentManager {
 
     this.inputDomNode.style.padding = '12px';
     this.inputDomNode.style.boxSizing = 'border-box';
-    this.inputDomNode.className = 'comment-view-zone bg-muted/40 border border-border';
+    this.inputDomNode.className = 'comment-view-zone';
     this.inputDomNode.style.pointerEvents = 'auto';
     this.inputDomNode.style.position = 'relative';
     this.inputDomNode.style.zIndex = '10';

@@ -34,13 +34,20 @@ const DirectoryField = React.forwardRef<HTMLButtonElement, DirectoryFieldProps>(
         ref={ref}
         type={type}
         data-slot="directory-field"
+        // The full path stays available on hover, however much of it the field shows.
+        title={hasPath ? path : undefined}
         className={cx(fieldShellBase, styles.layout, size === 'sm' && styles.layoutSm, className)}
         {...props}
       >
         <FolderIcon className={styles.icon} aria-hidden />
-        <span className={cx(styles.value, !hasPath && styles.placeholder)}>
-          {hasPath ? path : placeholder}
-        </span>
+        {hasPath ? (
+          // Truncates at the start so the folder name stays visible (see valuePath).
+          <span data-slot="directory-field-value" className={cx(styles.value, styles.valuePath)}>
+            <bdi dir="ltr">{path}</bdi>
+          </span>
+        ) : (
+          <span className={cx(styles.value, styles.placeholder)}>{placeholder}</span>
+        )}
         <span
           className={cx(
             controlVariants({ variant: 'secondary', size: 'xs' }),

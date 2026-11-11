@@ -5,6 +5,10 @@ import { ScrollContainer } from '@react/primitives/scroll-container';
 import { cx } from '@styles/utilities/cx';
 import { CheckIcon, XIcon } from 'lucide-react';
 import * as React from 'react';
+// Relative type import: the dts emitter rewrites `@styles/*` type imports to a
+// dangling relative path, silently degrading the variant prop types.
+import type { ControlVariantProps } from '../../../styles/recipes/control';
+import { TriggerButton } from '../trigger-button';
 import * as styles from './combobox.css';
 
 const ComboboxRoot = ComboboxPrimitive.Root;
@@ -13,7 +17,42 @@ function ComboboxValue({ ...props }: ComboboxPrimitive.Value.Props) {
   return <ComboboxPrimitive.Value data-slot="combobox-value" {...props} />;
 }
 
-function ComboboxTrigger({ className, children, ...props }: ComboboxPrimitive.Trigger.Props) {
+/**
+ * Without `appearance` the trigger is unstyled (an icon button beside an
+ * input, or a custom face). `appearance="input"` renders the form-field face
+ * shared with `Select.Trigger appearance="input"` (edge, fill, focus ring,
+ * trailing chevron): put the current value as children.
+ */
+function ComboboxTrigger({
+  className,
+  children,
+  appearance,
+  size = 'base',
+  showChevron = true,
+  ...props
+}: ComboboxPrimitive.Trigger.Props & {
+  appearance?: 'input';
+  size?: ControlVariantProps['size'];
+  showChevron?: boolean;
+}) {
+  if (appearance === 'input') {
+    return (
+      <ComboboxPrimitive.Trigger
+        data-slot="combobox-trigger"
+        render={
+          <TriggerButton
+            size={size}
+            showChevron={showChevron}
+            appearance="input"
+            className={cx(styles.comboboxTriggerInput, className)}
+          />
+        }
+        {...props}
+      >
+        {children}
+      </ComboboxPrimitive.Trigger>
+    );
+  }
   return (
     <ComboboxPrimitive.Trigger
       data-slot="combobox-trigger"

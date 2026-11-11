@@ -8,14 +8,14 @@ export function ProjectErrorDetails({ message }: { message?: string }) {
 
   return (
     <Popover.Root key={redacted}>
-      <Popover.Trigger render={<Button type="button" size="sm" variant="ghost" />}>
+      <Popover.Trigger render={<Button type="button" variant="text" className="shrink-0" />}>
         Error details
       </Popover.Trigger>
       <Popover.Content className="w-96 max-w-[calc(100vw-2rem)]">
         <Popover.Header>
           <Popover.Title>Error details</Popover.Title>
         </Popover.Header>
-        <pre className="max-h-64 overflow-auto text-xs break-words whitespace-pre-wrap select-text">
+        <pre className="max-h-64 overflow-auto font-mono text-xs break-words whitespace-pre-wrap text-foreground-muted select-text">
           {redacted}
         </pre>
       </Popover.Content>

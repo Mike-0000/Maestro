@@ -14,6 +14,8 @@ interface DirectoryFieldProps {
   onPathChange: (path: string) => void;
   placeholder?: string;
   ensureDefaultRoot?: boolean;
+  /** The chosen folder has a problem; the field's edge turns destructive. */
+  invalid?: boolean;
 }
 
 export function DirectoryField({
@@ -24,8 +26,9 @@ export function DirectoryField({
   onPathChange,
   path = '',
   getProjectsClient,
-  placeholder = 'Select a directory',
+  placeholder = 'Choose a folder',
   ensureDefaultRoot = false,
+  invalid = false,
 }: DirectoryFieldProps) {
   const openDirectorySelectorModal = useOpenModal('directorySelectorModal');
   const disabled = strategy === 'ssh' && !connectionId;
@@ -59,6 +62,8 @@ export function DirectoryField({
       path={path}
       placeholder={placeholder}
       disabled={disabled}
+      aria-invalid={invalid || undefined}
+      title={path || undefined}
       onClick={() => void handleChooseDirectory()}
     />
   );

@@ -4,6 +4,11 @@ import type { RecipeVariants } from '@vanilla-extract/recipes';
 import { vars } from '@theme/core/contract/contract.css';
 import { tokenVars } from '@theme/tokens.css';
 
+// A status tile reads by its glyph on one neutral step (design brief 2.6): only an
+// error and a warning colour the glyph; success reads full strength, info and
+// neutral muted. No tinted tiles.
+const quietTile = `color-mix(in srgb, ${vars.foreground} 7%, transparent)`;
+
 export const statusIcon = recipe({
   base: {
     '@layer': {
@@ -11,8 +16,9 @@ export const statusIcon = recipe({
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        borderRadius: tokenVars.radiusMd,
+        borderRadius: tokenVars.radiusSm,
         flexShrink: 0,
+        backgroundColor: quietTile,
       },
     },
   },
@@ -21,15 +27,13 @@ export const statusIcon = recipe({
       success: {
         '@layer': {
           recipes: {
-            backgroundColor: vars.backgroundSuccess,
-            color: vars.foregroundSuccess,
+            color: vars.foreground,
           },
         },
       },
       error: {
         '@layer': {
           recipes: {
-            backgroundColor: vars.backgroundError,
             color: vars.foregroundError,
           },
         },
@@ -37,7 +41,6 @@ export const statusIcon = recipe({
       warning: {
         '@layer': {
           recipes: {
-            backgroundColor: vars.backgroundWarning,
             color: vars.foregroundWarning,
           },
         },
@@ -45,15 +48,13 @@ export const statusIcon = recipe({
       info: {
         '@layer': {
           recipes: {
-            backgroundColor: vars.backgroundInfo,
-            color: vars.foregroundInfo,
+            color: vars.foregroundMuted,
           },
         },
       },
       neutral: {
         '@layer': {
           recipes: {
-            backgroundColor: `color-mix(in srgb, ${vars.foregroundMuted} 12%, transparent)`,
             color: vars.foregroundMuted,
           },
         },
@@ -81,6 +82,7 @@ export const statusIcon = recipe({
           recipes: {
             width: '2.25rem',
             height: '2.25rem',
+            borderRadius: tokenVars.radiusMd,
           },
         },
       },

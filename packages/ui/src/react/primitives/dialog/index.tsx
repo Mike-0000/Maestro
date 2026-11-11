@@ -85,7 +85,7 @@ function DialogHeader({
           render={
             <Button
               variant="ghost"
-              size="xs"
+              size="sm"
               icon
               aria-label="Close"
               className={styles.closeButtonOverride}
@@ -151,7 +151,7 @@ function DialogFooter({
     <div data-slot="dialog-footer" className={cx(styles.footer, className)} {...props}>
       {children}
       {showCloseButton && (
-        <DialogPrimitive.Close render={<Button variant="secondary" />}>Close</DialogPrimitive.Close>
+        <DialogPrimitive.Close render={<Button variant="ghost" />}>Close</DialogPrimitive.Close>
       )}
     </div>
   );

@@ -46,13 +46,20 @@ function sanitizeTimeSegmentDraft(raw: string, max: number) {
   return String(Math.min(max, parsed));
 }
 
-/** Small inline <Select.Root> styled to blend into the sentence. */
+/**
+ * The field look the sentence's controls share (the kit's input shell, at the 28px control
+ * height), so each blank reads as something to change without a box around the whole picker.
+ */
+const SENTENCE_FIELD = 'h-7 w-auto gap-1.5 px-2 text-sm text-foreground tabular-nums';
+
+/** A small inline select that reads as one blank in the schedule sentence. */
 function InlineSelect({
   value,
   onValueChange,
   children,
   className,
   renderValue,
+  ariaLabel,
 }: {
   value: string;
   onValueChange: (v: string) => void;
@@ -60,6 +67,7 @@ function InlineSelect({
   className?: string;
   /** Map the raw value to a display label. Required when value !== display text. */
   renderValue?: (v: string) => string;
+  ariaLabel: string;
 }) {
   return (
     <Select.Root
@@ -69,11 +77,9 @@ function InlineSelect({
       }}
     >
       <Select.Trigger
-        size="sm"
-        className={cn(
-          'h-7 border-border/60 bg-muted/20 px-2 text-sm font-medium hover:bg-muted/40',
-          className
-        )}
+        appearance="input"
+        aria-label={ariaLabel}
+        className={cn(SENTENCE_FIELD, className)}
       >
         {renderValue ? <Select.Value>{renderValue}</Select.Value> : <Select.Value />}
       </Select.Trigger>
@@ -159,7 +165,7 @@ function TimeSegment({
       onChange={(event) => setDraft(sanitizeTimeSegmentDraft(event.target.value, max))}
       onKeyDown={handleKeyDown}
       onBlur={() => commit(draft)}
-      className="w-[2ch] rounded-sm bg-transparent text-center leading-none tabular-nums outline-none focus:bg-background-quaternary-1"
+      className="w-[2.25ch] rounded-xs bg-transparent text-center leading-none tabular-nums outline-none focus:bg-surface-selected"
     />
   );
 }
@@ -174,7 +180,11 @@ function TimePicker({
   onChange: (next: { hour: number; minute: number }) => void;
 }) {
   return (
-    <div className="inline-flex h-7 items-center gap-0.5 rounded-md border border-border/60 px-1.5 text-sm leading-none font-medium text-foreground tabular-nums transition-colors focus-within:border-border-primary">
+    <div
+      role="group"
+      aria-label="Time"
+      className="inline-flex h-7 items-center gap-0.5 rounded-md border border-border bg-(--em-surface-input) px-2 text-sm leading-none text-foreground tabular-nums transition-colors focus-within:border-ring focus-within:ring-1 focus-within:ring-ring hover:border-border-1 emlight:border-border-1"
+    >
       <TimeSegment
         value={hour}
         min={0}
@@ -193,9 +203,14 @@ function TimePicker({
     </div>
   );
 }
-/** Thin text label between selectors. */
+/** The words between the blanks: they carry the sentence, so they read in the muted role. */
 function Label({ children }: { children: React.ReactNode }) {
-  return <span className="text-sm text-foreground-passive">{children}</span>;
+  return <span className="text-sm text-foreground-muted">{children}</span>;
+}
+
+/** Period names read inside the sentence ("Every day at …"), so they go lower case. */
+function periodWord(period: CronPeriod): string {
+  return PERIOD_LABELS[period].toLowerCase();
 }
 
 export function CronPicker({ value, onChange, className }: CronPickerProps) {
@@ -240,19 +255,20 @@ export function CronPicker({ value, onChange, className }: CronPickerProps) {
   const showHourMinute = period === 'hour';
 
   return (
-    <div className={cn('flex flex-col gap-1.5 border p-2 rounded-md', className)}>
-      <div className="flex flex-wrap items-center gap-1.5">
+    <div className={cn('flex flex-col gap-1.5', className)}>
+      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-2">
         <Label>Every</Label>
 
         {/* Period selector */}
         <InlineSelect
+          ariaLabel="Repeats every"
           value={period}
           onValueChange={handlePeriodChange}
-          renderValue={(v) => PERIOD_LABELS[v as CronPeriod] ?? v}
+          renderValue={(v) => (v in PERIOD_LABELS ? periodWord(v as CronPeriod) : v)}
         >
           {PERIOD_ORDER.map((p) => (
             <Select.Item key={p} value={p}>
-              {PERIOD_LABELS[p]}
+              {periodWord(p)}
             </Select.Item>
           ))}
         </InlineSelect>
@@ -262,6 +278,7 @@ export function CronPicker({ value, onChange, className }: CronPickerProps) {
           <>
             <Label>in</Label>
             <InlineSelect
+              ariaLabel="Month"
               value={String(month)}
               onValueChange={handleMonthChange}
               renderValue={(v) => MONTH_LABELS[parseInt(v, 10) - 1] ?? v}
@@ -280,6 +297,7 @@ export function CronPicker({ value, onChange, className }: CronPickerProps) {
           <>
             <Label>on the</Label>
             <InlineSelect
+              ariaLabel="Day of the month"
               value={String(monthDay)}
               onValueChange={handleMonthDayChange}
               renderValue={(v) => ordinal(parseInt(v, 10))}
@@ -298,6 +316,7 @@ export function CronPicker({ value, onChange, className }: CronPickerProps) {
           <>
             <Label>on</Label>
             <InlineSelect
+              ariaLabel="Day of the week"
               value={String(weekDay)}
               onValueChange={handleWeekDayChange}
               renderValue={(v) => WEEKDAY_LABELS[parseInt(v, 10)] ?? v}
@@ -329,15 +348,16 @@ export function CronPicker({ value, onChange, className }: CronPickerProps) {
               max={59}
               value={minute}
               onChange={handleMinuteChange}
-              className="h-7 w-[64px] px-2 text-sm"
+              aria-label="Minute past the hour"
+              className="h-7 w-16 px-2 text-sm tabular-nums"
             />
           </>
         )}
       </div>
 
       {parseError && (
-        <p className="text-destructive text-xs">
-          Could not parse the cron expression. Showing defaults — saving will overwrite it.
+        <p className="text-xs text-foreground-warning">
+          This schedule can't be shown in the picker, so it shows the default. Saving replaces it.
         </p>
       )}
     </div>

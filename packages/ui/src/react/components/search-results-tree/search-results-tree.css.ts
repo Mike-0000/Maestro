@@ -1,5 +1,6 @@
 import { style } from '@vanilla-extract/css';
 import { vars } from '@theme/core/contract/contract.css';
+import { tokenVars } from '@theme/tokens.css';
 
 export const root = style({
   display: 'flex',
@@ -22,7 +23,7 @@ export const fileIcon = style({
   flexShrink: 0,
   alignItems: 'center',
   justifyContent: 'center',
-  color: vars.foregroundMuted,
+  color: vars.foregroundPassive,
 });
 
 export const devicon = style({
@@ -42,13 +43,14 @@ export const fileName = style({
 export const count = style({
   marginLeft: 'auto',
   flexShrink: 0,
-  color: vars.foregroundMuted,
+  fontSize: tokenVars.textTiny,
+  color: vars.foregroundPassive,
   fontVariantNumeric: 'tabular-nums',
 });
 
 export const matchRow = style({
-  fontFamily: 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace)',
-  fontSize: '12px',
+  fontFamily: tokenVars.fontMono,
+  fontSize: tokenVars.textXs,
 });
 
 export const lineNumber = style({
@@ -56,7 +58,7 @@ export const lineNumber = style({
   flexShrink: 0,
   paddingRight: '0.5rem',
   textAlign: 'right',
-  color: vars.foregroundMuted,
+  color: vars.foregroundPassive,
   fontVariantNumeric: 'tabular-nums',
 });
 
@@ -68,13 +70,9 @@ export const preview = style({
   whiteSpace: 'pre',
 });
 
+// Match highlight: the amber solid at low strength, so it reads in both themes.
 export const highlight = style({
   borderRadius: '2px',
-  backgroundColor: 'rgb(253 224 71 / 0.6)',
-  color: 'inherit',
-  selectors: {
-    '[data-theme="dark"] &': {
-      backgroundColor: 'rgb(234 179 8 / 0.35)',
-    },
-  },
+  backgroundColor: `color-mix(in srgb, ${vars.foregroundDiffModified} 32%, transparent)`,
+  color: vars.foreground,
 });

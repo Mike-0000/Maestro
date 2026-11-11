@@ -12,8 +12,8 @@ export const wrapper = style({
   alignSelf: 'start',
   boxSizing: 'border-box',
   display: 'flex',
-  minHeight: '100vh',
-  maxHeight: '100vh',
+  minHeight: '100cqh',
+  maxHeight: '100cqh',
   flexDirection: 'column',
   paddingTop: '2.5rem',
   paddingBottom: '0.75rem',
@@ -67,23 +67,27 @@ export const navItem = recipe({
     fontWeight: 400,
     color: vars.foregroundMuted,
     cursor: 'pointer',
+    outline: 'none',
     transition: 'background-color 150ms, box-shadow 150ms, color 150ms',
     textAlign: 'left',
     selectors: {
       '&:hover': {
-        backgroundColor: vars.background1,
+        backgroundColor: vars.surfaceHover,
         color: vars.foreground,
+      },
+      '&:focus-visible': {
+        boxShadow: `inset 0 0 0 1px ${vars.focusRing}`,
       },
     },
   },
   variants: {
     active: {
       true: {
-        backgroundColor: vars.background3,
+        backgroundColor: vars.surfaceSelected,
         color: vars.foreground,
         selectors: {
           '&:hover': {
-            backgroundColor: vars.background3,
+            backgroundColor: vars.surfaceSelected,
             color: vars.foreground,
           },
         },
@@ -119,7 +123,7 @@ export const badge = style({
 });
 
 export const externalIcon = style({
-  color: vars.foregroundMuted,
+  color: vars.foregroundPassive,
   marginLeft: 'auto',
 });
 
@@ -135,7 +139,7 @@ export const divider = style({
       display: 'block',
       width: '100%',
       height: '1px',
-      backgroundColor: vars.border,
+      backgroundColor: vars.borderSubtle,
     },
   },
 });
@@ -144,11 +148,11 @@ export const sectionLabel = style({
   width: '100%',
   paddingTop: '1.25rem',
   paddingRight: '0.75rem',
-  paddingBottom: '0.75rem',
+  paddingBottom: '0.5rem',
   paddingLeft: '0.75rem',
-  fontSize: tokenVars.textSm,
+  // Group-label role (brief 2.4): 11px passive, sentence case.
+  fontSize: tokenVars.textTiny,
   fontWeight: 400,
-  lineHeight: 1,
-  letterSpacing: '-0.015em',
+  lineHeight: tokenVars.textTinyLineHeight,
   color: vars.foregroundPassive,
 });

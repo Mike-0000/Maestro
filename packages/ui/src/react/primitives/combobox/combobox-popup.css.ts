@@ -1,5 +1,5 @@
 import { globalStyle, style } from '@vanilla-extract/css';
-import { kfPopupIn } from '@styles/effects/animations.css';
+import { popupHairline, popupMotion } from '@styles/recipes/popup-surface.css';
 import { vars } from '@theme/core/contract/contract.css';
 import { tokenVars } from '@theme/tokens.css';
 
@@ -8,32 +8,35 @@ export const popupPositioner = style({
   zIndex: 50,
 });
 
-export const popupRoot = style({
-  minWidth: 'min(220px, var(--available-width))',
-  maxWidth: 'min(340px, var(--available-width))',
-  transformOrigin: 'var(--transform-origin)',
-  overflow: 'hidden',
-  outline: 'none',
-  borderRadius: tokenVars.radiusMd,
-  backgroundColor: vars.surface,
-  color: vars.foreground,
-  boxShadow: `${vars.shadowSm}, 0 0 0 1px color-mix(in srgb, ${vars.foreground} 10%, transparent)`,
-  animation: `${kfPopupIn} 100ms both`,
-});
+// The floating surface every popup shares (brief 2.10): elevated, rounded-lg, one hairline.
+export const popupRoot = style([
+  popupMotion,
+  {
+    minWidth: 'min(220px, var(--available-width))',
+    maxWidth: 'min(340px, var(--available-width))',
+    transformOrigin: 'var(--transform-origin)',
+    overflow: 'hidden',
+    outline: 'none',
+    borderRadius: tokenVars.radiusLg,
+    backgroundColor: vars.surface,
+    color: vars.foreground,
+    boxShadow: `${vars.shadowSm}, ${popupHairline}`,
+  },
+]);
 
 export const popupRootWide = style({
   width: 'min(30rem, var(--available-width))',
   maxWidth: 'var(--available-width)',
 });
 
+// A caption over the list, separated by space rather than a rule.
 export const popupHeader = style({
-  borderBottom: `1px solid ${vars.border}`,
-  paddingLeft: '0.5rem',
-  paddingRight: '0.5rem',
-  paddingTop: '0.375rem',
-  paddingBottom: '0.375rem',
-  fontSize: tokenVars.textXs,
-  color: vars.foregroundMuted,
+  paddingLeft: '0.75rem',
+  paddingRight: '0.75rem',
+  paddingTop: '0.5rem',
+  paddingBottom: '0.125rem',
+  fontSize: tokenVars.textTiny,
+  color: vars.foregroundPassive,
 });
 
 export const popupList = style({
@@ -52,12 +55,14 @@ export const popupItem = style({
   userSelect: 'none',
   alignItems: 'center',
   gap: '0.5rem',
-  borderRadius: tokenVars.radiusSm,
+  minHeight: '2rem',
+  borderRadius: tokenVars.radiusMd,
   paddingTop: '0.375rem',
   paddingBottom: '0.375rem',
   paddingLeft: '0.5rem',
   paddingRight: '2rem',
   fontSize: tokenVars.textSm,
+  color: vars.foregroundMuted,
   outline: 'none',
 });
 
@@ -84,9 +89,9 @@ export const popupSectionHeader = style({
   paddingBottom: '0.25rem',
   paddingLeft: '0.5rem',
   paddingRight: '0.5rem',
-  fontSize: tokenVars.textXs,
+  fontSize: tokenVars.textTiny,
   fontWeight: 400,
-  color: vars.foregroundMuted,
+  color: vars.foregroundPassive,
 });
 
 export const popupItemHighlighted = style({

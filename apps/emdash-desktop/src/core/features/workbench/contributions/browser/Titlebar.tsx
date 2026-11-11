@@ -14,7 +14,9 @@ export function Titlebar({ leftSlot, rightSlot }: { leftSlot?: ReactNode; rightS
   return (
     <header
       className={cn(
-        'flex h-10 shrink-0 items-center bg-background-secondary border-b border-border [-webkit-app-region:drag]',
+        // The sidebar's sunken surface, with no rule under it: with the tab strip below, the
+        // window chrome reads as one piece around the content.
+        'surface-sunken flex h-10 shrink-0 items-center bg-(--em-surface) [-webkit-app-region:drag]',
         // macOS traffic lights sit at the top-left, so clear room only there.
         !isLeftOpen && isMac && 'pl-18',
         // Linux draws its own controls flush to the right corner (no native

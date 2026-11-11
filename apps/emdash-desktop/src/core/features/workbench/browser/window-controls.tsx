@@ -91,9 +91,11 @@ function ControlButton({
       aria-label={label}
       title={label}
       onClick={onClick}
+      // Quiet glyphs on the title bar's sunken surface; hover lifts one surface step. Close keeps
+      // the platform's red.
       className={cn(
-        'flex h-10 w-12 items-center justify-center text-muted-foreground transition-colors hover:bg-muted',
-        danger && 'hover:bg-red-500 hover:text-white'
+        'flex h-10 w-12 items-center justify-center text-foreground-passive transition-colors outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset',
+        danger ? 'hover:bg-red-500 hover:text-white' : 'hover:bg-(--em-surface-hover)'
       )}
     >
       {children}

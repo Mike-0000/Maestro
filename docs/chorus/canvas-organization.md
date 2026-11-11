@@ -687,7 +687,7 @@ vanished) it aborts and explains. This covers "an agent was archived during the 
 | Window hidden (closed) | Keeps membership, so "reopen" puts it back in its region at its rect (pushing if needed) |
 | Project filter excludes members | Region header shows "3 filtered"; the Stage shows only visible members and says why others are missing |
 | Region deleted while on its Stage | Stage leaves to the parent location; trail entries for it are pruned |
-| New agent spawned | Goes into the "current region": the Stage's region, else the region containing focus, else `regionScope`, else root. Plans (`propose_plan`) create a region named after the plan (short goal text, uniqued) containing their agents, so a plan's agents arrive grouped. Setting: **Group plan agents in a region** (default on). |
+| New agent spawned | Goes into the "current region": the Stage's region, else the region containing focus, else `regionScope`, else root. Plans (`propose_plan`) create a region named after the plan (short goal text, uniqued) containing their agents, so a plan's agents arrive grouped. Setting: **Group a plan's agents** (default on). |
 | App window resized | Stage re-templates if the page size changes, keeping user ratios where the tree shape holds |
 | Memento from a newer app version | Existing versioned-schema `future-version` path: canvas opens read-only for regions and says so |
 
@@ -717,7 +717,7 @@ vanished) it aborts and explains. This covers "an agent was archived during the 
   right") with Undo; Preview-tier ops use the existing pending card with the countdown.
 - **Speak only what the eyes can't confirm.** Layout results that are visible are not spoken; an
   earcon (short tick) confirms them. Spoken replies are used for clarifications, failures,
-  results off-screen, and Preview-tier prompts. Setting: **Speak layout confirmations** (default
+  results off-screen, and Preview-tier prompts. Setting: **Confirm layout changes aloud** (default
   off). This keeps a busy layout session quiet while staying fully usable eyes-free when enabled.
 - Replies stay one short sentence, per the existing system prompt rule.
 
@@ -863,7 +863,7 @@ Results go to `docs/chorus/spikes/` as PLAN.md §6 prescribes.
 
 - `browser/regions/region-node.tsx` (header, collapse, count/status), drag-to-reparent with drop
   highlight, rigid-body region drag, nested rendering order, minimap outlines, task frames per
-  (task, region), region naming + uniqueness, region roster, "Group plan agents in a region".
+  (task, region), region naming + uniqueness, region roster, "Group a plan's agents".
 - Commands: `canvas.region.create` (Ctrl+G), `canvas.region.rename` (F2),
   `canvas.region.dissolve`, `canvas.region.collapse`, `canvas.moveToRegion` (picker).
 - *Exit*: `tooling/chorus/steps/regions.mjs`: create, nest (3 levels), reparent by drag, collapse,
@@ -1045,8 +1045,8 @@ Differences from the plan:
 - Closing and reopening windows go through the planner (`hide` / `show`), so "undo" also
   reopens a window you just closed. When there is no layout change to undo, "undo" falls back to
   reopening the last closed window, as before.
-- Plan agents gather in a region named after the plan goal (setting: group plan agents), and new
-  agents join the region you are looking at (setting: place new agents in the current region).
+- Plan agents gather in a region named after the plan goal (setting: group a plan's agents), and new
+  agents join the region you are looking at (setting: new windows join the region in view).
 - Layout changes are silent by default; failures, questions, and descriptions are spoken. The
   HUD offers a one-click undo for 12 seconds after a spoken change.
 

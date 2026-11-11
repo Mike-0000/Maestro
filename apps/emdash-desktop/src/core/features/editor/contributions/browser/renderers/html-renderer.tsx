@@ -1,4 +1,5 @@
 import { encodeResourceUri } from '@emdash/core/primitives/path/api';
+import { EmptyState } from '@emdash/ui/react/components';
 import { observer } from 'mobx-react-lite';
 import { useEffect, useRef, useState } from 'react';
 import { HTML_EXTS } from '@core/features/editor/api/browser/renderers/fileKind';
@@ -112,22 +113,26 @@ export const HtmlContentRenderer = observer(function HtmlContentRenderer({
   }, [filePath, workspacePath, pane]);
 
   return (
-    <div className="h-full w-full overflow-hidden bg-(--em-surface)">
+    <div className="h-full w-full overflow-hidden">
       {processedHtml !== null ? (
-        <iframe
-          ref={iframeRef}
-          title={fileName}
-          srcDoc={processedHtml}
-          // allow-scripts: lets the link-intercept script and the page's own JS run.
-          // No allow-same-origin: keeps the iframe an opaque origin so it can't read
-          // host cookies / localStorage. Resources are inlined, so no network needed.
-          sandbox="allow-scripts"
-          className="h-full w-full border-0 bg-white"
-        />
-      ) : (
-        <div className="flex h-full items-center justify-center text-xs text-foreground-passive">
-          {isProcessing ? 'Loading preview…' : 'Empty file'}
+        // The page keeps a white canvas, as a browser would give it (a deliberate exception to the
+        // token rule), framed on the paper so it reads as a document inside the app.
+        <div className="h-full w-full px-3 pb-3">
+          <iframe
+            ref={iframeRef}
+            title={fileName}
+            srcDoc={processedHtml}
+            // allow-scripts: lets the link-intercept script and the page's own JS run.
+            // No allow-same-origin: keeps the iframe an opaque origin so it can't read
+            // host cookies / localStorage. Resources are inlined, so no network needed.
+            sandbox="allow-scripts"
+            className="h-full w-full rounded-lg border-0 bg-white ring-1 ring-border-subtle"
+          />
         </div>
+      ) : isProcessing ? (
+        <EmptyState bare tone="loading" label="Loading preview…" />
+      ) : (
+        <EmptyState bare label="Empty file" />
       )}
     </div>
   );

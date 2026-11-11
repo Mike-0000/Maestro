@@ -2,7 +2,8 @@ import type { ComponentType } from 'react';
 
 declare const modalBrand: unique symbol;
 
-export type ModalSize = 'xs' | 'sm' | 'md' | 'lg';
+/** Dialog widths: xs 320, sm 400 (confirm), md 520 (default form), lg 680, xl 880 (pickers). */
+export type ModalSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl';
 export type ModalPosition = 'center' | 'top';
 
 interface ModalTypes<TResult> {

@@ -29,12 +29,12 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
   return (
     <Button
       type="button"
-      variant="secondary"
+      variant="ghost"
       size="sm"
       aria-label={copied ? `${label} copied` : `Copy ${label}`}
       onClick={() => void copy()}
     >
-      {copied ? <CheckIcon /> : <CopyIcon />}
+      {copied ? <CheckIcon aria-hidden /> : <CopyIcon aria-hidden />}
       <span aria-live="polite">{copied ? 'Copied' : 'Copy'}</span>
     </Button>
   );

@@ -1,4 +1,6 @@
 import type { PluginIconAsset } from '@emdash/shared/plugins';
+import { EmptyState } from '@emdash/ui/react/components';
+import { SettingsCard, SettingsSection } from '@emdash/ui/react/patterns';
 import { Sheet, Tooltip } from '@emdash/ui/react/primitives';
 import React, { useState } from 'react';
 import { isIssueIntegration } from '@core/features/integrations/api/browser/integration-display';
@@ -81,35 +83,64 @@ const IntegrationsCard: React.FC = () => {
 
   return (
     <Tooltip.Provider delay={150}>
-      <div className="space-y-8">
+      <div className="flex flex-col gap-10">
         {accountsError ? (
-          <p role="alert" className="text-sm text-foreground-error">
-            Unable to load accounts. {accountsError.message}
-          </p>
+          <SettingsCard>
+            <EmptyState
+              bare
+              tone="error"
+              className="py-6"
+              label="Could not load your accounts"
+              description="Integrations show here once their accounts load."
+              details={accountsError.message}
+            />
+          </SettingsCard>
         ) : null}
+
         {connectedIntegrations.length > 0 && (
-          <IntegrationSection title="Connected">
-            {connectedIntegrations.map((integration) => (
-              <IntegrationGridCard
-                key={integration.id}
-                integration={integration}
-                selected={integration.id === selectedProvider}
-                onSelect={() => setSelectedProvider(integration.id)}
-              />
-            ))}
-          </IntegrationSection>
+          <SettingsSection title="Connected" bare>
+            <IntegrationList>
+              {connectedIntegrations.map((integration) => (
+                <IntegrationGridCard
+                  key={integration.id}
+                  integration={integration}
+                  selected={integration.id === selectedProvider}
+                  onSelect={() => setSelectedProvider(integration.id)}
+                />
+              ))}
+            </IntegrationList>
+          </SettingsSection>
         )}
 
-        <IntegrationSection title="Available">
-          {availableIntegrations.map((integration) => (
-            <IntegrationGridCard
-              key={integration.id}
-              integration={integration}
-              selected={integration.id === selectedProvider}
-              onSelect={() => setSelectedProvider(integration.id)}
-            />
-          ))}
-        </IntegrationSection>
+        {accountsError ? null : (
+          <SettingsSection
+            title={connectedIntegrations.length > 0 ? 'More integrations' : 'Available'}
+            description="Connect a service to pick its issues when you start a task."
+            bare
+          >
+            <IntegrationList>
+              {availableIntegrations.length > 0 ? (
+                availableIntegrations.map((integration) => (
+                  <IntegrationGridCard
+                    key={integration.id}
+                    integration={integration}
+                    selected={integration.id === selectedProvider}
+                    onSelect={() => setSelectedProvider(integration.id)}
+                  />
+                ))
+              ) : isLoadingAccounts ? (
+                <EmptyState tone="loading" label="Loading integrations…" bare className="py-6" />
+              ) : (
+                <EmptyState
+                  label="Everything is connected"
+                  description="Every available integration has an account."
+                  bare
+                  className="py-6"
+                />
+              )}
+            </IntegrationList>
+          </SettingsSection>
+        )}
       </div>
 
       <Sheet.Root
@@ -126,17 +157,12 @@ const IntegrationsCard: React.FC = () => {
   );
 };
 
-function IntegrationSection({ title, children }: { title: string; children: React.ReactNode }) {
+/** A settings card holding one row per integration; rows bring their own hover step. */
+function IntegrationList({ children }: { children: React.ReactNode }) {
   return (
-    <section className="space-y-3">
-      <h3 className="text-sm font-normal text-foreground">{title}</h3>
-      <div
-        className="grid gap-3"
-        style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}
-      >
-        {children}
-      </div>
-    </section>
+    <SettingsCard padding="rows">
+      <div className="flex flex-col gap-0.5">{children}</div>
+    </SettingsCard>
   );
 }
 

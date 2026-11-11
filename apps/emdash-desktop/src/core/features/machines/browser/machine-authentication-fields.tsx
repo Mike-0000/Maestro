@@ -17,8 +17,7 @@ function PrivateKeyField({ inheritedKey, alias }: { inheritedKey?: string; alias
             {field.state.value && (
               <Button
                 type="button"
-                variant="ghost"
-                size="xs"
+                variant="text"
                 onClick={() => {
                   field.handleChange('');
                   setDraft(null);
@@ -67,7 +66,7 @@ export function MachineAuthenticationFields({
   reuse: { password: boolean; passphrase: boolean };
 }) {
   return (
-    <section className="grid gap-3" aria-label="Authentication settings">
+    <section className="grid gap-5" aria-label="Authentication settings">
       <form.AppField name={`${mode}.authType`}>
         {(field) => (
           <FormFieldShell label="Authentication" orientation="horizontal">
@@ -78,7 +77,12 @@ export function MachineAuthenticationFields({
                   if (value) field.handleChange(value);
                 }}
               >
-                <Select.Trigger id={id} onBlur={field.handleBlur}>
+                <Select.Trigger
+                  id={id}
+                  appearance="input"
+                  className="w-56"
+                  onBlur={field.handleBlur}
+                >
                   <Select.Value>
                     {field.state.value === 'key'
                       ? 'SSH Key'

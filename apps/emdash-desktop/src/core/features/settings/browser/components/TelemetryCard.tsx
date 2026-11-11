@@ -13,45 +13,37 @@ const TelemetryCard: React.FC = () => {
 
   return (
     <SettingRow
-      title="Privacy & Telemetry"
+      title="Usage data"
       description={
-        <div>
-          <p>Help improve {PRODUCT_NAME} by sending anonymous usage data.</p>
-          <p>
-            <span>See </span>
-            <Button
-              type="button"
-              variant="link"
-              size="sm"
-              className="group text-muted-foreground inline-flex h-auto items-center gap-1 px-0 text-sm font-normal hover:text-foreground hover:no-underline focus-visible:ring-0 focus-visible:outline-none"
-              onClick={() => openExternal('https://docs.emdash.sh/telemetry')}
-            >
-              <span className="transition-colors group-hover:text-foreground">
-                Telemetry information
-              </span>
-              <ArrowUpRight className="text-muted-foreground size-3.5 transition-colors transition-transform duration-200 group-hover:translate-x-px group-hover:-translate-y-px group-hover:text-foreground" />
-            </Button>
-            <span> for details.</span>
-          </p>
-        </div>
+        <>
+          Help improve {PRODUCT_NAME} by sending anonymous usage data.{' '}
+          <Button
+            type="button"
+            variant="text"
+            size="xs"
+            className="inline-flex gap-0.5 align-baseline"
+            onClick={() => openExternal('https://docs.emdash.sh/telemetry')}
+          >
+            What is sent
+            <ArrowUpRight className="size-3" aria-hidden />
+          </Button>
+          {!hasKeyAndHost ? (
+            <span className="mt-1 block text-tiny text-foreground-passive">
+              Inactive in this build (no PostHog keys).
+            </span>
+          ) : null}
+        </>
       }
       control={
-        <div className="flex flex-col items-end gap-1">
-          <Switch
-            checked={prefEnabled}
-            onCheckedChange={(checked) => {
-              captureTelemetry('setting_changed', { setting: 'telemetry' });
-              void setTelemetryEnabled(checked);
-            }}
-            disabled={loading || envDisabled}
-            aria-label="Enable anonymous telemetry"
-          />
-          {!hasKeyAndHost && (
-            <span className="text-muted-foreground text-[10px]">
-              Inactive in this build (no PostHog keys)
-            </span>
-          )}
-        </div>
+        <Switch
+          checked={prefEnabled}
+          onCheckedChange={(checked) => {
+            captureTelemetry('setting_changed', { setting: 'telemetry' });
+            void setTelemetryEnabled(checked);
+          }}
+          disabled={loading || envDisabled}
+          aria-label="Enable anonymous telemetry"
+        />
       }
     />
   );

@@ -22,9 +22,10 @@
  * (Host --composer-* inputs are typically set on the theme root and inherit
  * into the portaled surfaces just fine.)
  *
- * The defaults mirror the generated light/dark @emdash/ui theme so the composer
- * renders correctly in Storybook (where the theme sheets ARE imported) and in any
- * host that does not override the --composer-* vars.
+ * The defaults resolve to the generated @emdash/theme palette ramps (the
+ * --em-neutral-*, --em-accent-*, --em-red-* … steps each slot maps to), so the
+ * composer follows whichever theme is active in Storybook (where the theme
+ * sheets ARE imported) and in any host that does not override --composer-*.
  *
  * PUBLIC CONTRACT — --composer-* variables
  * ─────────────────────────────────────────
@@ -36,16 +37,22 @@
  *   --composer-fg-passive          placeholder text
  *
  * Borders:
- *   --composer-border              default border color
- *   --composer-border-strong       hover / focus-within border
- *   --composer-border-focus        focus-ring outline color
+ *   --composer-border              the field's hairline
+ *   --composer-border-strong       strong control edges
+ *   --composer-border-focus        the neutral `borderPrimary` slot (the field's focus ring and
+ *                                  every kit focus outline use the theme's accent focus-ring role,
+ *                                  which this bridge leaves alone)
  *
- * Surfaces (elevation ramp — base is the popup/menu bg, elevated is the shell):
- *   --composer-surface             base surface (menus, attachment remove btn)
+ * Surfaces (base-level slots read by kit pieces inside the composer):
+ *   --composer-surface             base surface
  *   --composer-surface-hover       hover tint on base surface
  *   --composer-surface-selected    selected tint on base surface
- *   --composer-surface-elevated    elevated shell background (composer border bg)
- *   --composer-surface-elevated-hover  elevated shell hover tint
+ *   --composer-surface-elevated    the base-emphasis slot
+ *   --composer-surface-elevated-hover  base-emphasis hover tint
+ *
+ * The field itself paints the emphasis step of the surface cascade it sits in
+ * (`--em-surface-emphasis`, inherited from the host's surface scope), like the
+ * conductor composer, so it follows the host's surfaces without a bridge input.
  *
  * Primary / send button (accent):
  *   --composer-accent              accent button background
@@ -77,9 +84,12 @@
  *   --composer-info-border         info band border
  *   --composer-info-surface-fg     info band foreground
  *
+ * Layout:
+ *   --composer-editor-min-height   resting height of the editor (default one line); the
+ *                                  `minRows` prop sets it, e.g. `minRows={3}` → 4.5em
+ *
  * Legacy single-property override (pre-contract, still honoured):
- *   --composer-bg                  overrides the shell background directly
- *                                  (takes priority over --composer-surface-elevated)
+ *   --composer-bg                  overrides the field background directly
  */
 
 import { globalStyle, style } from '@vanilla-extract/css';
@@ -100,146 +110,90 @@ export const composerThemeScope = style({});
 const lightScope = `:where(.emlight) :where(${composerThemeScope})`;
 const darkScope = `:where(.emdark) :where(${composerThemeScope})`;
 
-// ── Light defaults ─────────────────────────────────────────────────────────────
-// Values mirror the generated @emdash/ui emlight theme (semantic.css + theme.css).
+// ── Defaults ───────────────────────────────────────────────────────────────────
+// Each fallback points at the generated palette step the semantic template
+// resolves that slot to (packages/theme/src/core/contract/semantic-template.ts),
+// so an un-themed host and Storybook render the current theme in any colour
+// mode. The bridge cannot fall back to the slot it redefines (for example
+// `--em-foreground: var(--composer-fg, var(--em-foreground))` is a cycle and
+// resolves to nothing), which is why the fallbacks name ramp steps instead.
+
+/** Ramp-step reference: `ramp('neutral', 12)` → `var(--em-neutral-12)`. */
+const ramp = (scale: string, step: number | 'contrast') => `var(--em-${scale}-${step})`;
+const bridge = (input: string, fallback: string) => `var(${input}, ${fallback})`;
+
+/** Polarity-independent slots (foregrounds, borders, accent, status rooms). */
+const sharedDefaults = {
+  // Core foregrounds
+  [vars.foreground]: bridge('--composer-fg', ramp('neutral', 12)),
+  [vars.foregroundMuted]: bridge('--composer-fg-muted', ramp('neutral', 11)),
+  [vars.foregroundPassive]: bridge('--composer-fg-passive', ramp('neutral', 9)),
+
+  // Borders
+  [vars.border]: bridge('--composer-border', ramp('neutral', 6)),
+  [vars.border1]: bridge('--composer-border-strong', ramp('neutral', 7)),
+  [vars.borderPrimary]: bridge('--composer-border-focus', ramp('neutral', 9)),
+  [vars.borderDestructive]: bridge('--composer-border-destructive', ramp('red', 8)),
+
+  // Primary / send button
+  [vars.primaryButtonBackground]: bridge('--composer-accent', ramp('accent', 9)),
+  [vars.primaryButtonBackgroundHover]: bridge('--composer-accent-hover', ramp('accent', 10)),
+  [vars.primaryButtonForeground]: bridge('--composer-accent-fg', ramp('accent', 'contrast')),
+  [vars.primaryButtonBorder]: bridge('--composer-accent-border', ramp('accent', 7)),
+
+  // Destructive / stop button + ghost-destructive
+  [vars.foregroundDestructive]: bridge('--composer-fg-destructive', ramp('red', 11)),
+  [vars.backgroundDestructive]: bridge('--composer-destructive-bg', ramp('red', 3)),
+  [vars.surfaceDestructiveHover]: bridge('--composer-destructive-hover', ramp('red', 4)),
+  [vars.surfaceDestructiveSelected]: bridge('--composer-destructive-selected', ramp('red', 5)),
+
+  // Error notice band (surface-destructive is also the ghost-destructive room)
+  [vars.surfaceDestructive]: bridge('--composer-error-surface', ramp('red', 3)),
+  [vars.surfaceDestructiveBorder]: bridge('--composer-error-border', ramp('red', 6)),
+  [vars.surfaceDestructiveForeground]: bridge('--composer-error-fg', ramp('red', 11)),
+
+  // Warning notice band
+  [vars.foregroundWarning]: bridge('--composer-fg-warning', ramp('amber', 11)),
+  [vars.surfaceWarning]: bridge('--composer-warning-surface', ramp('amber', 3)),
+  [vars.surfaceWarningBorder]: bridge('--composer-warning-border', ramp('amber', 6)),
+  [vars.surfaceWarningForeground]: bridge('--composer-warning-surface-fg', ramp('amber', 11)),
+
+  // Info notice band
+  [vars.foregroundInfo]: bridge('--composer-fg-info', ramp('blue', 9)),
+  [vars.surfaceInfo]: bridge('--composer-info-surface', ramp('blue', 3)),
+  [vars.surfaceInfoBorder]: bridge('--composer-info-border', ramp('blue', 6)),
+  [vars.surfaceInfoForeground]: bridge('--composer-info-surface-fg', ramp('blue', 11)),
+};
+
+// Surface level vars (the cascade vars --em-surface/hover/selected in
+// surfaces.css.ts default to var(--em-surface-base) etc., so bridging the level
+// vars is sufficient to drive the full surface cascade). The neutral steps that
+// sit closest to each generated surface differ per polarity.
 
 globalStyle(lightScope, {
   vars: {
-    // Core foregrounds
-    [vars.foreground]: 'var(--composer-fg, color(display-p3 0.1329 0.1309 0.1314))',
-    [vars.foregroundMuted]: 'var(--composer-fg-muted, color(display-p3 0.3826 0.3787 0.3798))',
-    [vars.foregroundPassive]: 'var(--composer-fg-passive, color(display-p3 0.5582 0.5525 0.554))',
-
-    // Borders
-    [vars.border]: 'var(--composer-border, color(display-p3 0.7703 0.7673 0.7681))',
-    [vars.border1]: 'var(--composer-border-strong, color(display-p3 0.8109 0.8067 0.8078))',
-    [vars.borderPrimary]: 'var(--composer-border-focus, color(display-p3 0.5582 0.5525 0.554))',
-    [vars.borderDestructive]:
-      'var(--composer-border-destructive, color(display-p3 1 0.5988 0.5722))',
-
-    // Surface level vars (the cascade vars --em-surface/hover/selected in
-    // surfaces.css.ts default to var(--em-surface-base) etc., so bridging the
-    // level vars is sufficient to drive the full surface cascade):
-    [vars.surfaceBase]: 'var(--composer-surface, color(display-p3 0.9543 0.9539 0.954))',
-    [vars.surfaceBaseHover]: 'var(--composer-surface-hover, color(display-p3 0.9023 0.9019 0.902))',
-    [vars.surfaceBaseSelected]:
-      'var(--composer-surface-selected, color(display-p3 0.8508 0.8505 0.8506))',
-    [vars.surfaceBaseEmphasis]:
-      'var(--composer-surface-elevated, color(display-p3 0.9765 0.9762 0.9763))',
-    [vars.surfaceBaseEmphasisHover]:
-      'var(--composer-surface-elevated-hover, color(display-p3 0.9243 0.924 0.9241))',
-
-    // Primary / send button
-    [vars.primaryButtonBackground]: 'var(--composer-accent, color(display-p3 0 0.6298 0.4648))',
-    [vars.primaryButtonBackgroundHover]:
-      'var(--composer-accent-hover, color(display-p3 0 0.5868 0.4314))',
-    [vars.primaryButtonForeground]: 'var(--composer-accent-fg, color(display-p3 1 1 1))',
-    [vars.primaryButtonBorder]:
-      'var(--composer-accent-border, color(display-p3 0.5072 0.8816 0.7469))',
-
-    // Destructive / stop button + ghost-destructive
-    [vars.foregroundDestructive]:
-      'var(--composer-fg-destructive, color(display-p3 0.5963 0.2559 0.2471))',
-    [vars.backgroundDestructive]:
-      'var(--composer-destructive-bg, color(display-p3 0.9541 0.8772 0.8687))',
-    [vars.surfaceDestructiveHover]:
-      'var(--composer-destructive-hover, color(display-p3 0.9395 0.8204 0.8078))',
-    [vars.surfaceDestructiveSelected]:
-      'var(--composer-destructive-selected, color(display-p3 0.9377 0.7569 0.7389))',
-
-    // Error notice band (surface-destructive is also the ghost-destructive room)
-    [vars.surfaceDestructive]:
-      'var(--composer-error-surface, color(display-p3 0.9541 0.8772 0.8687))',
-    [vars.surfaceDestructiveBorder]:
-      'var(--composer-error-border, color(display-p3 0.9467 0.685 0.6619))',
-    [vars.surfaceDestructiveForeground]:
-      'var(--composer-error-fg, color(display-p3 0.5963 0.2559 0.2471))',
-
-    // Warning notice band
-    [vars.foregroundWarning]: 'var(--composer-fg-warning, color(display-p3 0.4753 0.3235 0))',
-    [vars.surfaceWarning]:
-      'var(--composer-warning-surface, color(display-p3 0.9296 0.8956 0.8292))',
-    [vars.surfaceWarningBorder]:
-      'var(--composer-warning-border, color(display-p3 0.8723 0.7501 0.5113))',
-    [vars.surfaceWarningForeground]:
-      'var(--composer-warning-surface-fg, color(display-p3 0.4753 0.3235 0))',
-
-    // Info notice band
-    [vars.foregroundInfo]: 'var(--composer-fg-info, color(display-p3 0.2318 0.5438 0.9627))',
-    [vars.surfaceInfo]: 'var(--composer-info-surface, color(display-p3 0.8604 0.9046 0.965))',
-    [vars.surfaceInfoBorder]: 'var(--composer-info-border, color(display-p3 0.6279 0.7807 0.9926))',
-    [vars.surfaceInfoForeground]:
-      'var(--composer-info-surface-fg, color(display-p3 0.1721 0.3782 0.6587))',
+    ...sharedDefaults,
+    [vars.surfaceBase]: bridge('--composer-surface', ramp('neutral', 2)),
+    [vars.surfaceBaseHover]: bridge('--composer-surface-hover', ramp('neutral', 4)),
+    [vars.surfaceBaseSelected]: bridge('--composer-surface-selected', ramp('neutral', 6)),
+    [vars.surfaceBaseEmphasis]: bridge('--composer-surface-elevated', ramp('neutral', 1)),
+    [vars.surfaceBaseEmphasisHover]: bridge(
+      '--composer-surface-elevated-hover',
+      ramp('neutral', 3)
+    ),
   },
 });
 
-// ── Dark defaults ──────────────────────────────────────────────────────────────
-// Values mirror the generated @emdash/ui emdark theme (semantic.css + theme.css).
-
 globalStyle(darkScope, {
   vars: {
-    // Core foregrounds
-    [vars.foreground]: 'var(--composer-fg, color(display-p3 0.9151 0.9123 0.913))',
-    [vars.foregroundMuted]: 'var(--composer-fg-muted, color(display-p3 0.7229 0.7185 0.7197))',
-    [vars.foregroundPassive]: 'var(--composer-fg-passive, color(display-p3 0.5721 0.5663 0.5679))',
-
-    // Borders
-    [vars.border]: 'var(--composer-border, color(display-p3 0.2206 0.2181 0.2188))',
-    [vars.border1]: 'var(--composer-border-strong, color(display-p3 0.3825 0.3788 0.3798))',
-    [vars.borderPrimary]: 'var(--composer-border-focus, color(display-p3 0.5721 0.5663 0.5679))',
-    [vars.borderDestructive]:
-      'var(--composer-border-destructive, color(display-p3 0.7226 0.3212 0.31))',
-
-    // Surface level vars
-    [vars.surfaceBase]: 'var(--composer-surface, color(display-p3 0.0818 0.0817 0.0817))',
-    [vars.surfaceBaseHover]:
-      'var(--composer-surface-hover, color(display-p3 0.1177 0.1176 0.1176))',
-    [vars.surfaceBaseSelected]:
-      'var(--composer-surface-selected, color(display-p3 0.1552 0.155 0.1551))',
-    [vars.surfaceBaseEmphasis]:
-      'var(--composer-surface-elevated, color(display-p3 0.1177 0.1176 0.1176))',
-    [vars.surfaceBaseEmphasisHover]:
-      'var(--composer-surface-elevated-hover, color(display-p3 0.1552 0.155 0.1551))',
-
-    // Primary / send button
-    [vars.primaryButtonBackground]: 'var(--composer-accent, color(display-p3 0 0.6515 0.4817))',
-    [vars.primaryButtonBackgroundHover]:
-      'var(--composer-accent-hover, color(display-p3 0 0.7093 0.5371))',
-    [vars.primaryButtonForeground]: 'var(--composer-accent-fg, color(display-p3 1 1 1))',
-    [vars.primaryButtonBorder]: 'var(--composer-accent-border, color(display-p3 0 0.4243 0.3136))',
-
-    // Destructive / stop button + ghost-destructive
-    [vars.foregroundDestructive]:
-      'var(--composer-fg-destructive, color(display-p3 0.9855 0.6116 0.5853))',
-    [vars.backgroundDestructive]:
-      'var(--composer-destructive-bg, color(display-p3 0.1618 0.1078 0.1029))',
-    [vars.surfaceDestructiveHover]:
-      'var(--composer-destructive-hover, color(display-p3 0.2137 0.1261 0.1194))',
-    [vars.surfaceDestructiveSelected]:
-      'var(--composer-destructive-selected, color(display-p3 0.2764 0.1365 0.1287))',
-
-    // Error notice band
-    [vars.surfaceDestructive]:
-      'var(--composer-error-surface, color(display-p3 0.1618 0.1078 0.1029))',
-    [vars.surfaceDestructiveBorder]:
-      'var(--composer-error-border, color(display-p3 0.3495 0.1343 0.1295))',
-    [vars.surfaceDestructiveForeground]:
-      'var(--composer-error-fg, color(display-p3 0.9855 0.6116 0.5853))',
-
-    // Warning notice band
-    [vars.foregroundWarning]: 'var(--composer-fg-warning, color(display-p3 0.8581 0.6803 0.314))',
-    [vars.surfaceWarning]:
-      'var(--composer-warning-surface, color(display-p3 0.1463 0.1212 0.0721))',
-    [vars.surfaceWarningBorder]:
-      'var(--composer-warning-border, color(display-p3 0.2995 0.1946 0))',
-    [vars.surfaceWarningForeground]:
-      'var(--composer-warning-surface-fg, color(display-p3 0.8581 0.6803 0.314))',
-
-    // Info notice band
-    [vars.foregroundInfo]: 'var(--composer-fg-info, color(display-p3 0.2522 0.5635 0.9839))',
-    [vars.surfaceInfo]: 'var(--composer-info-surface, color(display-p3 0.0959 0.1275 0.1712))',
-    [vars.surfaceInfoBorder]: 'var(--composer-info-border, color(display-p3 0.1789 0.3709 0.6338))',
-    [vars.surfaceInfoForeground]:
-      'var(--composer-info-surface-fg, color(display-p3 0.5114 0.7307 1))',
+    ...sharedDefaults,
+    [vars.surfaceBase]: bridge('--composer-surface', ramp('neutral', 1)),
+    [vars.surfaceBaseHover]: bridge('--composer-surface-hover', ramp('neutral', 3)),
+    [vars.surfaceBaseSelected]: bridge('--composer-surface-selected', ramp('neutral', 5)),
+    [vars.surfaceBaseEmphasis]: bridge('--composer-surface-elevated', ramp('neutral', 2)),
+    [vars.surfaceBaseEmphasisHover]: bridge(
+      '--composer-surface-elevated-hover',
+      ramp('neutral', 4)
+    ),
   },
 });

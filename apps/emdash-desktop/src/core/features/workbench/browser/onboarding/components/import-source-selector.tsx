@@ -1,4 +1,4 @@
-import { Check } from 'lucide-react';
+import { Checkbox } from '@emdash/ui/react/primitives';
 import {
   type LegacyImportSource,
   type LegacyPortPreviewSource,
@@ -6,7 +6,8 @@ import {
 import { cn } from '@core/primitives/styling/browser/cn';
 import { formatCount, sourceLabel } from './import-format';
 
-function SourceCard({
+/** One earlier version as a checkbox row: its name, then what it holds in a muted line. */
+function SourceRow({
   source,
   preview,
   selected,
@@ -20,34 +21,25 @@ function SourceCard({
   onToggle: () => void;
 }) {
   return (
-    <button
-      type="button"
-      aria-pressed={selected}
-      disabled={disabled}
-      onClick={onToggle}
+    <label
       className={cn(
-        'flex min-h-24 flex-1 flex-col items-start justify-between border p-4 text-left transition-colors',
-        selected
-          ? 'border-primary bg-background text-foreground'
-          : 'border-border bg-background-1 text-foreground hover:bg-background',
-        disabled && 'cursor-not-allowed opacity-60 hover:bg-background-1'
+        'flex items-start gap-3 rounded-md px-3 py-2.5 transition-colors',
+        disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-surface-hover'
       )}
     >
-      <span className="flex w-full items-center justify-between gap-3">
-        <span className="text-base font-medium">{sourceLabel(source)}</span>
-        <span
-          className={cn(
-            'flex h-5 w-5 items-center justify-center border',
-            selected ? 'border-primary bg-primary text-primary-foreground' : 'border-border'
-          )}
-        >
-          {selected && <Check className="h-3.5 w-3.5" />}
+      <Checkbox
+        className="mt-0.5"
+        checked={selected}
+        disabled={disabled}
+        onCheckedChange={() => onToggle()}
+      />
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span className="text-sm text-foreground">{sourceLabel(source)}</span>
+        <span className="text-xs text-foreground-muted tabular-nums">
+          {formatCount(preview.projects, 'project')} · {formatCount(preview.tasks, 'task')}
         </span>
       </span>
-      <span className="text-sm text-foreground-muted">
-        {formatCount(preview.projects, 'project')} · {formatCount(preview.tasks, 'task')}
-      </span>
-    </button>
+    </label>
   );
 }
 
@@ -69,9 +61,13 @@ export function ImportSourceSelector({
   if (sources.length === 0) return null;
 
   return (
-    <div className="grid shrink-0 grid-cols-1 gap-3 sm:grid-cols-2">
+    <div
+      role="group"
+      aria-label="Versions to import"
+      className="surface-emphasis flex w-full shrink-0 flex-col gap-0.5 rounded-lg bg-surface p-1 ring-1 ring-border-subtle"
+    >
       {sources.includes('v0') && (
-        <SourceCard
+        <SourceRow
           source="v0"
           preview={v0Preview}
           selected={selectedSources.includes('v0')}
@@ -80,7 +76,7 @@ export function ImportSourceSelector({
         />
       )}
       {sources.includes('v1-beta') && (
-        <SourceCard
+        <SourceRow
           source="v1-beta"
           preview={betaPreview}
           selected={selectedSources.includes('v1-beta')}

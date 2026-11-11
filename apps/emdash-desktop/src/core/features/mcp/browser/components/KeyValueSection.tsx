@@ -46,10 +46,14 @@ export const KeyValueSection: React.FC<KeyValueSectionProps> = ({
     onChange(replaceEnvEntryWithPaste(entries, index, pastedEntries));
   };
 
+  const missingRequired = entries
+    .filter((entry) => credentialKeys.get(entry.key) === true && !entry.value)
+    .map((entry) => entry.key);
+
   return (
     <Field.Root>
       <Field.Label>{label}</Field.Label>
-      <div className="space-y-2">
+      <div className="flex flex-col gap-2">
         {entries.map((entry, i) => {
           const isCredential = credentialKeys.has(entry.key);
           const isRequired = credentialKeys.get(entry.key) === true;
@@ -62,8 +66,9 @@ export const KeyValueSection: React.FC<KeyValueSectionProps> = ({
                   next[i] = { ...entry, key: e.target.value };
                   onChange(next);
                 }}
-                className="h-8 w-1/2"
+                className="w-2/5 font-mono text-xs"
                 placeholder="KEY"
+                aria-label={`${label}: name ${i + 1}`}
                 onPaste={(e) => handlePaste(i, e)}
               />
               <Input
@@ -73,34 +78,40 @@ export const KeyValueSection: React.FC<KeyValueSectionProps> = ({
                   next[i] = { ...entry, value: e.target.value };
                   onChange(next);
                 }}
-                className={`h-8 w-1/2 ${
-                  isCredential && isRequired && !entry.value
-                    ? 'border-border-warning bg-background-warning'
-                    : ''
-                }`}
+                className="min-w-0 flex-1 font-mono text-xs"
                 placeholder={isCredential ? (isRequired ? 'Required' : 'Optional') : 'value'}
+                aria-label={`${label}: value of ${entry.key || `entry ${i + 1}`}`}
               />
               <Button
                 type="button"
                 variant="ghost"
+                size="sm"
                 icon
-                className="text-muted-foreground hover:text-destructive h-8 w-8 shrink-0"
+                className="shrink-0"
+                aria-label={`Remove ${entry.key || 'this entry'}`}
                 onClick={() => onChange(entries.filter((_, j) => j !== i))}
               >
-                <X className="h-3 w-3" />
+                <X className="size-3.5" />
               </Button>
             </div>
           );
         })}
-        <Button
-          type="button"
-          variant="link"
-          size="sm"
-          className="h-auto p-0 text-xs"
-          onClick={() => onChange([...entries, { id: makeId(), key: '', value: '' }])}
-        >
-          {addLabel}
-        </Button>
+        {missingRequired.length > 0 && (
+          <p className="text-xs text-foreground-warning">
+            {missingRequired.join(', ')} {missingRequired.length === 1 ? 'is' : 'are'} needed for
+            this server to connect.
+          </p>
+        )}
+        <div>
+          <Button
+            type="button"
+            variant="text"
+            size="sm"
+            onClick={() => onChange([...entries, { id: makeId(), key: '', value: '' }])}
+          >
+            {addLabel}
+          </Button>
+        </div>
       </div>
     </Field.Root>
   );

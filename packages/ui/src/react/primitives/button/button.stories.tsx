@@ -5,7 +5,14 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { PlusIcon, SearchIcon, TrashIcon } from 'lucide-react';
 import * as s from '@react/story-layout.css';
 
-const buttonVariants: ButtonVariant[] = ['primary', 'destructive', 'secondary', 'ghost', 'link'];
+const buttonVariants: ButtonVariant[] = [
+  'primary',
+  'destructive',
+  'secondary',
+  'ghost',
+  'text',
+  'link',
+];
 
 const meta: Meta<typeof Button> = {
   title: 'Primitives/Button',
@@ -36,6 +43,28 @@ export const VariantMatrix: Story = {
           {variant}
         </Button>
       ))}
+    </Box>
+  ),
+};
+
+/**
+ * The action row the design brief asks for (2.7): one calm primary, the rest
+ * quiet text actions (`variant="text"`), a ghost icon button for overflow.
+ */
+export const QuietActionRow: Story = {
+  render: () => (
+    <Box display="flex" flexWrap="wrap" alignItems="center" gap="5">
+      <Button variant="primary" size="sm">
+        Done
+      </Button>
+      <Button variant="text">Merge…</Button>
+      <Button variant="text">Open app</Button>
+      <Button variant="text" disabled>
+        Show raw
+      </Button>
+      <Button variant="text" tone="destructive">
+        Discard
+      </Button>
     </Box>
   ),
 };

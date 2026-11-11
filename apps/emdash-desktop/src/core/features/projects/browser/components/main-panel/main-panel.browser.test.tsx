@@ -196,6 +196,8 @@ describe('ProjectMainPanel layout', () => {
         : undefined;
 
     await act(async () => root.render(<ProjectMainPanel />));
+    // The loading state appears after the kit EmptyState's 400ms delay, so fast loads never flash.
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 450)));
 
     expect(host.querySelector('[data-layout-part="header"]')?.textContent).toBe('Emdash');
     expect(host.textContent).toContain(message);

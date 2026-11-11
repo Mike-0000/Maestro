@@ -1,6 +1,6 @@
 import { useAppForm } from '@emdash/ui/react/form';
-import { Button, Collapsible, Dialog, ModalLayout } from '@emdash/ui/react/primitives';
-import { CheckCircle2, LoaderCircle } from 'lucide-react';
+import { Button, Collapsible, Dialog, ModalLayout, Spinner } from '@emdash/ui/react/primitives';
+import { CheckIcon } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { getMachinesStore } from '@core/features/machines/contributions/app-stores';
 import { useModalController } from '@core/manifests/browser/modal-api';
@@ -106,53 +106,41 @@ export function MaestroHostModal({ mode = 'add', machine }: MaestroHostModalProp
 
   return (
     <ModalLayout
-      header={
-        <Dialog.Header showCloseButton>
-          <Dialog.Title>{maestroHostFormTitle(mode)}</Dialog.Title>
-        </Dialog.Header>
+      title={maestroHostFormTitle(mode)}
+      description={introduction(mode, machine)}
+      leading={
+        mode !== 'repair' ? (
+          <Button type="button" variant="text" onClick={() => void check()} disabled={busy}>
+            {operation.status === 'checking' ? (
+              <>
+                <Spinner size="sm" />
+                Checking…
+              </>
+            ) : (
+              'Check address'
+            )}
+          </Button>
+        ) : undefined
       }
-      footer={
-        <Dialog.Footer>
-          <div className="flex w-full items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              {mode !== 'repair' && (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => void check()}
-                  disabled={busy}
-                >
-                  {operation.status === 'checking' ? (
-                    <>
-                      <LoaderCircle className="size-4 animate-spin" />
-                      Checking…
-                    </>
-                  ) : (
-                    'Check address'
-                  )}
-                </Button>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              <Button type="button" variant="secondary" onClick={modal.dismiss} disabled={busy}>
-                Cancel
-              </Button>
-              <Button type="submit" variant="primary" form={MAESTRO_HOST_FORM_ID} disabled={busy}>
-                {operation.status === 'saving' ? (
-                  <>
-                    <LoaderCircle className="size-4 animate-spin" />
-                    {mode === 'edit' ? 'Saving…' : 'Pairing…'}
-                  </>
-                ) : (
-                  maestroHostSubmitLabel(mode)
-                )}
-              </Button>
-            </div>
-          </div>
-        </Dialog.Footer>
+      actions={
+        <>
+          <Button type="button" variant="ghost" onClick={modal.dismiss} disabled={busy}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="primary" form={MAESTRO_HOST_FORM_ID} disabled={busy}>
+            {operation.status === 'saving' ? (
+              <>
+                <Spinner size="sm" />
+                {mode === 'edit' ? 'Saving…' : 'Pairing…'}
+              </>
+            ) : (
+              maestroHostSubmitLabel(mode)
+            )}
+          </Button>
+        </>
       }
     >
-      <Dialog.Body className="max-h-[calc(100dvh-10rem)] overflow-y-auto">
+      <Dialog.Body className="max-h-[calc(100dvh-12rem)] overflow-y-auto">
         <form
           id={MAESTRO_HOST_FORM_ID}
           onSubmit={(event) => {
@@ -160,8 +148,7 @@ export function MaestroHostModal({ mode = 'add', machine }: MaestroHostModalProp
             void submit();
           }}
         >
-          <fieldset disabled={busy} className="m-0 grid min-w-0 gap-4 border-0 p-0">
-            <p className="text-sm text-foreground-muted">{introduction(mode, machine)}</p>
+          <fieldset disabled={busy} className="m-0 grid min-w-0 gap-5 border-0 p-0">
             {mode !== 'repair' && (
               <form.AppField name="url">
                 {(field) => (
@@ -191,9 +178,11 @@ export function MaestroHostModal({ mode = 'add', machine }: MaestroHostModalProp
             {mode !== 'repair' && (
               <Collapsible.Root open={showCloudflare} onOpenChange={setShowCloudflare}>
                 <div className="w-fit">
-                  <Collapsible.Trigger type="button">Cloudflare Access</Collapsible.Trigger>
+                  <Collapsible.Trigger type="button" variant="text">
+                    Cloudflare Access
+                  </Collapsible.Trigger>
                 </div>
-                <Collapsible.Panel className="grid gap-3 pt-2">
+                <Collapsible.Panel className="grid gap-5 pt-3">
                   <p className="text-sm text-foreground-muted">
                     Only needed when the host is published through Cloudflare Access. Enter the
                     service token created for this device.
@@ -228,13 +217,13 @@ export function MaestroHostModal({ mode = 'add', machine }: MaestroHostModalProp
           </fieldset>
         </form>
         {operation.status === 'found' && (
-          <p role="status" className="mt-4 flex items-center gap-2 text-sm">
-            <CheckCircle2 className="size-4 shrink-0 text-foreground-success" />
+          <p role="status" className="mt-5 flex items-center gap-2 text-sm text-foreground">
+            <CheckIcon aria-hidden className="size-4 shrink-0 text-foreground-muted" />
             Found Maestro host “{operation.info.hostName || operation.info.url}”.
           </p>
         )}
         {operation.status === 'failed' && (
-          <p role="alert" className="mt-4 text-sm text-foreground-destructive">
+          <p role="alert" className="mt-5 text-sm text-foreground-error">
             {operation.message}
           </p>
         )}

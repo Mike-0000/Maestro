@@ -24,16 +24,17 @@ export const TabBar = observer(function TabBar({ trailingSlot }: { trailingSlot?
     // DOM focus to the active content. Child handlers run first; the rAF in
     // focusActiveContent() defers the focus call until after they settle.
     // The inline rename input stops propagation, so it keeps focus while editing.
-    // The bar owns one paper surface, matching the task sidebar panels. Tabs
-    // carry no fills — the active tab is marked by text contrast plus an
-    // underline drawn inside the strip, just above the bottom border.
+    // The strip sits on the sunken chrome surface, like the title bar above it and
+    // the app sidebar, with no rule under it. The active tab is a rounded tab on the
+    // content's own surface, so it runs straight into the content below; the other
+    // tabs are text only.
     <div
-      className="task-tab-bar surface-paper flex h-[41px] shrink-0 items-center border-b border-border bg-(--em-surface)"
+      className="task-tab-bar surface-sunken flex h-[41px] shrink-0 bg-(--em-surface)"
       onClick={() => pane.focusActiveContent()}
     >
       <div
         ref={scrollContainerRef}
-        className="flex h-full w-full overflow-x-auto overflow-y-hidden"
+        className="flex h-full w-full items-end gap-0.5 overflow-x-auto overflow-y-hidden pl-1.5"
       >
         {resolvedTabs.map((tab) => {
           if (!pane.registry.has(tab.kind)) return null;
@@ -42,7 +43,8 @@ export const TabBar = observer(function TabBar({ trailingSlot }: { trailingSlot?
           return <TabItemComponent key={tab.tabId} tab={tab} host={pane} ctx={pane.ctx} />;
         })}
         {trailingSlot && (
-          <div className="sticky right-0 z-20 flex h-full shrink-0 items-center bg-(--em-surface) px-1">
+          // Level with the tabs, which hang from the bottom of the strip.
+          <div className="sticky right-0 z-20 flex h-[33px] shrink-0 items-center bg-(--em-surface) px-1">
             {trailingSlot}
           </div>
         )}

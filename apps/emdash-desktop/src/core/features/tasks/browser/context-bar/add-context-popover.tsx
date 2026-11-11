@@ -20,12 +20,12 @@ export function ActionItemBaseRow({
   text: string;
 }) {
   return (
-    <div className="flex h-5 w-full min-w-0 items-center gap-4">
-      <div className="flex items-center gap-1.5">
-        {icon}
-        <div className="shrink-0 truncate text-sm font-normal text-foreground-muted">{label}</div>
+    <div className="flex w-full min-w-0 items-center gap-3">
+      <div className="flex min-w-0 shrink-0 items-center gap-2">
+        <span className="text-foreground-passive">{icon}</span>
+        <div className="max-w-56 truncate text-sm">{label}</div>
       </div>
-      <div className="truncate text-xs text-foreground-passive">{text}</div>
+      <div className="min-w-0 truncate text-xs text-foreground-passive">{text}</div>
     </div>
   );
 }
@@ -43,7 +43,7 @@ export function ActionItemRow({ action }: { action: ContextAction }) {
     case 'draft-comments':
       return (
         <ActionItemBaseRow
-          icon={<MessageSquare className="size-3.5 shrink-0 text-foreground-muted" />}
+          icon={<MessageSquare className="size-3.5 shrink-0" />}
           label="Line comments"
           text={`${action.commentCount} comment${action.commentCount !== 1 ? 's' : ''} in ${action.fileCount} file${action.fileCount !== 1 ? 's' : ''}`}
         />
@@ -183,7 +183,7 @@ export function AddContextPopover({
             ? 'pointer-events-none absolute bottom-0 left-1/2 size-px -translate-x-1/2 overflow-hidden border-0 p-0 opacity-0'
             : renderTrigger
               ? undefined
-              : 'flex h-6 min-w-[160px] items-center justify-between gap-1.5 rounded-lg border-border bg-background-secondary-2 px-2 text-xs font-normal text-foreground-muted transition-colors hover:bg-background-secondary-3 hover:text-foreground disabled:pointer-events-none'
+              : 'flex h-7 items-center justify-between gap-3 rounded-md px-2 text-xs text-foreground-passive transition-colors outline-none hover:bg-surface-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 data-popup-open:bg-surface-hover data-popup-open:text-foreground'
         )}
       >
         {hideTrigger ? null : renderTrigger ? (
@@ -215,17 +215,13 @@ export function AddContextPopover({
           }
         }}
       >
-        <Combobox.Input showTrigger={false} placeholder="Search..." />
+        <Combobox.Input showTrigger={false} placeholder="Search context…" />
         <Combobox.List className="flex-1">
           {(group: { value: string; items: ContextAction[] }) => (
             <Combobox.Group items={group.items}>
               <Combobox.Collection>
                 {(action: ContextAction) => (
-                  <Combobox.Item
-                    key={action.id}
-                    value={action}
-                    className="items-start data-highlighted:bg-background-2!"
-                  >
+                  <Combobox.Item key={action.id} value={action}>
                     <ActionItemRow action={action} />
                   </Combobox.Item>
                 )}
@@ -236,9 +232,10 @@ export function AddContextPopover({
         <Combobox.Empty className="flex flex-1 items-center justify-center">
           {emptyMessage}
         </Combobox.Empty>
-        <div className="flex items-center justify-end border-t px-2 py-1.5">
-          <span className="flex items-center gap-1">
-            <p className="text-xs text-foreground-passive">Add to input</p>
+        {/* Hints in the caption role, set apart by space rather than a rule. */}
+        <div className="flex items-center justify-end gap-4 px-2 pt-1 pb-1.5 text-tiny text-foreground-passive">
+          <span className="flex items-center gap-1.5">
+            Add to input
             <Shortcut hotkey="Enter" variant="keycaps" />
           </span>
         </div>

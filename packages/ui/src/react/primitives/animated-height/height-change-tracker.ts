@@ -2,28 +2,23 @@
  * Decides which ResizeObserver height observations should trigger an
  * animation.
  *
- * The first observation is always swallowed: ResizeObserver fires once
- * immediately after `observe()` with the size that was already measured
- * synchronously before first paint, so animating it would replay the initial
- * mount. Later observations only signal when the height actually changed
- * from the last known value.
+ * ResizeObserver fires once right after `observe()`. When that first
+ * observation matches the height measured synchronously before first paint it
+ * is a no-op (animating it would replay the initial mount). When it differs,
+ * the content changed between the measurement and the first callback (a modal
+ * swapping its loading state for the real body in that window): that is a real
+ * change and must be signalled, otherwise the box stays pinned to the stale
+ * initial height until some later resize happens to occur.
  */
 export function createHeightChangeTracker(initialHeight: number | undefined) {
   let lastHeight = initialHeight;
-  let isFirstObservation = true;
 
   return {
     /** Returns the height to animate to, or null when nothing should happen. */
     observe(height: number): number | null {
-      if (isFirstObservation) {
-        isFirstObservation = false;
-        // Never overwrite a real initial measurement: if the content changed
-        // between that measurement and this first callback, the next
-        // observation must still register as a change from the measured
-        // baseline. Only adopt the observation when no baseline exists.
-        if (lastHeight === undefined) {
-          lastHeight = height;
-        }
+      if (lastHeight === undefined) {
+        // No baseline to animate from: adopt the observation silently.
+        lastHeight = height;
         return null;
       }
       if (height === lastHeight) {

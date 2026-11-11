@@ -106,7 +106,7 @@ class MissingTerminalTabResource implements TerminalTabResourceView {
 }
 
 function TerminalIcon() {
-  return <Terminal className="size-4 shrink-0" />;
+  return <Terminal className="size-3.5 shrink-0" />;
 }
 
 const TerminalTabBarItem = observer(function TerminalTabBarItem({
@@ -154,6 +154,8 @@ const TerminalTabContent = observer(function TerminalTabContent({ host, ctx }: T
       autoFocus={activeTerminal !== null && host.resolvedActiveTabId === activeTab?.tabId}
       emptyState={
         <EmptyState
+          bare
+          tone={terminalManager?.isLoaded ? 'default' : 'loading'}
           label={terminalManager?.isLoaded ? 'Terminal unavailable' : 'Loading terminal'}
           description={
             terminalManager?.isLoaded
@@ -164,6 +166,7 @@ const TerminalTabContent = observer(function TerminalTabContent({ host, ctx }: T
       }
       unavailableState={
         <EmptyState
+          bare
           label="Terminal unavailable"
           description={disabledReason ?? 'Live actions are unavailable.'}
         />

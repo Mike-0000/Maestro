@@ -88,6 +88,13 @@ export const solarizedLightTheme = defineTheme({
         11: { l: -0.02 },
       },
     },
+    // Step 8 draws the keyboard focus ring; the generated step (L ≈ 0.76) is
+    // too pale to see on cream paper, so pull it down to ≈ 0.60 (≥ 3:1).
+    accent: {
+      steps: {
+        8: { l: -0.16 },
+      },
+    },
   },
 
   syntax: { generate: true },

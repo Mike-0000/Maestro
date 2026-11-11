@@ -1,16 +1,8 @@
-import { AgentStatus } from '@emdash/ui/react/components';
-import { AbsoluteTime, Switch } from '@emdash/ui/react/primitives';
-import cronstrue from 'cronstrue';
-import {
-  CheckCircle2,
-  Clock,
-  Folder,
-  Loader2,
-  MinusCircle,
-  XCircle,
-  type LucideIcon,
-} from 'lucide-react';
+import { StateGlyph, type StateGlyphState } from '@emdash/ui/react/components';
+import { MetaLine } from '@emdash/ui/react/patterns';
+import { AbsoluteTime, RelativeTime, Switch } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
+import type { ReactNode } from 'react';
 import {
   useLatestAutomationRun,
   useScheduledAutomationRun,
@@ -26,30 +18,23 @@ import {
   getTaskStore,
 } from '@core/features/tasks/api/browser/task-state/task-selectors';
 import type { Automation } from '@core/primitives/automations/api';
-import type { AutomationRunStatus } from '@core/primitives/automations/api';
 import { cn } from '@core/primitives/styling/browser/cn';
-import { formatRunTriggerKindLabel } from '../automation-run-format';
-
-const RUN_STATUS_ICON: Record<
-  AutomationRunStatus,
-  { Icon: LucideIcon; textClass: string; spin?: boolean }
-> = {
-  scheduled: { Icon: Clock, textClass: 'text-foreground-info' },
-  queued: { Icon: Clock, textClass: 'text-foreground-muted' },
-  provisioning_workspace: { Icon: Loader2, textClass: 'text-foreground-muted', spin: true },
-  starting_session: { Icon: Loader2, textClass: 'text-foreground-muted', spin: true },
-  done: { Icon: CheckCircle2, textClass: 'text-foreground-success' },
-  failed: { Icon: XCircle, textClass: 'text-foreground-error' },
-  skipped: { Icon: MinusCircle, textClass: 'text-foreground-muted' },
-  cancelled: { Icon: MinusCircle, textClass: 'text-foreground-muted' },
-};
+import { agentRunState } from './agent-state';
+import { automationScheduleLabel } from './automation-schedule';
+import { runStatusPresentation } from './RunStatusBadge';
 
 interface AutomationRowProps {
   automation: Automation;
   onToggleEnabled?: (enabled: boolean) => void;
 }
 
-/** Row content (switch + two-line summary) — the CollectionView shell owns interaction. */
+type RowState = { glyph?: StateGlyphState; words: ReactNode; tone?: 'muted' | 'warning' };
+
+/**
+ * Row content for the automations list, read like the project task list: the name, then one
+ * caption line with the state (glyph and words), the schedule and the project; the next run and
+ * the on / paused switch on the right. The CollectionView shell owns the row click.
+ */
 export const AutomationRow = observer(function AutomationRow({
   automation,
   onToggleEnabled,
@@ -73,106 +58,95 @@ export const AutomationRow = observer(function AutomationRow({
   const projectId = automation.projectId ?? null;
   const taskId = run && projectId ? getTaskIdForAutomationRun(projectId, run.id) : null;
   const taskStore = taskId && projectId ? getTaskStore(projectId, taskId) : undefined;
-  const agentStatus = taskStore ? taskAgentStatus(taskStore) : null;
+  const agentState = agentRunState(taskStore ? taskAgentStatus(taskStore) : null);
 
-  const expr = automation.triggerConfig?.expr ?? null;
-  const cronLabel = automation.triggerConfig?.onDemand
-    ? 'On demand'
-    : expr
-      ? (() => {
-          try {
-            return cronstrue.toString(expr.trim());
-          } catch {
-            return expr;
-          }
-        })()
-      : null;
+  // One state, most pressing first: the runtime is gone, the agent a run started is waiting or
+  // at work, the automation is paused, then what its last run did.
+  const state: RowState = (() => {
+    if (!runtimeAvailable) {
+      return {
+        words: availability.data ? 'Remote runtime unavailable' : 'Checking runtime…',
+        tone: availability.data ? 'warning' : 'muted',
+      };
+    }
+    if (agentState) return { glyph: agentState.glyph, words: agentState.words };
+    if (!automation.enabled) return { glyph: 'idle', words: 'Paused' };
+    if (!run) return { glyph: 'idle', words: 'No runs yet' };
+    const status = runStatusPresentation(run.status);
+    const time = run.startedAt ?? run.finishedAt;
+    if (!status) return { glyph: 'idle', words: 'Scheduled' };
+    return {
+      glyph: status.glyph,
+      words: time ? (
+        <>
+          {status.words} <RelativeTime value={time} compact ago />
+        </>
+      ) : (
+        status.words
+      ),
+    };
+  })();
 
   return (
-    <div className="group flex w-full items-center gap-4 text-left">
-      {/* The enable switch is an explicit control — clicks must not reach the row. */}
+    <div className="flex w-full min-w-0 items-center gap-4 text-left">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span
+          className={cn(
+            'min-w-0 truncate text-sm',
+            automation.enabled ? 'text-foreground' : 'text-foreground-muted',
+            agentState?.glyph === 'needs-you' && 'font-medium'
+          )}
+        >
+          {automation.name}
+        </span>
+        <MetaLine
+          className="min-h-4"
+          glyph={state.glyph ? <StateGlyph state={state.glyph} size="sm" /> : undefined}
+          start={[
+            <span
+              key="state"
+              className={cn(
+                state.tone === 'warning' && 'text-foreground-warning',
+                agentState?.glyph === 'needs-you' && 'text-foreground-muted'
+              )}
+            >
+              {state.words}
+            </span>,
+            automationScheduleLabel(automation),
+            projectId ? (
+              projectDisplayName(getProjectStore(projectId))
+            ) : (
+              <span key="project" className="text-foreground-warning">
+                No project
+              </span>
+            ),
+          ]}
+        />
+      </div>
+
+      <span className="shrink-0 text-right text-tiny text-foreground-passive tabular-nums">
+        {automation.enabled && scheduledAt ? (
+          <>
+            Next <AbsoluteTime value={scheduledAt} />
+          </>
+        ) : null}
+      </span>
+
+      {/* The switch is an explicit control: clicks must not reach the row. */}
       <div
         onClick={(e) => e.stopPropagation()}
         onPointerDown={(e) => e.stopPropagation()}
-        className="flex flex-row items-center justify-end gap-3"
+        className="flex shrink-0 items-center"
       >
         <Switch
           checked={automation.enabled}
           disabled={!runtimeAvailable}
           title={availability.data?.available === false ? availability.data.reason : undefined}
+          aria-label={
+            automation.enabled ? `Pause ${automation.name}` : `Turn on ${automation.name}`
+          }
           onCheckedChange={(checked) => onToggleEnabled?.(checked)}
         />
-      </div>
-
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        {/* Row 1: name + agent indicator left, cron + project right */}
-        <div className="flex min-w-0 items-center justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-1">
-            <span
-              className={cn(
-                'min-w-0 truncate text-md',
-                automation.enabled ? 'text-foreground' : 'text-foreground-muted'
-              )}
-            >
-              {automation.name}
-            </span>
-            <AgentStatus status={agentStatus} tooltip />
-          </div>
-          <div className="flex shrink-0 flex-row items-center gap-1 text-xs text-foreground-muted">
-            {cronLabel && (
-              <span className="flex items-center gap-1 rounded-md bg-background-1 px-2 py-1 text-foreground-muted group-hover:bg-background-2">
-                <Clock className="size-3 shrink-0" />
-                <span className="shrink-0">{cronLabel}</span>
-              </span>
-            )}
-            <div className="flex max-w-32 flex-row items-center gap-1.5 rounded-md bg-background-1 px-2 py-1 text-foreground-muted group-hover:bg-background-2">
-              <Folder className="size-3 shrink-0" />
-              <span
-                className={cn(
-                  'min-w-0 truncate text-xs font-normal',
-                  projectId == null && 'text-destructive/80'
-                )}
-              >
-                {projectId ? projectDisplayName(getProjectStore(projectId)) : 'No project'}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Row 2: latest run sentence left, next run / disabled right */}
-        <div className="flex min-w-0 items-center justify-between gap-2">
-          {!runtimeAvailable ? (
-            <span className="text-sm text-foreground-warning">Remote runtime unavailable</span>
-          ) : run ? (
-            (() => {
-              const { Icon, textClass, spin } = RUN_STATUS_ICON[run.status];
-              const time = run.startedAt ?? run.finishedAt;
-              return (
-                <span className="flex items-center gap-1.5 text-sm text-foreground-muted">
-                  <Icon className={cn('size-3.5 shrink-0', textClass, spin && 'animate-spin')} />
-                  Last run on
-                  {time && <AbsoluteTime value={time} className="text-foreground-muted" />}·{' '}
-                  {formatRunTriggerKindLabel(run.triggerKind)}
-                </span>
-              );
-            })()
-          ) : (
-            <span className="text-sm text-foreground-passive">No runs</span>
-          )}
-
-          <div className="shrink-0 text-xs text-foreground-muted">
-            {automation.enabled ? (
-              scheduledAt ? (
-                <span className="flex items-center gap-1">
-                  Next run scheduled
-                  <AbsoluteTime value={scheduledAt} />
-                </span>
-              ) : null
-            ) : (
-              <span className="text-foreground-passive">Disabled</span>
-            )}
-          </div>
-        </div>
       </div>
     </div>
   );

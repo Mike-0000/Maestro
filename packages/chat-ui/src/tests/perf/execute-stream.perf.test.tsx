@@ -10,6 +10,14 @@
  * re-split and re-measured the entire accumulated output, so per-chunk cost
  * grew linearly with total output. With incremental display lines and
  * running-max width tracking, per-chunk cost must stay flat.
+ *
+ * performance.now() has 0.1 ms resolution in a browser that is not cross-origin
+ * isolated, close to the cost of one update. So the test runs STREAMS
+ * independent streams side by side, each with its own identity-stable lines
+ * array, and times one flush across all of them as a single sample (several
+ * ms), divided by STREAMS. Every stream still does the real
+ * first-call-after-flush work (repeating calls on one stream would only hit
+ * its memo caches).
  */
 
 import { executeFromItem, executeUnitDef } from '@components/rows/tools/execute/execute.def';
@@ -23,18 +31,41 @@ import { now, record } from './harness';
 
 const UPDATES = 240;
 const LINES_PER_UPDATE = 25;
+/** Streams timed together per sample, so one sample spans many timer ticks. */
+const STREAMS = 8;
+/** performance.now() resolution without cross-origin isolation. */
+const TIMER_RESOLUTION_MS = 0.1;
+/** Smallest per-update mean a sample can resolve; guards the ratio against 0. */
+const MEAN_FLOOR_MS = TIMER_RESOLUTION_MS / STREAMS;
 
-function executeItem(): Extract<ToolNode, { kind: 'execute-tool-call' }> {
+function executeItem(stream: number): Extract<ToolNode, { kind: 'execute-tool-call' }> {
   return {
     kind: 'execute-tool-call',
-    id: 'perf-exec',
+    id: `perf-exec-${stream}`,
     seq: 0,
-    toolCallId: 'perf-call',
+    toolCallId: `perf-call-${stream}`,
     title: 'stream',
     command: 'stream --lots-of-output',
     status: 'running',
-    terminalId: 'perf-term',
+    terminalId: `perf-term-${stream}`,
   };
+}
+
+type Stream = {
+  item: Extract<ToolNode, { kind: 'execute-tool-call' }>;
+  lines: string[];
+  version: number;
+  ctx: SegmentCtx;
+};
+
+function createStream(index: number): Stream {
+  const stream: Stream = {
+    item: executeItem(index),
+    lines: [''],
+    version: 0,
+    ctx: segCtx(() => ({ lines: stream.lines, truncated: false, version: stream.version })),
+  };
+  return stream;
 }
 
 function segCtx(snapshot: () => TerminalOutputSnapshot): SegmentCtx {
@@ -54,46 +85,54 @@ function mean(samples: number[]): number {
 
 describe('execute row streaming cost', () => {
   it('per-chunk presenter+measure cost does not scale with accumulated output', () => {
-    const item = executeItem();
-    const lines: string[] = [''];
-    let version = 0;
-    const ctx = segCtx(() => ({ lines, truncated: false, version }));
+    const streams = Array.from({ length: STREAMS }, (_, index) => createStream(index));
     const measureCtx: MeasureCtx = {
       theme: DEFAULT_THEME,
       width: 640,
       isCollapsed: () => false,
-      expanded: () => false,
+      // Expanded: a collapsed row is header-only and never touches the output,
+      // so it would time nothing that could grow with accumulated lines.
+      expanded: () => true,
       caches: createChatCaches(),
     };
 
     const perUpdateMs: number[] = [];
     for (let update = 0; update < UPDATES; update += 1) {
       // Simulate one coalesced flush appending a batch of completed lines.
-      lines.pop();
+      const batch: string[] = [];
       for (let i = 0; i < LINES_PER_UPDATE; i += 1) {
-        lines.push(`[${update}:${i}] output line with some representative width ${'x'.repeat(i)}`);
+        batch.push(`[${update}:${i}] output line with some representative width ${'x'.repeat(i)}`);
       }
-      lines.push('');
-      version += 1;
+      for (const stream of streams) {
+        stream.lines.pop();
+        for (const line of batch) stream.lines.push(line);
+        stream.lines.push('');
+        stream.version += 1;
+      }
 
+      // One sample: this flush's per-update work on every stream, averaged.
       const start = now();
-      const data = executeFromItem(item, ctx);
-      executeUnitDef.measure(data, measureCtx, executeUnitDef.vars!);
-      perUpdateMs.push(now() - start);
+      for (const stream of streams) {
+        const data = executeFromItem(stream.item, stream.ctx);
+        executeUnitDef.measure(data, measureCtx, executeUnitDef.vars!);
+      }
+      perUpdateMs.push((now() - start) / STREAMS);
     }
 
     // Skip warmup; compare early steady-state cost against cost once ~6000
-    // lines have accumulated.
+    // lines have accumulated. The floor keeps a sample below timer resolution
+    // from turning the ratio into NaN or Infinity.
     const early = mean(perUpdateMs.slice(20, 60));
     const late = mean(perUpdateMs.slice(UPDATES - 40));
-    const ratio = late / early;
+    const ratio = late / Math.max(early, MEAN_FLOOR_MS);
 
     record({
       label: 'execute stream per-update cost',
       'early mean (ms)': Number(early.toFixed(4)),
       'late mean (ms)': Number(late.toFixed(4)),
       'late/early ratio': Number(ratio.toFixed(2)),
-      'total lines': lines.length,
+      'total lines': streams[0]!.lines.length,
+      streams: STREAMS,
     });
 
     // O(total-output) behavior produces a ratio near UPDATES-proportional

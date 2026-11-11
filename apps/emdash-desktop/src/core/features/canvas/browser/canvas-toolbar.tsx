@@ -1,7 +1,10 @@
+import { StateGlyph } from '@emdash/ui/react/components';
+import { Button, DropdownMenu, Input, Select } from '@emdash/ui/react/primitives';
 import {
   ArrowLeft,
   BellRing,
   Boxes,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Eye,
@@ -26,7 +29,7 @@ import type { OrganizeBy } from '../api/canvas-layout';
 import { MAX_PANES } from '../api/canvas-panes';
 import { adjacentRegion } from '../api/region-tiling';
 import { getCanvasStore } from '../contributions/browser/app-stores';
-import { regionStyle } from './tiles/region-node';
+import { FLOATING_LAYER, regionTint, TINT_SWATCH } from './canvas-styles';
 
 const ORGANIZE_OPTIONS: { value: OrganizeBy | 'tidy'; label: string }[] = [
   { value: 'tidy', label: 'Tidy up' },
@@ -37,7 +40,20 @@ const ORGANIZE_OPTIONS: { value: OrganizeBy | 'tidy'; label: string }[] = [
 ];
 
 const VIEW_OPTIONS = Array.from({ length: MAX_PANES }, (_, index) => index + 1);
+const viewsLabel = (count: number) => (count === 1 ? '1 view' : `${count} views`);
 
+/** The state mark for a group of windows: what needs you first, then a failure, then work. */
+function groupGlyph(group: { waiting: number; failed: number; working: number }) {
+  if (group.waiting > 0) return <StateGlyph state="needs-you" size="sm" />;
+  if (group.failed > 0) return <StateGlyph state="error" size="sm" />;
+  if (group.working > 0) return <StateGlyph state="working" size="sm" />;
+  return null;
+}
+
+/**
+ * The board's toolbar: one calm floating bar of quiet buttons. Toggles show their state as a
+ * pressed button, not a colour; the count of agents that need you uses the state mark.
+ */
 export const CanvasToolbar = observer(function CanvasToolbar() {
   const store = getCanvasStore();
   const attention = store.attentionEntries.length;
@@ -47,14 +63,15 @@ export const CanvasToolbar = observer(function CanvasToolbar() {
   const scope = store.currentRegion();
   const inside = store.focusedRegionId;
   const pro = store.proMode;
+  const projectName = store.projectOptions.find(
+    (project) => project.id === store.projectFilter
+  )?.name;
 
   return (
     <div
-      className={cn(
-        'flex items-center gap-1 rounded-lg border border-border bg-background/95 p-1 text-xs shadow-md backdrop-blur',
-        // Many desks on a narrow window: the bar takes a second row rather than squeezing.
-        pro && 'flex-wrap'
-      )}
+      // A narrow window (or many desks): the bar takes a second row rather than running off the
+      // edge of the board.
+      className={cn(FLOATING_LAYER, 'flex flex-wrap items-center gap-0.5 rounded-lg p-1')}
     >
       <ToolbarButton
         label={
@@ -63,7 +80,7 @@ export const CanvasToolbar = observer(function CanvasToolbar() {
             : 'Switch to Canvas Pro: desks you swap between, one at a time'
         }
         onClick={() => store.setMode(pro ? 'classic' : 'pro')}
-        className={pro ? 'text-violet-700 dark:text-violet-300' : 'text-foreground-muted'}
+        pressed={pro}
       >
         <Layers className="size-3.5" />
         {pro && 'Pro'}
@@ -74,19 +91,22 @@ export const CanvasToolbar = observer(function CanvasToolbar() {
       {inside && !(pro && inside === store.activeDeskId) && <ScopeSegment regionId={inside} />}
       {/* Canvas Pro keeps the bar to one row: the filter shows only when there is one to make. */}
       {(!pro || store.projectFilter !== null || store.projectOptions.length > 1) && (
-        <select
-          aria-label="Project filter"
+        <Select.Root
           value={store.projectFilter ?? ''}
-          onChange={(event) => store.setProjectFilter(event.currentTarget.value || null)}
-          className="h-7 rounded-md border border-border bg-background px-2 text-xs text-foreground outline-none"
+          onValueChange={(value) => store.setProjectFilter(value || null)}
         >
-          <option value="">All projects</option>
-          {store.projectOptions.map((project) => (
-            <option key={project.id} value={project.id}>
-              {project.name}
-            </option>
-          ))}
-        </select>
+          <Select.Trigger size="sm" aria-label="Project filter" className="max-w-44">
+            <Select.Value>{projectName ?? 'All projects'}</Select.Value>
+          </Select.Trigger>
+          <Select.Content align="start">
+            <Select.Item value="">All projects</Select.Item>
+            {store.projectOptions.map((project) => (
+              <Select.Item key={project.id} value={project.id}>
+                {project.name}
+              </Select.Item>
+            ))}
+          </Select.Content>
+        </Select.Root>
       )}
       <ToolbarButton
         label={inside ? 'Fit this sub-canvas to the screen' : 'Fit all agents'}
@@ -114,31 +134,42 @@ export const CanvasToolbar = observer(function CanvasToolbar() {
       >
         <Redo2 className="size-3.5" />
       </ToolbarButton>
-      <select
-        aria-label="Organize the board"
-        title={scope ? 'Organize the windows in this region' : 'Organize the board'}
-        value=""
-        onChange={(event) => {
-          const value = event.currentTarget.value as OrganizeBy | 'tidy' | '';
-          if (!value) return;
-          store.runLayout(
-            [
-              value === 'tidy'
-                ? { op: 'arrange', targets: null, scope, layout: 'tidy' }
-                : { op: 'organize', scope, by: value },
-            ],
-            { source: 'command', allowPreview: true }
-          );
-        }}
-        className="h-7 rounded-md border border-border bg-background px-2 text-xs text-foreground outline-none"
-      >
-        <option value="">Organize…</option>
-        {ORGANIZE_OPTIONS.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-label="Organize the board"
+              title={scope ? 'Organize the windows in this region' : 'Organize the board'}
+              className="gap-1 px-2"
+            />
+          }
+        >
+          Organize
+          <ChevronDown className="size-3.5" />
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Content align="start" width="content">
+          {ORGANIZE_OPTIONS.map((option) => (
+            <DropdownMenu.Item
+              key={option.value}
+              onClick={() =>
+                store.runLayout(
+                  [
+                    option.value === 'tidy'
+                      ? { op: 'arrange', targets: null, scope, layout: 'tidy' }
+                      : { op: 'organize', scope, by: option.value },
+                  ],
+                  { source: 'command', allowPreview: true }
+                )
+              }
+            >
+              {option.label}
+            </DropdownMenu.Item>
+          ))}
+        </DropdownMenu.Content>
+      </DropdownMenu.Root>
       {/* Canvas Pro: an empty top-level region would be a desk, and the strip's + makes those. */}
       {(!pro || selected > 0) && (
         <ToolbarButton
@@ -172,34 +203,46 @@ export const CanvasToolbar = observer(function CanvasToolbar() {
         {!pro && 'Stage'}
       </ToolbarButton>
       {!pro && (
-        <select
-          aria-label="Canvas views"
-          title="Multi-canvas: split the canvas into side-by-side views, each with its own pan and zoom (Ctrl+Alt+1 to 4)"
+        <Select.Root
           value={store.paneCount}
-          onChange={(event) => store.setPaneCount(Number(event.currentTarget.value))}
-          className="h-7 rounded-md border border-border bg-background px-2 text-xs text-foreground outline-none"
+          onValueChange={(value) => {
+            if (value !== null) store.setPaneCount(value);
+          }}
         >
-          {VIEW_OPTIONS.map((count) => (
-            <option key={count} value={count}>
-              {count === 1 ? '1 view' : `${count} views`}
-            </option>
-          ))}
-        </select>
+          <Select.Trigger
+            size="sm"
+            aria-label="Canvas views"
+            title="Multi-canvas: split the canvas into side-by-side views, each with its own pan and zoom (Ctrl+Alt+1 to 4)"
+          >
+            <Select.Value>{viewsLabel(store.paneCount)}</Select.Value>
+          </Select.Trigger>
+          <Select.Content align="start">
+            {VIEW_OPTIONS.map((count) => (
+              <Select.Item key={count} value={count}>
+                {viewsLabel(count)}
+              </Select.Item>
+            ))}
+          </Select.Content>
+        </Select.Root>
       )}
       <Divider />
       <ToolbarButton
         label="Jump to the agent that has waited longest for you"
         onClick={() => store.focusNextAttention()}
         disabled={attention === 0}
-        className={attention > 0 ? 'text-amber-700 dark:text-amber-300' : undefined}
+        className={attention > 0 ? 'text-foreground' : undefined}
       >
-        <BellRing className="size-3.5" />
+        {attention > 0 ? (
+          <StateGlyph state="needs-you" size="sm" />
+        ) : (
+          <BellRing className="size-3.5" />
+        )}
         {attention > 0 ? `${attention} need${attention === 1 ? 's' : ''} you` : 'All clear'}
       </ToolbarButton>
       <ToolbarButton
         label={store.showTaskFrames ? 'Hide task frames' : 'Show task frames'}
         onClick={() => store.setShowTaskFrames(!store.showTaskFrames)}
-        className={store.showTaskFrames ? undefined : 'text-foreground-muted'}
+        pressed={store.showTaskFrames}
       >
         <Group className="size-3.5" />
         {!pro && 'Frames'}
@@ -212,7 +255,7 @@ export const CanvasToolbar = observer(function CanvasToolbar() {
       )}
       {/* In Canvas Pro the desk strip carries the counts, desk by desk. */}
       {!pro && (
-        <span className="px-2 text-foreground-muted tabular-nums">
+        <span className="px-2 text-xs whitespace-nowrap text-foreground-passive tabular-nums">
           {store.visibleAgentEntries.length} agents · {working} working
         </span>
       )}
@@ -261,34 +304,23 @@ const DeskPager = observer(function DeskPager() {
   return (
     <div role="tablist" aria-label="Pages of this desk" className="flex items-center gap-0.5 pl-1">
       {pages.map((page) => {
-        const status =
-          page.waiting > 0
-            ? 'bg-amber-500 motion-safe:animate-pulse'
-            : page.failed > 0
-              ? 'bg-rose-500'
-              : page.working > 0
-                ? 'bg-blue-500'
-                : null;
         const waiting =
           page.waiting > 0 ? `, ${page.waiting} need${page.waiting === 1 ? 's' : ''} you` : '';
         return (
-          <button
+          <Button
             key={page.index}
             type="button"
+            variant="ghost"
+            size="sm"
             role="tab"
             aria-selected={page.active}
             title={`Page ${page.index + 1} of ${pages.length}: ${page.windowCount} window${page.windowCount === 1 ? '' : 's'}${waiting} (Alt+PageUp / PageDown)`}
             onClick={() => store.setDeskPage(page.index)}
-            className={cn(
-              'flex h-7 min-w-6 shrink-0 items-center justify-center gap-1 rounded-md px-1.5 tabular-nums',
-              page.active
-                ? 'bg-background-secondary font-medium text-foreground'
-                : 'text-foreground-muted hover:bg-background-secondary hover:text-foreground'
-            )}
+            className="min-w-7 gap-1 px-1.5 tabular-nums"
           >
             {page.index + 1}
-            {status && <span className={cn('size-1.5 shrink-0 rounded-full', status)} />}
-          </button>
+            {groupGlyph(page)}
+          </Button>
         );
       })}
     </div>
@@ -310,45 +342,38 @@ const DeskChip = observer(function DeskChip({
   removable: boolean;
 }) {
   const store = getCanvasStore();
-  const status =
-    desk.waiting > 0
-      ? 'bg-amber-500 motion-safe:animate-pulse'
-      : desk.failed > 0
-        ? 'bg-rose-500'
-        : desk.working > 0
-          ? 'bg-blue-500'
-          : null;
   return (
-    <span className="group relative flex items-center">
-      <button
+    <span className={cn('group/desk relative flex items-center', regionTint(desk.color))}>
+      <Button
         type="button"
+        variant="ghost"
+        size="sm"
         role="tab"
         aria-selected={desk.active}
         title={deskTitle(desk)}
         onClick={() => store.switchDesk(desk.regionId)}
         onDoubleClick={() => store.setRenamingRegion(desk.regionId)}
-        className={cn(
-          'flex h-7 max-w-40 shrink-0 items-center gap-1.5 rounded-md px-2 font-medium whitespace-nowrap',
-          desk.active
-            ? regionStyle(desk.color).chip
-            : 'text-foreground-muted hover:bg-background-secondary hover:text-foreground'
-        )}
+        className="max-w-40 gap-1.5 px-2"
       >
+        <span aria-hidden className={TINT_SWATCH} />
         <span className="truncate">{desk.name}</span>
         {desk.gather ? (
-          <Inbox className="size-3 shrink-0 opacity-70" />
+          <Inbox className="size-3 shrink-0 text-foreground-passive" />
         ) : (
-          <span className="tabular-nums opacity-60">{desk.windowCount}</span>
+          <span className="text-xs text-foreground-passive tabular-nums">{desk.windowCount}</span>
         )}
-        {status && <span className={cn('size-1.5 shrink-0 rounded-full', status)} />}
-      </button>
+        {groupGlyph(desk)}
+      </Button>
       {desk.active && removable && (
         <button
           type="button"
           aria-label={`Remove the ${desk.name} desk`}
           title={`Remove ${desk.name}; its windows move to the desk before it`}
           onClick={() => store.removeDesk(desk.regionId)}
-          className="absolute -top-1.5 -right-1 hidden size-3.5 items-center justify-center rounded-full border border-border bg-background text-foreground-muted group-hover:flex hover:text-foreground"
+          className={cn(
+            FLOATING_LAYER,
+            'absolute -top-1.5 -right-1 hidden size-4 items-center justify-center rounded-full text-foreground-muted group-hover/desk:flex hover:text-foreground focus-visible:flex focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
+          )}
         >
           <X className="size-2.5" />
         </button>
@@ -370,8 +395,9 @@ function DeskNameField({ desk }: { desk: DeskEntry }) {
     store.setRenamingRegion(null);
   };
   return (
-    <input
+    <Input
       autoFocus
+      size="sm"
       aria-label="Desk name"
       value={name}
       maxLength={40}
@@ -382,7 +408,7 @@ function DeskNameField({ desk }: { desk: DeskEntry }) {
         if (event.key === 'Enter') commit();
         if (event.key === 'Escape') store.setRenamingRegion(null);
       }}
-      className="h-7 w-32 rounded-md border border-border bg-background px-2 text-xs font-medium text-foreground outline-none"
+      className="w-32"
     />
   );
 }
@@ -398,23 +424,23 @@ const VisitorSegment = observer(function VisitorSegment() {
   return (
     <>
       <span
-        className="max-w-56 shrink-0 truncate px-1 font-medium text-violet-700 dark:text-violet-300"
+        className="max-w-56 shrink-0 truncate px-1.5 text-xs text-foreground"
         title={`Visiting from other desks: ${names.join(', ')}. They go back when you switch desks.`}
       >
-        Visiting: {shown}
+        <span className="text-foreground-muted">Visiting:</span> {shown}
         {more}
       </span>
       <ToolbarButton
         label="Send the visiting windows back to their own desks"
         onClick={() => store.sendBack()}
-        className="shrink-0 whitespace-nowrap"
+        className="shrink-0"
       >
         Send back
       </ToolbarButton>
       <ToolbarButton
         label="Keep the visiting windows on this desk"
         onClick={() => store.keepVisitors()}
-        className="shrink-0 whitespace-nowrap"
+        className="shrink-0"
       >
         Keep
       </ToolbarButton>
@@ -441,7 +467,7 @@ const ScopeSegment = observer(function ScopeSegment({ regionId }: { regionId: st
       <ToolbarButton
         label={`Back to ${parent ? parent.name : 'the main canvas'} (Esc)`}
         onClick={() => store.up()}
-        className="text-blue-700 dark:text-blue-300"
+        className="text-foreground"
       >
         <ArrowLeft className="size-3.5" />
         {parent ? parent.name : 'Main canvas'}
@@ -459,12 +485,13 @@ const ScopeSegment = observer(function ScopeSegment({ regionId }: { regionId: st
         <ChevronLeft className="size-3.5" />
       </ToolbarButton>
       <span
-        className="max-w-48 truncate px-1 text-sm font-semibold text-foreground"
+        className={cn('flex max-w-48 min-w-0 items-center gap-1.5 px-1', regionTint(region.color))}
         title={region.name}
       >
-        {region.name}
+        <span aria-hidden className={TINT_SWATCH} />
+        <span className="truncate text-sm font-medium text-foreground">{region.name}</span>
       </span>
-      <span className="text-foreground-muted tabular-nums">
+      <span className="text-xs whitespace-nowrap text-foreground-passive tabular-nums">
         {region.windowCount} window{region.windowCount === 1 ? '' : 's'}
       </span>
       <ToolbarButton
@@ -482,35 +509,38 @@ const ScopeSegment = observer(function ScopeSegment({ regionId }: { regionId: st
 });
 
 function Divider() {
-  return <span className="mx-0.5 h-5 w-px bg-border" />;
+  return <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border-subtle" />;
 }
 
 function ToolbarButton({
   label,
   onClick,
   disabled,
+  pressed,
   className,
   children,
 }: {
   label: string;
   onClick: () => void;
   disabled?: boolean;
+  /** A toggle: shown pressed (one surface step up) while on. */
+  pressed?: boolean;
   className?: string;
   children: React.ReactNode;
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="sm"
       title={label}
       aria-label={label}
+      aria-pressed={pressed}
       disabled={disabled}
       onClick={onClick}
-      className={cn(
-        'flex h-7 items-center gap-1.5 rounded-md px-2 font-medium text-foreground hover:bg-background-secondary disabled:opacity-50 disabled:hover:bg-transparent',
-        className
-      )}
+      className={cn('gap-1.5 px-2', className)}
     >
       {children}
-    </button>
+    </Button>
   );
 }

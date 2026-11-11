@@ -6,7 +6,7 @@ import {
   useQueryListSource,
   type CollectionViewColumn,
 } from '@emdash/ui/react/patterns';
-import { Button, DropdownMenu, Spinner, toast } from '@emdash/ui/react/primitives';
+import { Badge, Button, DropdownMenu, Spinner, toast } from '@emdash/ui/react/primitives';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   EllipsisIcon,
@@ -50,7 +50,7 @@ const CONVERSATION_COLUMNS: CollectionViewColumn<MachineConversationItem>[] = [
     cell: (item) => (
       <span
         className={cn(
-          'flex size-7 shrink-0 items-center justify-center rounded-md bg-background-2 text-foreground-muted',
+          'flex size-7 shrink-0 items-center justify-center rounded-md bg-surface-emphasis text-foreground-passive',
           item.pendingRemoval && 'opacity-60'
         )}
       >
@@ -60,7 +60,8 @@ const CONVERSATION_COLUMNS: CollectionViewColumn<MachineConversationItem>[] = [
   },
   {
     id: 'title',
-    width: 'minmax(0, 1fr)',
+    // The title keeps a readable width; the task chip gives way first in a narrow window.
+    width: 'minmax(9rem, 1fr)',
     cell: (item) => (
       <CollectionViewCell
         className={cn(item.pendingRemoval && 'opacity-60')}
@@ -75,7 +76,7 @@ const CONVERSATION_COLUMNS: CollectionViewColumn<MachineConversationItem>[] = [
   },
   {
     id: 'status',
-    width: 'max-content',
+    width: 'minmax(0, max-content)',
     align: 'center',
     cell: (item) => <ConversationStatusCell item={item} />,
   },
@@ -278,8 +279,9 @@ export function MachineConversationsList({
         errorSlot={
           <EmptyState
             bare
-            label="Could not load conversations."
-            description={
+            tone="error"
+            label="Could not load conversations"
+            details={
               conversationsQuery.error instanceof Error
                 ? conversationsQuery.error.message
                 : String(conversationsQuery.error)
@@ -289,10 +291,11 @@ export function MachineConversationsList({
         emptySlot={
           <EmptyState
             bare
-            label={
+            label={items.length > 0 ? 'No conversations match your search' : 'No conversations yet'}
+            description={
               items.length > 0
-                ? 'No conversations match the current search.'
-                : 'No conversations on this machine.'
+                ? undefined
+                : 'Conversations started on this machine show up here, with or without a task.'
             }
           />
         }
@@ -327,10 +330,10 @@ const ConversationsToolbar = observer(function ConversationsToolbar({
           {total} {total === 1 ? 'conversation' : 'conversations'}
         </span>
         {!hostReachable && (
-          <span className="inline-flex items-center gap-1 rounded-full border border-border-warning px-1.5 py-0.5 text-[10px] tracking-wide text-foreground-warning uppercase">
-            <WifiOffIcon className="size-3" />
-            Offline — showing cached records
-          </span>
+          <Badge tone="warning">
+            <WifiOffIcon aria-hidden />
+            Offline, showing saved records
+          </Badge>
         )}
       </CollectionToolbar.Group>
     </CollectionToolbar.Root>
@@ -340,31 +343,30 @@ const ConversationsToolbar = observer(function ConversationsToolbar({
 function ConversationStatusCell({ item }: { item: MachineConversationItem }) {
   const { conversation } = item;
   return (
-    <div className={cn('flex items-center gap-2', item.pendingRemoval && 'opacity-60')}>
+    <div
+      className={cn(
+        'flex max-w-full min-w-0 items-center gap-2',
+        item.pendingRemoval && 'opacity-60'
+      )}
+    >
       {item.linked ? (
-        <span
-          className="inline-flex max-w-56 shrink-0 items-center gap-1 rounded-full border border-border/70 px-1.5 py-0.5 text-[10px] tracking-wide text-foreground-muted uppercase"
+        <Badge
+          className="max-w-56 min-w-0"
           title={
             conversation.projectName
               ? `${conversation.projectName} / ${conversation.taskName ?? conversation.taskId}`
               : undefined
           }
         >
-          <Link2Icon className="size-3" />
-          <span className="truncate normal-case">
-            {conversation.taskName ?? conversation.taskId}
-          </span>
-        </span>
+          <Link2Icon aria-hidden />
+          <span className="truncate">{conversation.taskName ?? conversation.taskId}</span>
+        </Badge>
       ) : (
-        <Pill tone="warning">Not linked</Pill>
+        <Badge>Not linked</Badge>
       )}
-      {item.missing && <Pill tone="destructive">Missing on host</Pill>}
-      {item.dangling && !item.missing && <Pill tone="warning">Workspace removed</Pill>}
-      {item.pendingRemoval && (
-        <Pill tone="warning" pulse>
-          Removal pending…
-        </Pill>
-      )}
+      {item.missing && <Badge tone="error">Missing on host</Badge>}
+      {item.dangling && !item.missing && <Badge tone="warning">Workspace removed</Badge>}
+      {item.pendingRemoval && <Badge>Removal pending…</Badge>}
     </div>
   );
 }
@@ -418,28 +420,5 @@ function ConversationActionsCell({
         </DropdownMenu.Content>
       </DropdownMenu.Root>
     </div>
-  );
-}
-
-function Pill({
-  children,
-  tone,
-  pulse,
-}: {
-  children: React.ReactNode;
-  tone: 'warning' | 'destructive';
-  pulse?: boolean;
-}) {
-  return (
-    <span
-      className={cn(
-        'shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] tracking-wide uppercase',
-        tone === 'warning' && 'border-border-warning text-foreground-warning',
-        tone === 'destructive' && 'border-border-destructive text-foreground-destructive',
-        pulse && 'animate-pulse'
-      )}
-    >
-      {children}
-    </span>
   );
 }

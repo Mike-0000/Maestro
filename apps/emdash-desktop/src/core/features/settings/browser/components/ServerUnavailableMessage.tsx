@@ -1,13 +1,12 @@
-import { AlertCircle } from 'lucide-react';
+import { TriangleAlert } from 'lucide-react';
 import { PRODUCT_NAME } from '@core/primitives/app-identity/api/app-identity';
 
+/** A quiet line in place of an account action while the account server cannot be reached. */
 export function ServerUnavailableMessage() {
   return (
-    <div className="bg-muted/20 flex items-center gap-2 rounded-md border border-border/60 px-3 py-2">
-      <AlertCircle className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
-      <p className="text-muted-foreground text-xs">
-        {PRODUCT_NAME} server is currently unavailable. Please try again later.
-      </p>
-    </div>
+    <p className="flex max-w-56 items-start gap-1.5 text-xs text-foreground-muted">
+      <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-foreground-warning" aria-hidden />
+      <span>{PRODUCT_NAME} server is unavailable. Try again later.</span>
+    </p>
   );
 }

@@ -1,11 +1,12 @@
 import { useDroppable } from '@dnd-kit/core';
 import { observer } from 'mobx-react-lite';
 import { useCallback, useEffect, useRef, type ReactNode } from 'react';
+import { cn } from '@core/primitives/styling/browser/cn';
 import { PaneDimensionProvider } from '@core/primitives/workbench-shell/browser/tabs/pane-dimension-provider';
 import { usePaneContext } from '../tabs/pane-context';
 import { paneDropTargetId } from './pane-drop-target';
 import { TabBar } from './tab-bar';
-import { PaneSplitDropZones } from './tab-bar/pane-split-drop-zones';
+import { DROP_PREVIEW_CLASS, PaneSplitDropZones } from './tab-bar/pane-split-drop-zones';
 
 const CONTENT_FOCUS_SELECTOR = 'textarea, webview, [contenteditable="true"]';
 
@@ -53,9 +54,7 @@ export const PaneContent = observer(function PaneContent({
   if (!hasAnyTab) {
     return (
       <div ref={setContentRef} className="surface-paper relative h-full bg-(--em-surface)">
-        {isOverContent && (
-          <div className="pointer-events-none absolute inset-0 z-20 bg-foreground/10" />
-        )}
+        {isOverContent && <div className={cn(DROP_PREVIEW_CLASS, 'inset-2')} />}
         {emptyState}
       </div>
     );
@@ -73,9 +72,7 @@ export const PaneContent = observer(function PaneContent({
          * PTY grid calculations.
          */}
         <PaneDimensionProvider sink={pane}>
-          {isOverContent && (
-            <div className="pointer-events-none absolute inset-0 z-20 bg-foreground/10" />
-          )}
+          {isOverContent && <div className={cn(DROP_PREVIEW_CLASS, 'inset-2')} />}
           {pane.registry.all().map((def) => {
             const ContentComponent = def.TabContent;
             const isActive = activeKind === def.kind;

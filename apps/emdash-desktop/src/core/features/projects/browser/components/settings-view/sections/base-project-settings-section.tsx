@@ -1,6 +1,7 @@
 import type { GitBranchRef, GitRemote } from '@emdash/core/runtimes/git/api';
 import { deriveWorktreePoolPath } from '@emdash/core/runtimes/workspace-registry/api';
-import { Button, Field, Input, Select, Separator, Switch } from '@emdash/ui/react/primitives';
+import { SettingsRow, SettingsSection } from '@emdash/ui/react/patterns';
+import { Button, Input, Select, Switch } from '@emdash/ui/react/primitives';
 import { Folder } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useState, type ReactNode } from 'react';
@@ -30,7 +31,6 @@ import type {
 } from '@core/primitives/project-settings/api';
 import { formatDefaultBranch, resolveTmux } from '@core/primitives/project-settings/api';
 import type { Project } from '@core/primitives/projects/api';
-import { cn } from '@core/primitives/styling/browser/cn';
 import type { ProjectPlacementDomainSnapshot } from '../../../../api/project-settings-page';
 import {
   formToStoredGitSettings,
@@ -78,6 +78,7 @@ function ProvenanceField({
   flavor = 'inferred',
   isExplicit,
   onReset,
+  layout = 'inline',
   children,
 }: {
   label: string;
@@ -87,28 +88,46 @@ function ProvenanceField({
   /** Whether the form currently holds an explicit value (shows the reset affordance). */
   isExplicit: boolean;
   onReset: () => void;
+  /** `stacked` for long values (paths); `inline` puts the control on the right at `w-56`. */
+  layout?: 'inline' | 'stacked';
   children: ReactNode;
 }) {
   const provenance: Provenance | null = resolved?.provenance ?? null;
+  // A broken setting explains itself above the control, which needs the full width.
+  const rowLayout = provenance?.kind === 'broken-setting' ? 'stacked' : layout;
   return (
-    <Field.Root>
-      <div className="flex items-center gap-2">
-        <Field.Label>{label}</Field.Label>
-        {provenance ? <ProvenanceBadge provenance={provenance} flavor={flavor} /> : null}
-        {provenance && isExplicit ? (
-          <ResetProvenanceButton flavor={flavor} onReset={onReset} />
-        ) : null}
-      </div>
-      <Field.Description className="text-foreground-muted">{description}</Field.Description>
-      {provenance?.kind === 'broken-setting' ? (
-        <BrokenSettingNotice
-          staleValue={provenance.staleValue}
-          effectiveValue={brokenFallbackDisplay(resolved)}
-        />
-      ) : null}
-      {children}
-      {provenance ? <ProvenanceSourceLine provenance={provenance} /> : null}
-    </Field.Root>
+    <SettingsRow
+      layout={rowLayout}
+      label={
+        <span className="inline-flex flex-wrap items-center gap-2">
+          {label}
+          {provenance ? <ProvenanceBadge provenance={provenance} flavor={flavor} /> : null}
+        </span>
+      }
+      description={
+        <span className="flex flex-col gap-0.5">
+          <span>{description}</span>
+          {provenance ? (
+            <span className="flex flex-wrap items-center gap-x-3">
+              <ProvenanceSourceLine provenance={provenance} />
+              {isExplicit ? <ResetProvenanceButton flavor={flavor} onReset={onReset} /> : null}
+            </span>
+          ) : null}
+        </span>
+      }
+      controlClassName={rowLayout === 'inline' ? 'w-56' : undefined}
+      control={
+        <div className="flex w-full min-w-0 flex-col gap-1.5">
+          {provenance?.kind === 'broken-setting' ? (
+            <BrokenSettingNotice
+              staleValue={provenance.staleValue}
+              effectiveValue={brokenFallbackDisplay(resolved)}
+            />
+          ) : null}
+          {children}
+        </div>
+      }
+    />
   );
 }
 
@@ -187,6 +206,11 @@ export const BaseProjectSettingsSection = observer(function BaseProjectSettingsS
     remotes
   );
 
+  const unavailableCopy =
+    projectType === 'local'
+      ? 'Worktree placement is unavailable until the local runtime is ready.'
+      : 'Worktree placement is unavailable until this Project’s Machine is ready.';
+
   return (
     <>
       <IntegrationAccountsSection
@@ -200,187 +224,197 @@ export const BaseProjectSettingsSection = observer(function BaseProjectSettingsS
         }
       />
 
-      {hostObservationKind === 'unavailable' ? (
-        <Field.Root>
-          <Field.Label>Worktree root</Field.Label>
-          <Field.Description className="text-foreground-muted">
-            {projectType === 'local'
-              ? 'Worktree placement is unavailable until the local runtime is ready.'
-              : 'Worktree placement is unavailable until this Project’s Machine is ready.'}
-          </Field.Description>
-        </Field.Root>
-      ) : (
-        <>
-          <fieldset disabled={hostActionReason !== null} className="contents">
-            <ProvenanceField
-              label="Worktree root"
-              description="Where task worktrees are created."
-              resolved={hostActionReason ? null : (effective?.worktreeRoot ?? null)}
-              flavor="inherited"
-              isExplicit={placementForm.worktreeDirectory.trim() !== ''}
-              onReset={() => updatePlacement('worktreeDirectory', '')}
+      <SettingsSection
+        title="Git"
+        description="Where new tasks branch from, and where this project fetches and pushes."
+      >
+        <ProvenanceField
+          label="Default branch"
+          description="The branch new tasks are created from by default."
+          resolved={effective?.defaultBranch ?? null}
+          isExplicit={gitIdentityForm.defaultBranch !== null}
+          onReset={() => updateGitIdentity('defaultBranch', null)}
+        >
+          <ProjectBranchSelector
+            projectId={projectId}
+            value={gitIdentityForm.defaultBranch ?? effectiveDefaultBranchRef ?? undefined}
+            onValueChange={(branch: GitBranchRef) => updateGitIdentity('defaultBranch', branch)}
+          />
+        </ProvenanceField>
+
+        <ProvenanceField
+          label="Base remote"
+          description="Used for fetching remote branches, choosing task base branches and targeting pull requests."
+          resolved={effective?.baseRemote ?? null}
+          isExplicit={gitIdentityForm.baseRemote.trim() !== ''}
+          onReset={() => updateGitIdentity('baseRemote', '')}
+        >
+          <RemoteSelector
+            remotes={remotes}
+            value={gitIdentityForm.baseRemote || (effective?.baseRemote.value ?? '')}
+            onValueChange={(value) => updateGitIdentity('baseRemote', value)}
+            className="w-full"
+          />
+        </ProvenanceField>
+
+        <ProvenanceField
+          label="Push remote"
+          description="Used when publishing task branches and pushing commits."
+          resolved={effective?.pushRemote ?? null}
+          isExplicit={gitIdentityForm.pushRemote.trim() !== ''}
+          onReset={() => updateGitIdentity('pushRemote', '')}
+        >
+          <RemoteSelector
+            remotes={remotes}
+            value={gitIdentityForm.pushRemote || (effective?.pushRemote.value ?? '')}
+            onValueChange={(value) => updateGitIdentity('pushRemote', value)}
+            className="w-full"
+          />
+        </ProvenanceField>
+
+        <SettingsRow
+          label="Agent git credentials"
+          description="Which git credentials agent and terminal sessions use in this project. Effective account wires the account above, system keeps your machine's credentials, none disables credential helpers in sessions."
+          controlClassName="w-56"
+          control={
+            <Select.Root
+              value={gitIdentityForm.agentGitCredentials}
+              onValueChange={(value) => {
+                if (!value) return;
+                updateGitIdentity('agentGitCredentials', value as AgentGitCredentialsSetting);
+              }}
             >
-              <div className="flex items-center gap-2">
-                <div className="relative flex-1">
+              <Select.Trigger appearance="input" className="w-full min-w-0">
+                {AGENT_GIT_CREDENTIALS_OPTIONS.find(
+                  (option) => option.value === gitIdentityForm.agentGitCredentials
+                )?.label ?? 'Effective account'}
+              </Select.Trigger>
+              <Select.Content align="start" alignItemWithTrigger={false} sideOffset={6}>
+                {AGENT_GIT_CREDENTIALS_OPTIONS.map((option) => (
+                  <Select.Item key={option.value} value={option.value}>
+                    {option.label}
+                  </Select.Item>
+                ))}
+              </Select.Content>
+            </Select.Root>
+          }
+        />
+      </SettingsSection>
+
+      <SettingsSection
+        title="Worktrees"
+        description="Where task worktrees live and how agent sessions run in them."
+      >
+        {hostObservationKind === 'unavailable' ? (
+          <SettingsRow
+            layout="stacked"
+            label="Worktree root"
+            description={unavailableCopy}
+            control={null}
+          />
+        ) : (
+          <>
+            <fieldset disabled={hostActionReason !== null} className="contents">
+              <ProvenanceField
+                layout="stacked"
+                label="Worktree root"
+                description="Where task worktrees are created."
+                resolved={hostActionReason ? null : (effective?.worktreeRoot ?? null)}
+                flavor="inherited"
+                isExplicit={placementForm.worktreeDirectory.trim() !== ''}
+                onReset={() => updatePlacement('worktreeDirectory', '')}
+              >
+                <div className="flex min-w-0 items-center gap-2">
                   <Input
+                    aria-label="Worktree root"
                     aria-invalid={worktreeDirectoryError ? true : undefined}
-                    className={cn(worktreeDirectoryError ? 'pr-44' : undefined)}
+                    className="min-w-0 flex-1 font-mono text-xs"
+                    spellCheck={false}
                     placeholder={effectiveWorktreeRoot ?? inheritedWorktreeRoot}
                     value={placementForm.worktreeDirectory}
                     onChange={(e) => updatePlacement('worktreeDirectory', e.target.value)}
                   />
-                  {worktreeDirectoryError ? (
-                    <span className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-xs text-foreground-error">
-                      {worktreeDirectoryError}
-                    </span>
+                  {projectType === 'local' ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="shrink-0"
+                      disabled={isBrowsingWorktreeDirectory}
+                      onClick={handleBrowseWorktreeDirectory}
+                    >
+                      <Folder data-icon="inline-start" className="size-4" />
+                      Browse
+                    </Button>
                   ) : null}
                 </div>
-                {projectType === 'local' ? (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={isBrowsingWorktreeDirectory}
-                    onClick={handleBrowseWorktreeDirectory}
-                  >
-                    <Folder data-icon="inline-start" className="size-4" />
-                    Browse
-                  </Button>
+                {worktreeDirectoryError ? (
+                  <span role="alert" className="text-xs text-foreground-error">
+                    {worktreeDirectoryError}
+                  </span>
                 ) : null}
-              </div>
-              {derivedPoolPath ? (
-                <span className="text-xs text-foreground-muted">
-                  Worktrees for this repository go in{' '}
-                  <code className="font-mono break-all">{derivedPoolPath}</code>
+                {derivedPoolPath ? (
+                  <span className="text-xs text-foreground-muted">
+                    Worktrees for this repository go in{' '}
+                    <code className="rounded-xs bg-surface-hover px-1 font-mono break-all">
+                      {derivedPoolPath}
+                    </code>
+                  </span>
+                ) : null}
+              </ProvenanceField>
+            </fieldset>
+            {hostActionReason ? (
+              <p role="status" className="text-xs text-foreground-muted">
+                Worktree placement is {hostActionReason.toLocaleLowerCase()}
+              </p>
+            ) : null}
+          </>
+        )}
+
+        <SettingsRow
+          label={
+            <span className="inline-flex flex-wrap items-center gap-2">
+              Enable tmux
+              {tmuxSupported &&
+              (hostObservationKind !== 'unavailable' || placementForm.tmux !== undefined) ? (
+                <ProvenanceBadge provenance={effectiveTmux.provenance} flavor="inherited" />
+              ) : null}
+            </span>
+          }
+          description={
+            <span className="flex flex-col gap-0.5">
+              <span>
+                {!tmuxSupported
+                  ? 'tmux is unavailable for local Windows sessions. Your stored preference is preserved.'
+                  : hostObservationKind === 'unavailable' && placementForm.tmux === undefined
+                    ? 'The inherited tmux value is unavailable. Choose a value to set a Project override.'
+                    : 'Run the agent session inside a tmux session.'}
+              </span>
+              {tmuxSupported && placementForm.tmux !== undefined ? (
+                <span>
+                  <ResetProvenanceButton
+                    flavor="inherited"
+                    onReset={() => updatePlacement('tmux', undefined)}
+                  />
                 </span>
               ) : null}
-            </ProvenanceField>
-          </fieldset>
-          {hostActionReason ? (
-            <p role="status" className="text-xs text-foreground-muted">
-              Worktree placement is {hostActionReason.toLocaleLowerCase()}
-            </p>
-          ) : null}
-        </>
-      )}
-
-      <Separator />
-
-      <ProvenanceField
-        label="Default branch"
-        description="The branch new tasks are created from by default."
-        resolved={effective?.defaultBranch ?? null}
-        isExplicit={gitIdentityForm.defaultBranch !== null}
-        onReset={() => updateGitIdentity('defaultBranch', null)}
-      >
-        <ProjectBranchSelector
-          projectId={projectId}
-          value={gitIdentityForm.defaultBranch ?? effectiveDefaultBranchRef ?? undefined}
-          onValueChange={(branch: GitBranchRef) => updateGitIdentity('defaultBranch', branch)}
-        />
-      </ProvenanceField>
-
-      <Separator />
-
-      <ProvenanceField
-        label="Base remote"
-        description="Used for fetching remote branches, choosing task base branches and targeting pull requests."
-        resolved={effective?.baseRemote ?? null}
-        isExplicit={gitIdentityForm.baseRemote.trim() !== ''}
-        onReset={() => updateGitIdentity('baseRemote', '')}
-      >
-        <RemoteSelector
-          remotes={remotes}
-          value={gitIdentityForm.baseRemote || (effective?.baseRemote.value ?? '')}
-          onValueChange={(value) => updateGitIdentity('baseRemote', value)}
-          className="w-full"
-        />
-      </ProvenanceField>
-
-      <Separator />
-
-      <ProvenanceField
-        label="Push remote"
-        description="Used when publishing task branches and pushing commits."
-        resolved={effective?.pushRemote ?? null}
-        isExplicit={gitIdentityForm.pushRemote.trim() !== ''}
-        onReset={() => updateGitIdentity('pushRemote', '')}
-      >
-        <RemoteSelector
-          remotes={remotes}
-          value={gitIdentityForm.pushRemote || (effective?.pushRemote.value ?? '')}
-          onValueChange={(value) => updateGitIdentity('pushRemote', value)}
-          className="w-full"
-        />
-      </ProvenanceField>
-
-      <Separator />
-
-      <Field.Root>
-        <Field.Label>Agent git credentials</Field.Label>
-        <Field.Description className="text-foreground-muted">
-          Which git credentials agent and terminal sessions use in this project. Effective account
-          wires the account above, system keeps your machine's credentials, none disables credential
-          helpers in sessions.
-        </Field.Description>
-        <Select.Root
-          value={gitIdentityForm.agentGitCredentials}
-          onValueChange={(value) => {
-            if (!value) return;
-            updateGitIdentity('agentGitCredentials', value as AgentGitCredentialsSetting);
-          }}
-        >
-          <Select.Trigger className="w-full min-w-0">
-            {AGENT_GIT_CREDENTIALS_OPTIONS.find(
-              (option) => option.value === gitIdentityForm.agentGitCredentials
-            )?.label ?? 'Effective account'}
-          </Select.Trigger>
-          <Select.Content align="start" alignItemWithTrigger={false} sideOffset={6}>
-            {AGENT_GIT_CREDENTIALS_OPTIONS.map((option) => (
-              <Select.Item key={option.value} value={option.value}>
-                {option.label}
-              </Select.Item>
-            ))}
-          </Select.Content>
-        </Select.Root>
-      </Field.Root>
-
-      <Separator />
-
-      <Field.Root orientation="horizontal">
-        <div className="flex flex-1 flex-col gap-1">
-          <div className="flex items-center gap-2">
-            <Field.Label>Enable tmux</Field.Label>
-            {tmuxSupported &&
-            (hostObservationKind !== 'unavailable' || placementForm.tmux !== undefined) ? (
-              <ProvenanceBadge provenance={effectiveTmux.provenance} flavor="inherited" />
-            ) : null}
-            {tmuxSupported && placementForm.tmux !== undefined ? (
-              <ResetProvenanceButton
-                flavor="inherited"
-                onReset={() => updatePlacement('tmux', undefined)}
-              />
-            ) : null}
-          </div>
-          <Field.Description className="text-foreground-muted">
-            {!tmuxSupported
-              ? 'tmux is unavailable for local Windows sessions. Your stored preference is preserved.'
-              : hostObservationKind === 'unavailable' && placementForm.tmux === undefined
-                ? 'The inherited tmux value is unavailable. Choose a value to set a Project override.'
-                : 'Run the agent session inside a tmux session.'}
-          </Field.Description>
-        </div>
-        <Switch
-          checked={
-            !tmuxSupported
-              ? false
-              : hostObservationKind === 'unavailable'
-                ? (placementForm.tmux ?? false)
-                : effectiveTmux.value
+            </span>
           }
-          disabled={!tmuxSupported}
-          onCheckedChange={(checked) => updatePlacement('tmux', checked)}
+          control={
+            <Switch
+              aria-label="Enable tmux"
+              checked={
+                !tmuxSupported
+                  ? false
+                  : hostObservationKind === 'unavailable'
+                    ? (placementForm.tmux ?? false)
+                    : effectiveTmux.value
+              }
+              disabled={!tmuxSupported}
+              onCheckedChange={(checked) => updatePlacement('tmux', checked)}
+            />
+          }
         />
-      </Field.Root>
+      </SettingsSection>
     </>
   );
 });

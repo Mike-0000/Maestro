@@ -1,5 +1,6 @@
+import { EmptyState } from '@emdash/ui/react/components';
 import { PageLayout, SettingsRow, SettingsSection } from '@emdash/ui/react/patterns';
-import { Badge, Button, DropdownMenu, Spinner, Switch, toast } from '@emdash/ui/react/primitives';
+import { Button, DropdownMenu, Switch, toast } from '@emdash/ui/react/primitives';
 import { Ellipsis, LogIn, Pencil, Trash2, UserRoundCheck } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useEffect, useState } from 'react';
@@ -68,11 +69,13 @@ const ClaudeAccountRow = observer(function ClaudeAccountRow({
   return (
     <SettingsRow
       label={
-        <span className="flex min-w-0 items-center gap-2">
+        <span className="flex min-w-0 items-baseline gap-2">
           <span className="truncate">{account.label}</span>
-          {/* A plain badge: a tooltip trigger is a button, and the row label would click it. */}
+          {/* Words, not a chip: which account new agents start on. */}
           {isDefault && store.hasMultipleAccounts ? (
-            <Badge title="New agents use this account.">Default</Badge>
+            <span className="shrink-0 text-xs font-normal text-foreground-muted">
+              Used by new agents
+            </span>
           ) : null}
         </span>
       }
@@ -82,7 +85,7 @@ const ClaudeAccountRow = observer(function ClaudeAccountRow({
           {!signedIn && (
             <Button
               type="button"
-              variant="secondary"
+              variant="text"
               size="sm"
               disabled={busy}
               onClick={() => void signIn(account)}
@@ -170,18 +173,16 @@ export const ClaudeAccountsSettingsPage = observer(function ClaudeAccountsSettin
   };
 
   return (
-    <div className="space-y-8 pb-10">
+    <div className="flex flex-col pb-16">
       <PageLayout.Header
         sticky
         title="Claude accounts"
         description="Run agents on more than one Claude subscription. Each account keeps its own sign-in, and new agents use the default one."
       />
       {!loaded ? (
-        <div className="flex justify-center py-12">
-          <Spinner />
-        </div>
+        <EmptyState tone="loading" label="Loading accounts…" className="min-h-48" />
       ) : (
-        <>
+        <div className="flex flex-col gap-10">
           <SettingsSection title="Accounts">
             {store.accounts.map((account) => (
               <ClaudeAccountRow key={account.id} account={account} />
@@ -225,12 +226,12 @@ export const ClaudeAccountsSettingsPage = observer(function ClaudeAccountsSettin
             />
           </SettingsSection>
           <SettingsSection title="Usage">
-            <ClaudeUsageRefresh now={now} className="justify-between" />
+            <ClaudeUsageRefresh now={now} className="-mr-1.5 -mb-3 justify-end" />
             {store.accounts.map((account) => (
               <ClaudeUsageRow key={account.id} account={account} now={now} />
             ))}
           </SettingsSection>
-        </>
+        </div>
       )}
     </div>
   );

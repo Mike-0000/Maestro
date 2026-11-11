@@ -42,6 +42,25 @@ export const Default: Story = {
   ),
 };
 
+/**
+ * `variant="underline"`: plain words, the one on screen underlined in its own
+ * colour (the conductor status strip's Conductor | Raw switch).
+ */
+export const Underline: Story = {
+  render: () => (
+    <Tabs.Root defaultValue="conductor">
+      <Tabs.List variant="underline" aria-label="Chat view">
+        <Tabs.Tab value="conductor" size="sm">
+          Conductor
+        </Tabs.Tab>
+        <Tabs.Tab value="raw" size="sm">
+          Raw
+        </Tabs.Tab>
+      </Tabs.List>
+    </Tabs.Root>
+  ),
+};
+
 export const Vertical: Story = {
   render: () => (
     <Tabs.Root defaultValue="overview" orientation="vertical">

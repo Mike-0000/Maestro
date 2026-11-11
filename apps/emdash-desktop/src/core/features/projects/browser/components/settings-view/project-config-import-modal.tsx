@@ -1,5 +1,12 @@
 import { err, type Result } from '@emdash/shared';
-import { Button, Dialog, Field, RadioGroup, Select } from '@emdash/ui/react/primitives';
+import {
+  Button,
+  Dialog,
+  Field,
+  ModalLayout,
+  RadioGroup,
+  Select,
+} from '@emdash/ui/react/primitives';
 import { Check, Loader2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useModalController } from '@core/manifests/browser/modal-api';
@@ -56,8 +63,8 @@ export function ProjectConfigImportModal({
   );
   const description =
     migrations.length === 1 && selectedMigration
-      ? `Found configuration file from ${selectedMigration.label} that can be imported into Chorus.`
-      : 'Found configuration files that can be imported into Chorus.';
+      ? `Found configuration file from ${selectedMigration.label} that can be imported into Maestro.`
+      : 'Found configuration files that can be imported into Maestro.';
 
   const disabled = !selectedMigration || status === 'importing' || status === 'imported';
 
@@ -91,22 +98,43 @@ export function ProjectConfigImportModal({
   }
 
   return (
-    <>
-      <Dialog.Header showCloseButton={false}>
-        <Dialog.Title>Import project config</Dialog.Title>
-      </Dialog.Header>
-      <Dialog.Body className="pt-0">
-        <Field.Group>
-          <p className="text-sm text-foreground-muted">{description}</p>
+    <ModalLayout
+      title="Import project config"
+      description={description}
+      showCloseButton={false}
+      actions={
+        <>
+          <Button variant="ghost" onClick={modal.dismiss} disabled={status === 'importing'}>
+            {status === 'imported' ? 'Close' : 'Cancel'}
+          </Button>
+          <ConfirmButton variant="primary" onClick={() => void handleImport()} disabled={disabled}>
+            <span className="inline-flex items-center justify-center gap-1.5">
+              {status === 'importing' && (
+                <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden />
+              )}
+              {status === 'imported' && <Check className="size-4" aria-hidden />}
+              {status === 'importing'
+                ? 'Importing…'
+                : status === 'imported'
+                  ? 'Imported'
+                  : 'Import'}
+            </span>
+          </ConfirmButton>
+        </>
+      }
+    >
+      <Dialog.Body>
+        <Field.Group className="gap-5">
           {migrations.length > 1 && (
             <Field.Root>
+              <Field.Label>Config to import</Field.Label>
               <Select.Root
                 value={selectedMigration?.provider ?? ''}
                 onValueChange={(value) =>
                   setSelectedProvider(value as ProjectConfigMigrationProvider)
                 }
               >
-                <Select.Trigger className="w-full min-w-0">
+                <Select.Trigger appearance="input" className="w-full min-w-0">
                   <span className="min-w-0 truncate">
                     {selectedMigration?.label ?? 'Select config'}
                   </span>
@@ -123,61 +151,54 @@ export function ProjectConfigImportModal({
           )}
 
           {selectedMigration ? (
-            <div className="space-y-2 text-sm">
-              <p>Settings to import</p>
-              <ul className="list-disc space-y-1 pl-5 text-foreground-muted">
+            <div className="flex flex-col gap-1.5">
+              <p className="text-sm text-foreground">Settings it brings</p>
+              <ul className="flex flex-col gap-1 text-sm text-foreground-muted">
                 {selectedMigration.fields.map((field) => (
-                  <li key={field}>{fieldLabel(field)}</li>
+                  <li key={field} className="flex items-center gap-2">
+                    <span aria-hidden className="size-1 rounded-full bg-foreground-passive" />
+                    {fieldLabel(field)}
+                  </li>
                 ))}
               </ul>
             </div>
           ) : null}
 
-          <div className="space-y-2 text-sm">
-            <p>Save to</p>
+          <div className="flex flex-col gap-1.5">
+            <p className="text-sm text-foreground">Save to</p>
             <RadioGroup.Root
               value={destination}
               onValueChange={(value) => setDestination(value as ProjectConfigMigrationDestination)}
-              className="grid"
+              className="grid gap-1"
             >
-              <label className="flex items-center gap-3 rounded-md text-sm">
-                <RadioGroup.Item value="local" className="translate-y-px" />
-                <span className="flex min-w-0 flex-row gap-1.5">
-                  <p>Personal settings</p>
-                  <p className="text-foreground-muted">– stored only on this machine</p>
+              <label className="flex min-h-8 cursor-pointer items-center gap-3 text-sm">
+                <RadioGroup.Item value="local" />
+                <span className="flex min-w-0 flex-col">
+                  <span className="text-foreground">Personal settings</span>
+                  <span className="text-xs text-foreground-muted">
+                    Stored only on this machine.
+                  </span>
                 </span>
               </label>
-              <label className="flex items-center gap-3 rounded-md text-sm">
-                <RadioGroup.Item value="shared" className="translate-y-px" />
-                <span className="flex min-w-0 flex-row gap-1.5">
-                  <p>.emdash.json</p>
-                  <p className="text-foreground-muted">– commit to share with team</p>
+              <label className="flex min-h-8 cursor-pointer items-center gap-3 text-sm">
+                <RadioGroup.Item value="shared" />
+                <span className="flex min-w-0 flex-col">
+                  <span className="font-mono text-xs text-foreground">.emdash.json</span>
+                  <span className="text-xs text-foreground-muted">
+                    Commit it to share with your team.
+                  </span>
                 </span>
               </label>
             </RadioGroup.Root>
           </div>
           {status === 'error' ? (
-            <p className="text-xs text-foreground-error">{errorMessage}</p>
+            <p role="alert" className="text-xs text-foreground-error">
+              {errorMessage}
+            </p>
           ) : null}
         </Field.Group>
       </Dialog.Body>
-      <Dialog.Footer>
-        <Button variant="secondary" onClick={modal.dismiss} disabled={status === 'importing'}>
-          {status === 'imported' ? 'Close' : 'Cancel'}
-        </Button>
-        <ConfirmButton variant="primary" onClick={() => void handleImport()} disabled={disabled}>
-          <span className="inline-flex items-center justify-center gap-1.5">
-            {status === 'importing' && <Loader2 className="size-4 animate-spin" aria-hidden />}
-            {status === 'imported' && <Check className="size-4" aria-hidden />}
-            {status === 'importing'
-              ? 'Importing...'
-              : status === 'imported'
-                ? 'Imported'
-                : 'Import'}
-          </span>
-        </ConfirmButton>
-      </Dialog.Footer>
-    </>
+    </ModalLayout>
   );
 }
 

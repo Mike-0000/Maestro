@@ -1,4 +1,5 @@
-import { Field, Select, Separator } from '@emdash/ui/react/primitives';
+import { SettingsSection } from '@emdash/ui/react/patterns';
+import { Select } from '@emdash/ui/react/primitives';
 import { Plus } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import type { ReactNode } from 'react';
@@ -68,35 +69,30 @@ export const IntegrationAccountsSection = observer(function IntegrationAccountsS
   if (integrationRows.length === 0) return null;
 
   return (
-    <>
-      <Field.Root>
-        <Field.Label>Accounts</Field.Label>
-        <Field.Description className="text-foreground-muted">
-          Choose which account each integration uses for this project.
-        </Field.Description>
-        <div className="flex flex-col">
-          {integrationRows.map(({ integration, accounts, override, resolution }) => (
-            <ProviderAccountRow
-              key={integration.id}
-              name={integration.name}
-              accounts={accounts}
-              resolution={resolution}
-              override={override}
-              fallbackIcon={<IntegrationIcon provider={integration.id} icon={integration.icon} />}
-              loadError={accountsQuery.isError}
-              onOverrideChange={(value) => updateIntegrationAccounts(integration.id, value)}
-              onConnect={() => void openIntegrationSetup({ integration: integration.id })}
-              unresolvableHint={
-                integration.issueCapabilities.requiresRepositoryUrl
-                  ? `The ${integration.name} account set for this project is no longer connected or does not match this repository's host. ${integration.name} stays paused until you pick an account or reset.`
-                  : undefined
-              }
-            />
-          ))}
-        </div>
-      </Field.Root>
-      <Separator />
-    </>
+    <SettingsSection
+      title="Accounts"
+      description="Which account each integration uses for this project."
+      gap="0.75rem"
+    >
+      {integrationRows.map(({ integration, accounts, override, resolution }) => (
+        <ProviderAccountRow
+          key={integration.id}
+          name={integration.name}
+          accounts={accounts}
+          resolution={resolution}
+          override={override}
+          fallbackIcon={<IntegrationIcon provider={integration.id} icon={integration.icon} />}
+          loadError={accountsQuery.isError}
+          onOverrideChange={(value) => updateIntegrationAccounts(integration.id, value)}
+          onConnect={() => void openIntegrationSetup({ integration: integration.id })}
+          unresolvableHint={
+            integration.issueCapabilities.requiresRepositoryUrl
+              ? `The ${integration.name} account set for this project is no longer connected or does not match this repository's host. ${integration.name} stays paused until you pick an account or reset.`
+              : undefined
+          }
+        />
+      ))}
+    </SettingsSection>
   );
 });
 
@@ -135,9 +131,9 @@ const ProviderAccountRow = observer(function ProviderAccountRow({
 
   return (
     <div className="flex flex-col">
-      <div className="flex min-h-9 items-center justify-between gap-4">
+      <div className="flex min-h-10 items-center justify-between gap-4">
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="text-sm font-medium text-foreground">{name}</span>
+          <span className="text-sm text-foreground">{name}</span>
           {resolution ? <ProvenanceBadge provenance={resolution.provenance} /> : null}
           {resolution && isExplicit ? (
             <ResetProvenanceButton onReset={() => onOverrideChange(null)} />
@@ -158,8 +154,10 @@ const ProviderAccountRow = observer(function ProviderAccountRow({
           }}
         >
           <Select.Trigger
-            className={cn('min-w-0 shrink-0 text-left', unresolvable && 'text-foreground-warning')}
-            style={{ width: '18rem', maxWidth: '65%' }}
+            className={cn(
+              'w-64 max-w-[65%] min-w-0 shrink-0 justify-between text-left',
+              unresolvable && 'text-foreground-warning'
+            )}
           >
             {resolution?.value ? (
               <ProviderAccountLabel account={resolution.value} fallbackIcon={fallbackIcon} />
@@ -192,7 +190,7 @@ const ProviderAccountRow = observer(function ProviderAccountRow({
               <Select.Separator />
               <Select.Item value={CONNECT_OPTION} className="py-2">
                 <div className="flex min-w-0 items-center gap-2">
-                  <Plus className="text-muted-foreground h-4 w-4 shrink-0" />
+                  <Plus className="size-4 shrink-0 text-foreground-passive" />
                   <span className="relative -top-px shrink-0">Connect another account…</span>
                 </div>
               </Select.Item>
@@ -201,7 +199,7 @@ const ProviderAccountRow = observer(function ProviderAccountRow({
         </Select.Root>
       </div>
       {unresolvable ? (
-        <span className="pb-2 text-xs text-foreground-muted">
+        <span className="pb-1 text-xs text-foreground-muted">
           {unresolvableHint ??
             `The account set for this project is no longer connected. ${name} stays paused until you pick an account or reset.`}
         </span>

@@ -32,7 +32,7 @@ export function KeyBar({ showReplies, onKey, onText }: KeyBarProps) {
     <div
       role="toolbar"
       aria-label="Terminal keys"
-      className="no-scrollbar flex items-center gap-1.5 overflow-x-auto px-3 pt-2 pb-1.5"
+      className="keybar no-scrollbar flex items-center gap-1 overflow-x-auto px-3 pt-1 pb-1"
     >
       {showReplies ? (
         <>
@@ -46,7 +46,7 @@ export function KeyBar({ showReplies, onKey, onText }: KeyBarProps) {
               {reply}
             </KeyButton>
           ))}
-          <span aria-hidden="true" className="bg-line-strong mx-0.5 h-5 w-px shrink-0" />
+          <span aria-hidden="true" className="w-2 shrink-0" />
         </>
       ) : null}
       <KeyButton label="Escape" onPress={() => onKey('escape')}>
@@ -74,7 +74,8 @@ export function KeyBar({ showReplies, onKey, onText }: KeyBarProps) {
       <KeyButton label="Right arrow" repeat onPress={() => onKey('right')}>
         <ArrowRight className="size-4" aria-hidden="true" />
       </KeyButton>
-      <KeyButton label="Control C, interrupt" tone="danger" onPress={() => onKey('ctrl-c')}>
+      <span aria-hidden="true" className="w-2 shrink-0" />
+      <KeyButton label="Control C, interrupt" onPress={() => onKey('ctrl-c')}>
         ctrl c
       </KeyButton>
     </div>
@@ -83,7 +84,8 @@ export function KeyBar({ showReplies, onKey, onText }: KeyBarProps) {
 
 type KeyButtonProps = {
   label: string;
-  tone?: 'key' | 'reply' | 'danger';
+  /** A one-tap answer reads at full strength; the keys stay muted. */
+  tone?: 'key' | 'reply';
   /** Holding the key repeats it, like a hardware keyboard. */
   repeat?: boolean;
   onPress(): void;
@@ -91,9 +93,8 @@ type KeyButtonProps = {
 };
 
 const KEY_TONES: Record<NonNullable<KeyButtonProps['tone']>, string> = {
-  key: 'border-line-strong bg-surface text-fg',
-  reply: 'border-attention-line bg-attention-soft text-attention',
-  danger: 'border-line-strong bg-surface text-danger',
+  key: 'text-foreground-muted',
+  reply: 'font-medium text-foreground',
 };
 
 function tick(): void {
@@ -152,8 +153,8 @@ function KeyButton({ label, tone = 'key', repeat = false, onPress, children }: K
       onContextMenu={(event) => event.preventDefault()}
       onClick={onClick}
       className={cx(
-        'inline-flex h-9 min-w-10 shrink-0 items-center justify-center rounded-[10px] border px-2.5 font-mono text-[13px] font-medium',
-        'transition-[background-color,transform] duration-100 active:scale-95 active:bg-surface-3',
+        'inline-flex h-11 min-w-11 shrink-0 items-center justify-center rounded-md bg-surface-emphasis px-3 font-mono text-detail',
+        'transition-colors duration-100 hover:text-foreground active:bg-surface-selected',
         KEY_TONES[tone]
       )}
     >

@@ -27,7 +27,8 @@ export const inner = style({
       alignItems: 'center',
       gap: '0.5rem',
       fontSize: tokenVars.textSm,
-      boxShadow: vars.shadowSm,
+      // A floating bar: the overlay shadow (none in dark) plus the shared hairline.
+      boxShadow: `${vars.shadowMd}, 0 0 0 1px ${vars.borderSubtle}`,
     },
   },
 });

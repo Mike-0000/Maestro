@@ -1,8 +1,9 @@
 /**
- * CollapsibleCard — shared bordered collapsible-card primitive.
+ * CollapsibleCard — shared collapsible-card primitive.
  *
- * Renders a bordered, rounded card with a sticky collapsible header and an
- * arbitrary body slot. Used by plan and execute rows.
+ * Renders a collapsible header and an arbitrary body slot, either as a quiet
+ * card (`appearance="card"`, the plan) or with no box at all
+ * (`appearance="bare"`, commands, whose output sits in its own well).
  *
  * Key behaviour:
  *   - Resolves `ctx.clipHeight?.() ?? height` as the root element's height so
@@ -18,9 +19,18 @@ import { assignInlineVars } from '@vanilla-extract/dynamic';
 import type { JSX } from 'solid-js';
 import { clipTrackedHeight } from './card-clip';
 import { CardHeader } from './CardHeader';
-import { collapsibleCard, collapsibleCardVars } from './collapsible-card.css';
+import {
+  collapsibleCard,
+  collapsibleCardVars,
+  type CollapsibleCardAppearance,
+} from './collapsible-card.css';
 
 export type CollapsibleCardProps = {
+  /**
+   * `card` (default): a quiet card for an artifact read as a whole (the plan).
+   * `bare`: no box; the header is a quiet row and the body brings its own well.
+   */
+  appearance?: CollapsibleCardAppearance;
   /** Item id wired to data-collapse-id for ChatRoot click delegation. */
   id: string;
   /** RenderCtx from the parent def — read to obtain the animated clipHeight. */
@@ -61,7 +71,7 @@ export function CollapsibleCard(props: CollapsibleCardProps) {
 
   return (
     <div
-      class={collapsibleCard}
+      class={collapsibleCard[props.appearance ?? 'card']}
       style={assignInlineVars(collapsibleCardVars, pxTokens({ height: cardH() }))}
     >
       <CardHeader

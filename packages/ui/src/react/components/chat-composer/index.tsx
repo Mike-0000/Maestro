@@ -3,11 +3,11 @@ import { cx } from '@styles/utilities/cx';
 import {
   ArrowUp,
   ChevronRight,
-  CircleAlert,
   Info,
   ListTodo,
   Paperclip,
   ShieldCheck,
+  TriangleAlert,
   X,
 } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
@@ -203,6 +203,11 @@ export interface ChatComposerProps {
   value?: string;
   /** Override the idle editor placeholder. Disabled/working placeholders still take precedence. */
   placeholder?: string;
+  /**
+   * Resting height of the editor, in lines of text (it still grows with what is typed, up to
+   * its scroll limit). Defaults to one line. Hosts can also set --composer-editor-min-height.
+   */
+  minRows?: number;
 
   agentOptions?: ComposerAgentOption[] | null;
   selectedAgent?: string;
@@ -388,31 +393,45 @@ function formatContextWindow(tokens: number): string {
   return `${tokens} tokens`;
 }
 
-// ── Notice band ───────────────────────────────────────────────────────────────
+// ── Notice line ───────────────────────────────────────────────────────────────
 
-function NoticeBand({ notice }: { notice: ComposerNotice }) {
+/** A title reads as the first sentence of the line, so it ends with a full stop. */
+function asSentence(title: string): string {
+  return /[.!?…:]$/.test(title.trim()) ? title.trim() : `${title.trim()}.`;
+}
+
+/**
+ * One quiet line above the field about how the last turn ended: the error dot (or a warning
+ * glyph) and words, never a tinted panel.
+ */
+function NoticeLine({ notice }: { notice: ComposerNotice }) {
   return (
-    <div className={styles.noticeBand({ variant: notice.variant })}>
-      <div className={styles.noticeBandBody}>
-        <div className={styles.noticeBandHeader}>
-          <CircleAlert style={{ width: '0.875rem', height: '0.875rem', flexShrink: 0 }} />
-          {notice.title && <p className={styles.noticeBandTitle}>{notice.title}</p>}
-        </div>
-        <p
-          className={cx(styles.noticeBandMessage, notice.title && styles.noticeBandMessageIndented)}
-        >
-          {notice.message}
-        </p>
-      </div>
+    <div className={styles.noticeLine} role={notice.variant === 'info' ? 'status' : 'alert'}>
+      <span className={styles.noticeGlyph} aria-hidden>
+        {notice.variant === 'error' ? (
+          <span className={styles.noticeMark.error} />
+        ) : notice.variant === 'warning' ? (
+          <TriangleAlert className={styles.noticeMark.warning} />
+        ) : (
+          <Info className={styles.noticeMark.info} />
+        )}
+      </span>
+      <p className={styles.noticeText}>
+        {notice.title && <span className={styles.noticeTitle}>{asSentence(notice.title)}</span>}
+        {notice.title && ' '}
+        {notice.message}
+      </p>
       {notice.onDismiss && (
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="xs"
+          icon
           aria-label="Dismiss notice"
           onClick={notice.onDismiss}
           className={styles.noticeDismiss}
         >
-          <X style={{ width: '0.875rem', height: '0.875rem' }} />
-        </button>
+          <X />
+        </Button>
       )}
     </div>
   );
@@ -475,8 +494,9 @@ function ComposerAgentSelector({
         disabled
         aria-label={triggerLabel}
         title={triggerLabel}
+        className={styles.agentTrigger}
       >
-        {selected?.icon ?? <span style={{ width: '0.875rem', height: '0.875rem' }} />}
+        {selected?.icon ?? <span className={styles.agentIconPlaceholder} />}
       </Button>
     );
   }
@@ -513,44 +533,25 @@ function ComposerAgentSelector({
               <Combobox.Group key={group.label}>
                 <Combobox.Label>{group.label}</Combobox.Label>
                 {group.items.map((item) => (
-                  <Combobox.Item key={item.id} value={item} disabled={item.disabled}>
-                    {item.icon && <span style={{ flexShrink: 0 }}>{item.icon}</span>}
-                    <span
-                      style={{
-                        minWidth: 0,
-                        flex: '1 1 0%',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {item.name}
-                    </span>
-                  </Combobox.Item>
+                  <AgentOptionItem key={item.id} item={item} />
                 ))}
               </Combobox.Group>
             ) : (
-              group.items.map((item) => (
-                <Combobox.Item key={item.id} value={item} disabled={item.disabled}>
-                  {item.icon && <span style={{ flexShrink: 0 }}>{item.icon}</span>}
-                  <span
-                    style={{
-                      minWidth: 0,
-                      flex: '1 1 0%',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {item.name}
-                  </span>
-                </Combobox.Item>
-              ))
+              group.items.map((item) => <AgentOptionItem key={item.id} item={item} />)
             )
           )}
         </Combobox.List>
       </Combobox.Content>
     </Combobox.Root>
+  );
+}
+
+function AgentOptionItem({ item }: { item: ComposerAgentOption }) {
+  return (
+    <Combobox.Item value={item} disabled={item.disabled}>
+      {item.icon && <span className={styles.agentOptionIcon}>{item.icon}</span>}
+      <span className={styles.agentOptionName}>{item.name}</span>
+    </Combobox.Item>
   );
 }
 
@@ -565,7 +566,6 @@ interface ComposerModeSelectProps {
   selectedId?: string;
   onChange?: (id: string) => void;
   disabled: boolean;
-  isFirst: boolean;
   ariaLabel: string;
   placeholder: string;
   icon: React.ReactNode;
@@ -576,7 +576,6 @@ function ComposerModeSelect({
   selectedId,
   onChange,
   disabled,
-  isFirst,
   ariaLabel,
   placeholder,
   icon,
@@ -591,22 +590,12 @@ function ComposerModeSelect({
       }}
       disabled={disabled}
     >
-      <Select.Trigger
-        aria-label={ariaLabel}
-        className={isFirst ? styles.permissionModeTrigger : undefined}
-      >
-        <span
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '0.25rem',
-            color: selected ? 'var(--em-foreground)' : 'var(--em-foreground-muted)',
-            fontSize: 'var(--em-text-xs)',
-            lineHeight: 1.25,
-          }}
-        >
-          {icon}
-          {selected?.name ?? placeholder}
+      <Select.Trigger aria-label={ariaLabel} size="sm" className={styles.toolTrigger}>
+        <span className={styles.toolLabel}>
+          <span className={styles.toolIcon}>{icon}</span>
+          <span className={cx(styles.toolText, !selected && styles.toolPlaceholder)}>
+            {selected?.name ?? placeholder}
+          </span>
         </span>
       </Select.Trigger>
       <Select.Content
@@ -621,27 +610,10 @@ function ComposerModeSelect({
       >
         {items.map((item) => (
           <Select.Item key={item.id} value={item.id}>
-            <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-              <span
-                style={{
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  fontSize: 'var(--em-text-sm)',
-                }}
-              >
-                {item.name}
-              </span>
+            <span className={styles.modeItem}>
+              <span className={styles.modeItemName}>{item.name}</span>
               {item.description && (
-                <span
-                  style={{
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    fontSize: 'var(--em-text-xs)',
-                    color: 'var(--em-foreground-muted)',
-                  }}
-                >
+                <span className={styles.modeItemDescription} title={item.description}>
                   {item.description}
                 </span>
               )}
@@ -662,6 +634,7 @@ export function ChatComposer({
   showSubmitButton = true,
   value,
   placeholder,
+  minRows,
   agentOptions,
   selectedAgent,
   onAgentChange,
@@ -859,50 +832,27 @@ export function ChatComposer({
   const collaborationModeItems: ComposerModeItem[] = collaborationModeOptions
     ? Object.entries(collaborationModeOptions).map(([id, opt]) => ({ id, ...opt }))
     : [];
-  const collaborationModeIsFirst = modelItems.length === 0 && !agentOptions?.length;
-  const permissionModeIsFirst =
-    collaborationModeItems.length === 0 && modelItems.length === 0 && !agentOptions?.length;
-
   const canShowQueuedPrompts =
     queuedPrompts.length > 0 &&
     !!onEditQueuedPrompt &&
     !!onDeleteQueuedPrompt &&
     !!onReorderQueuedPrompts &&
     !!onSendQueuedPromptNow;
-  // The permission band takes priority over the notice band.
-  const hasBand = canShowQueuedPrompts || !!(permissionRequest ?? notice);
+  const showPermission = !!(permissionRequest && onResolvePermission);
   const shouldHandleSubmitAttempt = !disabled && (isWorking ? !!onSubmitWhileWorking : canSubmit);
+  const hasContent = editorText.trim().length > 0 || imageAttachments.length > 0;
+  // Send is the field's one move: the accent button only once there is something to send.
+  const canSend = !disabled && canSubmit && hasContent;
   const resolvedPlaceholder = disabled
-    ? 'Session closed'
+    ? 'This chat is closed'
     : isWorking
       ? 'Add a follow-up'
-      : (placeholder ?? 'Send a message, tag @files or use /commands');
+      : (placeholder ?? 'Ask for a change. @ adds a file, / runs a command');
 
   return (
     <div className={cx(styles.composerRoot, composerThemeScope, className)}>
-      {canShowQueuedPrompts && (
-        <QueuedPromptsBand
-          prompts={queuedPrompts}
-          onEdit={onEditQueuedPrompt}
-          onDelete={onDeleteQueuedPrompt}
-          onReorder={onReorderQueuedPrompts}
-          onSendNow={onSendQueuedPromptNow}
-          connectToBandBelow={!!(permissionRequest && onResolvePermission)}
-        />
-      )}
-
-      {/* Permission band — shown when the agent is awaiting user approval. */}
-      {permissionRequest && onResolvePermission && (
-        <PermissionBand
-          request={permissionRequest}
-          queueCount={permissionQueueCount}
-          onResolve={onResolvePermission}
-        />
-      )}
-
-      {/* Notice band — height + opacity animate on enter/exit via the
-          grid-rows 0fr↔1fr technique so add/remove transitions are smooth.
-          Hidden when the permission band is active. */}
+      {/* How the last turn ended: one quiet line above the field. Height and opacity animate
+          via the grid-rows 0fr↔1fr technique; hidden while a permission request is open. */}
       {!permissionRequest && (
         <div
           className={cx(
@@ -912,18 +862,42 @@ export function ChatComposer({
           aria-hidden={!notice}
         >
           <div className={styles.noticeOverflowClip}>
-            {retainedNotice && <NoticeBand notice={retainedNotice} />}
+            {retainedNotice && <NoticeLine notice={retainedNotice} />}
           </div>
         </div>
       )}
 
       <div
-        className={styles.composerShell({ hasBand: !!hasBand, dragActive })}
+        className={styles.field({ dragActive, disabled })}
+        data-disabled={disabled ? '' : undefined}
         onPaste={handlePaste}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
+        {canShowQueuedPrompts && (
+          <div className={styles.fieldSection}>
+            <QueuedPromptsBand
+              prompts={queuedPrompts}
+              onEdit={onEditQueuedPrompt}
+              onDelete={onDeleteQueuedPrompt}
+              onReorder={onReorderQueuedPrompts}
+              onSendNow={onSendQueuedPromptNow}
+            />
+          </div>
+        )}
+
+        {/* The agent is waiting on a decision: the request leads the field. */}
+        {showPermission && permissionRequest && onResolvePermission && (
+          <div className={styles.fieldSection}>
+            <PermissionBand
+              request={permissionRequest}
+              queueCount={permissionQueueCount}
+              onResolve={onResolvePermission}
+            />
+          </div>
+        )}
+
         {/* Image attachment previews */}
         {imageAttachments.length > 0 && (
           <div className={styles.attachmentStrip}>
@@ -943,49 +917,58 @@ export function ChatComposer({
                   onClick={() => removeAttachment(att.id)}
                   className={styles.attachmentRemoveBtn}
                 >
-                  <X style={{ width: '0.625rem', height: '0.625rem' }} />
+                  <X className={styles.attachmentRemoveIcon} />
                 </button>
               </div>
             ))}
           </div>
         )}
 
-        {/* Editor area */}
-        <PromptEditor
-          model={model}
-          viewportClassName={styles.editorArea}
-          ref={(handle) => {
-            editorRef.current = handle;
-            if (handle) setEditorText(handle.getText());
-            if (editorApiRef) {
-              if (typeof editorApiRef === 'function') {
-                editorApiRef(handle);
-              } else {
-                (editorApiRef as React.MutableRefObject<PromptEditorRef | null>).current = handle;
+        <div
+          className={styles.editorRow}
+          style={
+            minRows && minRows > 1
+              ? ({ '--composer-editor-min-height': `${minRows * 1.5}em` } as React.CSSProperties)
+              : undefined
+          }
+        >
+          <PromptEditor
+            model={model}
+            viewportClassName={styles.editorArea}
+            ref={(handle) => {
+              editorRef.current = handle;
+              if (handle) setEditorText(handle.getText());
+              if (editorApiRef) {
+                if (typeof editorApiRef === 'function') {
+                  editorApiRef(handle);
+                } else {
+                  (editorApiRef as React.MutableRefObject<PromptEditorRef | null>).current = handle;
+                }
               }
-            }
-          }}
-          value={value}
-          placeholder={resolvedPlaceholder}
-          disabled={disabled}
-          onChange={(text) => {
-            setEditorText(text);
-            onInputChange?.(text);
-          }}
-          onSubmit={shouldHandleSubmitAttempt ? handleSubmit : undefined}
-          clearOnSubmit={model ? false : undefined}
-          onMentionInsert={onMentionInsert}
-          mentionProvider={mentionProvider}
-          renderMentionIcon={renderMentionIcon}
-          queryMentions={queryMentions}
-          queryCommands={queryCommands}
-          onCommand={onCommand}
-          popupClassName={composerThemeScope}
-        />
-        {/* Toolbar */}
-        <div className={styles.toolbar}>
-          {/* Left: agent + model selector */}
-          <div className={styles.toolbarLeft}>
+            }}
+            value={value}
+            placeholder={resolvedPlaceholder}
+            disabled={disabled}
+            onChange={(text) => {
+              setEditorText(text);
+              onInputChange?.(text);
+            }}
+            onSubmit={shouldHandleSubmitAttempt ? handleSubmit : undefined}
+            clearOnSubmit={model ? false : undefined}
+            onMentionInsert={onMentionInsert}
+            mentionProvider={mentionProvider}
+            renderMentionIcon={renderMentionIcon}
+            queryMentions={queryMentions}
+            queryCommands={queryCommands}
+            onCommand={onCommand}
+            popupClassName={composerThemeScope}
+          />
+        </div>
+        {/* The footer: the agent's settings as quiet facts on the left, then the context
+            window, attach and send. It keeps its height while the session's controls arrive,
+            so the field never jumps. */}
+        <div className={styles.tools}>
+          <div className={styles.toolsStart}>
             {agentOptions && agentOptions.length > 0 && modelItems.length === 0 && (
               <ComposerAgentSelector
                 options={agentOptions}
@@ -1003,36 +986,17 @@ export function ChatComposer({
                 itemToKey={(item) => item.id}
                 itemToLabel={(item) => item.name}
                 disabled={disabled}
+                className={styles.toolTrigger}
                 searchPlaceholder="Search models…"
                 contentClassName={composerThemeScope}
                 contentStyle={{ minWidth: '12.5rem' }}
                 triggerTitle={() => selectedAgentTitle}
                 renderTrigger={(selected) => (
-                  <span
-                    style={{
-                      display: 'inline-flex',
-                      minWidth: 0,
-                      alignItems: 'center',
-                      gap: '0.375rem',
-                      color: selected ? 'var(--em-foreground)' : 'var(--em-foreground-muted)',
-                      fontSize: 'var(--em-text-xs)',
-                      lineHeight: 1,
-                    }}
-                  >
+                  <span className={styles.toolLabel}>
                     {selectedAgentItem?.icon && (
-                      <span style={{ display: 'inline-flex', flexShrink: 0 }}>
-                        {selectedAgentItem.icon}
-                      </span>
+                      <span className={styles.agentOptionIcon}>{selectedAgentItem.icon}</span>
                     )}
-                    <span
-                      style={{
-                        minWidth: 0,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        lineHeight: 1.25,
-                      }}
-                    >
+                    <span className={cx(styles.toolText, !selected && styles.toolPlaceholder)}>
                       {selected?.name ?? 'Model…'}
                       {selected && selectedEffortItem ? (
                         <span className={styles.selectedModelEffort}>
@@ -1043,19 +1007,7 @@ export function ChatComposer({
                     </span>
                   </span>
                 )}
-                renderItem={(item) => (
-                  <span
-                    style={{
-                      flex: '1 1 0%',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      fontSize: 'var(--em-text-sm)',
-                    }}
-                  >
-                    {item.name}
-                  </span>
-                )}
+                renderItem={(item) => <span className={styles.modelItemName}>{item.name}</span>}
                 renderItemDetail={(item) => <ModelDetailCard item={item} />}
                 detailSide="right"
                 detailAlign="start"
@@ -1067,9 +1019,7 @@ export function ChatComposer({
                             <span className={styles.effortRowLabel}>Effort</span>
                             <span className={styles.effortRowValue}>
                               {selectedEffortItem?.name ?? 'Default'}
-                              <ChevronRight
-                                style={{ width: '0.75rem', height: '0.75rem', flexShrink: 0 }}
-                              />
+                              <ChevronRight className={styles.effortRowChevron} aria-hidden />
                             </span>
                           </DropdownMenu.Trigger>
                           <DropdownMenu.Content
@@ -1101,10 +1051,9 @@ export function ChatComposer({
                 selectedId={selectedCollaborationMode}
                 onChange={onCollaborationModeChange}
                 disabled={disabled}
-                isFirst={collaborationModeIsFirst}
                 ariaLabel="Collaboration mode"
                 placeholder="Collaboration…"
-                icon={<ListTodo style={{ width: '0.75rem', height: '0.75rem', flexShrink: 0 }} />}
+                icon={<ListTodo aria-hidden />}
               />
             )}
             {permissionModeItems.length > 0 && (
@@ -1113,18 +1062,15 @@ export function ChatComposer({
                 selectedId={selectedPermissionMode}
                 onChange={onPermissionModeChange}
                 disabled={disabled}
-                isFirst={permissionModeIsFirst}
                 ariaLabel="Permission mode"
                 placeholder="Permissions…"
-                icon={
-                  <ShieldCheck style={{ width: '0.75rem', height: '0.75rem', flexShrink: 0 }} />
-                }
+                icon={<ShieldCheck aria-hidden />}
               />
             )}
             {mcpServers.length > 0 && (
               <Popover.Root>
                 <Popover.Trigger
-                  className={styles.mcpTrigger}
+                  className={cx(styles.toolTrigger, styles.mcpTrigger)}
                   data-failed={mcpFailureCount > 0 ? '' : undefined}
                   openOnHover
                   aria-label={`${mcpServers.length} session MCP ${
@@ -1179,19 +1125,19 @@ export function ChatComposer({
             )}
           </div>
 
-          {/* Right: usage donut + attach + send/stop */}
-          <div className={styles.toolbarRight}>
+          <div className={styles.toolsEnd}>
             {contextUsage && contextUsage.size > 0 && (
               <ContextUsageIndicator usage={contextUsage} disabled={disabled} />
             )}
             {onAttach && (
               <Button
                 variant="ghost"
-                size="xs"
+                size="sm"
                 icon
                 onClick={onAttach}
                 disabled={disabled}
                 aria-label="Add attachment"
+                title="Add attachment"
               >
                 <Paperclip />
               </Button>
@@ -1200,25 +1146,25 @@ export function ChatComposer({
             {showSubmitButton ? (
               isWorking && !canQueuePrompt ? (
                 <Button
-                  variant="primary"
-                  tone="destructive"
-                  size="xs"
+                  variant="secondary"
+                  size="sm"
                   icon
-                  className={styles.sendButtonRound}
                   onClick={onStop}
+                  disabled={!onStop}
                   aria-label="Stop generation"
+                  title="Stop"
                 >
                   <span className={styles.stopIcon} aria-hidden="true" />
                 </Button>
               ) : (
                 <Button
-                  variant="primary"
-                  size="xs"
+                  variant={canSend || canQueuePrompt ? 'primary' : 'ghost'}
+                  size="sm"
                   icon
-                  className={styles.sendButtonRound}
                   onClick={() => handleSubmit(editorRef.current?.getText() ?? '')}
-                  disabled={disabled || (!isWorking && !canSubmit)}
+                  disabled={disabled || (isWorking ? !canQueuePrompt : !canSend)}
                   aria-label={isWorking ? 'Queue message' : 'Send message'}
+                  title={isWorking ? 'Queue: sends when this turn ends' : 'Send'}
                 >
                   <ArrowUp />
                 </Button>

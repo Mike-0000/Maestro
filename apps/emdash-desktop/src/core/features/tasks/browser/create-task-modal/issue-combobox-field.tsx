@@ -1,3 +1,4 @@
+import { ChevronDown } from 'lucide-react';
 import { getIntegrationName } from '@core/features/integrations/api/browser/integration-display';
 import { useIntegrationsContext } from '@core/features/integrations/contributions/browser/integrations-provider';
 import {
@@ -6,6 +7,7 @@ import {
   ProviderLogo,
   SelectedIssueValue,
 } from '@core/features/tasks/browser/components/issue-selector/issue-selector';
+import { FIELD_TRIGGER_CLASS } from '@core/features/tasks/browser/task-config/field-trigger';
 import type { LinkedIssue } from '@core/primitives/linked-issues/api';
 import { cn } from '@core/primitives/styling/browser/cn';
 
@@ -23,24 +25,21 @@ function ModalPlaceholder({ issueProvider }: IssueSelectorTriggerContext) {
   const { integrationById } = useIntegrationsContext();
   const issueProviderName = issueProvider
     ? getIntegrationName(integrationById, issueProvider)
-    : 'issue';
+    : null;
 
   return (
-    <span className="flex h-14 w-full items-center justify-center gap-2 p-2 text-sm text-foreground-passive transition-colors hover:bg-background-2">
-      <span className="inline-flex max-w-full min-w-0 items-center gap-1 whitespace-nowrap">
-        <span className="shrink-0">Select a</span>
-        {issueProvider && (
-          <>
-            <ProviderLogo provider={issueProvider} className="size-3.5 shrink-0 opacity-40" />
-            <span className="truncate">{issueProviderName}</span>
-          </>
-        )}
-        <span className="shrink-0">issue</span>
+    <span className="flex h-8 min-w-0 flex-1 items-center gap-2 text-foreground-passive">
+      {issueProvider && (
+        <ProviderLogo provider={issueProvider} className="size-3.5 shrink-0 opacity-70" />
+      )}
+      <span className="truncate">
+        {issueProviderName ? `Select a ${issueProviderName} issue…` : 'Select an issue…'}
       </span>
     </span>
   );
 }
 
+/** The issue picker as one field: the whole trigger is the field, its content bare. */
 export function IssueComboboxField({
   value,
   onValueChange,
@@ -58,22 +57,22 @@ export function IssueComboboxField({
       repositoryUrl={repositoryUrl}
       projectPath={projectPath}
       disabled={disabled}
+      triggerClassName={cn(
+        FIELD_TRIGGER_CLASS,
+        value ? 'py-1.5' : 'h-8',
+        disabled && 'pointer-events-none opacity-50',
+        className
+      )}
       renderSelectedValue={(issue) => (
-        <div
-          className={cn(
-            'flex w-full items-center justify-between gap-2 p-2 text-sm hover:bg-background-1 data-popup-open:bg-background-1',
-            disabled && 'pointer-events-none opacity-50',
-            issue.description && 'h-14',
-            className
-          )}
-        >
+        <span className="flex w-full min-w-0 items-center gap-2">
           <SelectedIssueValue issue={issue} />
-        </div>
+        </span>
       )}
       renderPlaceholder={(ctx) => (
-        <div className={cn('w-full', disabled && 'pointer-events-none opacity-50', className)}>
+        <span className="flex w-full min-w-0 items-center gap-2">
           <ModalPlaceholder {...ctx} />
-        </div>
+          <ChevronDown className="size-3.5 shrink-0 text-foreground-passive" />
+        </span>
       )}
     />
   );

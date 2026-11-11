@@ -14,11 +14,13 @@ export const trigger = style({
   paddingLeft: '0.5rem',
   paddingRight: '0.5rem',
   fontSize: tokenVars.textXs,
-  color: vars.foreground,
+  color: vars.foregroundMuted,
   outline: 'none',
+  transition: 'background-color 150ms, color 150ms',
   selectors: {
-    '&:hover': { backgroundColor: vars.surfaceBaseSelected },
-    '&[data-popup-open]': { backgroundColor: vars.surfaceBaseSelected },
+    '&:hover': { backgroundColor: vars.surfaceHover, color: vars.foreground },
+    '&[data-popup-open]': { backgroundColor: vars.surfaceSelected, color: vars.foreground },
+    '&:focus-visible': { outline: `2px solid ${vars.focusRing}`, outlineOffset: '1px' },
     '&[data-disabled], &:disabled': { cursor: 'not-allowed', opacity: 0.6 },
   },
 });
@@ -39,7 +41,7 @@ export const triggerChevron = style({
   flexShrink: 0,
   width: '0.75rem',
   height: '0.75rem',
-  color: vars.foregroundMuted,
+  color: vars.foregroundPassive,
 });
 
 /** Default min-width for the combobox dropdown content. */

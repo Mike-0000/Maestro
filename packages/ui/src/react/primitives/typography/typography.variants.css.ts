@@ -8,6 +8,7 @@ import { nsVar } from '@emdash/theme';
 import { recipe } from '@vanilla-extract/recipes';
 import type { RecipeVariants } from '@vanilla-extract/recipes';
 import { vars } from '@theme/core/contract/contract.css';
+import { tokenVars } from '@theme/tokens.css';
 
 export const textVariants = recipe({
   base: {},
@@ -38,6 +39,7 @@ export const textVariants = recipe({
         fontSize: nsVar('type-h1-font-size'),
         fontWeight: nsVar('type-h1-font-weight'),
         lineHeight: nsVar('type-h1-line-height'),
+        letterSpacing: nsVar('type-h1-letter-spacing'),
       },
       h2: {
         fontFamily: nsVar('type-h2-font-family'),
@@ -86,6 +88,34 @@ export const textVariants = recipe({
         fontSize: nsVar('type-code-lang-font-size'),
         fontWeight: nsVar('type-code-lang-font-weight'),
         lineHeight: nsVar('type-code-lang-line-height'),
+      },
+      /** Hero line / page-level empty title (one per screen): 26px medium, balanced. */
+      title: {
+        fontFamily: tokenVars.fontSans,
+        fontSize: tokenVars.text2xl,
+        fontWeight: tokenVars.fontWeightMedium,
+        lineHeight: tokenVars.text2xlLineHeight,
+        letterSpacing: '-0.015em',
+        textWrap: 'balance',
+      },
+      /**
+       * Group label (sidebar sections, list groups, settings groups): 11px in the
+       * passive tone, sentence case. Pass `tone` to override the colour.
+       */
+      label: {
+        fontFamily: tokenVars.fontSans,
+        fontSize: tokenVars.textTiny,
+        fontWeight: tokenVars.fontWeightNormal,
+        lineHeight: tokenVars.textTinyLineHeight,
+        color: vars.foregroundPassive,
+      },
+      /** Caption / meta line (ages, counts, provenance): 11px, tabular figures. */
+      meta: {
+        fontFamily: tokenVars.fontSans,
+        fontSize: tokenVars.textTiny,
+        fontWeight: tokenVars.fontWeightNormal,
+        lineHeight: tokenVars.textTinyLineHeight,
+        fontVariantNumeric: 'tabular-nums',
       },
       mention: {
         fontFamily: nsVar('type-mention-font-family'),

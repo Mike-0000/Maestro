@@ -1,5 +1,6 @@
 import { ComboboxPopover } from '@emdash/ui/react/components';
 import {
+  Button,
   Dialog,
   Field,
   Input,
@@ -48,7 +49,7 @@ export const AddRemoteModal = observer(function AddRemoteModal({
   projectName,
   workspaceId,
 }: AddRemoteModalArgs) {
-  const { complete } = useModalController('addRemoteModal');
+  const { complete, dismiss } = useModalController('addRemoteModal');
   const openIntegrationSetup = useOpenModal('integrationSetupModal');
   const [tab, setTab] = useState<Tab>('create');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -209,44 +210,47 @@ export const AddRemoteModal = observer(function AddRemoteModal({
   };
 
   return (
+    // The standard form dialog (design brief 2.9): the segmented choice of what to do, the
+    // fields for it, the acting account, and one primary to finish.
     <ModalLayout
-      header={
-        <Dialog.Header>
-          <Dialog.Title>Add Remote</Dialog.Title>
-        </Dialog.Header>
-      }
-      footer={
-        <Dialog.Footer>
+      title="Add remote"
+      description="Publish this branch to a new GitHub repository or to an existing remote."
+      actions={
+        <>
+          <Button variant="ghost" onClick={dismiss}>
+            Cancel
+          </Button>
           <ConfirmButton
             variant="primary"
             onClick={() => void handleSubmit()}
             disabled={!isValid || isSubmitting || isSavingAccount}
           >
-            {isSubmitting ? 'Adding...' : tab === 'create' ? 'Create & Publish' : 'Link & Publish'}
+            {isSubmitting ? 'Adding…' : tab === 'create' ? 'Create & Publish' : 'Link & Publish'}
           </ConfirmButton>
-        </Dialog.Footer>
+        </>
       }
     >
-      <Dialog.Body className="gap-4">
+      <Dialog.Body>
         <ToggleGroup.Root
           className="flex w-full"
+          aria-label="Remote"
           value={[tab]}
           onValueChange={([v]) => {
             if (v) setTab(v as Tab);
           }}
         >
           <ToggleGroup.Item className="flex-1" value="create">
-            Create Repository
+            Create repository
           </ToggleGroup.Item>
           <ToggleGroup.Item className="flex-1" value="link">
-            Link Existing
+            Link existing
           </ToggleGroup.Item>
         </ToggleGroup.Root>
 
         {tab === 'create' && (
           <Field.Group>
             <Field.Root>
-              <Field.Label>Repository Name</Field.Label>
+              <Field.Label>Repository name</Field.Label>
               <Input
                 autoFocus
                 value={repositoryName}
@@ -270,7 +274,7 @@ export const AddRemoteModal = observer(function AddRemoteModal({
                 className="w-full"
               />
               {ownersErrorMessage && (
-                <p className="text-destructive text-xs">{ownersErrorMessage}</p>
+                <p className="text-xs text-foreground-error">{ownersErrorMessage}</p>
               )}
             </Field.Root>
             <Field.Root>
@@ -279,11 +283,11 @@ export const AddRemoteModal = observer(function AddRemoteModal({
                 value={visibility}
                 onValueChange={(v) => setVisibility(v as 'public' | 'private')}
               >
-                <Label className="flex cursor-pointer items-center gap-3 font-normal">
+                <Label className="flex cursor-pointer items-center gap-2.5 font-normal">
                   <RadioGroup.Item value="private" />
                   Private
                 </Label>
-                <Label className="flex cursor-pointer items-center gap-3 font-normal">
+                <Label className="flex cursor-pointer items-center gap-2.5 font-normal">
                   <RadioGroup.Item value="public" />
                   Public
                 </Label>
@@ -340,7 +344,12 @@ export const AddRemoteModal = observer(function AddRemoteModal({
           />
         ) : null}
 
-        {error && <p className="text-destructive text-sm">{error}</p>}
+        {error && (
+          <p role="alert" className="flex items-start gap-2 text-sm text-foreground-muted">
+            <span aria-hidden className="mt-1.5 size-2 shrink-0 rounded-full bg-foreground-error" />
+            {error}
+          </p>
+        )}
       </Dialog.Body>
     </ModalLayout>
   );

@@ -2,9 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { createHeightChangeTracker } from './height-change-tracker';
 
 describe('createHeightChangeTracker', () => {
-  it('swallows the first observation even when the height differs', () => {
+  it('ignores a first observation that matches the initial measurement', () => {
     const tracker = createHeightChangeTracker(100);
-    expect(tracker.observe(180)).toBeNull();
+    expect(tracker.observe(100)).toBeNull();
+  });
+
+  it('signals a first observation that differs from the initial measurement', () => {
+    // The content changed between the synchronous measurement and the first
+    // ResizeObserver callback; swallowing it would leave the box stuck at the
+    // stale height.
+    const tracker = createHeightChangeTracker(100);
+    expect(tracker.observe(240)).toBe(240);
+    expect(tracker.observe(240)).toBeNull();
   });
 
   it('signals a change after the first observation', () => {
@@ -16,15 +25,6 @@ describe('createHeightChangeTracker', () => {
   it('ignores observations equal to the last known height', () => {
     const tracker = createHeightChangeTracker(100);
     tracker.observe(100);
-    expect(tracker.observe(100)).toBeNull();
-  });
-
-  it('compares against the initial height when the first observation was skipped', () => {
-    // The skipped first observation must not overwrite the initial
-    // measurement: a later observation matching the initial height is a
-    // no-op, not a change.
-    const tracker = createHeightChangeTracker(100);
-    tracker.observe(240);
     expect(tracker.observe(100)).toBeNull();
   });
 

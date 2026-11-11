@@ -1,6 +1,5 @@
-import { Input, SplitButton, Textarea, toast } from '@emdash/ui/react/primitives';
-import { card } from '@emdash/ui/styles/recipes/card';
-import { CheckCircle, Loader2 } from 'lucide-react';
+import { StateGlyph } from '@emdash/ui/react/components';
+import { Input, Spinner, SplitButton, toast } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
 import { useState } from 'react';
 import { getGitRepositoryStore } from '@core/features/source-control/api/browser/stores/source-control-selectors';
@@ -158,70 +157,85 @@ export const CommitCard = observer(function CommitCard({ autoStage = false }: Co
       : diffView.effectiveCommitAction;
 
   return (
-    <div
-      className={cn(
-        card({ level: 'elevated-emphasis', radius: 'lg', padding: 'sm' }),
-        'mx-2 mb-2 flex shrink-0 flex-col items-center justify-between gap-2'
-      )}
-    >
-      <Input
-        placeholder="Commit message"
-        className="w-full bg-background"
-        value={commitMessage}
-        onChange={(e) => setCommitMessage(e.target.value)}
-        disabled={isInFlight}
-      />
-      <Textarea
-        placeholder="Description"
-        className="w-full bg-background"
-        value={description}
-        onChange={(e) => setDescription(e.target.value)}
-        disabled={isInFlight}
-      />
-      {phase === 'idle' && (
-        <SplitButton
-          options={actions.map(({ id, label }) => ({ id, label }))}
-          size="sm"
-          fullWidth
-          disabled={!commitMessage.trim()}
-          selectedId={effectiveAction}
-          onSelectedChange={(id) =>
-            diffView.setCommitAction(id as 'commit' | 'commit-push' | 'commit-pr')
-          }
-          commitOnSelect={false}
-          onAction={(id) => actions.find((a) => a.id === id)?.action()}
+    // The commit box reads like the conductor composer: one emphasis card with
+    // the summary, a description that grows with its text, and the section's
+    // one solid move. Progress shows as words on the left of that move.
+    <div className="shrink-0 px-2 pt-2 pb-2">
+      <div
+        className={cn(
+          '@container/commit flex flex-col rounded-lg border border-border bg-surface-emphasis transition-[border-color,box-shadow] duration-150',
+          'focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/25'
+        )}
+      >
+        <Input
+          bare
+          aria-label="Commit message"
+          placeholder="Commit message"
+          value={commitMessage}
+          onChange={(e) => setCommitMessage(e.target.value)}
+          disabled={isInFlight}
+          className="px-3"
         />
-      )}
-      {phase === 'committing' && (
-        <StatusRow icon={<Loader2 className="size-4 animate-spin" />} label="Committing…" />
-      )}
-      {phase === 'opening-pr' && (
-        <StatusRow icon={<Loader2 className="size-4 animate-spin" />} label="Opening PR…" />
-      )}
-      {(phase === 'commit-only-done' || phase === 'committed') && (
-        <StatusRow
-          icon={<CheckCircle className="size-4 text-foreground-success" />}
-          label="Committed"
+        <textarea
+          aria-label="Commit description"
+          placeholder="Description (optional)"
+          rows={1}
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          disabled={isInFlight}
+          className="field-sizing-content max-h-40 min-h-8 resize-none bg-transparent px-3 pt-0.5 pb-1.5 text-sm leading-normal text-foreground outline-none placeholder:text-foreground-passive disabled:cursor-not-allowed disabled:opacity-50"
         />
-      )}
-      {phase === 'pushing' && (
-        <StatusRow icon={<Loader2 className="size-4 animate-spin" />} label="Pushing…" />
-      )}
-      {phase === 'pushed' && (
-        <StatusRow
-          icon={<CheckCircle className="size-4 text-foreground-success" />}
-          label="Pushed"
-        />
-      )}
+        <div className="flex min-h-10 items-center justify-between gap-2 pr-2 pb-2 pl-3">
+          <CommitProgress phase={phase} autoStage={autoStage} />
+          <SplitButton
+            options={actions.map(({ id, label }) => ({ id, label }))}
+            size="sm"
+            disabled={isInFlight || !commitMessage.trim()}
+            selectedId={effectiveAction}
+            onSelectedChange={(id) =>
+              diffView.setCommitAction(id as 'commit' | 'commit-push' | 'commit-pr')
+            }
+            commitOnSelect={false}
+            onAction={(id) => actions.find((a) => a.id === id)?.action()}
+            className="min-w-0"
+          />
+        </div>
+      </div>
     </div>
   );
 });
 
-function StatusRow({ icon, label }: { icon: React.ReactNode; label: string }) {
+const PHASE_WORDS: Record<Exclude<CommitPhase, 'idle'>, string> = {
+  committing: 'Committing…',
+  'commit-only-done': 'Committed',
+  committed: 'Committed',
+  pushing: 'Pushing…',
+  pushed: 'Pushed',
+  'opening-pr': 'Opening PR…',
+};
+
+/** Where a commit stands, in words: a passive spinner while it runs, the done ring after. */
+function CommitProgress({ phase, autoStage }: { phase: CommitPhase; autoStage: boolean }) {
+  if (phase === 'idle') {
+    return (
+      // In a narrow panel the hint steps aside so the commit button keeps its label.
+      <span className="min-w-0 truncate text-tiny text-foreground-passive @max-[17rem]/commit:hidden">
+        {autoStage ? 'Stages all changes' : null}
+      </span>
+    );
+  }
+  const done = phase === 'commit-only-done' || phase === 'committed' || phase === 'pushed';
   return (
-    <div className="flex w-full items-center justify-center gap-2 py-1 text-sm text-foreground-muted">
-      {icon}
-      <span>{label}</span>
-    </div>
+    <span
+      role="status"
+      className="flex min-w-0 items-center gap-1.5 text-xs text-foreground-muted motion-safe:animate-in motion-safe:fade-in"
+    >
+      {done ? (
+        <StateGlyph state="done" size="sm" />
+      ) : (
+        <Spinner size="sm" className="shrink-0 text-foreground-passive" />
+      )}
+      <span className="truncate">{PHASE_WORDS[phase]}</span>
+    </span>
   );
 }

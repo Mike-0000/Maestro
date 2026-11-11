@@ -1,4 +1,6 @@
 import { observer } from 'mobx-react-lite';
+import { TaskConductorSubtitle } from '@core/features/conductor/contributions/browser/task-conductor-subtitle';
+import { isSidebarTaskYours } from '@core/features/conductor/contributions/browser/task-ownership';
 import { projectViewDef } from '@core/features/projects/contributions/views';
 import { useAppSettingsKey } from '@core/features/settings/api/browser/use-app-settings-key';
 import {
@@ -98,6 +100,9 @@ export const SidebarTaskItem = observer(function SidebarTaskItem({
   const handleReconnect =
     workspaceStore?.connectionState != null ? () => workspaceStore.reconnect() : undefined;
 
+  // A task that is the developer's (the ownership line's rule) reads at full strength.
+  const yours = isSidebarTaskYours(taskId);
+
   return (
     <TaskContextMenu
       isPinned={task.data.isPinned}
@@ -113,32 +118,51 @@ export const SidebarTaskItem = observer(function SidebarTaskItem({
       onIntegrate={handleIntegrate}
       onDelete={handleDelete}
     >
+      {/*
+       * Two lines at a fixed 46px: the title with its trailing facts, then one line of what the
+       * task's conductor or chats last said. Without a second line the title sits centred in the
+       * same height, so rows never jump when a subtitle comes or goes.
+       */}
       <SidebarMenuRow
         className={cn(
-          'group/row flex items-center justify-between px-1 py-1.5 h-8 gap-1',
+          'group/row h-[46px] gap-0 py-0 pr-2',
           rowVariant === 'pinned' ? 'pl-2' : 'pl-8'
         )}
         isActive={isActive}
         onMouseDown={(e) => e.preventDefault()}
         onClick={openTask}
       >
-        <SidebarMenuAction
-          aria-label={`Open conductor ${taskName || 'conductor'}`}
-          className="gap-1 overflow-hidden"
-        >
-          <span
-            className={cn(
-              'min-w-0 truncate text-left transition-colors',
-              task.isBootstrapping && 'text-foreground/40'
-            )}
-          >
-            {taskName}
-          </span>
-        </SidebarMenuAction>
-        <div className="ml-2 flex shrink-0 items-center justify-end gap-1.5">
-          {showLineChanges && <TaskGitDiffStats task={task} />}
-          {showPrStatus && <RenderPrBadge task={task} />}
-          <TaskSidebarTrailingSlot task={task} showTimestamp={showTimestamps} />
+        <div className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
+          <div className="flex min-w-0 items-center gap-2">
+            <SidebarMenuAction
+              aria-label={`Open conductor ${taskName || 'conductor'}`}
+              className="overflow-hidden"
+            >
+              <span
+                className={cn(
+                  'min-w-0 truncate text-sm/[18px]',
+                  task.isBootstrapping
+                    ? 'text-foreground/40'
+                    : cn('text-foreground', yours && 'font-medium')
+                )}
+              >
+                {taskName}
+              </span>
+            </SidebarMenuAction>
+            <div className="flex shrink-0 items-center justify-end gap-1.5">
+              {showPrStatus && <RenderPrBadge task={task} />}
+              <TaskSidebarTrailingSlot task={task} showTimestamp={showTimestamps} />
+            </div>
+          </div>
+          {/* Collapses when it has nothing to show, so a lone title centres in the row. */}
+          <div className="flex min-w-0 items-center gap-2 empty:hidden">
+            <TaskConductorSubtitle
+              taskId={taskId}
+              branchName={branchName ?? null}
+              className="flex-1 leading-4"
+            />
+            {showLineChanges && <TaskGitDiffStats task={task} className="ml-auto leading-4" />}
+          </div>
         </div>
       </SidebarMenuRow>
     </TaskContextMenu>

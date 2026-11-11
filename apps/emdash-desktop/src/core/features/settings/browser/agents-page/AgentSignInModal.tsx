@@ -1,9 +1,9 @@
 import { sshConnectionIdOf, type HostRef } from '@emdash/core/primitives/host/api';
-import { Button, Dialog, toast } from '@emdash/ui/react/primitives';
+import { StateGlyph } from '@emdash/ui/react/components';
+import { Button, Dialog, Spinner, toast } from '@emdash/ui/react/primitives';
 import { useQuery } from '@tanstack/react-query';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal } from '@xterm/xterm';
-import { Loader2 } from 'lucide-react';
 import { reaction } from 'mobx';
 import { useEffect, useRef, useState } from 'react';
 import { AcpAuthLoginBinding } from '@core/features/agents/api/browser/auth-login-binding';
@@ -239,44 +239,48 @@ export function AgentSignInModal({
     setAttempt((current) => current + 1);
   };
 
+  const description = [
+    machineName ? `On ${machineName}` : null,
+    claudeAccountLabel ? `Account: ${claudeAccountLabel}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
   return (
     <>
       <Dialog.Header>
         <Dialog.Title>Sign in to {providerName}</Dialog.Title>
-        {machineName && <Dialog.Description>on {machineName}</Dialog.Description>}
-        {claudeAccountLabel && (
-          <Dialog.Description>Account: {claudeAccountLabel}</Dialog.Description>
-        )}
+        {description ? <Dialog.Description>{description}</Dialog.Description> : null}
       </Dialog.Header>
-      <Dialog.Body height={520} className="p-0">
-        <div className="relative h-full">
-          <div
-            ref={terminalHostRef}
-            className="h-full rounded-md border border-border bg-(--xterm-bg)"
-          />
+      <Dialog.Body height={520}>
+        <div className="relative h-full overflow-hidden rounded-lg border border-border-subtle bg-(--xterm-bg)">
+          <div ref={terminalHostRef} className="h-full" />
           {!ready && !error && (
-            <div className="absolute inset-0 flex items-center justify-center gap-2 bg-background/60 text-sm text-foreground-muted">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Starting sign-in terminal...
-            </div>
+            <TerminalOverlay>
+              <Spinner size="sm" className="text-foreground-passive" />
+              <span>Starting the sign-in terminal…</span>
+            </TerminalOverlay>
           )}
           {error && (
-            <div className="text-destructive absolute inset-0 bg-background p-4 text-sm">
-              {error}
-            </div>
+            <TerminalOverlay>
+              <div role="alert" className="flex max-w-sm flex-col items-center gap-2">
+                <p className="flex items-center gap-2 font-medium text-foreground">
+                  <StateGlyph state="error" />
+                  Could not start the sign-in terminal
+                </p>
+                <p className="font-mono text-xs break-all text-foreground-muted">{error}</p>
+              </div>
+            </TerminalOverlay>
           )}
           {!error && accountPhase.kind === 'checking' && (
-            <div className="absolute inset-0 flex items-center justify-center gap-2 bg-background/60 text-sm text-foreground-muted">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Checking sign-in...
-            </div>
+            <TerminalOverlay>
+              <Spinner size="sm" className="text-foreground-passive" />
+              <span>Checking the sign-in…</span>
+            </TerminalOverlay>
           )}
           {!error && (accountPhase.kind === 'not-signed-in' || accountPhase.kind === 'failed') && (
-            <div
-              role="status"
-              className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-background/80 p-6 text-center text-sm"
-            >
-              <div className="flex max-w-sm flex-col gap-1">
+            <TerminalOverlay>
+              <div role="status" className="flex max-w-sm flex-col items-center gap-1">
                 <p className="font-medium text-foreground">
                   {accountPhase.kind === 'not-signed-in'
                     ? `${claudeAccountLabel ?? 'This account'} isn't signed in yet`
@@ -287,20 +291,29 @@ export function AgentSignInModal({
                     ? 'The sign-in ended before it finished.'
                     : accountPhase.message}
                 </p>
+                <Button variant="text" size="sm" className="mt-3" onClick={retryAccountSignIn}>
+                  Try again
+                </Button>
               </div>
-              <Button variant="secondary" size="sm" onClick={retryAccountSignIn}>
-                Try again
-              </Button>
-            </div>
+            </TerminalOverlay>
           )}
         </div>
       </Dialog.Body>
       <Dialog.Footer>
-        <Button variant="secondary" onClick={modal.dismiss}>
+        <Button variant="ghost" onClick={modal.dismiss}>
           Close
         </Button>
       </Dialog.Footer>
     </>
+  );
+}
+
+/** A centred note over the terminal (starting, checking, failed), on the dialog's surface. */
+function TerminalOverlay({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="surface-elevated absolute inset-0 flex items-center justify-center gap-2 bg-surface/90 p-6 text-center text-sm text-foreground-muted">
+      {children}
+    </div>
   );
 }
 

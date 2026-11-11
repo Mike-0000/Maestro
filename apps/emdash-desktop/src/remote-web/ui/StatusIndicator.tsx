@@ -1,5 +1,4 @@
 import type { RemoteAgent } from '@emdash/core/services/remote-control/api';
-import { Check } from 'lucide-react';
 import { agentGroupOf } from '../lib/agent-groups';
 import { cx } from './hooks';
 
@@ -14,11 +13,12 @@ export function agentTone(agent: RemoteAgent): AgentTone {
   return 'idle';
 }
 
+/** The words for each state, as the desktop app says them. */
 const TONE_LABEL: Record<AgentTone, string> = {
   attention: 'Needs you',
   working: 'Working',
-  error: 'Stopped with an error',
-  completed: 'Done',
+  error: 'Stopped on an error',
+  completed: 'Finished',
   idle: 'Idle',
 };
 
@@ -28,53 +28,62 @@ export function agentStatusLabel(agent: RemoteAgent): string {
   return TONE_LABEL[tone];
 }
 
+/**
+ * Text tone for the state words. Only an error is coloured; a waiting agent reads at full
+ * strength and the rest stay muted, so the eye lands on what needs it.
+ */
 export const TONE_TEXT: Record<AgentTone, string> = {
-  attention: 'text-attention',
-  working: 'text-working',
-  error: 'text-danger',
-  completed: 'text-success',
-  idle: 'text-fg-passive',
+  attention: 'text-foreground',
+  working: 'text-foreground-muted',
+  error: 'text-foreground-error',
+  completed: 'text-foreground-muted',
+  idle: 'text-foreground-muted',
 };
 
+/** The state glyphs of the desktop kit (styles.css `.state-glyph`). */
+export type StateMarkState = 'needs-you' | 'working' | 'unread' | 'done' | 'idle' | 'error';
+
+const MARK_FOR_TONE: Record<AgentTone, StateMarkState> = {
+  attention: 'needs-you',
+  working: 'working',
+  error: 'error',
+  completed: 'done',
+  idle: 'idle',
+};
+
+/** The mark for an agent's state. */
+export function agentMark(agent: RemoteAgent): StateMarkState {
+  return MARK_FOR_TONE[agentTone(agent)];
+}
+
 /**
- * The state of an agent at a glance. Working agents get the waveform from the Maestro mark,
- * moving; waiting agents pulse; the rest sit still so the eye lands on what needs it.
+ * One state mark: a filled near-white dot when a person is needed, a softly pulsing accent dot
+ * while working, a ring once finished (dimmer when idle), the error dot. With a label it is
+ * announced; without one it is decoration beside words that already say it.
  */
-export function StatusIndicator({ agent, className }: { agent: RemoteAgent; className?: string }) {
-  const tone = agentTone(agent);
+export function StateMark({
+  state,
+  label,
+  className,
+}: {
+  state: StateMarkState;
+  label?: string;
+  className?: string;
+}) {
   return (
     <span
-      role="img"
-      aria-label={agentStatusLabel(agent)}
-      className={cx('relative inline-flex size-5 shrink-0 items-center justify-center', className)}
-    >
-      {tone === 'working' ? (
-        <span className="text-working flex h-3.5 items-center gap-[2px]" aria-hidden="true">
-          {[0, 1, 2, 3].map((bar) => (
-            <span
-              key={bar}
-              className="animate-bar h-full w-[2.5px] origin-center rounded-full bg-current"
-              style={{ animationDelay: `${bar * -230}ms` }}
-            />
-          ))}
-        </span>
-      ) : tone === 'attention' ? (
-        <>
-          <span className="animate-halo bg-attention absolute size-2.5 rounded-full" />
-          <span className="bg-attention relative size-2.5 rounded-full" />
-        </>
-      ) : tone === 'completed' ? (
-        <Check className="text-success size-4" strokeWidth={2.5} aria-hidden="true" />
-      ) : tone === 'error' ? (
-        <span className="bg-danger size-2.5 rounded-full" />
-      ) : (
-        <span
-          className={cx(
-            'size-2.5 rounded-full border-[1.5px] border-fg-passive',
-            !agent.running && 'opacity-50'
-          )}
-        />
-      )}
-    </span>
+      role={label ? 'img' : undefined}
+      aria-label={label}
+      aria-hidden={label ? undefined : true}
+      data-state={state}
+      className={cx('state-glyph', className)}
+    />
+  );
+}
+
+/** The state of an agent at a glance, with its words for screen readers. */
+export function StatusIndicator({ agent, className }: { agent: RemoteAgent; className?: string }) {
+  return (
+    <StateMark state={agentMark(agent)} label={agentStatusLabel(agent)} className={className} />
   );
 }

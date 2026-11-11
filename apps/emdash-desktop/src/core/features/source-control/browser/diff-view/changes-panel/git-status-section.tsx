@@ -1,5 +1,5 @@
 import { Button, Tooltip } from '@emdash/ui/react/primitives';
-import { ArrowDown, ArrowUp, GitBranch, GitMerge, RefreshCcw } from 'lucide-react';
+import { ArrowDown, ArrowUp, GitBranch, RefreshCcw } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import {
   asAvailableProject,
@@ -16,6 +16,7 @@ import { getTaskStore } from '@core/features/tasks/api/browser/task-state/task-s
 import { useTaskViewContext } from '@core/features/tasks/contributions/browser/task-view-context';
 import { useOpenModal } from '@core/manifests/browser/modal-api';
 import { projectAvailabilityUi } from '@core/manifests/browser/project-availability-ui';
+import { cn } from '@core/primitives/styling/browser/cn';
 import { getBranchTooltipText, getPublishTooltipText } from './git-status-tooltips';
 
 export const GitStatusSection = observer(function GitStatusSection() {
@@ -65,158 +66,160 @@ export const GitStatusSection = observer(function GitStatusSection() {
     publish();
   };
 
+  const fetchLabel = isFetching ? 'Fetching…' : 'Fetch changes';
+  const pullLabel = isPulling ? 'Pulling…' : behindCount === 0 ? 'Nothing to pull' : 'Pull changes';
+  const pushLabel = isPushing ? 'Pushing…' : aheadCount === 0 ? 'Nothing to push' : 'Push changes';
+
+  // The panel's footer strip: where this worktree's branch stands on the left,
+  // the sync moves on the right as quiet icon buttons that carry their
+  // ahead / behind counts, and Merge… as a text action. No rule above it.
+  // When the panel is too narrow for the branch name beside the actions, the
+  // actions wrap to a second line, right-aligned, instead of crushing the name.
   return (
     <Tooltip.Provider>
-      <div className="flex flex-col gap-2 border-t border-border p-2">
-        <div className="flex items-center justify-between gap-2 text-foreground-muted">
+      <div className="flex min-h-10 shrink-0 flex-wrap items-center justify-between gap-x-3 py-1 pr-2 pl-4">
+        <div className="flex min-h-8 min-w-0 grow basis-36 items-center">
           <Tooltip.Root>
-            <Tooltip.Trigger className="flex min-w-0 items-center gap-2">
-              <GitBranch className="size-3 shrink-0" />
-              <span className="truncate text-xs">{headDisplay}</span>
+            <Tooltip.Trigger className="flex min-w-0 items-center gap-1.5 rounded-sm text-xs text-foreground-muted outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <GitBranch aria-hidden className="size-3.5 shrink-0 text-foreground-passive" />
+              <span className="truncate">{headDisplay}</span>
             </Tooltip.Trigger>
-            <Tooltip.Content side="bottom">
+            <Tooltip.Content side="top">
               {getBranchTooltipText(headDisplay, headKind)}
             </Tooltip.Content>
           </Tooltip.Root>
-          <div className="flex items-center gap-1">
-            {showIntegrate && (
+        </div>
+        <div className="ml-auto flex min-h-8 shrink-0 items-center gap-0.5">
+          {showIntegrate && (
+            <Tooltip.Root>
+              <Tooltip.Trigger
+                render={
+                  <Button
+                    variant="text"
+                    size="xs"
+                    className="mr-2"
+                    aria-disabled={hostActionDisabled}
+                    aria-description={hostActionReason ?? undefined}
+                    onClick={() => {
+                      if (!hostActionDisabled) void openIntegrateModal({ projectId, taskId });
+                    }}
+                  >
+                    Merge…
+                  </Button>
+                }
+              />
+              <Tooltip.Content className="max-w-64">
+                {hostActionReason ??
+                  "Merge this task's commits into the branch checked out in the project's main directory"}
+              </Tooltip.Content>
+            </Tooltip.Root>
+          )}
+          {isPublished && !isDetached ? (
+            <>
               <Tooltip.Root>
                 <Tooltip.Trigger
                   render={
                     <Button
-                      variant="secondary"
+                      variant="ghost"
                       size="xs"
+                      icon
+                      aria-label={fetchLabel}
+                      disabled={isFetching}
                       aria-disabled={hostActionDisabled}
                       aria-description={hostActionReason ?? undefined}
                       onClick={() => {
-                        if (!hostActionDisabled) void openIntegrateModal({ projectId, taskId });
+                        if (!hostActionDisabled) fetch();
                       }}
                     >
-                      <GitMerge className="size-3" />
-                      Integrate
+                      <RefreshCcw
+                        className={cn('size-3.5', isFetching && 'motion-safe:animate-spin')}
+                      />
+                    </Button>
+                  }
+                />
+                <Tooltip.Content>{hostActionReason ?? fetchLabel}</Tooltip.Content>
+              </Tooltip.Root>
+              <Tooltip.Root>
+                <Tooltip.Trigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      icon={behindCount === 0}
+                      aria-label={pullLabel}
+                      disabled={isPulling || behindCount === 0}
+                      aria-disabled={hostActionDisabled}
+                      aria-description={hostActionReason ?? undefined}
+                      onClick={() => {
+                        if (!hostActionDisabled) pull();
+                      }}
+                      className="tabular-nums"
+                    >
+                      <ArrowDown className="size-3.5" />
+                      {behindCount > 0 && behindCount}
+                    </Button>
+                  }
+                />
+                <Tooltip.Content>{hostActionReason ?? pullLabel}</Tooltip.Content>
+              </Tooltip.Root>
+              <Tooltip.Root>
+                <Tooltip.Trigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      icon={aheadCount === 0}
+                      aria-label={pushLabel}
+                      disabled={isPushing || aheadCount === 0}
+                      aria-disabled={hostActionDisabled}
+                      aria-description={hostActionReason ?? undefined}
+                      onClick={() => {
+                        if (!hostActionDisabled) push();
+                      }}
+                      className="tabular-nums"
+                    >
+                      <ArrowUp className="size-3.5" />
+                      {aheadCount > 0 && aheadCount}
+                    </Button>
+                  }
+                />
+                <Tooltip.Content>{hostActionReason ?? pushLabel}</Tooltip.Content>
+              </Tooltip.Root>
+            </>
+          ) : (
+            !isDetached && (
+              <Tooltip.Root>
+                <Tooltip.Trigger
+                  render={
+                    <Button
+                      variant="text"
+                      size="xs"
+                      className="mr-2"
+                      disabled={isPublishing || !headDisplay || headKind !== 'branch'}
+                      aria-disabled={hostActionDisabled}
+                      aria-description={hostActionReason ?? undefined}
+                      onClick={handlePublishClick}
+                    >
+                      {isPublishing
+                        ? 'Publishing…'
+                        : shouldOfferAddRemote
+                          ? 'Add remote'
+                          : 'Publish'}
                     </Button>
                   }
                 />
                 <Tooltip.Content>
                   {hostActionReason ??
-                    "Merge this task's commits into the branch checked out in the project's main directory"}
+                    getPublishTooltipText({
+                      isPublishing,
+                      headDisplay,
+                      headKind,
+                      shouldOfferAddRemote,
+                    })}
                 </Tooltip.Content>
               </Tooltip.Root>
-            )}
-            {isPublished && !isDetached ? (
-              <>
-                <Tooltip.Root>
-                  <Tooltip.Trigger
-                    render={
-                      <Button
-                        variant="secondary"
-                        size="xs"
-                        icon
-                        disabled={isFetching}
-                        aria-disabled={hostActionDisabled}
-                        aria-description={hostActionReason ?? undefined}
-                        onClick={() => {
-                          if (!hostActionDisabled) fetch();
-                        }}
-                      >
-                        <RefreshCcw className="size-3" />
-                      </Button>
-                    }
-                  />
-                  <Tooltip.Content>
-                    {hostActionReason ?? (isFetching ? 'Fetching...' : 'Fetch changes')}
-                  </Tooltip.Content>
-                </Tooltip.Root>
-                <Tooltip.Root>
-                  <Tooltip.Trigger
-                    render={
-                      <Button
-                        variant="secondary"
-                        size="xs"
-                        icon
-                        disabled={isPulling || behindCount === 0}
-                        aria-disabled={hostActionDisabled}
-                        aria-description={hostActionReason ?? undefined}
-                        onClick={() => {
-                          if (!hostActionDisabled) pull();
-                        }}
-                      >
-                        <ArrowDown className="size-3" />
-                      </Button>
-                    }
-                  />
-                  <Tooltip.Content>
-                    {hostActionReason ??
-                      (isPulling
-                        ? 'Pulling...'
-                        : behindCount === 0
-                          ? 'Nothing to pull'
-                          : 'Pull changes')}
-                  </Tooltip.Content>
-                </Tooltip.Root>
-                <Tooltip.Root>
-                  <Tooltip.Trigger
-                    render={
-                      <Button
-                        variant="secondary"
-                        size="xs"
-                        icon
-                        disabled={isPushing || aheadCount === 0}
-                        aria-disabled={hostActionDisabled}
-                        aria-description={hostActionReason ?? undefined}
-                        onClick={() => {
-                          if (!hostActionDisabled) push();
-                        }}
-                      >
-                        <ArrowUp className="size-3" />
-                      </Button>
-                    }
-                  />
-                  <Tooltip.Content>
-                    {hostActionReason ??
-                      (isPushing
-                        ? 'Pushing...'
-                        : aheadCount === 0
-                          ? 'Nothing to push'
-                          : 'Push changes')}
-                  </Tooltip.Content>
-                </Tooltip.Root>
-              </>
-            ) : (
-              !isDetached && (
-                <Tooltip.Root>
-                  <Tooltip.Trigger
-                    render={
-                      <Button
-                        variant="secondary"
-                        size="xs"
-                        disabled={isPublishing || !headDisplay || headKind !== 'branch'}
-                        aria-disabled={hostActionDisabled}
-                        aria-description={hostActionReason ?? undefined}
-                        onClick={handlePublishClick}
-                      >
-                        <ArrowUp className="size-3" />
-                        {isPublishing
-                          ? 'Publishing...'
-                          : shouldOfferAddRemote
-                            ? 'Add Remote'
-                            : 'Publish'}
-                      </Button>
-                    }
-                  />
-                  <Tooltip.Content>
-                    {hostActionReason ??
-                      getPublishTooltipText({
-                        isPublishing,
-                        headDisplay,
-                        headKind,
-                        shouldOfferAddRemote,
-                      })}
-                  </Tooltip.Content>
-                </Tooltip.Root>
-              )
-            )}
-          </div>
+            )
+          )}
         </div>
       </div>
     </Tooltip.Provider>

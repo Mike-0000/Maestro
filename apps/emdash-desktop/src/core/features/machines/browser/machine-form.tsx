@@ -1,6 +1,5 @@
 import { FormFieldShell } from '@emdash/ui/react/form';
-import { Input, ToggleGroup, Tooltip } from '@emdash/ui/react/primitives';
-import { LoaderCircle } from 'lucide-react';
+import { Input, Spinner, ToggleGroup, Tooltip } from '@emdash/ui/react/primitives';
 import { MachineAuthenticationFields } from './machine-authentication-fields';
 import { MachineConnectionDetails } from './machine-connection-details';
 import { MachineFormFeedback } from './machine-form-actions';
@@ -9,6 +8,11 @@ import { MachineManualFields, MachineManualRouting } from './machine-manual-fiel
 import type { MachineFormController } from './use-machine-form';
 import { WindowsHostSetupHelp } from './windows-host-setup-help';
 
+/**
+ * The machine form: an optional name, where the connection settings come from (your SSH config
+ * or typed by hand), the connection itself, then authentication. Fields sit 20px apart; errors
+ * are one line of error text under what they are about.
+ */
 export function MachineFormFields({
   controller,
   formId,
@@ -29,31 +33,28 @@ export function MachineFormFields({
     isSaving,
   } = controller;
   const showConnection = mode === 'manual' || !!details;
+  const sourceLabelId = `${formId}-source-label`;
   return (
     <Tooltip.Provider delay={150}>
-      <form
-        id={formId}
-        onSubmit={(event) => {
-          event.preventDefault();
-          actions.submit();
-        }}
-      >
-        <fieldset disabled={isSaving} className="m-0 grid min-w-0 gap-4 border-0 p-0">
-          <div className="grid gap-1">
-            <div className="flex items-center gap-3">
+      <div className="flex flex-col gap-5">
+        <form
+          id={formId}
+          onSubmit={(event) => {
+            event.preventDefault();
+            actions.submit();
+          }}
+        >
+          <fieldset disabled={isSaving} className="m-0 grid min-w-0 gap-5 border-0 p-0">
+            <div className="grid gap-1.5">
               <form.AppField name="name">
                 {(field) => (
-                  <FormFieldShell className="min-w-0 flex-1">
+                  <FormFieldShell label="Connection name" className="min-w-0">
                     {({ id, invalid }) => (
                       <Input
                         id={id}
                         name={field.name}
-                        bare
                         autoFocus
-                        aria-label="Connection name"
-                        title="Optional. Defaults to the host."
-                        placeholder={name.fallback || 'Connection name'}
-                        className="min-w-0 px-0 text-lg!"
+                        placeholder={name.fallback || 'Defaults to the host'}
                         value={field.state.value}
                         onChange={(event) => field.handleChange(event.target.value)}
                         onBlur={field.handleBlur}
@@ -64,9 +65,23 @@ export function MachineFormFields({
                   </FormFieldShell>
                 )}
               </form.AppField>
+              {name.error && (
+                <p
+                  id={formId + '-name-error'}
+                  role="alert"
+                  className="text-xs text-foreground-error"
+                >
+                  {name.error}
+                </p>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+              <span id={sourceLabelId} className="text-sm text-foreground">
+                Connection settings
+              </span>
               <ToggleGroup.Root
                 aria-label="Connection source"
-                className="shrink-0 bg-transparent"
+                className="shrink-0"
                 value={[mode]}
                 onValueChange={([value]) => {
                   if (value === 'manual' || value === 'config') selectMode(value);
@@ -80,19 +95,8 @@ export function MachineFormFields({
                 </ToggleGroup.Item>
               </ToggleGroup.Root>
             </div>
-            {name.error && (
-              <p
-                id={formId + '-name-error'}
-                role="alert"
-                className="text-sm text-foreground-destructive"
-              >
-                {name.error}
-              </p>
-            )}
-          </div>
-          <div className="grid gap-4">
             {mode === 'config' && !showConnection && (
-              <>
+              <div className="grid gap-2">
                 <MachineHostPicker
                   id={formId + '-target'}
                   target={config.target}
@@ -101,22 +105,22 @@ export function MachineFormFields({
                   disabled={isSaving}
                 />
                 {config.suggestionsError && (
-                  <p className="text-sm text-foreground-muted">{config.suggestionsError}</p>
+                  <p className="text-xs text-foreground-muted">{config.suggestionsError}</p>
                 )}
                 {config.resolution.status === 'resolving' && (
                   <p
                     role="status"
-                    className="flex items-center gap-2 text-sm text-foreground-muted"
+                    className="flex items-center gap-2 text-xs text-foreground-muted"
                   >
-                    <LoaderCircle className="size-4 animate-spin" /> Resolving connection settings…
+                    <Spinner size="sm" /> Resolving connection settings…
                   </p>
                 )}
                 {config.resolution.status === 'failed' && (
-                  <p role="alert" className="text-sm text-foreground-destructive">
+                  <p role="alert" className="text-xs text-foreground-error">
                     {config.resolution.error}
                   </p>
                 )}
-              </>
+              </div>
             )}
             {mode === 'config' && details && (
               <MachineConnectionDetails host={details} target={config.target} />
@@ -132,11 +136,11 @@ export function MachineFormFields({
               />
             )}
             {mode === 'manual' && <MachineManualRouting form={form} />}
-          </div>
-        </fieldset>
-      </form>
-      <MachineFormFeedback {...feedback} />
-      <WindowsHostSetupHelp />
+          </fieldset>
+        </form>
+        <MachineFormFeedback {...feedback} />
+        <WindowsHostSetupHelp />
+      </div>
     </Tooltip.Provider>
   );
 }

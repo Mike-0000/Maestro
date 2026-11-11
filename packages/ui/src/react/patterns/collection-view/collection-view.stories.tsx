@@ -337,10 +337,10 @@ const WORKTREES: WorktreeFixture[] = [
 function WorktreeActionsCell({ row }: { row: WorktreeFixture }) {
   return (
     <DropdownMenu.Root>
-      <DropdownMenu.Trigger>
-        <Button variant="ghost" size="xs" aria-label={`Actions for ${row.branch}`}>
-          <MoreHorizontal />
-        </Button>
+      <DropdownMenu.Trigger
+        render={<Button variant="ghost" size="xs" icon aria-label={`Actions for ${row.branch}`} />}
+      >
+        <MoreHorizontal />
       </DropdownMenu.Trigger>
       <DropdownMenu.Content align="end">
         <DropdownMenu.Item>

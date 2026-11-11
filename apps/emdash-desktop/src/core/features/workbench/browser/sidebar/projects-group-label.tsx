@@ -1,17 +1,19 @@
-import { Button, DropdownMenu, MicroLabel, Tooltip } from '@emdash/ui/react/primitives';
+import { Button, DropdownMenu, Tooltip } from '@emdash/ui/react/primitives';
 import { FolderPlus, ListFilter } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { getSidebarStore } from '@core/features/workbench/contributions/browser/app-stores';
 import { useOpenModal } from '@core/manifests/browser/modal-api';
 import { BoundShortcut } from '@core/primitives/keybindings/browser/shortcut';
+import { SidebarSectionLabel } from './sidebar-primitives';
 
 export const ProjectsGroupLabel = observer(function ProjectsGroupLabel() {
   const openAddProjectModal = useOpenModal('addProjectModal');
 
   return (
-    <div className="flex h-[40px] items-center justify-between pr-2.5 pl-5">
-      <MicroLabel className="font-medium text-foreground-tertiary-passive">Projects</MicroLabel>
-      <div className="flex items-center gap-1">
+    <div className="group/label flex h-8 items-center justify-between pr-2.5 pl-5">
+      <SidebarSectionLabel>Projects</SidebarSectionLabel>
+      {/* The sort and add buttons stay findable by keyboard and come forward on hover. */}
+      <div className="flex items-center gap-0.5 text-foreground-passive opacity-70 transition-opacity group-hover/label:opacity-100 focus-within:opacity-100">
         <DropdownMenu.Root>
           <Tooltip.Root>
             <DropdownMenu.Trigger

@@ -35,6 +35,7 @@ import { For, Show } from 'solid-js';
 import type { Component } from 'solid-js';
 import { Dynamic } from 'solid-js/web';
 import { layoutBlockStack, type BlockStackOpts } from './block-stack';
+import { vars } from '@styles/theme.css';
 
 // ── Box ──────────────────────────────────────────────────────────────────────
 
@@ -201,6 +202,8 @@ export function chrome(opts: ChromeOpts, child: Box): Box {
         'padding-right': padX > 0 ? `${padX}px` : undefined,
         'border-width': border > 0 ? `${border}px` : undefined,
         'border-style': border > 0 ? ('solid' as const) : undefined,
+        // The quiet hairline; without it the edge would fall back to currentColor.
+        'border-color': border > 0 ? vars.borderSubtle : undefined,
       });
       return (
         <div style={style()}>

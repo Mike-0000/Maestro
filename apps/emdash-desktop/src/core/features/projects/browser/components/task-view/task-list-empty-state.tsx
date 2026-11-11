@@ -1,4 +1,4 @@
-import { menuItemBase } from '@emdash/ui/styles/recipes/menu-item';
+import { EmptyState } from '@emdash/ui/react/components';
 import { CircleDot, GitBranch, GitPullRequest, type LucideIcon } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useConnectedIssueProviders } from '@core/features/integrations/api/browser/use-connected-issue-providers';
@@ -47,18 +47,18 @@ export const TaskListEmptyState = observer(function TaskListEmptyState({
 
   const actions: TaskAction[] = [
     {
-      label: 'Create a Conductor from a Branch',
-      description: 'Create a conductor from an existing branch',
+      label: 'From a branch',
+      description: 'Start on a branch that already exists.',
       icon: GitBranch,
       disabled: !!createDisabledReason,
       disabledReason: createDisabledReason,
       onActivate: () => void openTaskModal({ projectId, strategy: 'from-branch' }),
     },
     {
-      label: 'Create from Issue',
+      label: 'From an issue',
       description: hasAnyIntegration
-        ? 'Link and create a conductor from an issue'
-        : 'Configure issue integrations',
+        ? 'Link an issue and start from it.'
+        : 'Connect an issue tracker first.',
       icon: CircleDot,
       disabled: !!createDisabledReason,
       disabledReason: createDisabledReason,
@@ -68,8 +68,8 @@ export const TaskListEmptyState = observer(function TaskListEmptyState({
           : navigate(settingsViewDef({ tab: 'integrations' })),
     },
     {
-      label: 'Create from Pull Request',
-      description: 'Create a conductor from a pull request',
+      label: 'From a pull request',
+      description: 'Start from an open pull request.',
       icon: GitPullRequest,
       disabled: !!createDisabledReason || !supportsPullRequests,
       disabledReason: createDisabledReason ?? 'No remote repository connected',
@@ -82,19 +82,27 @@ export const TaskListEmptyState = observer(function TaskListEmptyState({
     if (action && !action.disabled) action.onActivate();
   });
 
+  // The page-level empty state: a quiet title, one sentence, then the three ways in as a short
+  // list. Arrow keys move through it and Enter starts the highlighted one (its keycap shows).
   return (
-    <div className="flex h-full flex-col items-center justify-center p-8">
-      <div className="flex w-full max-w-sm flex-col gap-1">
-        {actions.map((action, i) => (
-          <TaskActionRow
-            key={action.label}
-            action={action}
-            isSelected={i === selectedIndex}
-            onMouseEnter={() => setSelectedIndex(i)}
-          />
-        ))}
-      </div>
-    </div>
+    <EmptyState
+      bare
+      size="page"
+      label="No conductors yet"
+      description="Start one from a branch, an issue or a pull request."
+      action={
+        <div className="flex w-80 max-w-full flex-col gap-0.5 text-left">
+          {actions.map((action, i) => (
+            <TaskActionRow
+              key={action.label}
+              action={action}
+              isSelected={i === selectedIndex}
+              onMouseEnter={() => setSelectedIndex(i)}
+            />
+          ))}
+        </div>
+      }
+    />
   );
 });
 
@@ -116,24 +124,24 @@ function TaskActionRow({
       onClick={disabled ? undefined : onActivate}
       onMouseEnter={disabled ? undefined : onMouseEnter}
       className={cn(
-        menuItemBase({ fullWidth: true }),
-        'justify-between',
-        disabled ? 'opacity-50' : 'hover:bg-background-1',
-        !disabled && isSelected && 'bg-background-1'
+        'flex w-full min-w-0 items-center justify-between gap-3 rounded-md px-3 py-2 text-left transition-colors',
+        'focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none',
+        disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:bg-surface-hover',
+        !disabled && isSelected && 'bg-surface-hover'
       )}
     >
-      <div className="flex items-center gap-3">
-        <Icon className="size-7 shrink-0 text-foreground-passive" strokeWidth={1} />
-        <div className="flex flex-col gap-1 text-left">
+      <div className="flex min-w-0 items-center gap-3">
+        <Icon className="size-4 shrink-0 text-foreground-passive" aria-hidden />
+        <div className="flex min-w-0 flex-col">
           <span
             className={cn(
-              'text-sm whitespace-nowrap text-foreground-muted transition-colors',
+              'truncate text-sm text-foreground-muted transition-colors',
               !disabled && isSelected && 'text-foreground'
             )}
           >
             {label}
           </span>
-          <span className="text-xs text-foreground-passive">
+          <span className="truncate text-xs text-foreground-passive">
             {disabled && disabledReason ? disabledReason : description}
           </span>
         </div>

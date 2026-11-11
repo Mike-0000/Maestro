@@ -21,9 +21,9 @@
           // paint (and the boot splash) match the persisted theme.
           var dark = effective === 'emdark';
           var style = document.documentElement.style;
-          style.backgroundColor = dark ? '#111111' : '#fcfcfc';
-          style.setProperty('--boot-splash-bg', dark ? '#111111' : '#fcfcfc');
-          style.setProperty('--boot-splash-fg', dark ? '#eeeeee' : '#202020');
+          style.backgroundColor = dark ? '#121a1e' : '#fafcfd';
+          style.setProperty('--boot-splash-bg', dark ? '#121a1e' : '#fafcfd');
+          style.setProperty('--boot-splash-fg', dark ? '#eceff1' : '#12181c');
         } catch (_) {}
       })();
     </script>
@@ -37,8 +37,8 @@
         align-items: center;
         justify-content: center;
         gap: 28px;
-        background-color: var(--boot-splash-bg, #fcfcfc);
-        color: var(--boot-splash-fg, #202020);
+        background-color: var(--boot-splash-bg, #fafcfd);
+        color: var(--boot-splash-fg, #12181c);
         font-family:
           -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell,
           'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
@@ -55,7 +55,7 @@
       #boot-splash .boot-splash-logo {
         height: 26px;
         width: auto;
-        fill: var(--boot-splash-fg, #202020);
+        fill: var(--boot-splash-fg, #12181c);
         opacity: 0.9;
       }
       #boot-splash .boot-splash-progress {
@@ -64,7 +64,7 @@
         height: 2px;
         border-radius: 1px;
         overflow: hidden;
-        background-color: color-mix(in srgb, var(--boot-splash-fg, #202020) 14%, transparent);
+        background-color: color-mix(in srgb, var(--boot-splash-fg, #12181c) 14%, transparent);
         opacity: 0;
         animation: boot-splash-reveal 240ms ease-out 1200ms forwards;
       }
@@ -76,7 +76,7 @@
         left: 0;
         width: 40%;
         border-radius: 1px;
-        background-color: color-mix(in srgb, var(--boot-splash-fg, #202020) 55%, transparent);
+        background-color: color-mix(in srgb, var(--boot-splash-fg, #12181c) 55%, transparent);
         animation: boot-splash-slide 1.3s ease-in-out infinite;
       }
       #boot-splash-escape {
@@ -87,7 +87,7 @@
         align-items: center;
         gap: 12px;
         font-size: 13px;
-        color: color-mix(in srgb, var(--boot-splash-fg, #202020) 72%, transparent);
+        color: color-mix(in srgb, var(--boot-splash-fg, #12181c) 72%, transparent);
       }
       #boot-splash-escape[hidden] {
         display: none;
@@ -104,15 +104,15 @@
         appearance: none;
         font: inherit;
         font-size: 12px;
-        color: var(--boot-splash-fg, #202020);
+        color: var(--boot-splash-fg, #12181c);
         background: transparent;
-        border: 1px solid color-mix(in srgb, var(--boot-splash-fg, #202020) 30%, transparent);
+        border: 1px solid color-mix(in srgb, var(--boot-splash-fg, #12181c) 30%, transparent);
         border-radius: 6px;
         padding: 5px 12px;
         cursor: pointer;
       }
       .boot-splash-escape-actions button:hover {
-        background-color: color-mix(in srgb, var(--boot-splash-fg, #202020) 8%, transparent);
+        background-color: color-mix(in srgb, var(--boot-splash-fg, #12181c) 8%, transparent);
       }
       @keyframes boot-splash-reveal {
         to {

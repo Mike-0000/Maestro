@@ -1,6 +1,6 @@
 import type { HostRef } from '@emdash/core/primitives/host/api';
-import { CardGridSection } from '@emdash/ui/react/components';
-import { Loader2 } from 'lucide-react';
+import { EmptyState } from '@emdash/ui/react/components';
+import { SettingsSection } from '@emdash/ui/react/patterns';
 import React from 'react';
 import { McpCard } from '@core/features/mcp/browser/components/McpCard';
 import { McpDrawer, type McpDrawerMode } from '@core/features/mcp/browser/components/McpDrawer';
@@ -56,11 +56,7 @@ export const McpServersList: React.FC<McpServersListProps> = ({
   );
 
   if (mcp.isLoading) {
-    return (
-      <div className="flex min-h-64 items-center justify-center text-foreground">
-        <Loader2 className="text-muted-foreground h-6 w-6 animate-spin" />
-      </div>
-    );
+    return <EmptyState tone="loading" label="Loading servers…" className="min-h-64" />;
   }
 
   return (
@@ -76,9 +72,9 @@ export const McpServersList: React.FC<McpServersListProps> = ({
         onSave={(server) => mcp.saveServer(server, drawerSource)}
         onRemove={handleRemoveRequest}
       />
-      <div className="flex flex-col gap-8 pt-3 pb-8">
+      <div className="flex flex-col gap-10 pb-16">
         {filteredInstalled.length > 0 && (
-          <CardGridSection title="Added">
+          <SettingsSection title="Added" description="Servers your agents can use." gap="0.25rem">
             {filteredInstalled.map((server) => (
               <McpCard
                 key={server.name}
@@ -88,11 +84,15 @@ export const McpServersList: React.FC<McpServersListProps> = ({
                 onEdit={(nextServer) => onDrawerModeChange({ type: 'edit', server: nextServer })}
               />
             ))}
-          </CardGridSection>
+          </SettingsSection>
         )}
 
         {filteredCatalog.length > 0 && (
-          <CardGridSection title="Recommended">
+          <SettingsSection
+            title="Recommended"
+            description="Ready-made servers. Add one, then choose the agents it syncs to."
+            gap="0.25rem"
+          >
             {filteredCatalog.map((entry) => (
               <McpCard
                 key={entry.key}
@@ -101,15 +101,19 @@ export const McpServersList: React.FC<McpServersListProps> = ({
                 onAdd={(nextEntry) => onDrawerModeChange({ type: 'add-catalog', entry: nextEntry })}
               />
             ))}
-          </CardGridSection>
+          </SettingsSection>
         )}
 
         {filteredInstalled.length === 0 && filteredCatalog.length === 0 && (
-          <div className="py-12 text-center">
-            <p className="text-muted-foreground text-sm">
-              {search ? 'No servers match your search.' : 'No servers available.'}
-            </p>
-          </div>
+          <EmptyState
+            className="min-h-48"
+            label={search ? 'No servers match' : 'No servers yet'}
+            description={
+              search
+                ? 'Try another name, or add it yourself as a custom server.'
+                : 'Add a custom server to connect your agents to a tool.'
+            }
+          />
         )}
       </div>
     </div>

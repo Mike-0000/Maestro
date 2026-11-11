@@ -126,6 +126,51 @@ describe('PaletteController', () => {
     expect(controller.getSnapshot().selectedIdentity).toBe('commands:command-1');
   });
 
+  it('keeps the first row selected when a slower provider ranks above the shown results', async () => {
+    const conversations = deferred<PaletteProviderMatch[]>();
+    const controller = new PaletteController(
+      definePaletteProviderCatalog([
+        {
+          ...provider({ kind: 'commands', keyword: '@commands', results: [] }),
+          idle: () => matches('command', 2, 'fuzzy'),
+        },
+        {
+          ...provider({ kind: 'conversations', keyword: '@conversations', results: [] }),
+          idle: () => conversations.promise,
+        },
+      ])
+    );
+
+    // The palette opens idle: commands answer at once, recent conversations a moment later.
+    const settled = controller.setInput('', {});
+    expect(controller.getSnapshot().selectedIdentity).toBe('commands:command-0');
+
+    conversations.resolve(matches('conversation', 1, 'exact'));
+    await settled;
+
+    const snapshot = controller.getSnapshot();
+    expect(snapshot.results[0]?.identity).toBe('conversations:conversation-0');
+    expect(snapshot.selectedIdentity).toBe('conversations:conversation-0');
+  });
+
+  it('forgets a chosen row when the input changes', async () => {
+    const controller = new PaletteController(
+      definePaletteProviderCatalog([
+        provider({
+          kind: 'commands',
+          keyword: '@commands',
+          results: matches('command', 3, 'fuzzy'),
+        }),
+      ])
+    );
+
+    await controller.setInput('a', {});
+    controller.select('commands:command-2');
+    await controller.setInput('ab', {});
+
+    expect(controller.getSnapshot().selectedIdentity).toBe('commands:command-0');
+  });
+
   it('discards results from older query generations', async () => {
     const first = deferred<PaletteProviderMatch[]>();
     const second = deferred<PaletteProviderMatch[]>();

@@ -12,8 +12,10 @@ export function Onboarding({
 }) {
   const [steps] = useState(initialSteps);
 
+  // The whole window is the plain content surface and stays draggable around the column; the
+  // shell itself opts out so its controls take clicks.
   return (
-    <div className="flex h-full w-full flex-col items-center justify-center [-webkit-app-region:drag]">
+    <div className="flex h-full w-full flex-col items-center overflow-y-auto bg-background px-6 [-webkit-app-region:drag]">
       <OnboardingShell steps={steps} onComplete={onComplete} />
     </div>
   );

@@ -1,7 +1,7 @@
 import { style } from '@vanilla-extract/css';
 import { recipe } from '@vanilla-extract/recipes';
 import type { MessageStyleVars } from './metrics';
-import { fadeOverlayBottom, fadeOverlayTop } from '@styles/effects.css';
+import { fadeOverlayBottom, fadeOverlayTop, fadeSurface } from '@styles/effects.css';
 import { vars } from '@styles/theme.css';
 import { createVariableThemeContract } from '@styles/variable-theme-contract.css';
 
@@ -32,6 +32,12 @@ export const cardRoot = style({ height: cardVars.height });
 
 // ── UserMessageCard ───────────────────────────────────────────────────────────
 
+/**
+ * What the developer wrote: a quiet bubble one surface step above the ground,
+ * in full-strength text (as the conductor thread draws it). The edge keeps its
+ * measured width but is transparent by default. A long message that can open
+ * lifts one more step on hover, the hint that a click shows the rest.
+ */
 export const card = recipe({
   base: {
     position: 'relative',
@@ -40,28 +46,38 @@ export const card = recipe({
     borderWidth: cardVars.cardBorder,
     borderColor: vars.userCardBorder,
     background: vars.userCardBg,
-    color: vars.fgBody,
+    color: vars.fg,
     paddingLeft: cardVars.userCardPadX,
     paddingRight: cardVars.userCardPadX,
     paddingTop: cardVars.userCardPadY,
     paddingBottom: cardVars.userCardPadY,
     boxSizing: 'border-box',
+    transition: 'background-color 150ms, border-color 150ms',
+    vars: { [fadeSurface]: vars.userCardBg },
   },
   variants: {
     state: {
       static: {},
       overflowing: {
         selectors: {
-          '&:hover': { borderColor: vars.userCardBorderHover },
+          '&:hover': {
+            borderColor: vars.userCardBorderHover,
+            background: vars.userCardBgHover,
+            vars: { [fadeSurface]: vars.userCardBgHover },
+          },
         },
       },
     },
-    /** When true, the hover border shows regardless of overflow state. */
+    /** When true, the hover state shows regardless of overflow state. */
     current: {
       false: {},
       true: {
         selectors: {
-          '&:hover': { borderColor: vars.userCardBorderHover },
+          '&:hover': {
+            borderColor: vars.userCardBorderHover,
+            background: vars.userCardBgHover,
+            vars: { [fadeSurface]: vars.userCardBgHover },
+          },
         },
       },
     },
@@ -92,11 +108,12 @@ export const stopButtonOverlay = style({
   color: vars.fgMuted,
   cursor: 'pointer',
   opacity: 0,
-  transition: 'opacity 150ms ease',
+  outline: 'none',
+  transition: 'opacity 150ms ease, color 150ms ease, background-color 150ms ease',
   selectors: {
     [`${userCardGroup}:hover &`]: { opacity: 1 },
-    '&:focus-visible': { opacity: 1 },
-    '&:hover': { color: vars.fg },
+    '&:focus-visible': { opacity: 1, boxShadow: `0 0 0 2px ${vars.focusRing}` },
+    '&:hover': { color: vars.fg, background: vars.surfaceHover },
   },
 });
 
@@ -118,7 +135,7 @@ export const attachThumbBtn = style({
   lineHeight: 0,
   selectors: {
     '&:focus-visible': {
-      outline: '2px solid currentColor',
+      outline: `2px solid ${vars.focusRing}`,
       outlineOffset: '2px',
     },
   },
@@ -130,18 +147,17 @@ export const attachThumb = style({
   height: cardVars.attachThumb,
   borderRadius: vars.radiusMd,
   objectFit: 'cover',
-  boxShadow: `0 0 0 1px ${vars.border}`,
+  boxShadow: `0 0 0 1px ${vars.borderSubtle}`,
 });
 
 export const attachPlaceholder = style({
   width: cardVars.attachThumb,
   height: cardVars.attachThumb,
   borderRadius: vars.radiusMd,
-  background: vars.bg2,
-  color: vars.fgMuted,
+  background: vars.bg3,
+  color: vars.fgPassive,
   display: 'grid',
   placeItems: 'center',
-  boxShadow: `0 0 0 1px ${vars.border}`,
 });
 
 export const cardFadeOverlay = style([

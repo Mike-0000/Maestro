@@ -14,6 +14,12 @@ type ErrorBoundaryProps = {
   children?: React.ReactNode;
 };
 
+// The kit trigger is a full-width ghost row: a fit-width wrapper keeps it to its words, lined up
+// with the text above (the negative margin cancels its padding); the label is muted until hovered.
+const DISCLOSURE_TRIGGER = 'group h-7';
+const DISCLOSURE_LABEL =
+  'flex items-center gap-1.5 text-sm text-foreground-muted transition-colors group-hover:text-foreground';
+
 function ErrorFallback({
   message,
   onReload,
@@ -27,29 +33,35 @@ function ErrorFallback({
   isRecovering: boolean;
   recoveryError: string | null;
 }) {
+  // The page-level error pattern (design brief 2.12) on the plain content surface: the error
+  // dot and a hero line, one sentence, the one move, then two quiet disclosures: the technical
+  // detail, and the heavier reset for when a reload is not enough.
   return (
-    <div className="flex min-h-screen w-full items-center justify-center bg-background p-6">
-      <div className="w-full max-w-xl overflow-hidden rounded-xl border border-border bg-background-1 text-foreground shadow-sm">
-        <div className="p-7">
-          <h1 className="text-xl font-medium tracking-tight">Maestro couldn’t display that view</h1>
-          <p className="mt-2 text-sm text-foreground-muted">
-            Reload to try again with your saved layout.
+    <div className="flex min-h-screen w-full items-center justify-center bg-background px-6 py-16 text-foreground">
+      <div className="w-full max-w-md motion-safe:animate-in motion-safe:duration-300 motion-safe:fade-in">
+        <span aria-hidden className="block size-2 rounded-full bg-foreground-error" />
+        <h1 className="mt-5 text-2xl font-medium text-balance">
+          Maestro couldn’t display that view
+        </h1>
+        <p className="mt-3 text-sm leading-relaxed text-foreground-muted">
+          Reload to try again with your saved layout.
+        </p>
+        <Button variant="primary" className="mt-6" onClick={onReload} disabled={isRecovering}>
+          <RotateCw className="size-3.5" aria-hidden />
+          Reload app
+        </Button>
+        {recoveryError && (
+          <p role="alert" className="mt-4 text-xs text-foreground-error">
+            {recoveryError}
           </p>
-          <Button variant="primary" className="mt-6" onClick={onReload} disabled={isRecovering}>
-            <RotateCw className="size-3.5" aria-hidden />
-            Reload app
-          </Button>
-          {recoveryError && (
-            <p role="alert" className="mt-3 text-sm">
-              {recoveryError}
-            </p>
-          )}
-          <Collapsible.Root className="mt-4">
+        )}
+        <div className="mt-10 flex flex-col gap-4">
+          <Collapsible.Root>
             <div className="-ml-2 w-fit">
-              <Collapsible.Trigger hideChevron className="group">
-                <span className="flex items-center gap-1 text-xs text-foreground-muted">
+              <Collapsible.Trigger hideChevron className={DISCLOSURE_TRIGGER}>
+                <span className={DISCLOSURE_LABEL}>
                   <ChevronRight
-                    className="size-3 transition-transform group-data-[panel-open]:rotate-90"
+                    className="size-3 text-foreground-passive transition-transform group-data-[panel-open]:rotate-90 motion-reduce:transition-none"
                     aria-hidden
                   />
                   Error details
@@ -57,42 +69,36 @@ function ErrorFallback({
               </Collapsible.Trigger>
             </div>
             <Collapsible.Panel>
-              <pre className="mt-2 rounded-md border border-border bg-background-2 px-3 py-2 font-mono text-xs break-words whitespace-pre-wrap text-foreground-muted">
+              <pre className="mt-2 max-h-48 overflow-auto rounded-md bg-surface-emphasis px-3 py-2.5 font-mono text-xs break-words whitespace-pre-wrap text-foreground-muted select-text">
                 {message}
               </pre>
             </Collapsible.Panel>
           </Collapsible.Root>
+          <Collapsible.Root disabled={isRecovering}>
+            <div className="-ml-2 w-fit">
+              <Collapsible.Trigger hideChevron className={DISCLOSURE_TRIGGER}>
+                <span className={DISCLOSURE_LABEL}>
+                  <ChevronRight
+                    className="size-3 text-foreground-passive transition-transform group-data-[panel-open]:rotate-90 motion-reduce:transition-none"
+                    aria-hidden
+                  />
+                  Still having trouble?
+                </span>
+              </Collapsible.Trigger>
+            </div>
+            <Collapsible.Panel>
+              <p className="mt-2 pl-4.5 text-xs leading-relaxed text-foreground-muted">
+                Reset saved UI state to try a fresh layout. This clears layouts, navigation, project
+                order, and unsent drafts. Projects, files, and saved conversations are kept.
+              </p>
+              <div className="mt-3 pl-4.5">
+                <Button variant="destructive" size="sm" onClick={onReset} disabled={isRecovering}>
+                  Reset UI state and reload
+                </Button>
+              </div>
+            </Collapsible.Panel>
+          </Collapsible.Root>
         </div>
-        <Collapsible.Root
-          className="border-t border-border bg-background-2 px-7 py-3"
-          disabled={isRecovering}
-        >
-          <div className="-ml-2 w-fit">
-            <Collapsible.Trigger hideChevron className="group">
-              <span className="flex items-center gap-1 text-sm">
-                <ChevronRight
-                  className="size-3 transition-transform group-data-[panel-open]:rotate-90"
-                  aria-hidden
-                />
-                Still having trouble?
-              </span>
-            </Collapsible.Trigger>
-          </div>
-          <Collapsible.Panel>
-            <p className="mt-2 text-xs leading-relaxed text-foreground-muted">
-              Reset saved UI state to try a fresh layout. This clears layouts, navigation, project
-              order, and unsent drafts. Projects, files, and saved conversations are kept.
-            </p>
-            <Button
-              variant="destructive"
-              className="mt-3 mb-1"
-              onClick={onReset}
-              disabled={isRecovering}
-            >
-              Reset UI state and reload
-            </Button>
-          </Collapsible.Panel>
-        </Collapsible.Root>
       </div>
     </div>
   );

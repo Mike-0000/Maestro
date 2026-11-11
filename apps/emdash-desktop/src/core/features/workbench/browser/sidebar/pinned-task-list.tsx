@@ -1,7 +1,6 @@
-import { MicroLabel } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
 import { getSidebarStore } from '@core/features/workbench/contributions/browser/app-stores';
-import { SidebarGroup, SidebarMenu } from './sidebar-primitives';
+import { SidebarGroup, SidebarMenu, SidebarSectionLabel } from './sidebar-primitives';
 import { SidebarTaskItem } from './task-item';
 
 export const SidebarPinnedTaskList = observer(function SidebarPinnedTaskList() {
@@ -9,11 +8,11 @@ export const SidebarPinnedTaskList = observer(function SidebarPinnedTaskList() {
   if (entries.length === 0) return null;
 
   return (
-    <SidebarGroup className="flex shrink-0 flex-col">
-      <div className="flex h-[40px] items-center justify-between pr-2.5 pl-5">
-        <MicroLabel className="font-medium text-foreground-tertiary-passive">Pinned</MicroLabel>
+    <SidebarGroup className="mb-2 flex shrink-0 flex-col">
+      <div className="flex h-8 items-center justify-between pr-2.5 pl-5">
+        <SidebarSectionLabel>Pinned</SidebarSectionLabel>
       </div>
-      <SidebarMenu className="px-3 pb-2">
+      <SidebarMenu className="px-3">
         {entries.map(({ projectId, taskId }) => (
           <SidebarTaskItem
             key={`${projectId}:${taskId}`}

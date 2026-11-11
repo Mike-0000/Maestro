@@ -1,10 +1,9 @@
 import { style } from '@vanilla-extract/css';
 import { vars } from '@styles/theme.css';
 
-const cardInnerRadius = `calc(${vars.radiusLg} - 1px)`;
-
 // Uses content-box intentionally: the borderBottom is counted by card chrome
-// measurement helpers as the header separator.
+// measurement helpers as the header separator. The separator keeps its width
+// (geometry) but draws nothing: a header never gets a rule under it.
 export const cardHeader = style({
   display: 'flex',
   appearance: 'none',
@@ -17,7 +16,7 @@ export const cardHeader = style({
   padding: '0 8px',
   background: 'transparent',
   border: 0,
-  borderRadius: cardInnerRadius,
+  borderRadius: vars.radiusMd,
   cursor: 'pointer',
   color: vars.fgMuted,
   font: 'inherit',
@@ -25,32 +24,35 @@ export const cardHeader = style({
   letterSpacing: 'inherit',
   textAlign: 'left',
   textTransform: 'inherit',
-  transition: 'background 150ms',
+  transition: 'background-color 150ms, color 150ms',
   userSelect: 'none',
   selectors: {
     '&[data-body-visible]': {
-      borderBottom: `1px solid ${vars.border}`,
+      borderBottom: '1px solid transparent',
       borderBottomLeftRadius: 0,
       borderBottomRightRadius: 0,
     },
     '&:focus-visible': {
-      boxShadow: 'inset 0 0 0 2px currentColor',
+      boxShadow: `inset 0 0 0 1px ${vars.focusRing}`,
       outline: '2px solid transparent',
       outlineOffset: '-2px',
     },
-    '&:hover': { background: vars.bg3 },
+    '&:hover': { background: vars.surfaceHover, color: vars.fg },
   },
 });
 
 export const cardHeaderLeft = style({
   display: 'flex',
   alignItems: 'center',
-  gap: '6px',
+  gap: '8px',
   minWidth: 0,
 });
 
 export const cardHeaderTitle = style({
   minWidth: 0,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
 });
 
 export const cardHeaderRight = style({
@@ -68,6 +70,7 @@ export const cardLeadingSlot = style({
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
+  color: vars.fgPassive,
 });
 
 export const cardLeadingIcon = style({
@@ -76,7 +79,7 @@ export const cardLeadingIcon = style({
   justifyContent: 'center',
   transition: 'opacity 120ms ease-out',
   selectors: {
-    [`${cardHeader}:hover &`]: { opacity: 0 },
+    [`${cardHeader}:hover &, ${cardHeader}:focus-visible &`]: { opacity: 0 },
   },
 });
 
@@ -86,24 +89,17 @@ export const cardHoverChevron = style({
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  fontSize: '10px',
+  fontSize: '0.875rem',
   opacity: 0,
   transition: 'opacity 120ms ease-out, transform 150ms ease-out',
   selectors: {
-    [`${cardHeader}:hover &`]: { opacity: 1 },
+    [`${cardHeader}:hover &, ${cardHeader}:focus-visible &`]: { opacity: 1 },
+  },
+  '@media': {
+    '(prefers-reduced-motion: reduce)': { transition: 'none' },
   },
 });
 
 export const cardChevronExpanded = style({
   transform: 'rotate(90deg)',
-});
-
-export const cardErrorIcon = style({
-  display: 'flex',
-  color: vars.fgError,
-});
-
-export const cardPermissionIcon = style({
-  display: 'flex',
-  color: '#eab308',
 });

@@ -1,9 +1,7 @@
 import type { JSX } from 'solid-js';
-import { Show } from 'solid-js';
-import { IconError, IconShieldAlert } from './icons';
+import { StatusMark } from './StatusMark';
 import {
   cardChevronExpanded,
-  cardErrorIcon,
   cardHeader,
   cardHeaderLeft,
   cardHeaderRight,
@@ -11,7 +9,6 @@ import {
   cardHoverChevron,
   cardLeadingIcon,
   cardLeadingSlot,
-  cardPermissionIcon,
 } from './card-header.css';
 import { textShimmer } from '@styles/effects.css';
 
@@ -70,24 +67,11 @@ export function CardHeader(props: CardHeaderProps) {
       </span>
       <span class={cardHeaderRight}>
         {props.right}
-        <Show
-          when={props.awaitingPermission}
-          fallback={
-            <Show when={props.error}>
-              <span class={cardErrorIcon} title={props.errorTitle ?? 'Failed'} aria-label="error">
-                <IconError />
-              </span>
-            </Show>
-          }
-        >
-          <span
-            class={cardPermissionIcon}
-            title="Awaiting permission"
-            aria-label="awaiting permission"
-          >
-            <IconShieldAlert />
-          </span>
-        </Show>
+        <StatusMark
+          awaitingPermission={props.awaitingPermission}
+          error={props.error}
+          errorTitle={props.errorTitle}
+        />
       </span>
     </button>
   );

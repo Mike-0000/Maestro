@@ -41,17 +41,11 @@ export const RelinkProjectModal = observer(function RelinkProjectModal({
 
   return (
     <ModalLayout
-      header={
-        <Dialog.Header>
-          <Dialog.Title>Relink Project</Dialog.Title>
-          <Dialog.Description>
-            Choose the Machine that hosts this Project&apos;s repository.
-          </Dialog.Description>
-        </Dialog.Header>
-      }
-      footer={
-        <Dialog.Footer>
-          <Button type="button" variant="secondary" disabled={isRelinking} onClick={modal.dismiss}>
+      title="Relink Project"
+      description="Choose the Machine that hosts this Project's repository."
+      actions={
+        <>
+          <Button type="button" variant="ghost" disabled={isRelinking} onClick={modal.dismiss}>
             Cancel
           </Button>
           <ConfirmButton
@@ -62,7 +56,7 @@ export const RelinkProjectModal = observer(function RelinkProjectModal({
           >
             {isRelinking ? 'Relinking…' : 'Relink'}
           </ConfirmButton>
-        </Dialog.Footer>
+        </>
       }
     >
       <Dialog.Body>

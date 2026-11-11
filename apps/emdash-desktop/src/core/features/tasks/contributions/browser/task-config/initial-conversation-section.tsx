@@ -197,6 +197,10 @@ interface InitialConversationFieldProps {
   requirePromptDelivery?: boolean;
   /** Offers a Claude account choice when the form supports one and there is one to make. */
   claudeAccount?: ClaudeAccountPicker;
+  /** Puts the caret in the prompt once the form opens (the prompt is the form's first field). */
+  autoFocus?: boolean;
+  /** Resting height of the prompt in lines; it still grows with what is typed. */
+  minRows?: number;
 }
 
 export function InitialConversationField({
@@ -209,6 +213,8 @@ export function InitialConversationField({
   showAutoApproveToggle = true,
   requirePromptDelivery = false,
   claudeAccount,
+  autoFocus = false,
+  minRows = 3,
 }: InitialConversationFieldProps) {
   const claudeAccountSelectId = useId();
   const autoApproveSwitchId = useId();
@@ -269,6 +275,19 @@ export function InitialConversationField({
       syncingEditorTextRef.current = false;
     }
   }, [state.prompt]);
+
+  // The prompt is the form's first field: once it can take text (the agent list has loaded
+  // and the agent accepts an initial prompt), put the caret in it. One frame later, so the
+  // dialog's own initial focus has settled first.
+  const didAutoFocusRef = useRef(false);
+  useEffect(() => {
+    if (!autoFocus || !canDeliverInitialPrompt || didAutoFocusRef.current) return;
+    const frame = requestAnimationFrame(() => {
+      didAutoFocusRef.current = true;
+      editorApiRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [autoFocus, canDeliverInitialPrompt]);
 
   const linkedIssueMention = useMemo(
     () => (linkedIssue ? toLinkedIssueMentionItem(linkedIssue) : null),
@@ -332,63 +351,23 @@ export function InitialConversationField({
     [canDeliverInitialPrompt, linkedIssueMention, state]
   );
 
+  // Prompt first (design brief 2.9): the composer leads, and the conversation's options sit
+  // under it as one quiet row that reads as its footer: who runs it, then the switches.
+  // A file dragged over the field draws the accent focus ring, never a tinted panel.
   return (
     <Field.Root>
       <div
         className={cn(
-          'flex flex-col gap-2 transition-colors',
-          isDragOver && 'bg-accent/10 ring-2 ring-accent/50 ring-inset'
+          'flex flex-col gap-2 rounded-lg transition-shadow',
+          isDragOver && 'ring-2 ring-ring ring-offset-4 ring-offset-(--em-surface)'
         )}
         onBlur={onPromptBlur}
         {...(canDeliverInitialPrompt ? dropHandlers : {})}
       >
-        <div className="flex w-full">
-          <AgentSelector
-            value={state.provider}
-            onChange={(provider) => state.setProvider(provider)}
-            connectionId={state.connectionId}
-            getDisabledReason={getDisabledReason}
-            contentClassName="w-64"
-          />
-        </div>
-
-        {claudeAccount?.visible ? (
-          <div className="flex items-center gap-2">
-            <Field.Label htmlFor={claudeAccountSelectId}>Claude account</Field.Label>
-            <ClaudeAccountSelect
-              id={claudeAccountSelectId}
-              picker={claudeAccount}
-              variant="inline"
-            />
-          </div>
-        ) : null}
-
-        {showAutoApproveToggle && canToggleAutoApprove ? (
-          <div className="flex items-center gap-2">
-            <Switch
-              id={autoApproveSwitchId}
-              checked={state.autoApprove}
-              onCheckedChange={state.setAutoApprove}
-              disabled={!state.provider}
-            />
-            <Field.Label htmlFor={autoApproveSwitchId}>Auto-approve permissions</Field.Label>
-          </div>
-        ) : null}
-
-        {canToggleChatUi ? (
-          <div className="flex items-center gap-2">
-            <Switch
-              id={chatUiSwitchId}
-              checked={state.useChatUi}
-              onCheckedChange={state.setUseChatUi}
-            />
-            <Field.Label htmlFor={chatUiSwitchId}>Use chat UI</Field.Label>
-          </div>
-        ) : null}
-
         <ChatComposer
           canSubmit={false}
           showSubmitButton={false}
+          minRows={minRows}
           placeholder={
             placeholder ?? 'Describe what the agent should do, or use / to select a prompt...'
           }
@@ -403,7 +382,68 @@ export function InitialConversationField({
           onModelChange={(modelId) => state.setModel(modelId || null)}
           className={textareaClassName}
         />
-        {initialPromptInfo ? <Field.Description>{initialPromptInfo}</Field.Description> : null}
+        {initialPromptInfo ? (
+          <Field.Description className="px-1">{initialPromptInfo}</Field.Description>
+        ) : null}
+
+        <div className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-1.5 pl-1">
+          <AgentSelector
+            value={state.provider}
+            onChange={(provider) => state.setProvider(provider)}
+            connectionId={state.connectionId}
+            getDisabledReason={getDisabledReason}
+            appearance="quiet"
+            className="-ml-1"
+          />
+
+          {claudeAccount?.visible ? (
+            <div className="flex min-w-0 items-center gap-2">
+              <Field.Label
+                htmlFor={claudeAccountSelectId}
+                className="shrink-0 font-normal text-foreground-muted"
+              >
+                Claude account
+              </Field.Label>
+              <ClaudeAccountSelect
+                id={claudeAccountSelectId}
+                picker={claudeAccount}
+                variant="inline"
+              />
+            </div>
+          ) : null}
+
+          {showAutoApproveToggle && canToggleAutoApprove ? (
+            <div className="flex items-center gap-2">
+              <Switch
+                id={autoApproveSwitchId}
+                size="sm"
+                checked={state.autoApprove}
+                onCheckedChange={state.setAutoApprove}
+                disabled={!state.provider}
+              />
+              <Field.Label
+                htmlFor={autoApproveSwitchId}
+                className="font-normal text-foreground-muted"
+              >
+                Auto-approve permissions
+              </Field.Label>
+            </div>
+          ) : null}
+
+          {canToggleChatUi ? (
+            <div className="flex items-center gap-2">
+              <Switch
+                id={chatUiSwitchId}
+                size="sm"
+                checked={state.useChatUi}
+                onCheckedChange={state.setUseChatUi}
+              />
+              <Field.Label htmlFor={chatUiSwitchId} className="font-normal text-foreground-muted">
+                Use chat UI
+              </Field.Label>
+            </div>
+          ) : null}
+        </div>
       </div>
     </Field.Root>
   );

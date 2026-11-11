@@ -69,5 +69,5 @@ export const splitButtonChevronFace = style({
 
 /** Left border separator between primary face and chevron in primary variant. */
 export const chevronBorderLeft = style({
-  borderLeft: `1px solid rgba(255,255,255,0.2)`,
+  borderLeft: '1px solid color-mix(in srgb, currentColor 22%, transparent)',
 });

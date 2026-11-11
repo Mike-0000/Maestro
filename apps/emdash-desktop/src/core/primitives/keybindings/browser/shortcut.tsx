@@ -9,18 +9,20 @@ import { keyboardLayoutService } from './keyboard-layout-service';
 
 type ShortcutVariant = 'text' | 'badge' | 'keycaps';
 
-const KEYCAP_KBD_BASE_CLASS =
-  'h-5 min-w-5 shrink-0 rounded px-1 text-[11px] font-medium leading-none text-current';
-
-const KEYCAP_KBD_CLASS = cn(
-  KEYCAP_KBD_BASE_CLASS,
-  'border-border/60 bg-background-secondary shadow-[inset_0_-1px_0_rgba(255,255,255,0.05)]',
-  // Primary action buttons (Create, Save, etc.). Primary buttons opt in via data-variant="primary".
-  'in-data-[variant=primary]:border-primary-button-foreground/22 in-data-[variant=primary]:bg-primary-button-foreground/16 in-data-[variant=primary]:shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]',
-  'in-data-[slot=combobox-trigger]:border-border/50 in-data-[slot=combobox-trigger]:bg-background-secondary in-data-[slot=combobox-trigger]:shadow-[inset_0_-1px_0_rgba(255,255,255,0.05)]',
-  'in-data-[slot=tooltip-content]:border-background/20 in-data-[slot=tooltip-content]:bg-background/15 in-data-[slot=tooltip-content]:text-background in-data-[slot=tooltip-content]:shadow-none',
-  'in-data-[slot=dropdown-menu-item]:border-border/50 in-data-[slot=dropdown-menu-item]:bg-background-secondary in-data-[slot=dropdown-menu-item]:shadow-[inset_0_-1px_0_rgba(255,255,255,0.05)]'
-);
+/**
+ * Shortcut looks (design brief 2.10 / 2.13.17):
+ *  - `text`: the caption role, 11px passive with tabular figures (menu and row hints).
+ *  - `badge`: the same words on one quiet neutral step, rounded-xs.
+ *  - `keycaps`: one kit `Kbd` per key. Hosts tune the keycap through the Kbd hooks
+ *    (`--kbd-bg`, `--kbd-border`, `--kbd-color`): Button sets them per variant and
+ *    Tooltip for its surface, so no per-context overrides live here.
+ */
+const VARIANT_CLASS: Record<ShortcutVariant, string> = {
+  text: 'inline-flex shrink-0 items-center gap-0.5 text-tiny leading-none text-foreground-passive tabular-nums',
+  badge:
+    'inline-flex shrink-0 items-center gap-0.5 rounded-xs bg-foreground/8 px-1.5 py-0.5 text-tiny leading-none font-medium text-foreground-muted tabular-nums',
+  keycaps: 'inline-flex shrink-0 items-center gap-0.5',
+};
 
 interface ShortcutProps {
   hotkey: Chord | string | null | undefined;
@@ -74,19 +76,11 @@ function Shortcut({ hotkey, className, variant = 'text', bare = false }: Shortcu
       data-slot="shortcut"
       role="img"
       aria-label={keys.join(' + ')}
-      className={cn(
-        variant === 'text' &&
-          'inline-flex shrink-0 items-center justify-center gap-0 rounded px-1.5 py-1 text-xs leading-none text-muted-foreground in-data-[slot=tooltip-content]:text-background',
-        variant === 'badge' &&
-          'inline-flex shrink-0 items-center justify-center gap-0 rounded bg-background-secondary px-1.5 py-1 text-xs leading-none text-foreground/60 in-data-[slot=tooltip-content]:bg-background/20 in-data-[slot=tooltip-content]:py-0.5 in-data-[slot=tooltip-content]:text-background',
-        variant === 'keycaps' &&
-          'inline-flex shrink-0 items-center gap-0.5 text-muted-foreground in-data-[slot=button]:text-current in-data-[slot=combobox-trigger]:text-current in-data-[slot=tooltip-content]:text-background',
-        className
-      )}
+      className={cn(VARIANT_CLASS[variant], className)}
     >
       {keys.map((key, index) =>
         variant === 'keycaps' ? (
-          <Kbd key={`${key}-${index}`} aria-hidden="true" className={KEYCAP_KBD_CLASS}>
+          <Kbd key={`${key}-${index}`} aria-hidden="true">
             <ShortcutKey keyName={key} />
           </Kbd>
         ) : (

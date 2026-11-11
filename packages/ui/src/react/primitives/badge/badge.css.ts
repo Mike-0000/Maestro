@@ -4,6 +4,10 @@ import { svgContainer, svgSmSize } from '@styles/effects/svg-helpers.css';
 import { vars } from '@theme/core/contract/contract.css';
 import { tokenVars } from '@theme/tokens.css';
 
+// A quiet chip (design brief 2.13.11): caption-role text on one neutral
+// surface step (soft) or inside one neutral hairline (outline), fully rounded.
+// State is words plus a glyph, not colour (brief 2.6): only an error and a
+// warning tint the text; success reads in full strength, info muted.
 export const badge = recipe({
   base: [
     svgContainer,
@@ -17,41 +21,40 @@ export const badge = recipe({
       flexShrink: 0,
       gap: '0.25rem',
       overflow: 'hidden',
-      padding: '0 0.375rem',
+      padding: '0 0.4375rem',
       borderRadius: tokenVars.radiusFull,
       border: '1px solid transparent',
-      fontSize: tokenVars.textMicro,
+      fontSize: tokenVars.textTiny,
+      lineHeight: 1,
       fontWeight: 500,
+      fontVariantNumeric: 'tabular-nums',
       whiteSpace: 'nowrap',
       transition: 'color 150ms, background-color 150ms, border-color 150ms',
       selectors: {
         '&:focus-visible': {
-          outline: 'none',
-          borderColor: vars.borderPrimary,
-          boxShadow: `0 0 0 3px color-mix(in srgb, ${vars.borderPrimary} 30%, transparent)`,
+          outline: `2px solid ${vars.focusRing}`,
+          outlineOffset: '1px',
         },
       },
     },
   ],
 
   variants: {
-    // Tone owns `color`; the variant derives its background/border from
-    // currentColor so every tone × variant combination stays consistent.
     variant: {
       soft: {
-        backgroundColor: 'color-mix(in srgb, currentColor 10%, transparent)',
+        backgroundColor: `color-mix(in srgb, ${vars.foreground} 7%, transparent)`,
       },
       outline: {
         backgroundColor: 'transparent',
-        borderColor: 'color-mix(in srgb, currentColor 35%, transparent)',
+        borderColor: vars.border,
       },
     },
     tone: {
       neutral: { color: vars.foregroundMuted },
-      success: { color: vars.foregroundSuccess },
+      success: { color: vars.foreground },
       warning: { color: vars.foregroundWarning },
       error: { color: vars.foregroundError },
-      info: { color: vars.foregroundInfo },
+      info: { color: vars.foregroundMuted },
     },
   },
 
@@ -59,7 +62,7 @@ export const badge = recipe({
     // Neutral outline reads as a quiet chip: full foreground text, hairline border.
     {
       variants: { variant: 'outline', tone: 'neutral' },
-      style: { color: vars.foreground, borderColor: vars.border },
+      style: { color: vars.foreground },
     },
   ],
 

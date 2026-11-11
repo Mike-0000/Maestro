@@ -26,7 +26,7 @@ export const ManualForwardButton = observer(function ManualForwardButton() {
           <button
             type="button"
             disabled={Boolean(disabledReason)}
-            className="flex h-7 items-center gap-1.5 rounded-lg px-2 text-xs text-foreground-muted transition-colors hover:bg-background-1 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex h-7 items-center gap-1 rounded-md px-1.5 text-foreground-passive transition-colors outline-none hover:bg-surface-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
             aria-label="Forward remote port"
             onClick={() => setOpen(true)}
           >

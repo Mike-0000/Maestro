@@ -220,7 +220,7 @@ export const AgentHoverCard: React.FC<AgentHoverCardProps> = ({
         sideOffset={8}
         initialFocus={false}
         finalFocus={false}
-        className="w-auto p-0 text-foreground"
+        className="w-auto text-foreground"
         onMouseEnter={popupHoverProps.onMouseEnter}
         onMouseLeave={popupHoverProps.onMouseLeave}
       >

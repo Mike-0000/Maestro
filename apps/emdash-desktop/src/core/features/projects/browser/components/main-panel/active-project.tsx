@@ -1,5 +1,5 @@
-import { getPillTabId, PillTabs, type PillTab } from '@emdash/ui/react/patterns';
-import { GitPullRequest, ListTodo, PanelsTopLeft, Settings as SettingsIcon } from 'lucide-react';
+import { getPillTabId } from '@emdash/ui/react/patterns';
+import { Tabs } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
 import {
   asAvailableProject,
@@ -17,19 +17,11 @@ import { cn } from '@core/primitives/styling/browser/cn';
 
 const PROJECT_SECTION_PANEL_ID = 'project-section-panel';
 
-const projectViewItems: readonly PillTab<ProjectView>[] = [
-  { value: 'tasks', label: 'Tasks', icon: <ListTodo className="size-3.5" /> },
-  {
-    value: 'pull-request',
-    label: 'Pull Requests',
-    icon: <GitPullRequest className="size-3.5" />,
-  },
-  {
-    value: 'workspaces',
-    label: 'Workspaces',
-    icon: <PanelsTopLeft className="size-3.5" />,
-  },
-  { value: 'settings', label: 'Settings', icon: <SettingsIcon className="size-3.5" /> },
+const PROJECT_SECTIONS: readonly { value: ProjectView; label: string }[] = [
+  { value: 'tasks', label: 'Tasks' },
+  { value: 'pull-request', label: 'Pull requests' },
+  { value: 'workspaces', label: 'Workspaces' },
+  { value: 'settings', label: 'Settings' },
 ];
 
 export const ActiveProject = observer(function ActiveProject() {
@@ -43,14 +35,33 @@ export const ActiveProject = observer(function ActiveProject() {
 
   const activeView = view.activeView;
   return (
-    <div className="flex min-h-0 w-full flex-col gap-6">
-      <PillTabs
-        items={projectViewItems}
+    <div className="flex min-h-0 w-full flex-col gap-5">
+      {/* Plain words with an underline under the one on screen; no segmented bar, no icons. */}
+      <Tabs.Root
         value={activeView}
-        onValueChange={(nextView) => view.setProjectView(nextView)}
-        ariaLabel="Project sections"
-        panelId={PROJECT_SECTION_PANEL_ID}
-      />
+        onValueChange={(next) => {
+          if (next != null) view.setProjectView(next as ProjectView);
+        }}
+      >
+        <Tabs.List
+          variant="underline"
+          aria-label="Project sections"
+          activateOnFocus
+          className="-ml-2"
+        >
+          {PROJECT_SECTIONS.map((section) => (
+            <Tabs.Tab
+              key={section.value}
+              value={section.value}
+              size="sm"
+              id={getPillTabId(PROJECT_SECTION_PANEL_ID, section.value)}
+              aria-controls={PROJECT_SECTION_PANEL_ID}
+            >
+              {section.label}
+            </Tabs.Tab>
+          ))}
+        </Tabs.List>
+      </Tabs.Root>
       <section
         role="tabpanel"
         id={PROJECT_SECTION_PANEL_ID}

@@ -1,10 +1,9 @@
+import { StateGlyph, type StateGlyphState } from '@emdash/ui/react/components';
 import { Tooltip } from '@emdash/ui/react/primitives';
-import { CheckCircle2, Clock, Loader2, MinusCircle, XCircle } from 'lucide-react';
 import type {
   AutomationRun,
   AutomationRunStatus,
 } from '@core/features/automations/api/automation-run';
-import { cn } from '@core/primitives/styling/browser/cn';
 import { formatRunError } from '../automation-run-format';
 
 interface RunStatusBadgeProps {
@@ -12,73 +11,56 @@ interface RunStatusBadgeProps {
   error: AutomationRun['error'];
 }
 
-const BASE = 'flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-xs';
+export type RunStatusPresentation = { glyph: StateGlyphState; words: string };
 
-const PROGRESS_LABELS: Partial<Record<AutomationRunStatus, string>> = {
-  provisioning_workspace: 'Preparing workspace',
-  starting_session: 'Starting agent',
+const RUN_STATUS: Partial<Record<AutomationRunStatus, RunStatusPresentation>> = {
+  queued: { glyph: 'idle', words: 'Queued' },
+  provisioning_workspace: { glyph: 'setting-up', words: 'Preparing workspace' },
+  starting_session: { glyph: 'setting-up', words: 'Starting agent' },
+  done: { glyph: 'done', words: 'Agent started' },
+  failed: { glyph: 'error', words: 'Failed' },
+  skipped: { glyph: 'idle', words: 'Skipped' },
+  cancelled: { glyph: 'idle', words: 'Cancelled' },
 };
 
-export function RunStatusBadge({ status, error }: RunStatusBadgeProps) {
-  if (!status || status === 'scheduled') return null;
+/**
+ * A run's status in the one state language (design brief 2.6): the kit glyph plus words. A
+ * scheduled run (or no run) has nothing to say yet.
+ */
+export function runStatusPresentation(
+  status: AutomationRunStatus | null
+): RunStatusPresentation | null {
+  if (!status) return null;
+  return RUN_STATUS[status] ?? null;
+}
 
-  if (status === 'done') {
-    return (
-      <span className={cn(BASE, 'bg-background-success text-foreground-success')}>
-        <CheckCircle2 className="size-3" />
-        Agent started
-      </span>
-    );
-  }
-
-  if (status === 'failed') {
-    const badge = (
-      <span className={cn(BASE, 'bg-destructive/10 text-destructive')}>
-        <XCircle className="size-3" />
-        Failed
-      </span>
-    );
-    if (!error) return badge;
-    return (
-      <Tooltip.Root>
-        <Tooltip.Trigger
-          render={
-            <span className={cn(BASE, 'bg-destructive/10 text-destructive cursor-default')} />
-          }
-        >
-          <XCircle className="size-3" />
-          Failed
-        </Tooltip.Trigger>
-        <Tooltip.Content>{formatRunError(error)}</Tooltip.Content>
-      </Tooltip.Root>
-    );
-  }
-
-  if (status === 'queued') {
-    return (
-      <span className={cn(BASE, 'bg-background-info text-foreground-info')}>
-        <Clock className="size-3" />
-        Queued
-      </span>
-    );
-  }
-
-  if (status === 'skipped' || status === 'cancelled') {
-    return (
-      <span className={cn(BASE, 'bg-background-3 text-muted-foreground')}>
-        <MinusCircle className="size-3" />
-        {status === 'cancelled' ? 'Cancelled' : 'Skipped'}
-      </span>
-    );
-  }
-
-  const progressLabel = PROGRESS_LABELS[status];
-  if (!progressLabel) return null;
-
+/** The status words, with the failure reason in a tooltip when a run failed. */
+export function RunStatusWords({ status, error }: RunStatusBadgeProps) {
+  const presentation = runStatusPresentation(status);
+  if (!presentation) return null;
+  if (status !== 'failed' || !error) return <span>{presentation.words}</span>;
   return (
-    <span className={cn(BASE, 'bg-background-3 text-foreground-muted')}>
-      <Loader2 className="size-3 animate-spin" />
-      {progressLabel}
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        render={
+          <span className="cursor-default underline decoration-foreground-passive/50 decoration-dotted underline-offset-2" />
+        }
+      >
+        {presentation.words}
+      </Tooltip.Trigger>
+      <Tooltip.Content>{formatRunError(error)}</Tooltip.Content>
+    </Tooltip.Root>
+  );
+}
+
+/** Glyph and words together, for places that show a run's status on its own. */
+export function RunStatusBadge({ status, error }: RunStatusBadgeProps) {
+  const presentation = runStatusPresentation(status);
+  if (!presentation) return null;
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1.5 text-xs text-foreground-muted">
+      <StateGlyph state={presentation.glyph} size="sm" />
+      <RunStatusWords status={status} error={error} />
     </span>
   );
 }

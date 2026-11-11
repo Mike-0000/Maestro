@@ -11,6 +11,13 @@ export interface AnimatedHeightProps {
   className?: string;
   /** Notified when the height transition starts and when it settles. */
   onAnimatingChange?: (isAnimating: boolean) => void;
+  /**
+   * The box sits in a height-limited flex column (a dialog between its header
+   * and footer): it may shrink below its content, and scrolls when it does,
+   * instead of pushing the content under the footer. Content that grows after
+   * mount (a fetch) is covered too.
+   */
+  constrain?: boolean;
 }
 
 /**
@@ -19,11 +26,20 @@ export interface AnimatedHeightProps {
  * overflow is only clipped while a transition is running so popovers and
  * menus rendered inside can escape the box at rest.
  */
-export function AnimatedHeight({ children, className, onAnimatingChange }: AnimatedHeightProps) {
+export function AnimatedHeight({
+  children,
+  className,
+  onAnimatingChange,
+  constrain = false,
+}: AnimatedHeightProps) {
+  const rootRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const [isOverflowing, setIsOverflowing] = useState(false);
   // Track the last observed height in a ref so the ResizeObserver callback
   // can seed its change tracker after remounts (React StrictMode re-runs
-  // effects) without re-measuring.
+  // effects) without re-measuring. The tracker compares ResizeObserver's
+  // first callback against this baseline, so content that changes between
+  // the measurement and that callback still moves the row.
   const lastHeightRef = useRef<number | undefined>(undefined);
   const settleTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [height, setHeight] = useState<number | undefined>(undefined);
@@ -67,15 +83,32 @@ export function AnimatedHeight({ children, className, onAnimatingChange }: Anima
     };
   }, []);
 
+  // Constrained: compare the box (shrunk by its flex parent) with its content
+  // and only turn on scrolling when the content does not fit, so popovers
+  // rendered inline can still escape the box at rest.
+  useEffect(() => {
+    const root = rootRef.current;
+    const el = contentRef.current;
+    if (!constrain || !root || !el) return;
+    const update = () => setIsOverflowing(el.offsetHeight > root.clientHeight + 1);
+    const observer = new ResizeObserver(update);
+    observer.observe(root);
+    observer.observe(el);
+    update();
+    return () => observer.disconnect();
+  }, [constrain]);
+
   useEffect(() => {
     onAnimatingChange?.(isAnimating);
   }, [isAnimating, onAnimatingChange]);
 
   return (
     <div
+      ref={rootRef}
       data-slot="animated-height"
       data-animating={isAnimating ? '' : undefined}
-      className={cx(styles.root, className)}
+      data-overflowing={constrain && isOverflowing ? '' : undefined}
+      className={cx(styles.root, constrain && styles.constrained, className)}
       style={height === undefined ? undefined : { gridTemplateRows: `${height}px` }}
       onTransitionEnd={(event) => {
         if (event.target !== event.currentTarget) return;

@@ -1,7 +1,7 @@
 import { Pill, UpdateCard, type UpdateStatus } from '@emdash/ui/react/components';
 import { SettingsRow } from '@emdash/ui/react/patterns';
-import { Button, SplitButton } from '@emdash/ui/react/primitives';
-import { DownloadIcon, LoaderCircleIcon, PlayIcon } from 'lucide-react';
+import { Button, Spinner, SplitButton } from '@emdash/ui/react/primitives';
+import { DownloadIcon, PlayIcon } from 'lucide-react';
 import type { HostAvailabilityState, HostServerState } from '@core/services/hosts/api';
 import { WorkspaceServerBadge } from './workspace-server-badge';
 
@@ -36,7 +36,7 @@ export function WorkspaceRuntimeRow({
       <SettingsRow
         label={
           <span className="flex items-center gap-2">
-            Workspace Runtime
+            Workspace runtime
             {connected &&
               !loading &&
               state &&
@@ -71,6 +71,7 @@ export function WorkspaceRuntimeRow({
           status={workspaceServerUpdateStatus(state, actions)}
           onCheckForUpdates={actions.refresh}
           error={state.error}
+          bare
         />
       )}
     </div>
@@ -110,7 +111,7 @@ function WorkspaceRuntimeDetails({
   if (loading || !state) {
     return (
       <span className="flex items-center gap-2">
-        <LoaderCircleIcon className="size-3.5 animate-spin" />
+        <Spinner size="sm" />
         Checking workspace runtime…
       </span>
     );
@@ -124,14 +125,14 @@ function WorkspaceRuntimeDetails({
   return (
     <span className="flex flex-col gap-1">
       {(state.version || startedAt) && (
-        <span className="flex flex-wrap items-center gap-2">
+        <span className="flex flex-wrap items-center gap-x-2 tabular-nums">
           {state.version && <span className="tabular-nums">Runtime v{state.version}</span>}
           {state.version && startedAt && <span aria-hidden>·</span>}
           {startedAt && <span>Started {startedAt}</span>}
           {state.detail && <span>{state.detail}</span>}
         </span>
       )}
-      {state.error && <span className="text-destructive">{state.error.message}</span>}
+      {state.error && <span className="text-foreground-error">{state.error.message}</span>}
     </span>
   );
 }
@@ -150,7 +151,7 @@ function WorkspaceServerAction({
       <Button
         type="button"
         variant="primary"
-        size="xs"
+        size="sm"
         disabled={transitioning}
         onClick={() => void actions.install()}
       >
@@ -165,7 +166,7 @@ function WorkspaceServerAction({
       <Button
         type="button"
         variant="primary"
-        size="xs"
+        size="sm"
         disabled={transitioning}
         onClick={() => void actions.start()}
       >
@@ -202,7 +203,7 @@ function WorkspaceServerAction({
           void actions.restart();
         }}
         variant="secondary"
-        size="xs"
+        size="sm"
         disabled={transitioning}
       />
     );

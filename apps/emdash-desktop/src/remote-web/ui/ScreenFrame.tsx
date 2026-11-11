@@ -4,9 +4,9 @@ import { observer } from 'mobx-react-lite';
 import type { ReactNode } from 'react';
 import { useApp, useRouter } from './app-context';
 import { ReconnectingBar } from './ConnectionStatus';
-import { Button, IconButton } from './controls';
+import { IconButton, TextAction } from './controls';
 import { cx, useIsWide } from './hooks';
-import { agentStatusLabel, agentTone, TONE_TEXT } from './StatusIndicator';
+import { agentMark, agentStatusLabel, agentTone, StateMark, TONE_TEXT } from './StatusIndicator';
 
 type ScreenFrameProps = {
   title: string;
@@ -15,7 +15,10 @@ type ScreenFrameProps = {
   children: ReactNode;
 };
 
-/** Header (back, title, status, actions) over a body that fills the rest of the pane. */
+/**
+ * Header (back, title, state, actions) over a body that fills the rest of the pane. The header
+ * is window chrome, on the sunken surface like the desktop's title bar; the body is the paper.
+ */
 export const ScreenFrame = observer(function ScreenFrame({
   title,
   agent,
@@ -30,26 +33,28 @@ export const ScreenFrame = observer(function ScreenFrame({
     ? agent.title || app.providerName(agent.providerId) || agent.providerId
     : '';
   return (
-    <section aria-label={title} className="bg-canvas flex h-full min-w-0 flex-col">
-      <header className="border-line px-safe pt-safe shrink-0 border-b">
-        <div className="flex h-14 items-center gap-1 pr-2 pl-1.5">
-          {wide ? (
-            <span className="w-2.5" />
-          ) : (
+    <section aria-label={title} className="surface-paper flex h-full min-w-0 flex-col bg-surface">
+      <header className="surface-sunken px-safe pt-safe shrink-0 bg-surface">
+        <div
+          className={cx(
+            'screen-header-row flex h-14 items-center gap-1 pr-1.5',
+            wide ? 'pl-5' : 'pl-1'
+          )}
+        >
+          {wide ? null : (
             <IconButton label="Back to agents" onClick={() => router.back()}>
               <ChevronLeft className="size-6" aria-hidden="true" />
             </IconButton>
           )}
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-[16px] leading-5 font-semibold">{title}</h1>
+            <h1 className="text-heading truncate font-semibold text-foreground">{title}</h1>
             {agent ? (
-              <p className="text-fg-muted mt-px flex min-w-0 items-center gap-1.5 text-[12.5px] leading-4">
-                <span className={cx('shrink-0 font-medium', TONE_TEXT[agentTone(agent)])}>
+              <p className="text-caption flex min-w-0 items-center gap-1.5 text-foreground-passive">
+                <StateMark state={agentMark(agent)} className="-mr-0.5 size-3" />
+                <span className={cx('shrink-0', TONE_TEXT[agentTone(agent)])}>
                   {agentStatusLabel(agent)}
                 </span>
-                <span aria-hidden="true" className="text-fg-passive">
-                  ·
-                </span>
+                <span aria-hidden="true">·</span>
                 <span className="truncate">
                   {agentName}
                   {project ? ` · ${project}` : ''}
@@ -59,13 +64,14 @@ export const ScreenFrame = observer(function ScreenFrame({
           </div>
           {actions}
         </div>
+        {wide ? null : <ReconnectingBar />}
       </header>
-      {wide ? null : <ReconnectingBar />}
       <div className="flex min-h-0 flex-1 flex-col">{children}</div>
     </section>
   );
 });
 
+/** A page-level notice in a pane: a quiet title, one sentence, the way on. */
 export function Notice({
   title,
   body,
@@ -79,15 +85,11 @@ export function Notice({
   const wide = useIsWide();
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-8 text-center">
-      <h2 className="text-[18px] font-semibold tracking-tight">{title}</h2>
-      <p className="text-fg-muted mt-1.5 max-w-xs text-[14.5px]">{body}</p>
-      <div className="mt-5 flex flex-col gap-2">
+      <h2 className="text-title text-balance text-foreground">{title}</h2>
+      <p className="text-body mt-3 max-w-xs text-balance text-foreground-muted">{body}</p>
+      <div className="mt-8 flex flex-col items-center gap-1">
         {action}
-        {wide ? null : (
-          <Button variant="ghost" onClick={() => router.back()}>
-            Back to agents
-          </Button>
-        )}
+        {wide ? null : <TextAction onClick={() => router.back()}>Back to agents</TextAction>}
       </div>
     </div>
   );

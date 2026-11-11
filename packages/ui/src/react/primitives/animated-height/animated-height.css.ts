@@ -11,6 +11,11 @@ import { HEIGHT_TRANSITION_DURATION_MS } from './constants';
 export const root = style({
   display: 'grid',
   gridTemplateRows: '1fr',
+  // The one column is the box's width, never the content's widest line: an
+  // `auto` column grows to its item's min-content width, so one long
+  // unbreakable value (a path, a URL) pushed a dialog body past its edge.
+  // `minmax(0, 1fr)` pins the track and lets fields truncate inside it.
+  gridTemplateColumns: 'minmax(0, 1fr)',
   // Content must keep its natural height (not stretch to the row) so the
   // ResizeObserver keeps measuring the real content size while the row is
   // pinned to the previous height during a transition.
@@ -22,5 +27,25 @@ export const root = style({
     // Clip only while animating so popovers/menus rendered inside can escape
     // the box once the transition settles.
     '&[data-animating]': { overflow: 'hidden' },
+  },
+});
+
+/**
+ * `constrain`: a flex item that may shrink below its content (a dialog's
+ * middle between header and footer); when the content no longer fits the box
+ * scrolls instead of letting it run under the footer.
+ */
+export const constrained = style({
+  minHeight: 0,
+  flexShrink: 1,
+  selectors: {
+    // Scrolls, with the bottom edge fading into the footer below it (the content's own bottom
+    // padding sits inside the fade, so the last line is clear once scrolled to the end).
+    '&[data-overflowing]': {
+      overflowY: 'auto',
+      overscrollBehavior: 'contain',
+      maskImage: 'linear-gradient(to bottom, black calc(100% - 1.5rem), transparent)',
+    },
+    '&[data-overflowing][data-animating]': { overflowY: 'hidden' },
   },
 });

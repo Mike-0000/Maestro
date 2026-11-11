@@ -1,3 +1,4 @@
+import { StateGlyph } from '@emdash/ui/react/components';
 import { Button } from '@emdash/ui/react/primitives';
 import type { ReactNode } from 'react';
 import type { ProviderAccountReportingState } from '@core/features/integrations/api/account-reporting';
@@ -34,15 +35,15 @@ export function ProviderAccountStateEmpty({
     return (
       <div className="flex flex-col items-center gap-3 px-4 py-6 text-center">
         {icon ? (
-          <span className="flex size-8 items-center justify-center rounded-full bg-background-2">
+          <span className="flex size-6 items-center justify-center text-foreground-passive">
             {icon}
           </span>
         ) : null}
         <p className="max-w-64 text-sm text-foreground-muted">{state.message}</p>
         <Button
           type="button"
-          variant="secondary"
-          size="xs"
+          variant="text"
+          size="sm"
           onClick={() => {
             void openIntegrationSetup({ integration: providerId });
           }}
@@ -54,12 +55,15 @@ export function ProviderAccountStateEmpty({
   }
   return (
     <div className="flex flex-col items-center gap-3 px-4 py-6 text-center">
-      <p className="max-w-64 text-sm text-foreground-error">{state.message}</p>
+      <p className="flex max-w-64 items-start gap-2 text-sm text-foreground-muted">
+        <StateGlyph state="error" className="mt-0.5" />
+        <span>{state.message}</span>
+      </p>
       {projectId ? (
         <Button
           type="button"
-          variant="secondary"
-          size="xs"
+          variant="text"
+          size="sm"
           onClick={() => {
             navigate(projectViewDef({ projectId }));
             getProjectViewStore(projectId)?.setProjectView('settings');

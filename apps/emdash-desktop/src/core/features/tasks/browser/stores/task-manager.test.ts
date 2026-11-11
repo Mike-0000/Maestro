@@ -423,7 +423,7 @@ describe('TaskManagerStore lifecycle', () => {
     manager.dispose();
   });
 
-  it('does not provision a Task while live Project access is unavailable', async () => {
+  it('does not provision a Task while live project access is unavailable', async () => {
     const manager = makeTaskManager();
     const task = createUnprovisionedTask(makeTask());
     manager.tasks.set('task-1', task);

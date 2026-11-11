@@ -11,11 +11,11 @@ import {
   type PaletteProviderMatch,
   type PaletteProviderRenderProps,
 } from '@core/primitives/palette/api';
+import { PALETTE_ITEM_CLASS } from '@core/primitives/palette/browser/palette-item-styles';
 import { cn } from '@core/primitives/styling/browser/cn';
 import type { BoundCommand } from '@core/primitives/view-scopes/api';
 import { scopes, type ViewScopes } from '@core/primitives/view-scopes/browser';
 import { getCommandIcon } from '../../browser/command-palette/command-icons';
-import { PALETTE_ITEM_CLASS } from '../../browser/command-palette/palette-item-styles';
 
 const APP_IDLE_COMMAND_IDS = ['app.newProject', 'app.settings', 'app.giveFeedback'] as const;
 const PROJECT_IDLE_COMMAND_IDS = ['app.newTask', 'app.settings', 'app.giveFeedback'] as const;
@@ -62,14 +62,14 @@ function CommandPaletteProviderRow({
       }}
       disabled={disabled}
       title={match.disabledReason}
-      className={cn(PALETTE_ITEM_CLASS, 'group', disabled && 'cursor-not-allowed opacity-50')}
+      className={cn(PALETTE_ITEM_CLASS, 'group', disabled && 'opacity-50')}
     >
-      {Icon && <Icon size={14} className="shrink-0 text-foreground/40" />}
+      {Icon && <Icon className="size-4 shrink-0 text-foreground-passive" />}
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate">{match.title}</span>
-        {subtitle && <span className="truncate text-xs text-foreground/40">{subtitle}</span>}
+        {subtitle && <span className="truncate text-xs text-foreground-passive">{subtitle}</span>}
       </span>
-      {match.chord && <Shortcut hotkey={match.chord} variant="keycaps" />}
+      {match.chord && <Shortcut hotkey={match.chord} />}
     </Command.Item>
   );
 }

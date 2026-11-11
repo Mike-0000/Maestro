@@ -143,45 +143,42 @@ export const pquoteRail = style({
 // ── Visual (no measurement impact — color, background, decoration only) ───────
 
 export const inlineCodeChip = style({
-  borderRadius: '4px',
+  borderRadius: vars.radiusXs,
   background: vars.codeInlineBg,
 });
 
+// Mention chips: small inline chips (rounded-xs, like inline code), neutral for
+// every kind. The faint ring keeps them findable on the user bubble too.
+const mentionChipBase = style({
+  borderRadius: vars.radiusXs,
+  boxShadow: `0 0 0 1px color-mix(in srgb, ${vars.fg} 8%, transparent)`,
+});
+
 /** Fallback for unknown mentionKind values. */
-export const mentionChip = style({
-  borderRadius: vars.radiusSm,
-  background: vars.mentionChipBg,
-  color: vars.mentionChipFg,
-  boxShadow: `0 0 0 1px color-mix(in srgb, ${vars.fg} 10%, transparent)`,
-});
+export const mentionChip = style([
+  mentionChipBase,
+  { background: vars.mentionChipBg, color: vars.mentionChipFg },
+]);
 
-export const mentionChipFile = style({
-  borderRadius: vars.radiusSm,
-  background: vars.mentionChipBg,
-  color: vars.mentionChipFg,
-  boxShadow: `0 0 0 1px color-mix(in srgb, ${vars.fg} 10%, transparent)`,
-});
+export const mentionChipFile = style([
+  mentionChipBase,
+  { background: vars.mentionFileBg, color: vars.mentionFileFg },
+]);
 
-export const mentionChipIssue = style({
-  borderRadius: vars.radiusSm,
-  background: vars.mentionChipBg,
-  color: vars.mentionChipFg,
-  boxShadow: `0 0 0 1px color-mix(in srgb, ${vars.fg} 10%, transparent)`,
-});
+export const mentionChipIssue = style([
+  mentionChipBase,
+  { background: vars.mentionIssueBg, color: vars.mentionIssueFg },
+]);
 
-export const mentionChipSymbol = style({
-  borderRadius: vars.radiusSm,
-  background: vars.mentionChipBg,
-  color: vars.mentionChipFg,
-  boxShadow: `0 0 0 1px color-mix(in srgb, ${vars.fg} 10%, transparent)`,
-});
+export const mentionChipSymbol = style([
+  mentionChipBase,
+  { background: vars.mentionSymbolBg, color: vars.mentionSymbolFg },
+]);
 
-export const mentionChipCustom = style({
-  borderRadius: vars.radiusSm,
-  background: vars.mentionCustomBg,
-  color: vars.mentionCustomFg,
-  boxShadow: `0 0 0 1px color-mix(in srgb, ${vars.fg} 10%, transparent)`,
-});
+export const mentionChipCustom = style([
+  mentionChipBase,
+  { background: vars.mentionCustomBg, color: vars.mentionCustomFg },
+]);
 
 /** Lookup from mentionKind to its visual class. Falls back to mentionChip. */
 export const mentionChipByKind: Record<string, string> = {
@@ -199,20 +196,26 @@ export const mentionPlain = style({
 
 /** Slash-command chip — reuses the generic mention chip tint. */
 export const commandChip = style({
-  borderRadius: vars.radiusSm,
+  borderRadius: vars.radiusXs,
   background: vars.mentionCustomBg,
   color: vars.mentionCustomFg,
 });
 
+/** Links: the accent's link tone, underlined softly; the underline firms up on hover. */
 export const linkFragment = style({
   color: vars.link,
   textDecoration: 'underline',
   textDecorationThickness: '1px',
-  textUnderlineOffset: '0.14em',
+  textDecorationColor: `color-mix(in srgb, ${vars.link} 45%, transparent)`,
+  textUnderlineOffset: '0.2em',
   cursor: 'pointer',
+  transition: 'text-decoration-color 150ms',
+  selectors: {
+    '&:hover': { textDecorationColor: vars.link },
+  },
 });
 
-export const bulletColor = style({ color: vars.fgMuted });
+export const bulletColor = style({ color: vars.fgPassive });
 
 export const quoteRailBar = style({
   background: vars.border,

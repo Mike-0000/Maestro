@@ -1,3 +1,5 @@
+import { StateGlyph } from '@emdash/ui/react/components';
+import { MetaLine } from '@emdash/ui/react/patterns';
 import { AbsoluteTime } from '@emdash/ui/react/primitives';
 import type {
   AutomationRun,
@@ -5,7 +7,7 @@ import type {
   AutomationRunTriggerKind,
 } from '@core/features/automations/api/automation-run';
 import { formatRunTriggerKindLabel } from '../automation-run-format';
-import { RunStatusBadge } from './RunStatusBadge';
+import { runStatusPresentation, RunStatusWords } from './RunStatusBadge';
 
 export interface RunMetaLineProps {
   displayTime: number | null;
@@ -14,25 +16,22 @@ export interface RunMetaLineProps {
   error: AutomationRun['error'];
 }
 
+/**
+ * The caption under a run: its state (glyph and words), when it ran, and what started it, in
+ * the caption role ("Agent started · Nov 11, 09:00 · Triggered by schedule").
+ */
 export function RunMetaLine({ displayTime, triggerKind, runStatus, error }: RunMetaLineProps) {
+  const presentation = runStatusPresentation(runStatus);
   const triggerLabel = triggerKind ? formatRunTriggerKindLabel(triggerKind) : null;
 
   return (
-    <div className="flex min-w-0 items-center gap-2 text-xs text-foreground-muted">
-      <span className="flex-1">
-        {displayTime ? (
-          <div className="flex items-center gap-2">
-            <AbsoluteTime className="text-tiny text-foreground-muted" value={displayTime} />
-            <span className="text-foreground-passive">•</span>
-            {triggerLabel && (
-              <span className="shrink-0 text-tiny text-foreground-passive">{triggerLabel}</span>
-            )}
-          </div>
-        ) : (
-          <span>—</span>
-        )}
-      </span>
-      <RunStatusBadge status={runStatus} error={error} />
-    </div>
+    <MetaLine
+      glyph={presentation ? <StateGlyph state={presentation.glyph} size="sm" /> : undefined}
+      start={[
+        presentation ? <RunStatusWords key="status" status={runStatus} error={error} /> : null,
+        displayTime ? <AbsoluteTime key="time" value={displayTime} /> : 'Not started',
+        triggerLabel,
+      ]}
+    />
   );
 }

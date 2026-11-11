@@ -22,12 +22,12 @@ export function PrBadge({ variant = 'default', pr, className, hoverDelay }: PrBa
         return (
           <div
             className={cn(
-              'flex h-5 max-w-52 items-center gap-1.5 rounded-md bg-background-2 px-1.5 leading-none',
+              'flex h-5 max-w-52 items-center gap-1.5 rounded-sm bg-surface-emphasis px-1.5 leading-none',
               className
             )}
           >
             <StatusIcon className="size-3" pr={pr} disableTooltip />
-            <span className="shrink-0 font-sans text-xs leading-none text-foreground-muted">
+            <span className="shrink-0 text-xs leading-none text-foreground-passive tabular-nums">
               #{getPrNumber(pr) ?? 0}
             </span>
             <span className="truncate text-xs leading-none text-foreground-muted">{pr.title}</span>
@@ -48,37 +48,43 @@ export function PrBadge({ variant = 'default', pr, className, hoverDelay }: PrBa
         {renderBadge()}
       </Popover.Trigger>
       <Popover.Content className="w-auto max-w-sm min-w-72">
+        {/* Hover card: state + title, then who wants to merge what; the two
+            actions (open, copy) are quiet icon buttons at the end of the title. */}
         <div className="flex flex-col gap-2">
-          <div className="no-wrap flex items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-2">
-              <StatusIcon pr={pr} className="size-3" />
-              <span className="min-w-0 truncate text-sm leading-snug text-foreground">
-                {pr.title}
-              </span>
-              <PrNumberBadge number={getPrNumber(pr) ?? 0} />
+          <div className="flex min-w-0 items-center gap-2">
+            <StatusIcon pr={pr} className="size-3.5" />
+            <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+              {pr.title}
+            </span>
+            <span className="-mr-1 flex shrink-0 items-center">
               <Tooltip.Root>
-                <Tooltip.Trigger>
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    icon
-                    className="cursor-pointer"
-                    onClick={() => openExternal(pr.url)}
-                  >
-                    <ExternalLink className="size-3.5" />
-                  </Button>
-                </Tooltip.Trigger>
+                <Tooltip.Trigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      icon
+                      aria-label="Open PR on GitHub"
+                      onClick={() => openExternal(pr.url)}
+                    >
+                      <ExternalLink className="size-3.5" />
+                    </Button>
+                  }
+                />
                 <Tooltip.Content>Open PR on GitHub</Tooltip.Content>
               </Tooltip.Root>
               <PrUrlCopyButton url={pr.url} />
-            </div>
-            <RelativeTime
-              value={pr.createdAt}
-              className="text-xs text-foreground-passive"
-              compact
-            />
+            </span>
           </div>
           <PrMergeLine pr={pr} />
+          <span className="text-tiny text-foreground-passive tabular-nums">
+            <PrNumberBadge
+              number={getPrNumber(pr) ?? 0}
+              className="text-tiny text-foreground-passive"
+            />
+            {' · opened '}
+            <RelativeTime value={pr.createdAt} compact />
+          </span>
         </div>
       </Popover.Content>
     </Popover.Root>

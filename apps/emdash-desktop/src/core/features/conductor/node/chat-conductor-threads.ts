@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type Anthropic from '@anthropic-ai/sdk';
 import { redactSecrets, type Logger } from '@emdash/shared/logger';
 import type { z } from 'zod';
+import { mapDigestText } from '../api/chat-conductor/digest';
 import {
   boundThread,
   chatConductorThreadSchema,
@@ -38,6 +39,9 @@ export function chatThreadFileName(conversationId: string): string | null {
 type Message = Anthropic.Beta.BetaMessageParam;
 
 function redactEntry(entry: ChatConductorEntry): ChatConductorEntry {
+  if (entry.kind === 'digest') {
+    return { ...entry, digest: mapDigestText(entry.digest, redactSecrets) };
+  }
   if (entry.kind !== 'action') return { ...entry, text: redactSecrets(entry.text) };
   return {
     ...entry,
@@ -47,8 +51,24 @@ function redactEntry(entry: ChatConductorEntry): ChatConductorEntry {
 }
 
 /**
- * Redacts the text the model reads back: user text, the conductor's own text, and tool results.
- * Thinking blocks are left as they are (they are signed), and so are tool inputs.
+ * Every string inside a tool input redacted, keeping its shape: objects stay objects (the API
+ * requires a tool_use input to be one), arrays stay arrays, other values are kept as they are.
+ */
+function redactToolInput(value: unknown): unknown {
+  if (typeof value === 'string') return redactSecrets(value);
+  if (Array.isArray(value)) return value.map(redactToolInput);
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, field]) => [key, redactToolInput(field)])
+    );
+  }
+  return value;
+}
+
+/**
+ * Redacts the text the model reads back: user text, the conductor's own text, the text it wrote
+ * into its tool calls (a digest, a prompt, its notes), and tool results. Thinking blocks are left
+ * as they are (they are signed).
  */
 function redactMessage(message: Message): Message {
   if (typeof message.content === 'string') {
@@ -58,6 +78,7 @@ function redactMessage(message: Message): Message {
     ...message,
     content: message.content.map((block) => {
       if (block.type === 'text') return { ...block, text: redactSecrets(block.text) };
+      if (block.type === 'tool_use') return { ...block, input: redactToolInput(block.input) };
       if (block.type !== 'tool_result' || block.content === undefined) return block;
       if (typeof block.content === 'string') {
         return { ...block, content: redactSecrets(block.content) };
@@ -148,7 +169,9 @@ class ThreadFiles<Thread extends StoredThread> {
     const path = this.pathFor(key);
     if (!path) return Promise.reject(new Error('That id cannot name a thread file.'));
     return this.enqueue(key, async () => {
-      const bounded = redactThread(boundThread(this.schema.parse(thread)));
+      // Redacted first, bounded second: a redaction can lengthen text (`token=abc` becomes
+      // `token=[REDACTED]`), and a digest field over its limit would not parse back.
+      const bounded = boundThread(redactThread(this.schema.parse(thread)));
       let text = JSON.stringify(bounded);
       if (Buffer.byteLength(text) > MAX_FILE_BYTES) {
         // What the developer reads and the notes outlive the model history.

@@ -4,9 +4,8 @@ import type {
   McpServer,
 } from '@emdash/core/primitives/mcp/api';
 import type { AgentProviderId } from '@emdash/plugins/agents/types';
-import { CardGridItem } from '@emdash/ui/react/components';
 import { Button, Tooltip } from '@emdash/ui/react/primitives';
-import { ExternalLink, Globe, Pencil, Plus, Terminal } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
 import React from 'react';
 import { AgentIcon } from '@core/features/agents/contributions/browser/agent-icon';
 import { McpServerIcon } from '@core/features/mcp/browser/mcpIcons';
@@ -29,6 +28,12 @@ function getTransport(server?: McpServer, entry?: McpCatalogEntry): 'stdio' | 'h
   return 'stdio';
 }
 
+/**
+ * One MCP server as a row of its settings card: the server's mark, its name with the transport
+ * in the caption role, one line of what it does, and on the right the agents it syncs to (added
+ * servers) or a quiet "Add" (recommended ones). The whole row opens the editor sheet; the docs
+ * link appears on hover or focus.
+ */
 export const McpCard: React.FC<McpCardProps> = ({
   server,
   providers,
@@ -47,6 +52,9 @@ export const McpCard: React.FC<McpCardProps> = ({
   ) as AgentProviderId[];
   const visibleProviders = syncedProviders.slice(0, MAX_VISIBLE_PROVIDERS);
   const hiddenProviderCount = syncedProviders.length - visibleProviders.length;
+  const providerNames = syncedProviders
+    .map((id) => providers.find((provider) => provider.id === id)?.name ?? id)
+    .join(', ');
 
   const handleClick = () => {
     if (isInstalled && server && onEdit) {
@@ -57,84 +65,78 @@ export const McpCard: React.FC<McpCardProps> = ({
   };
 
   return (
-    <CardGridItem
+    <div
       role="button"
       tabIndex={0}
+      aria-label={isInstalled ? `Edit ${name}` : `Add ${name}`}
       onClick={handleClick}
       onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           handleClick();
         }
       }}
-      className="group relative"
+      className="group -mx-2 flex min-w-0 cursor-pointer items-center gap-3 rounded-md px-2 py-2 transition-colors outline-none hover:bg-surface-hover focus-visible:ring-1 focus-visible:ring-ring"
     >
       <McpServerIcon name={name} iconKey={catalogEntry?.key ?? server?.name} />
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <div className="flex min-w-0 items-center gap-2">
-          <h3 className="text-smd min-w-0 truncate">{name}</h3>
-          <span className="inline-flex shrink-0 items-center gap-0.5 rounded bg-background-2 px-1 py-0.5 text-[10px] text-foreground-muted">
-            {transport === 'http' ? <Globe className="size-2" /> : <Terminal className="size-2" />}
-            {transport}
-          </span>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <span className="min-w-0 truncate text-sm text-foreground">{name}</span>
+          <span className="shrink-0 font-mono text-tiny text-foreground-passive">{transport}</span>
         </div>
         {description && <p className="line-clamp-1 text-xs text-foreground-muted">{description}</p>}
-        {syncedProviders.length > 0 && (
-          <div className="mt-1.5 flex flex-wrap items-center gap-1">
-            {visibleProviders.map((id) => (
-              <AgentIcon key={id} id={id} size={14} className="rounded-sm" />
-            ))}
-            {hiddenProviderCount > 0 && (
-              <span className="text-[10px] leading-none text-foreground-muted">
-                +{hiddenProviderCount}
-              </span>
-            )}
-          </div>
-        )}
       </div>
 
-      <div className="absolute inset-y-0 right-0 flex items-center gap-1 rounded-r-lg bg-linear-to-r from-transparent to-background-2 pr-3 pl-10 opacity-0 transition-opacity group-hover:opacity-100">
+      <div className="flex shrink-0 items-center gap-2">
         {docsUrl && (
           <Tooltip.Root>
-            <Tooltip.Trigger>
-              <Button
-                size="sm"
-                icon
-                variant="ghost"
-                onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-                  e.stopPropagation();
-                  window.open(docsUrl, '_blank', 'noopener,noreferrer');
-                }}
-                aria-label={`View ${name} docs`}
-              >
-                <ExternalLink className="h-4 w-4" />
-              </Button>
+            <Tooltip.Trigger
+              render={
+                <Button
+                  size="sm"
+                  icon
+                  variant="ghost"
+                  className="opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 focus-visible:opacity-100"
+                  onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                    e.stopPropagation();
+                    window.open(docsUrl, '_blank', 'noopener,noreferrer');
+                  }}
+                  aria-label={`View ${name} docs`}
+                />
+              }
+            >
+              <ExternalLink className="size-3.5" />
             </Tooltip.Trigger>
             <Tooltip.Content>View docs</Tooltip.Content>
           </Tooltip.Root>
         )}
-        <Tooltip.Root>
-          <Tooltip.Trigger>
-            <Button
-              size="sm"
-              icon
-              variant="ghost"
-              onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-                e.stopPropagation();
-                if (isInstalled && server && onEdit) {
-                  onEdit(server);
-                } else if (catalogEntry && onAdd) {
-                  onAdd(catalogEntry);
-                }
-              }}
-              aria-label={isInstalled ? `Edit ${name}` : `Add ${name}`}
+        {isInstalled ? (
+          syncedProviders.length > 0 ? (
+            <span
+              className="flex items-center gap-1"
+              title={`Synced to ${providerNames}`}
+              aria-label={`Synced to ${providerNames}`}
+              role="img"
             >
-              {isInstalled ? <Pencil className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-            </Button>
-          </Tooltip.Trigger>
-          <Tooltip.Content>{isInstalled ? 'Edit' : 'Add'}</Tooltip.Content>
-        </Tooltip.Root>
+              {visibleProviders.map((id) => (
+                <AgentIcon key={id} id={id} size={14} className="rounded-xs" />
+              ))}
+              {hiddenProviderCount > 0 && (
+                <span className="text-tiny text-foreground-passive tabular-nums">
+                  +{hiddenProviderCount}
+                </span>
+              )}
+            </span>
+          ) : (
+            <span className="text-tiny text-foreground-passive">Not synced</span>
+          )
+        ) : (
+          <span className="text-xs text-foreground-muted transition-colors group-hover:text-foreground">
+            Add
+          </span>
+        )}
       </div>
-    </CardGridItem>
+    </div>
   );
 };

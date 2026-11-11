@@ -1,5 +1,4 @@
 import { toast } from '@emdash/ui/react/primitives';
-import { ArrowUpRight } from 'lucide-react';
 import { action, computed, makeObservable, observable, runInAction } from 'mobx';
 import { settingsViewDef } from '@core/features/settings/contributions/views';
 import type { DesktopUpdateEvent, DesktopUpdateState } from '@core/features/updates/api';
@@ -268,16 +267,13 @@ export class UpdateStore {
   }
 
   private _showAvailableToast(version: string): void {
-    toast('Update Available', {
-      description: `Version ${version} is available to download and install.`,
+    // One quiet toast with one action; the action opens Settings › General (not a website), so
+    // it carries no outbound arrow.
+    toast('Update available', {
+      description: `Maestro ${version} is ready to download.`,
       duration: 10_000,
       action: {
-        label: (
-          <span className="flex items-center gap-1.5">
-            Update
-            <ArrowUpRight className="size-3.5" />
-          </span>
-        ),
+        label: 'Update',
         onClick: () => {
           getNavigation().navigate(settingsViewDef({ tab: 'general' }));
           if (this.state.status === 'available') {

@@ -32,56 +32,52 @@ export const SyncToAgentsSection: React.FC<SyncToAgentsSectionProps> = ({
 
   return (
     <Field.Root>
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex items-baseline justify-between gap-3">
         <Field.Label>Sync to agents</Field.Label>
         <Button
           type="button"
-          variant="link"
-          size="sm"
-          className="h-auto p-0 text-xs"
+          variant="text"
+          size="xs"
           disabled={installedProviders.length === 0}
           onClick={() => onSetAll(installedProviders.map((provider) => provider.id))}
         >
           Sync to all installed agents
         </Button>
       </div>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-1.5">
         {selected.map((provider) => (
-          <div
+          <span
             key={provider.id}
-            className={cn(
-              'group relative inline-flex h-8 items-center gap-1.5 rounded-full border border-primary bg-primary/10 pr-3 pl-2 text-xs text-foreground ring-1 ring-primary/30 transition-colors',
-              'hover:border-destructive/60 hover:bg-background-destructive hover:text-foreground-destructive'
-            )}
+            className="inline-flex h-7 items-center gap-1.5 rounded-full bg-surface-hover pr-1 pl-2 text-xs text-foreground"
             title={`Synced to ${provider.name}`}
           >
-            <AgentIcon
-              id={provider.id as AgentProviderId}
-              size={16}
-              className="rounded-sm transition-opacity group-hover:opacity-35"
-            />
-            <span className="transition-opacity group-hover:opacity-35">{provider.name}</span>
+            <AgentIcon id={provider.id as AgentProviderId} size={14} className="rounded-xs" />
+            <span>{provider.name}</span>
             <button
               type="button"
-              className="absolute right-2 opacity-0 transition-opacity group-hover:opacity-100"
+              className="flex size-5 items-center justify-center rounded-full text-foreground-passive transition-colors outline-none hover:bg-foreground/8 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
               onClick={() => onToggle(provider.id)}
               aria-label={`Remove ${provider.name} from synced agents`}
             >
-              <X className="h-3 w-3" />
+              <X className="size-3" />
             </button>
-          </div>
+          </span>
         ))}
         <AgentSelector
           value={null}
-          placeholder="Select agent"
+          appearance="quiet"
+          placeholder={selected.length > 0 ? 'Add an agent' : 'Choose an agent'}
           connectionId={sshConnectionIdOf(host)}
           onChange={(id) => {
             if (!selectedProviderIds.has(id)) onToggle(id);
           }}
-          className="h-8 w-44 rounded-full border-dashed text-xs"
+          className={cn('text-xs', selected.length > 0 && 'ml-0')}
           contentClassName="w-72"
         />
       </div>
+      {selected.length === 0 && (
+        <Field.Description>Choose at least one agent to add the server to.</Field.Description>
+      )}
     </Field.Root>
   );
 };

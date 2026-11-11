@@ -55,6 +55,7 @@ export const UpdateCard = observer(function UpdateCard(): React.JSX.Element {
           : undefined
       }
       onCheckForUpdates={() => update.check()}
+      bare
     />
   );
 

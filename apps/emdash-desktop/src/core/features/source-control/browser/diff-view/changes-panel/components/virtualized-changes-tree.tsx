@@ -9,7 +9,7 @@ import {
 } from '@core/features/editor/api/browser/file-tree/tree-utils';
 import { FileIcon } from '@core/features/editor/contributions/browser/file-icon';
 import { cn } from '@core/primitives/styling/browser/cn';
-import { ChangeStatusAffordance } from './changes-list-item';
+import { CHANGE_ROW, CHANGE_ROW_ACTIVE, ChangeStatusAffordance } from './changes-list-item';
 import { buildChangesTree } from './changes-tree-utils';
 
 export interface VirtualizedChangesTreeProps {
@@ -77,7 +77,7 @@ export function VirtualizedChangesTree({
   return (
     <div
       ref={parentRef}
-      className={cn('h-full overflow-y-auto overflow-x-hidden py-2 px-1', className)}
+      className={cn('h-full overflow-x-hidden overflow-y-auto px-2 py-1', className)}
     >
       <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
         {virtualizer.getVirtualItems().map((virtualItem) => {
@@ -142,20 +142,17 @@ function DirectoryRow({
     <button
       type="button"
       onClick={onToggle}
-      className="group/item flex h-7 w-full items-center gap-1.5 rounded-md pr-2 select-none hover:bg-background-1"
+      aria-expanded={isExpanded}
+      className={cn(CHANGE_ROW, 'justify-start gap-1.5 pr-2')}
       style={{ ...style, paddingLeft }}
     >
-      <span className="shrink-0 text-foreground-muted">
-        {isExpanded ? (
-          <ChevronDown className="h-3.5 w-3.5" />
-        ) : (
-          <ChevronRight className="h-3.5 w-3.5" />
-        )}
+      <span className="shrink-0 text-foreground-passive">
+        {isExpanded ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
       </span>
-      <span className="shrink-0 text-foreground-muted">
-        {isExpanded ? <FolderOpen className="h-3.5 w-3.5" /> : <Folder className="h-3.5 w-3.5" />}
+      <span className="shrink-0 text-foreground-passive">
+        {isExpanded ? <FolderOpen className="size-3.5" /> : <Folder className="size-3.5" />}
       </span>
-      <span className="min-w-0 flex-1 truncate text-left text-sm">{displayName}</span>
+      <span className="min-w-0 flex-1 truncate text-sm text-foreground-muted">{displayName}</span>
     </button>
   );
 }
@@ -190,10 +187,7 @@ function FileRow({
       onDoubleClick={onDoubleClick}
       onMouseEnter={onMouseEnter}
       style={{ ...style, paddingLeft }}
-      className={cn(
-        'group/item flex h-7 w-full select-none items-center gap-2 rounded-md pr-2 hover:bg-background-1',
-        isActive && 'bg-background-2 hover:bg-background-2'
-      )}
+      className={cn(CHANGE_ROW, 'pr-2', isActive && CHANGE_ROW_ACTIVE)}
     >
       <span className="inline-block w-3.5 shrink-0" />
       <span className="shrink-0">
@@ -201,8 +195,8 @@ function FileRow({
       </span>
       <span
         className={cn(
-          'min-w-0 flex-1 truncate text-left text-sm',
-          change.status === 'deleted' && 'line-through text-foreground-muted'
+          'min-w-0 flex-1 truncate text-sm text-foreground',
+          change.status === 'deleted' && 'text-foreground-muted line-through'
         )}
       >
         {node.name}

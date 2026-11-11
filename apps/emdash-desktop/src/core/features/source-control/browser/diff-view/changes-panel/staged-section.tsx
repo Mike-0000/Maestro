@@ -1,7 +1,6 @@
 import type { GitChange } from '@emdash/core/runtimes/git/api';
 import { EmptyState } from '@emdash/ui/react/components';
 import { Button, toast } from '@emdash/ui/react/primitives';
-import { Minus } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { gitCheckoutStoreToken } from '@core/features/source-control/contributions/browser/workspace-store-tokens';
 import { formatErrorType } from '@core/features/tasks/api/browser/utils';
@@ -118,40 +117,39 @@ export const StagedSectionBody = observer(function StagedSectionBody() {
     <>
       {!hasChanges && (
         <EmptyState
+          bare
           label="Nothing staged"
           description="Stage files above to include them in a commit."
         />
       )}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
         {hasChanges && changesView.stagedSelection.size > 0 && (
           <ActionCard
             selectedCount={changesView.stagedSelection.size}
             selectionActions={
               <Button
-                variant="secondary"
+                variant="text"
                 size="xs"
                 onClick={handleUnstageSelection}
                 title="Unstage selected files"
               >
-                <Minus className="size-3" />
                 Unstage
               </Button>
             }
             generalActions={
               <Button
-                variant="ghost"
+                variant="text"
                 size="xs"
                 disabled={!hasChanges}
                 onClick={handleUnstageAll}
                 title="Unstage all files"
               >
-                <Minus className="size-3" />
                 Unstage all
               </Button>
             }
           />
         )}
-        <div className="min-h-0 flex-1 px-1">
+        <div className="min-h-20 flex-1">
           <ChangesListOrTree
             viewMode={viewMode}
             changes={changes}

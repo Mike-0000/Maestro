@@ -1,14 +1,19 @@
-import { Globe, Play, SendHorizontal } from 'lucide-react';
+import { EmptyState } from '@emdash/ui/react/components';
+import { Button, Input } from '@emdash/ui/react/primitives';
+import { Globe, SendHorizontal } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { AgentTileEntry } from '@core/features/canvas/api/browser/stores/canvas-store';
 import { getConversationsClient } from '@core/features/conversations/api/browser/client';
 import { MarkdownDocView } from '@core/features/markdown-viewer/contributions/browser/markdown-doc-view';
 import { log } from '@core/primitives/logging/browser/logger';
+import { cn } from '@core/primitives/styling/browser/cn';
 import { windowKindOf } from '../../api/canvas-regions';
 import { getCanvasBrowserHost, getCanvasStore } from '../../contributions/browser/app-stores';
+import { NOTE_SURFACE } from '../canvas-styles';
 import { AgentAcpLive } from '../tiles/agent-acp';
 import { AgentTerminal, TerminalPlaceholder } from '../tiles/agent-terminal';
+import { ResumePrompt } from '../tiles/agent-tile';
 
 /** A window's live content on the stage: always at 100 % and interactive. */
 export const StagePaneContent = observer(function StagePaneContent({
@@ -43,26 +48,7 @@ const StageAgentPane = observer(function StageAgentPane({
   const store = getCanvasStore();
   const entry = store.entryForTile(tileId);
   if (!entry) return <TerminalPlaceholder label="This agent is gone." />;
-  if (!store.shouldAttach(entry)) {
-    if (store.startRequested.has(entry.conversationId)) {
-      return <TerminalPlaceholder label="Starting agent…" />;
-    }
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 bg-(--xterm-bg)">
-        <span className="text-xs text-foreground-muted">
-          {entry.taskProvisioned ? 'This agent is not running.' : 'This task workspace is asleep.'}
-        </span>
-        <button
-          type="button"
-          onClick={() => store.resumeAgent(entry)}
-          className="flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-background-secondary"
-        >
-          <Play className="size-3.5" />
-          Resume agent
-        </button>
-      </div>
-    );
-  }
+  if (!store.shouldAttach(entry)) return <ResumePrompt entry={entry} />;
   if (entry.type === 'acp') {
     return (
       <div className="flex h-full min-h-0 flex-col">
@@ -113,27 +99,29 @@ const AcpReplyBox = observer(function AcpReplyBox({ entry }: { entry: AgentTileE
   };
   return (
     <form
-      className="flex shrink-0 items-center gap-2 border-t border-border bg-background px-2 py-1.5"
+      className="flex shrink-0 items-center gap-1 px-2 pt-1 pb-2"
       onSubmit={(event) => {
         event.preventDefault();
         void send();
       }}
     >
-      <input
+      <Input
         value={text}
         onChange={(event) => setText(event.currentTarget.value)}
         placeholder={`Message ${getCanvasStore().spokenName(entry.conversationId)}…`}
         aria-label="Message this agent"
-        className="h-7 min-w-0 flex-1 rounded-md border border-border bg-background-secondary px-2 text-xs text-foreground outline-none focus:border-blue-500/60"
+        className="min-w-0 flex-1"
       />
-      <button
+      <Button
         type="submit"
+        variant="ghost"
+        size="base"
+        icon
         aria-label="Send"
         disabled={!text.trim() || sending}
-        className="flex size-7 items-center justify-center rounded-md text-foreground-muted hover:bg-background-secondary hover:text-foreground disabled:opacity-40"
       >
-        <SendHorizontal className="size-3.5" />
-      </button>
+        <SendHorizontal className="size-4" />
+      </Button>
     </form>
   );
 });
@@ -191,16 +179,12 @@ const StageBrowserPane = observer(function StageBrowserPane({
   if (!entry) return <TerminalPlaceholder label="This app browser is closed." />;
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-7 shrink-0 items-center gap-2 border-b border-border px-2 text-[11px] text-foreground-muted">
+      <div className="flex h-7 shrink-0 items-center gap-2 px-3 text-tiny text-foreground-passive">
         <Globe className="size-3.5 shrink-0" />
         <span className="truncate">{entry.url}</span>
       </div>
-      <div ref={pageRef} className="relative min-h-0 flex-1 bg-background-secondary">
-        {!host.isAlive(entry.browserId) && (
-          <div className="flex h-full items-center justify-center text-xs text-foreground-muted">
-            Loading…
-          </div>
-        )}
+      <div ref={pageRef} className="relative min-h-0 flex-1">
+        {!host.isAlive(entry.browserId) && <EmptyState bare tone="loading" label="Loading…" />}
       </div>
     </div>
   );
@@ -219,7 +203,10 @@ const StageNotePane = observer(function StageNotePane({ tileId }: { tileId: stri
   return (
     <textarea
       key={note.noteId}
-      className="h-full w-full resize-none bg-amber-50 p-4 text-base text-foreground outline-none dark:bg-amber-950/40"
+      className={cn(
+        'h-full w-full resize-none p-4 text-base text-foreground outline-none placeholder:text-foreground-passive',
+        NOTE_SURFACE[note.color]
+      )}
       defaultValue={note.text}
       placeholder="Write a goal, a plan, or a prompt…"
       onBlur={(event) => store.updateNote(note.noteId, { text: event.currentTarget.value })}

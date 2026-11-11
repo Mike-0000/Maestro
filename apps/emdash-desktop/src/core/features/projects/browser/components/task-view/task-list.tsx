@@ -1,4 +1,4 @@
-import { ListPopoverCard } from '@emdash/ui/react/components';
+import { EmptyState, ListPopoverCard } from '@emdash/ui/react/components';
 import { CollectionToolbar, CollectionView, SortSelect } from '@emdash/ui/react/patterns';
 import { Button, ToggleGroup } from '@emdash/ui/react/primitives';
 import { Archive, RotateCcw, Trash2, X } from 'lucide-react';
@@ -68,8 +68,12 @@ const TasksTabs = observer(function TasksTabs({
         filter.set({ tab });
       }}
     >
-      <ToggleGroup.Item value="active">Active ({activeCount})</ToggleGroup.Item>
-      <ToggleGroup.Item value="archived">Archived ({archivedCount})</ToggleGroup.Item>
+      <ToggleGroup.Item value="active" aria-label={`Active (${activeCount})`}>
+        Active <span className="text-foreground-passive tabular-nums">{activeCount}</span>
+      </ToggleGroup.Item>
+      <ToggleGroup.Item value="archived" aria-label={`Archived (${archivedCount})`}>
+        Archived <span className="text-foreground-passive tabular-nums">{archivedCount}</span>
+      </ToggleGroup.Item>
     </ToggleGroup.Root>
   );
 });
@@ -122,11 +126,11 @@ const TasksToolbar = observer(function TasksToolbar({
         disabled={!!createDisabledReason}
         title={createDisabledReason}
         aria-label={
-          createDisabledReason ? `Create Conductor. ${createDisabledReason}` : 'Create Conductor'
+          createDisabledReason ? `New conductor. ${createDisabledReason}` : 'New conductor'
         }
         onClick={() => void openCreateTaskModal({ projectId })}
       >
-        Create Conductor <BoundShortcut command="app.newTask" variant="keycaps" />
+        New conductor <BoundShortcut command="app.newTask" variant="keycaps" />
       </Button>
     </CollectionToolbar.Root>
   );
@@ -150,11 +154,13 @@ const TasksSelectionBar = observer(function TasksSelectionBar({
 
   return (
     <ListPopoverCard className="justify-between">
-      <span className="whitespace-nowrap text-foreground-muted">{taskView.count} selected</span>
-      <div className="flex items-center gap-2">
+      <span className="whitespace-nowrap text-foreground-muted tabular-nums">
+        {taskView.count} selected
+      </span>
+      <div className="flex items-center gap-1">
         {taskView.tab === 'active' && (
           <Button
-            variant="secondary"
+            variant="ghost"
             size="sm"
             aria-label="Archive"
             onClick={() => bulkApply((id) => void taskManager.archiveTask(id))}
@@ -165,7 +171,7 @@ const TasksSelectionBar = observer(function TasksSelectionBar({
         )}
         {taskView.tab === 'archived' && (
           <Button
-            variant="secondary"
+            variant="ghost"
             size="sm"
             onClick={() => bulkApply((id) => void taskManager.restoreTask(id))}
           >
@@ -173,7 +179,13 @@ const TasksSelectionBar = observer(function TasksSelectionBar({
             Restore
           </Button>
         )}
-        <Button variant="destructive" size="sm" onClick={() => void deleteSelectedTasks(projectId)}>
+        {/* Opens the delete confirmation; the destructive fill belongs to that dialog. */}
+        <Button
+          variant="ghost"
+          tone="destructive"
+          size="sm"
+          onClick={() => void deleteSelectedTasks(projectId)}
+        >
           <Trash2 className="size-3.5" />
           Delete <BoundShortcut command="task.deleteSelected" variant="keycaps" />
         </Button>
@@ -219,7 +231,13 @@ const TaskListContent = observer(function TaskListContent({
     <view.Root>
       <CollectionView
         view={view}
-        renderRow={(task) => <TaskRow task={task} view={view} />}
+        renderRow={(task) => (
+          // A block wrapper so the context-menu trigger inside the row spans the whole row (as a
+          // flex item it shrank to its content and the age never reached the right edge).
+          <div className="w-full min-w-0">
+            <TaskRow task={task} view={view} />
+          </div>
+        )}
         toolbar={
           <TasksToolbar
             view={view}
@@ -239,9 +257,11 @@ const TaskListContent = observer(function TaskListContent({
           taskView.tab === 'active' ? (
             <TaskListEmptyState projectId={projectId} />
           ) : (
-            <div className="flex h-full items-center justify-center p-6 text-sm text-foreground-muted">
-              No archived tasks
-            </div>
+            <EmptyState
+              bare
+              label="No archived tasks"
+              description="Tasks you archive in this project show up here."
+            />
           )
         }
       />

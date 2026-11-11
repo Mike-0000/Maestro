@@ -113,9 +113,9 @@ export const ClaudeAccountMoveSubmenu = observer(function ClaudeAccountMoveSubme
                   disabled={!signedIn}
                   closeOnClick
                 >
-                  <span className="flex min-w-0 flex-col">
+                  <span className="flex min-w-0 flex-col py-0.5">
                     <span className="truncate">{label}</span>
-                    <span className="text-xs text-foreground-muted">
+                    <span className="text-xs text-foreground-passive tabular-nums">
                       {signedIn ? (usage ?? 'Usage unknown') : 'Not signed in'}
                     </span>
                   </span>

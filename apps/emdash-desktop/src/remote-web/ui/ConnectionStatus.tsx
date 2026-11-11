@@ -1,5 +1,6 @@
 import { observer } from 'mobx-react-lite';
 import { useApp } from './app-context';
+import { Spinner } from './controls';
 import { cx } from './hooks';
 
 const LABELS = {
@@ -8,7 +9,10 @@ const LABELS = {
   reconnecting: 'Reconnecting…',
 } as const;
 
-/** A dot and a word: steady green when live, pulsing amber while the link is being restored. */
+/**
+ * The link to the computer in words. While it is fine it is only a word (or nothing); while it
+ * is being restored a small passive spinner goes with the words. No coloured lights.
+ */
 export const ConnectionStatus = observer(function ConnectionStatus({
   showOnline = true,
   className,
@@ -24,18 +28,14 @@ export const ConnectionStatus = observer(function ConnectionStatus({
     <span
       role="status"
       aria-live="polite"
-      className={cx('inline-flex items-center gap-1.5 text-[13px] text-fg-muted', className)}
+      className={cx('inline-flex min-w-0 items-center gap-1.5', className)}
     >
       {online && !showOnline ? null : (
         <>
-          <span
-            aria-hidden="true"
-            className={cx(
-              'size-2 rounded-full',
-              online ? 'bg-success' : 'animate-pulse bg-attention'
-            )}
-          />
-          {LABELS[status]}
+          {online ? null : (
+            <Spinner className="size-3 shrink-0 border-[1.5px] text-foreground-passive" />
+          )}
+          <span className="truncate">{LABELS[status]}</span>
         </>
       )}
     </span>
@@ -53,9 +53,9 @@ export const ReconnectingBar = observer(function ReconnectingBar() {
     <div
       role="status"
       aria-live="polite"
-      className="animate-fade-in bg-attention-soft text-attention flex items-center justify-center gap-2 px-4 py-1.5 text-[12.5px] font-medium"
+      className="animate-fade-in text-detail flex min-h-8 items-center justify-center gap-2 px-4 py-1.5 text-foreground-muted"
     >
-      <span aria-hidden="true" className="bg-attention size-1.5 animate-pulse rounded-full" />
+      <Spinner className="size-3 shrink-0 border-[1.5px] text-foreground-passive" />
       Reconnecting to {app.hostName}…
     </div>
   );

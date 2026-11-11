@@ -16,33 +16,37 @@ import { UpdateCard } from '../components/UpdateCard';
 
 export function GeneralSettingsPage() {
   return (
-    <div className="space-y-8 pb-10">
+    <div className="pb-16">
       <PageLayout.Header
         sticky
         draggable
         title="General"
-        description="Manage your account, app updates, and task preferences."
+        description="Your account, updates, notifications and the defaults for new tasks."
       />
-      <SettingsSection>
-        <AccountTab />
-      </SettingsSection>
-      <SettingsSection title="App">
-        <UpdateCard />
-        <TelemetryCard />
-      </SettingsSection>
-      <SettingsSection title="Notifications" bare>
-        <NotificationSettingsCard />
-      </SettingsSection>
-      <SettingsSection title="Preferences">
-        <AutoGenerateTaskNamesRow />
-        <AutoApproveByDefaultRow />
-        <AutoTrustWorktreesRow />
-        <CreateBranchAndWorktreeRow />
-        <DeleteBranchByDefaultRow />
-        <PreserveTaskNameCapitalizationRow />
-        <IncludeIssueContextByDefaultRow />
-        <EnableTmuxRow />
-      </SettingsSection>
+      <div className="flex flex-col gap-10">
+        <SettingsSection title="Account">
+          <AccountTab />
+        </SettingsSection>
+        <SettingsSection title="App">
+          <UpdateCard />
+          <TelemetryCard />
+        </SettingsSection>
+        <SettingsSection title="Notifications">
+          <NotificationSettingsCard />
+        </SettingsSection>
+        <SettingsSection title="New tasks">
+          <AutoGenerateTaskNamesRow />
+          <PreserveTaskNameCapitalizationRow />
+          <CreateBranchAndWorktreeRow />
+          <IncludeIssueContextByDefaultRow />
+          <DeleteBranchByDefaultRow />
+        </SettingsSection>
+        <SettingsSection title="Agent sessions">
+          <AutoApproveByDefaultRow />
+          <AutoTrustWorktreesRow />
+          <EnableTmuxRow />
+        </SettingsSection>
+      </div>
     </div>
   );
 }

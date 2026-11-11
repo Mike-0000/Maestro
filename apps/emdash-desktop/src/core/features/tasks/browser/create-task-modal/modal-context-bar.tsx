@@ -25,7 +25,7 @@ export function ModalContextBar({
 
   return (
     <Tooltip.Provider>
-      <div className="flex h-[41px] items-center gap-2 border-t border-border px-2">
+      <div className="flex min-h-9 items-center gap-2 px-2">
         <PromptActionsMenu
           actions={promptActions}
           disabled={false}
@@ -37,24 +37,24 @@ export function ModalContextBar({
           <Tooltip.Root>
             <Tooltip.Trigger>
               <Button
-                variant="secondary"
+                variant="ghost"
                 size="sm"
                 disabled={issueActionPending}
                 onClick={() => onActionClick(issueAction)}
-                className="h-7 max-w-full rounded-md bg-background-1 px-2 text-xs font-normal hover:bg-background-1/80"
+                className="max-w-full gap-1.5 px-2 text-xs"
               >
                 {issueAction.provider ? (
-                  <ProviderLogo provider={issueAction.provider} className="h-3.5 w-3.5" />
+                  <ProviderLogo provider={issueAction.provider} className="size-3.5" />
                 ) : null}
                 <span className="max-w-72 truncate">
                   {issueActionPending
-                    ? 'Adding issue context...'
+                    ? 'Adding issue context…'
                     : `${issueAction.issue.identifier} ${issueAction.issue.title}`}
                 </span>
                 {issueActionPending ? (
-                  <LoaderCircle className="size-3 shrink-0 animate-spin" />
+                  <LoaderCircle className="size-3 shrink-0 text-foreground-passive motion-safe:animate-spin" />
                 ) : (
-                  <ArrowUp className="size-3 shrink-0" />
+                  <ArrowUp className="size-3 shrink-0 text-foreground-passive" />
                 )}
               </Button>
             </Tooltip.Trigger>

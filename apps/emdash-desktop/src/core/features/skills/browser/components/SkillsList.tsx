@@ -1,5 +1,5 @@
-import { CardGridSection } from '@emdash/ui/react/components';
-import { Loader2 } from 'lucide-react';
+import { EmptyState } from '@emdash/ui/react/components';
+import { SettingsSection } from '@emdash/ui/react/patterns';
 import React, { useCallback } from 'react';
 import { SkillCard } from '@core/features/skills/browser/components/SkillCard';
 import type { UseSkillsResult } from '@core/features/skills/browser/components/useSkills';
@@ -42,18 +42,18 @@ export const SkillsList: React.FC<SkillsListProps> = ({ skills, onOpenTerminal }
   );
 
   if (skills.isLoading) {
-    return (
-      <div className="flex min-h-64 items-center justify-center text-foreground">
-        <Loader2 className="text-muted-foreground h-6 w-6 animate-spin" />
-      </div>
-    );
+    return <EmptyState tone="loading" label="Loading skills…" className="min-h-64" />;
   }
 
   return (
     <div className="flex flex-col text-foreground">
-      <div className="flex flex-col gap-8 pt-3 pb-8">
+      <div className="flex flex-col gap-10 pb-16">
         {skills.installedSkills.length > 0 && (
-          <CardGridSection title="Installed">
+          <SettingsSection
+            title="Installed"
+            description="Available to every coding agent on this machine."
+            gap="0.25rem"
+          >
             {skills.installedSkills.map((skill) => (
               <SkillCard
                 key={skill.id}
@@ -64,10 +64,14 @@ export const SkillsList: React.FC<SkillsListProps> = ({ skills, onOpenTerminal }
                 onClick={() => handleOpenDetail(skill)}
               />
             ))}
-          </CardGridSection>
+          </SettingsSection>
         )}
         {skills.recommendedSkills.length > 0 && (
-          <CardGridSection title="Recommended">
+          <SettingsSection
+            title="Recommended"
+            description="From the OpenAI and Anthropic skill libraries."
+            gap="0.25rem"
+          >
             {skills.recommendedSkills.map((skill) => (
               <SkillCard
                 key={skill.id}
@@ -78,12 +82,19 @@ export const SkillsList: React.FC<SkillsListProps> = ({ skills, onOpenTerminal }
                 onClick={() => handleOpenDetail(skill)}
               />
             ))}
-          </CardGridSection>
+          </SettingsSection>
         )}
         {(skills.isSearchingSkillSh || skills.skillShSearchSkills.length > 0) && (
-          <CardGridSection
-            title={skills.isSearchingSkillSh ? 'Searching Skills.sh...' : 'Skills.sh'}
+          <SettingsSection
+            title="Skills.sh"
+            description="Results from the Skills.sh directory."
+            gap="0.25rem"
           >
+            {skills.skillShSearchSkills.length === 0 && (
+              <p role="status" className="py-2 text-xs text-foreground-muted">
+                Searching Skills.sh…
+              </p>
+            )}
             {skills.skillShSearchSkills.map((skill) => (
               <SkillCard
                 key={skill.id}
@@ -94,8 +105,22 @@ export const SkillsList: React.FC<SkillsListProps> = ({ skills, onOpenTerminal }
                 onClick={() => handleOpenDetail(skill)}
               />
             ))}
-          </CardGridSection>
+          </SettingsSection>
         )}
+        {skills.installedSkills.length === 0 &&
+          skills.recommendedSkills.length === 0 &&
+          skills.skillShSearchSkills.length === 0 &&
+          !skills.isSearchingSkillSh && (
+            <EmptyState
+              className="min-h-48"
+              label={skills.searchQuery ? 'No skills match' : 'No skills yet'}
+              description={
+                skills.searchQuery
+                  ? 'Try another word, or write the skill yourself.'
+                  : 'Write a skill to teach your agents how you work.'
+              }
+            />
+          )}
       </div>
     </div>
   );

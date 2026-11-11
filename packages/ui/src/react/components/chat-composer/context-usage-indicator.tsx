@@ -1,4 +1,3 @@
-import { Button } from '@react/primitives/button';
 import { Popover } from '@react/primitives/popover';
 import { cx } from '@styles/utilities/cx';
 import * as styles from './chat-composer.css';
@@ -70,29 +69,25 @@ export function ContextUsageIndicator({
 
   return (
     <Popover.Root>
+      {/* A quiet fact in the tools row: the ring and the share of the window used. */}
       <Popover.Trigger
-        render={
-          <Button
-            variant="ghost"
-            size="xs"
-            icon
-            disabled={disabled}
-            aria-label={`Context window: ${pct}% used`}
-          >
-            <ContextDonut fraction={fraction} />
-          </Button>
-        }
-      />
+        className={cx(styles.toolTrigger, styles.usageTrigger)}
+        disabled={disabled}
+        aria-label={`Context window: ${pct}% used`}
+      >
+        <ContextDonut fraction={fraction} />
+        <span aria-hidden>{pct}%</span>
+      </Popover.Trigger>
       {/* Portaled out of the composer root — must carry the theme-bridge scope. */}
       <Popover.Content className={composerThemeScope} align="end" side="top">
         <Popover.Header>
-          <Popover.Title>Context usage</Popover.Title>
+          <Popover.Title>Context window</Popover.Title>
         </Popover.Header>
         <div className={styles.usagePopoverBody}>
           <div className={styles.usageStatsRow}>
-            <span className={styles.usagePercent}>{pct}%</span>
+            <span className={styles.usagePercent}>{pct}% used</span>
             <span className={styles.usageTokenCount}>
-              {formatTokens(usage.used)} / {formatTokens(usage.size)} Tokens
+              {formatTokens(usage.used)} of {formatTokens(usage.size)} tokens
             </span>
           </div>
           <div className={styles.usageBarTrack} aria-hidden="true">

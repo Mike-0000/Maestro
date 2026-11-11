@@ -113,6 +113,58 @@ export const TopFadeDisabled: Story = {
   ),
 };
 
+/**
+ * Bottom fade — the last visible row dissolves into the edge while more content
+ * sits below, and the fade clears once the end scrolls into view. Same size and
+ * technique as the top fade (which still appears once you scroll down).
+ */
+export const BottomFade: Story = {
+  render: () => (
+    <ScrollContainer
+      maxHeight={192}
+      bottomFade
+      className={cx(
+        sx({
+          background: 'surface',
+          borderWidth: '1',
+          borderStyle: 'solid',
+          borderColor: 'border',
+          rounded: 'sm',
+        }),
+        s.w80
+      )}
+    >
+      <Box display="flex" flexDirection="column" gap="3" padding="4">
+        <Paragraph n={8} />
+      </Box>
+    </ScrollContainer>
+  ),
+};
+
+/** Bottom fade with content that fits — no fade at either edge. */
+export const BottomFadeNoOverflow: Story = {
+  render: () => (
+    <ScrollContainer
+      maxHeight={192}
+      bottomFade
+      className={cx(
+        sx({
+          background: 'surface',
+          borderWidth: '1',
+          borderStyle: 'solid',
+          borderColor: 'border',
+          rounded: 'sm',
+        }),
+        s.w80
+      )}
+    >
+      <Box display="flex" flexDirection="column" gap="3" padding="4">
+        <Paragraph n={2} />
+      </Box>
+    </ScrollContainer>
+  ),
+};
+
 /** String maxHeight — CSS value passed directly (e.g. '50vh'). */
 export const MaxHeightString: Story = {
   render: () => (

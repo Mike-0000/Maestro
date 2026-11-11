@@ -36,7 +36,7 @@ export function McpPanel({ host, header }: McpPanelProps) {
           actions={toolbar}
         />
       ) : (
-        toolbar
+        <div className="pb-6">{toolbar}</div>
       )}
       <McpServersList
         mcp={mcp}

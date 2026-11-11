@@ -1,6 +1,6 @@
 import type { Commit, GitChange, GitObjectRef } from '@emdash/core/runtimes/git/api';
 import { EmptyState } from '@emdash/ui/react/components';
-import { RelativeTime } from '@emdash/ui/react/primitives';
+import { Button, RelativeTime } from '@emdash/ui/react/primitives';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
@@ -91,11 +91,11 @@ export const CommitRangeCommitsList = observer(function CommitRangeCommitsList({
   };
 
   if (commits.length === 0 && !isFetchingNextPage) {
-    return <EmptyState label={emptyState.label} description={emptyState.description} />;
+    return <EmptyState bare label={emptyState.label} description={emptyState.description} />;
   }
 
   return (
-    <div ref={parentRef} className="h-full overflow-x-hidden overflow-y-auto py-2">
+    <div ref={parentRef} className="h-full overflow-x-hidden overflow-y-auto py-1">
       <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
         {virtualizer.getVirtualItems().map((virtualItem) => {
           const commit = commits[virtualItem.index]!;
@@ -125,13 +125,14 @@ export const CommitRangeCommitsList = observer(function CommitRangeCommitsList({
       </div>
       {hasNextPage && (
         <div className="flex justify-center py-2">
-          <button
-            className="hover:bg-surface-raised rounded-md px-3 py-1 text-xs text-foreground-muted transition-colors hover:text-foreground"
+          <Button
+            variant="text"
+            size="xs"
             onClick={() => void fetchNextPage()}
             disabled={isFetchingNextPage}
           >
-            {isFetchingNextPage ? 'Loading...' : 'Load more'}
-          </button>
+            {isFetchingNextPage ? 'Loading…' : 'Load more'}
+          </Button>
         </div>
       )}
     </div>
@@ -154,45 +155,55 @@ function CommitItem({
   const shortHash = commit.hash.slice(0, 7);
 
   return (
+    // A quiet history rail: a passive dot per commit joined by a subtle line;
+    // the commit itself is a two-line row (subject, then author · age · hash)
+    // that expands to its files.
     <div className="flex items-stretch">
-      <div className="relative w-3.5 shrink-0">
+      <div aria-hidden className="relative w-4 shrink-0">
         <div
           className={cn(
-            'absolute left-1/2 top-0 h-[19px] w-px -translate-x-1/2 bg-border',
+            'absolute top-0 left-1/2 h-3.5 w-px -translate-x-1/2 bg-border-subtle',
             isFirst && 'invisible'
           )}
         />
-        <div className="absolute top-[19px] left-1/2 size-1.5 -translate-x-1/2 rounded-full bg-foreground-passive" />
+        <div className="absolute top-3.5 left-1/2 size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-foreground-passive" />
         <div
           className={cn(
-            'absolute bottom-0 left-1/2 top-[25px] w-px -translate-x-1/2 bg-border',
+            'absolute top-[17px] bottom-0 left-1/2 w-px -translate-x-1/2 bg-border-subtle',
             isLast && 'invisible'
           )}
         />
       </div>
       <div className="min-w-0 flex-1">
         <button
+          type="button"
+          aria-expanded={isExpanded}
           className={cn(
-            'group flex w-full rounded-md px-1.5 py-1 text-left hover:bg-background-1',
-            isExpanded && 'bg-background-1'
+            'group/commit flex w-full items-start gap-1 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-surface-hover focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset focus-visible:outline-none',
+            isExpanded && 'bg-surface-hover'
           )}
           onClick={onToggleExpanded}
         >
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm">{commit.subject}</span>
-            <span className="flex min-w-0 items-center gap-1 text-xs text-foreground-muted">
-              <span className="min-w-0 truncate font-medium">{commit.author}</span>
-              {'·'}
-              <RelativeTime compact value={commit.date} className="text-foreground-muted" />
-              {'·'}
-              <span className="font-mono text-foreground-passive">{shortHash}</span>
-              {isExpanded ? (
-                <ChevronDown className="size-3.5 shrink-0 text-foreground-muted" />
-              ) : (
-                <ChevronRight className="size-3.5 shrink-0 text-foreground-muted" />
-              )}
+            <span className="block truncate text-sm leading-5 text-foreground">
+              {commit.subject}
+            </span>
+            <span className="flex min-w-0 items-center gap-1 text-tiny text-foreground-passive tabular-nums">
+              <span className="min-w-0 truncate">{commit.author}</span>
+              <span aria-hidden>·</span>
+              <RelativeTime compact value={commit.date} className="shrink-0" />
+              <span aria-hidden>·</span>
+              <span className="shrink-0 font-mono">{shortHash}</span>
             </span>
           </span>
+          {isExpanded ? (
+            <ChevronDown aria-hidden className="mt-0.5 size-3.5 shrink-0 text-foreground-passive" />
+          ) : (
+            <ChevronRight
+              aria-hidden
+              className="mt-0.5 size-3.5 shrink-0 text-foreground-passive opacity-0 transition-opacity group-hover/commit:opacity-100 group-focus-visible/commit:opacity-100"
+            />
+          )}
         </button>
         {isExpanded && <CommitFilesList commit={commit} />}
       </div>
@@ -267,27 +278,26 @@ const CommitFilesList = observer(function CommitFilesList({ commit }: { commit: 
   };
 
   if (filesQuery.isLoading) {
-    return <div className="px-6 py-2 text-xs text-foreground-passive">Loading files...</div>;
+    return <p className="px-2 py-1.5 text-xs text-foreground-passive">Loading files…</p>;
   }
 
   if (filesQuery.isError) {
-    return <div className="px-6 py-2 text-xs text-foreground-passive">Unable to load files</div>;
+    return <p className="px-2 py-1.5 text-xs text-foreground-passive">Unable to load files</p>;
   }
 
   const files = filesQuery.data ?? [];
   if (files.length === 0) {
-    return <div className="px-6 py-2 text-xs text-foreground-passive">No file changes</div>;
+    return <p className="px-2 py-1.5 text-xs text-foreground-passive">No file changes</p>;
   }
 
   return (
-    <div className="pr-1 pb-1 pl-5">
-      <div className="flex flex-col gap-0.5">
+    <div className="pt-0.5 pb-1.5">
+      <div className="flex flex-col">
         {files.map((change) => (
           <ChangesListItem
             key={change.path}
             change={change}
             isActive={change.path === activePath}
-            className="h-7"
             onClick={() => openPreview(change)}
             onDoubleClick={() => openDiff(change)}
             onMouseEnter={() => prefetchDiff(change.path)}

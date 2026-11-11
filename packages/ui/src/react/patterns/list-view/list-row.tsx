@@ -11,8 +11,10 @@ export interface RowProps extends React.HTMLAttributes<HTMLDivElement> {
   selected?: boolean;
   /** Suppresses the bottom border on the final row of a list. */
   isLast?: boolean;
-  /** Divider color: 'default' (border) or 'subtle' (borderSubtle). */
-  divider?: 'default' | 'subtle';
+  /** Divider: 'default' (border), 'subtle' (borderSubtle) or 'none' (rhythm only). */
+  divider?: 'default' | 'subtle' | 'none';
+  /** Round the row (rounded-md), for flat lists that sit straight on the page. */
+  rounded?: boolean;
   /** When true the inner padding wrapper is omitted so you control layout. */
   bare?: boolean;
 }
@@ -34,6 +36,7 @@ function Row({
   selected = false,
   isLast = false,
   divider = 'default',
+  rounded = false,
   bare = false,
   className,
   children,
@@ -43,7 +46,7 @@ function Row({
     <div
       data-slot="list-row"
       data-selected={selected || undefined}
-      className={cx(styles.row({ interactive, selected, isLast, divider }), className)}
+      className={cx(styles.row({ interactive, selected, isLast, divider, rounded }), className)}
       {...props}
     >
       {bare ? children : <div className={styles.rowInner}>{children}</div>}

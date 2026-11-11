@@ -3,11 +3,11 @@ import { MachineConversationsList } from '../components/machine-conversations-li
 
 export function ConversationsSettingsPage() {
   return (
-    <div className="space-y-8 pb-4">
+    <div className="flex min-h-0 flex-col pb-16">
       <PageLayout.Header
         sticky
         title="Conversations"
-        description="Every conversation record on this machine, including ones no longer linked to a task."
+        description="Every conversation record on this computer, including ones no longer linked to a task."
       />
       <MachineConversationsList scope={{ kind: 'local' }} hostReachable />
     </div>

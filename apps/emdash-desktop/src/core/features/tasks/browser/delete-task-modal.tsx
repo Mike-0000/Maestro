@@ -1,4 +1,4 @@
-import { Button, Checkbox, Dialog } from '@emdash/ui/react/primitives';
+import { Button, Checkbox, Dialog, ModalLayout } from '@emdash/ui/react/primitives';
 import { useQuery } from '@tanstack/react-query';
 import { TriangleAlert } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
@@ -118,22 +118,45 @@ export const DeleteTaskModal = observer(function DeleteTaskModal({
     return `${unpushed.length} ${unpushed.length === 1 ? 'conductor has' : 'conductors have'} unpushed commits.`;
   })();
 
-  return (
-    <>
-      <Dialog.Header showCloseButton={false}>
-        <Dialog.Title>{title}</Dialog.Title>
-      </Dialog.Header>
-      <Dialog.Body className="flex flex-col gap-4 pt-0">
-        <p className="text-sm text-foreground-muted">{description}</p>
+  // A confirm dialog (design brief 2.9): the title, one sentence, the choices as checkbox rows
+  // with any warning as a glyph and words under its row (never a tinted box), Cancel and the
+  // destructive confirm.
+  const checkRow =
+    'flex cursor-pointer items-center gap-2.5 text-sm text-foreground aria-disabled:cursor-not-allowed aria-disabled:opacity-50';
+  const warningRow = 'flex items-start gap-2 pl-6.5 text-xs text-pretty text-foreground-muted';
 
+  return (
+    <ModalLayout
+      title={title}
+      description={description}
+      showCloseButton={false}
+      actions={
+        <>
+          <Button variant="ghost" onClick={dismiss}>
+            Cancel
+          </Button>
+          <ConfirmButton
+            variant="destructive"
+            disabled={isLoading}
+            onClick={() =>
+              complete({
+                deleteWorktree: effectiveDeleteWorktree,
+                deleteBranch: showBranchCheckbox && shouldDeleteBranch,
+                deleteConversations: deleteConversations && !hostActionDisabledReason,
+              })
+            }
+          >
+            {isLoading ? 'Loading…' : isBulk ? `Delete ${count} tasks` : 'Delete'}
+          </ConfirmButton>
+        </>
+      }
+    >
+      <Dialog.Body>
         {(showWorktreeCheckbox || showBranchCheckbox) && (
           <div className="flex flex-col gap-3">
             {showWorktreeCheckbox && (
               <div className="flex flex-col gap-2">
-                <label
-                  className="flex cursor-pointer items-center gap-2 text-sm aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
-                  aria-disabled={hostUnreachable}
-                >
+                <label className={checkRow} aria-disabled={hostUnreachable}>
                   <Checkbox
                     checked={effectiveDeleteWorktree}
                     onCheckedChange={(checked) => handleWorktreeChange(Boolean(checked))}
@@ -142,35 +165,32 @@ export const DeleteTaskModal = observer(function DeleteTaskModal({
                   {worktreeLabel}
                 </label>
                 {hostUnreachable && (
-                  <div className="flex items-start gap-1.5 rounded-md bg-background-warning px-3 py-2 text-xs text-foreground-warning">
-                    <TriangleAlert className="mt-px size-3.5 shrink-0" />
+                  <p className={warningRow}>
+                    <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-foreground-warning" />
                     <span>
                       {hostActionDisabledReason ?? 'Live Project access is unavailable.'} The
                       worktree cannot be deleted right now. The conductor record will be removed;
                       delete the worktree later from the workspaces view.
                     </span>
-                  </div>
+                  </p>
                 )}
                 {effectiveDeleteWorktree && dirtyWarning && (
-                  <div className="flex items-start gap-1.5 rounded-md bg-background-warning px-3 py-2 text-xs text-foreground-warning">
-                    <TriangleAlert className="mt-px size-3.5 shrink-0" />
+                  <p className={warningRow}>
+                    <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-foreground-warning" />
                     <span>{dirtyWarning}</span>
-                  </div>
+                  </p>
                 )}
                 {effectiveDeleteWorktree && unpushedWarning && (
-                  <div className="flex items-start gap-1.5 rounded-md bg-background-warning px-3 py-2 text-xs text-foreground-warning">
-                    <TriangleAlert className="mt-px size-3.5 shrink-0" />
+                  <p className={warningRow}>
+                    <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-foreground-warning" />
                     <span>{unpushedWarning}</span>
-                  </div>
+                  </p>
                 )}
               </div>
             )}
 
             {showBranchCheckbox && (
-              <label
-                className="flex cursor-pointer items-center gap-2 text-sm aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
-                aria-disabled={!deleteWorktree}
-              >
+              <label className={checkRow} aria-disabled={!deleteWorktree}>
                 <Checkbox
                   checked={shouldDeleteBranch}
                   onCheckedChange={(checked) => setDeleteBranchOverride(Boolean(checked))}
@@ -183,22 +203,19 @@ export const DeleteTaskModal = observer(function DeleteTaskModal({
         )}
 
         {hostActionDisabledReason && (
-          <div
+          <p
             role="status"
-            className="flex items-start gap-1.5 rounded-md bg-background-warning px-3 py-2 text-xs text-foreground-warning"
+            className="flex items-start gap-2 text-xs text-pretty text-foreground-muted"
           >
-            <TriangleAlert className="mt-px size-3.5 shrink-0" />
+            <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-foreground-warning" />
             <span>
               {hostActionDisabledReason} The conductor record can still be deleted without removing
               workspace artifacts.
             </span>
-          </div>
+          </p>
         )}
 
-        <label
-          className="flex cursor-pointer items-center gap-2 text-sm aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
-          aria-disabled={!!hostActionDisabledReason}
-        >
+        <label className={checkRow} aria-disabled={!!hostActionDisabledReason}>
           <Checkbox
             checked={deleteConversations && !hostActionDisabledReason}
             onCheckedChange={(checked) => setDeleteConversations(Boolean(checked))}
@@ -212,25 +229,7 @@ export const DeleteTaskModal = observer(function DeleteTaskModal({
           Delete conversations
         </label>
       </Dialog.Body>
-      <Dialog.Footer>
-        <Button variant="secondary" onClick={dismiss}>
-          Cancel
-        </Button>
-        <ConfirmButton
-          variant="destructive"
-          disabled={isLoading}
-          onClick={() =>
-            complete({
-              deleteWorktree: effectiveDeleteWorktree,
-              deleteBranch: showBranchCheckbox && shouldDeleteBranch,
-              deleteConversations: deleteConversations && !hostActionDisabledReason,
-            })
-          }
-        >
-          {isLoading ? 'Loading...' : isBulk ? `Delete ${count} tasks` : 'Delete'}
-        </ConfirmButton>
-      </Dialog.Footer>
-    </>
+    </ModalLayout>
   );
 });
 

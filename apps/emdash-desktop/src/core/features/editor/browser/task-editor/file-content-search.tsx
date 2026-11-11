@@ -7,6 +7,7 @@ import type {
   ContentSearchLineMatch,
 } from '@emdash/core/runtimes/file-search/api';
 import {
+  EmptyState,
   SearchResultsTree,
   type SearchResultFile,
   type SearchResultMatch,
@@ -148,15 +149,30 @@ export function FileContentSearchResults({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="text-muted-foreground flex h-8 shrink-0 items-center gap-1.5 px-3 text-xs">
+      <div
+        className="flex h-8 shrink-0 items-center gap-1.5 px-3 text-tiny text-foreground-passive tabular-nums"
+        aria-live="polite"
+      >
         {state.isSearching && <Loader2 className="size-3 animate-spin" aria-label="Searching" />}
-        <span>{resultSummary}</span>
+        {!state.error && <span>{resultSummary}</span>}
       </div>
 
       {state.error ? (
-        <div className="text-destructive px-3 py-6 text-center text-xs">{state.error}</div>
+        <EmptyState
+          className="min-h-0 flex-1"
+          bare
+          tone="error"
+          label="Search failed"
+          description="The search could not run in this workspace."
+          details={state.error}
+        />
       ) : !state.isSearching && state.files.length === 0 ? (
-        <div className="text-muted-foreground px-3 py-6 text-center text-xs">No results found</div>
+        <EmptyState
+          className="min-h-0 flex-1"
+          bare
+          label="No results"
+          description={`Nothing in this workspace matches "${query}".`}
+        />
       ) : (
         <SearchResultsTree
           files={searchFiles}
@@ -171,8 +187,8 @@ export function FileContentSearchResults({
       )}
 
       {!state.isSearching && !state.complete && (
-        <div className="text-muted-foreground shrink-0 border-t border-border px-3 py-2 text-xs">
-          Results were limited. Refine your search to see more.
+        <div className="shrink-0 px-3 py-2 text-tiny text-foreground-passive">
+          Showing the first results. Narrow the search to see the rest.
         </div>
       )}
     </div>

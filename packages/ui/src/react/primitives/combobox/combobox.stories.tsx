@@ -35,6 +35,35 @@ export const Default: Story = {
   ),
 };
 
+function InputTriggerExample() {
+  const [value, setValue] = React.useState<string | null>(null);
+  return (
+    <Box className={s.w64}>
+      <Combobox.Root value={value} onValueChange={(next) => setValue(next as string | null)}>
+        <Combobox.Trigger appearance="input" aria-label="Fruit">
+          {value ?? 'Choose a fruit'}
+        </Combobox.Trigger>
+        <Combobox.Content width="trigger">
+          <Combobox.Input placeholder="Search fruits…" showTrigger={false} />
+          <Combobox.List>
+            {FRUITS.map((fruit) => (
+              <Combobox.Item key={fruit} value={fruit}>
+                {fruit}
+              </Combobox.Item>
+            ))}
+            <Combobox.Empty>No fruits found.</Combobox.Empty>
+          </Combobox.List>
+        </Combobox.Content>
+      </Combobox.Root>
+    </Box>
+  );
+}
+
+/** `Combobox.Trigger appearance="input"`: the form-field face shared with Select's. */
+export const InputTrigger: Story = {
+  render: () => <InputTriggerExample />,
+};
+
 export const StandaloneInput: Story = {
   render: () => (
     <Box className={s.w64}>

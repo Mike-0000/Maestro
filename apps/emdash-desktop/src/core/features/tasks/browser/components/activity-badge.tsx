@@ -1,6 +1,6 @@
-import { ScriptStatus, type ScriptStatusKind } from '@emdash/ui/react/components';
+import { ScriptStatus, StateGlyph, type ScriptStatusKind } from '@emdash/ui/react/components';
 import { Popover, Spinner, toast } from '@emdash/ui/react/primitives';
-import { Activity, RotateCcw } from 'lucide-react';
+import { Activity } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useState } from 'react';
 import {
@@ -18,7 +18,6 @@ import {
 } from '@core/features/workspaces/api/browser/client';
 import { lifecycleScriptsStoreToken } from '@core/features/workspaces/contributions/browser/workspace-stores';
 import { projectHostRef } from '@core/primitives/projects/api';
-import { cn } from '@core/primitives/styling/browser/cn';
 import type { WorkspaceLifecycleStepInfo } from '@core/primitives/tasks/api';
 import { createLifecycleScriptTerminalId } from '@core/primitives/terminals/api';
 import { LIFECYCLE_STEP_TITLES } from '@core/primitives/workspaces/api';
@@ -142,103 +141,117 @@ export function ActivityBadgeView({
   const failed = visible.some((step) => step.status === 'failed');
   const state = running ? 'running' : failed ? 'failed' : 'settled';
 
+  // A quiet chip in the title bar (design brief 2.6): a passive spinner while a step runs, the
+  // error dot once one failed, nothing coloured otherwise. The popover is a list of steps in
+  // the caption role; a failed step's way out is a "Retry" text action.
+  const retryClass =
+    'flex shrink-0 items-center gap-1 rounded-sm text-xs text-foreground-muted underline decoration-foreground-passive/60 underline-offset-4 transition-colors outline-none hover:text-foreground hover:decoration-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50';
+
   return (
     <Popover.Root>
       <Popover.Trigger
         aria-label="Workspace activity"
         data-activity-state={state}
-        className={cn(
-          'flex h-7 items-center gap-1.5 rounded-lg px-2 text-xs transition-colors',
-          failed && !running
-            ? 'bg-background-destructive text-foreground-destructive hover:bg-destructive/20'
-            : 'bg-background-secondary text-foreground-muted hover:text-foreground'
-        )}
+        className="flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-foreground-muted transition-colors outline-none hover:bg-surface-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-popup-open:bg-surface-hover data-popup-open:text-foreground"
       >
-        {running ? <Spinner size="sm" /> : <Activity className="size-3 shrink-0" />}
+        {running ? (
+          <Spinner size="sm" className="text-foreground-passive" />
+        ) : failed ? (
+          <StateGlyph state="error" size="sm" />
+        ) : (
+          <Activity className="size-3.5 shrink-0 text-foreground-passive" />
+        )}
         <span>Activity</span>
       </Popover.Trigger>
-      <Popover.Content align="end" className="flex w-80 flex-col gap-0.5 p-2">
-        {visible.map((step) => {
-          const icon = <ScriptStatus status={STATUS_ICONS[step.status]} size={14} />;
-          const timestamp = stepTimestamp(step);
-          const body = (
-            <>
-              {icon}
-              <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
-                <span className="flex w-full items-baseline justify-between gap-2">
-                  <span className="text-xs font-medium text-foreground">
-                    {LIFECYCLE_STEP_TITLES[step.id]}
-                  </span>
-                  {timestamp !== null && (
-                    <span className="shrink-0 text-[11px] text-foreground-passive">
-                      {relativeLabel(timestamp, now)}
-                    </span>
-                  )}
-                </span>
-                <span className="w-full truncate text-left text-[11px] text-foreground-muted">
-                  {stepDescription(step)}
-                </span>
-                {step.status === 'failed' && step.message ? (
-                  <span className="w-full truncate text-left text-[11px] text-foreground-destructive">
-                    {step.message}
-                  </span>
-                ) : null}
-                {step.status === 'cancelled' && step.message ? (
-                  <span className="w-full truncate text-left text-[11px] text-foreground-passive">
-                    {step.message}
-                  </span>
-                ) : null}
+      <Popover.Content align="end" className="w-80">
+        <div className="-m-2 flex flex-col gap-0.5">
+          {visible.map((step) => {
+            const icon = (
+              <span className="mt-0.5 flex shrink-0">
+                <ScriptStatus status={STATUS_ICONS[step.status]} size={14} />
               </span>
-            </>
-          );
-          if (SCRIPT_STEP_IDS.has(step.id)) {
-            const script = step.id as ScriptStepId;
-            const isRetryingScript = retryingScript === script;
-            return (
-              <div
-                key={step.id}
-                data-step={step.id}
-                className="hover:bg-muted/30 flex items-start gap-2 rounded-md p-1.5 transition-colors"
-              >
-                <button
-                  type="button"
-                  title="Open script output"
-                  onClick={() => onOpenScript(script)}
-                  className="flex min-w-0 flex-1 items-start gap-2 text-left"
+            );
+            const timestamp = stepTimestamp(step);
+            const body = (
+              <>
+                {icon}
+                <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+                  <span className="flex w-full items-baseline justify-between gap-2">
+                    <span className="text-sm text-foreground">
+                      {LIFECYCLE_STEP_TITLES[step.id]}
+                    </span>
+                    {timestamp !== null && (
+                      <span className="shrink-0 text-tiny text-foreground-passive tabular-nums">
+                        {relativeLabel(timestamp, now)}
+                      </span>
+                    )}
+                  </span>
+                  <span className="w-full truncate text-left text-xs text-foreground-muted">
+                    {stepDescription(step)}
+                  </span>
+                  {step.status === 'failed' && step.message ? (
+                    <span className="flex w-full min-w-0 items-center gap-1.5 text-left text-xs text-foreground">
+                      <StateGlyph state="error" size="sm" />
+                      <span className="truncate">{step.message}</span>
+                    </span>
+                  ) : null}
+                  {step.status === 'cancelled' && step.message ? (
+                    <span className="w-full truncate text-left text-xs text-foreground-passive">
+                      {step.message}
+                    </span>
+                  ) : null}
+                </span>
+              </>
+            );
+            if (SCRIPT_STEP_IDS.has(step.id)) {
+              const script = step.id as ScriptStepId;
+              const isRetryingScript = retryingScript === script;
+              return (
+                <div
+                  key={step.id}
+                  data-step={step.id}
+                  className="flex items-start gap-3 rounded-md px-2 py-1.5 transition-colors hover:bg-surface-hover"
                 >
-                  {body}
-                </button>
-                {step.status === 'failed' ? (
                   <button
                     type="button"
-                    disabled={isRetryingScript}
-                    onClick={() => onRetryScript(script)}
-                    className="flex shrink-0 items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-[11px] text-foreground-muted transition-colors hover:text-foreground disabled:opacity-60"
+                    title="Open script output"
+                    onClick={() => onOpenScript(script)}
+                    className="flex min-w-0 flex-1 items-start gap-2 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
-                    {isRetryingScript ? <Spinner size="sm" /> : <RotateCcw className="size-2.5" />}
+                    {body}
+                  </button>
+                  {step.status === 'failed' ? (
+                    <button
+                      type="button"
+                      disabled={isRetryingScript}
+                      onClick={() => onRetryScript(script)}
+                      className={retryClass}
+                    >
+                      {isRetryingScript ? <Spinner size="sm" /> : null}
+                      Retry
+                    </button>
+                  ) : null}
+                </div>
+              );
+            }
+            return (
+              <div key={step.id} data-step={step.id} className="flex items-start gap-3 px-2 py-1.5">
+                <span className="flex min-w-0 flex-1 items-start gap-2">{body}</span>
+                {step.id === 'push-branch' && step.status === 'failed' ? (
+                  <button
+                    type="button"
+                    disabled={isRetryingPush}
+                    onClick={onRetryPush}
+                    className={retryClass}
+                  >
+                    {isRetryingPush ? <Spinner size="sm" /> : null}
                     Retry
                   </button>
                 ) : null}
               </div>
             );
-          }
-          return (
-            <div key={step.id} data-step={step.id} className="flex items-start gap-2 p-1.5">
-              {body}
-              {step.id === 'push-branch' && step.status === 'failed' ? (
-                <button
-                  type="button"
-                  disabled={isRetryingPush}
-                  onClick={onRetryPush}
-                  className="flex shrink-0 items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-[11px] text-foreground-muted transition-colors hover:text-foreground disabled:opacity-60"
-                >
-                  {isRetryingPush ? <Spinner size="sm" /> : <RotateCcw className="size-2.5" />}
-                  Retry
-                </button>
-              ) : null}
-            </div>
-          );
-        })}
+          })}
+        </div>
       </Popover.Content>
     </Popover.Root>
   );

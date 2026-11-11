@@ -2,58 +2,113 @@
 @import '@xterm/xterm/css/xterm.css';
 @import '@emdash/theme/theme.css';
 @import '@emdash/theme/semantic.css';
+@import '../assets/styles/terminal-ansi.css';
 
 /* Theme follows the system: theme-boot.js puts emlight/emdark on <html> before first paint. */
 @custom-variant dark (&:is(.emdark *));
 
+/*
+ * The phone-sized sibling of the desktop app's design system: the same @emdash/theme tokens
+ * under the same names (surfaces, foreground steps, hairlines, accent, radii), with a type scale
+ * sized for a phone held at arm's length. Tailwind's default palette, type scale and shadows are
+ * cleared, so only the roles below exist.
+ */
 @theme inline {
+  --color-*: initial;
+  --text-*: initial;
+  --shadow-*: initial;
+
   --font-sans:
     'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue',
     sans-serif;
   --font-mono:
     'JetBrains Mono Variable', ui-monospace, Menlo, Monaco, Consolas, 'Roboto Mono', monospace;
 
-  /* Maestro tokens (@emdash/theme), named for how this app uses them. */
-  --color-canvas: var(--em-background);
-  --color-surface: var(--em-background-1);
-  --color-surface-2: var(--em-background-2);
-  --color-surface-3: var(--em-background-3);
-  --color-raised: var(--em-surface-elevated);
-  --color-terminal: var(--em-surface-paper);
+  /*
+   * Type roles (the desktop role each one stands in for):
+   *   hero     26/32 medium  one per screen: pairing, page-level empty and error titles
+   *   title    22/28 medium  page title (the agents list)
+   *   heading  17/24         sheet titles, screen titles (semibold); the conductor's reply
+   *   reading  16/24         reading text, every text field (16 keeps iOS from zooming)
+   *   body     15/22         UI body: rows, buttons, settings labels, card titles (semibold)
+   *   detail   13/18         helper text, previews, key values, terminal keys
+   *   caption  12/16         group labels, ages, meta lines (passive, tabular figures)
+   */
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1rem;
+  --text-detail: 0.8125rem;
+  --text-detail--line-height: 1.125rem;
+  --text-body: 0.9375rem;
+  --text-body--line-height: 1.375rem;
+  --text-reading: 1rem;
+  --text-reading--line-height: 1.5rem;
+  --text-heading: 1.0625rem;
+  --text-heading--line-height: 1.5rem;
+  --text-title: 1.375rem;
+  --text-title--line-height: 1.75rem;
+  --text-title--font-weight: 500;
+  --text-title--letter-spacing: -0.01em;
+  --text-hero: 1.625rem;
+  --text-hero--line-height: 2rem;
+  --text-hero--font-weight: 500;
+  --text-hero--letter-spacing: -0.015em;
 
-  --color-fg: var(--em-foreground);
-  --color-fg-muted: var(--em-foreground-muted);
-  --color-fg-passive: var(--em-foreground-passive);
-  --color-fg-inverse: var(--em-foreground-inverse);
+  /* Surfaces resolve against the nearest .surface-* scope, as on the desktop. */
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-selected: var(--surface-selected);
+  --color-surface-emphasis: var(--surface-emphasis);
+  --color-surface-paper: var(--em-surface-paper);
+  --color-surface-sunken: var(--em-surface-sunken);
+  --color-surface-elevated: var(--em-surface-elevated);
+  --color-overlay: var(--em-backdrop);
 
-  --color-line: var(--em-border-subtle);
-  --color-line-strong: var(--em-border);
-  --color-focus: var(--em-blue-9);
+  --color-foreground: var(--em-foreground);
+  --color-foreground-body: var(--em-foreground-body);
+  --color-foreground-muted: var(--em-foreground-muted);
+  --color-foreground-passive: var(--em-foreground-passive);
+  --color-foreground-inverse: var(--em-foreground-inverse);
+  --color-foreground-error: var(--em-foreground-error);
+  --color-foreground-warning: var(--em-foreground-warning);
 
+  --color-border: var(--em-border);
+  --color-border-subtle: var(--em-border-subtle);
+  --color-border-control: var(--field-edge);
+  --color-border-error: var(--em-border-destructive);
+
+  --color-accent: var(--em-accent);
+  --color-ring: var(--em-focus-ring);
+  --color-link: var(--em-link);
   --color-primary: var(--em-primary-button-background);
   --color-primary-hover: var(--em-primary-button-background-hover);
-  --color-primary-fg: var(--em-primary-button-foreground);
-  --color-accent: var(--em-accent-11);
-  --color-accent-soft: var(--em-accent-3);
+  --color-primary-foreground: var(--em-primary-button-foreground);
+  /* The desktop's destructive button: a quiet red room with red ink, only inside its confirm. */
+  --color-destructive: var(--em-background-destructive);
+  --color-destructive-hover: var(--em-surface-destructive-hover);
+  --color-foreground-destructive: var(--em-foreground-destructive);
 
-  --color-attention: var(--em-foreground-warning);
-  --color-attention-soft: var(--em-background-warning);
-  --color-attention-line: var(--em-border-warning);
-  --color-working: var(--em-foreground-info);
-  --color-working-soft: var(--em-background-info);
-  --color-success: var(--em-foreground-success);
-  --color-danger: var(--em-foreground-error);
-  --color-danger-soft: var(--em-background-error);
-  --color-danger-line: var(--em-border-error);
+  --color-transparent: transparent;
+  --color-current: currentColor;
+
+  /* Floating layers: draws nothing in dark, a soft ink shadow in light. Dialogs and sheets keep
+     the overlay shadow in both. */
+  --shadow-float: var(--em-shadow-md);
+  --shadow-overlay: var(--em-shadow-overlay);
+
+  --radius-xs: var(--em-radius-xs);
+  --radius-sm: var(--em-radius-sm);
+  --radius-md: var(--em-radius-md);
+  --radius-lg: var(--em-radius-lg);
+  --radius-xl: var(--em-radius-xl);
+  --radius-2xl: var(--em-radius-2xl);
 
   --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
 
   --animate-screen-in: screen-in 260ms var(--ease-out-soft) both;
   --animate-fade-in: fade-in 180ms ease-out both;
-  --animate-sheet-in: sheet-in 320ms var(--ease-out-soft) both;
-  --animate-pop-in: pop-in 200ms var(--ease-out-soft) both;
-  --animate-halo: halo 1.8s ease-out infinite;
-  --animate-bar: bar 1s ease-in-out infinite;
+  --animate-delayed-in: fade-in 200ms ease-out 400ms both;
+  --animate-sheet-in: sheet-in 300ms var(--ease-out-soft) both;
+  --animate-pop-in: pop-in 160ms var(--ease-out-soft) both;
   --animate-shake: shake 360ms ease-in-out both;
 
   @keyframes screen-in {
@@ -75,27 +130,7 @@
   @keyframes pop-in {
     from {
       opacity: 0;
-      transform: translateY(8px) scale(0.98);
-    }
-  }
-  @keyframes halo {
-    0% {
-      transform: scale(1);
-      opacity: 0.55;
-    }
-    70%,
-    100% {
-      transform: scale(2.6);
-      opacity: 0;
-    }
-  }
-  @keyframes bar {
-    0%,
-    100% {
-      transform: scaleY(0.35);
-    }
-    50% {
-      transform: scaleY(1);
+      transform: translateY(4px) scale(0.98);
     }
   }
   @keyframes shake {
@@ -108,24 +143,40 @@
       transform: translateX(6px);
     }
   }
+  @keyframes state-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.35;
+    }
+  }
 }
 
 @layer base {
   html {
-    /* sRGB stand-ins for --em-background so the first paint already matches the theme. */
-    background-color: #fcfcfc;
+    /* sRGB stand-ins for --em-surface-sunken (the app's ground), so the first paint already
+       matches the theme before the tokens resolve. */
+    background-color: #eef0f1;
     color-scheme: light;
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
     -webkit-tap-highlight-color: transparent;
+    /* Inputs at rest are found by their edge in light, by their fill in dark. */
+    --field-edge: var(--em-border-1);
+
+    /* The terminal's 16 ANSI colours (--xterm-ansi-*) come from the desktop's shared
+       src/assets/styles/terminal-ansi.css, so both terminals show the same palette. */
   }
   html.emdark {
-    background-color: #111111;
+    background-color: #0d1316;
     color-scheme: dark;
+    --field-edge: var(--em-border-subtle);
   }
   @media (prefers-color-scheme: dark) {
     html:not(.emlight) {
-      background-color: #111111;
+      background-color: #0d1316;
     }
   }
 
@@ -138,11 +189,11 @@
   }
 
   body {
-    background-color: var(--color-canvas);
-    color: var(--color-fg);
+    background-color: var(--em-surface-sunken);
+    color: var(--em-foreground);
     font-family: var(--font-sans);
-    font-size: 15px;
-    line-height: 1.4;
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     font-feature-settings: 'cv11', 'ss03';
@@ -164,11 +215,12 @@
   input,
   textarea,
   select {
-    font-size: 16px;
+    font-size: var(--text-reading);
   }
 
+  /* The accent focus ring the desktop kit draws: 2px, just outside the control. */
   :focus-visible {
-    outline: 2px solid var(--color-focus);
+    outline: 2px solid var(--em-focus-ring);
     outline-offset: 2px;
   }
 
@@ -181,7 +233,8 @@
     color: inherit;
   }
   dialog::backdrop {
-    background-color: rgb(0 0 0 / 0.5);
+    /* Older engines do not let ::backdrop inherit custom properties; they get the fallback. */
+    background-color: var(--em-backdrop, rgb(0 0 0 / 0.5));
     animation: fade-in 200ms ease-out both;
   }
 
@@ -198,6 +251,30 @@
 }
 
 @layer components {
+  /* Surface scopes: rebind the generic --surface steps, as the desktop kit's surface classes do. */
+  :root,
+  .surface-sunken {
+    --surface: var(--em-surface-sunken);
+    --surface-hover: var(--em-surface-sunken-hover);
+    --surface-selected: var(--em-surface-sunken-selected);
+    --surface-emphasis: var(--em-surface-base);
+  }
+  .surface-paper {
+    --surface: var(--em-surface-paper);
+    --surface-hover: var(--em-surface-paper-hover);
+    --surface-selected: var(--em-surface-paper-selected);
+    --surface-emphasis: var(--em-surface-base-emphasis);
+  }
+  .surface-elevated {
+    --surface: var(--em-surface-elevated);
+    --surface-hover: var(--em-surface-elevated-hover);
+    --surface-selected: var(--em-surface-elevated-selected);
+    --surface-emphasis: var(--em-surface-elevated-emphasis);
+  }
+  .surface-emphasis {
+    --surface: var(--surface-emphasis);
+  }
+
   /* Sized to the visual viewport (see use-visual-viewport), so the composer rides above the
      on-screen keyboard instead of being covered by it. */
   .app-frame {
@@ -208,7 +285,7 @@
     height: var(--vv-height, 100dvh);
     display: flex;
     overflow: hidden;
-    background-color: var(--color-canvas);
+    background-color: var(--em-surface-sunken);
   }
 
   .scroll-area {
@@ -216,7 +293,7 @@
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: thin;
-    scrollbar-color: var(--color-line-strong) transparent;
+    scrollbar-color: var(--em-border) transparent;
   }
 
   .no-scrollbar {
@@ -226,6 +303,111 @@
     display: none;
   }
 
+  /*
+   * A text field: the surface's emphasis step as its fill, an edge that is findable in light and
+   * quiet in dark, and on focus the accent edge plus a 1px accent ring (the desktop field shell).
+   */
+  .field {
+    background-color: var(--surface-emphasis);
+    border: 1px solid var(--field-edge);
+    color: var(--em-foreground);
+    outline: none;
+    transition:
+      border-color 150ms,
+      box-shadow 150ms;
+  }
+  .field::placeholder {
+    color: var(--em-foreground-passive);
+  }
+  .field:focus,
+  .field:focus-within,
+  .field[data-focused] {
+    border-color: var(--em-focus-ring);
+    box-shadow: 0 0 0 1px var(--em-focus-ring);
+  }
+  .field[aria-invalid='true'],
+  .field[data-invalid] {
+    border-color: var(--em-border-destructive);
+    box-shadow: none;
+  }
+  /* The edge belongs to the wrapper when a field is drawn around a bare input. */
+  .field > input,
+  .field > textarea {
+    outline: none;
+  }
+
+  /*
+   * The one set of state marks (the desktop kit's StateGlyph): a filled near-white dot when a
+   * person is needed, a softly pulsing accent dot while working, a bright ring for a finish, a
+   * dimmer ring when idle, the error dot. Only the working dot moves.
+   */
+  .state-glyph {
+    display: inline-flex;
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+  }
+  .state-glyph::before {
+    content: '';
+    display: block;
+    box-sizing: border-box;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 9999px;
+  }
+  .state-glyph[data-state='needs-you']::before {
+    background-color: var(--em-foreground);
+  }
+  .state-glyph[data-state='working']::before {
+    width: 0.375rem;
+    height: 0.375rem;
+    background-color: var(--em-accent);
+    animation: state-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+  .state-glyph[data-state='unread']::before {
+    border: 1.5px solid var(--em-foreground);
+  }
+  .state-glyph[data-state='done']::before {
+    border: 1.5px solid var(--em-foreground-passive);
+  }
+  .state-glyph[data-state='idle']::before {
+    border: 1.5px solid var(--em-foreground-passive);
+    opacity: 0.6;
+  }
+  .state-glyph[data-state='error']::before {
+    background-color: var(--em-foreground-error);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .state-glyph[data-state='working']::before {
+      animation: none;
+    }
+  }
+
+  /* A quiet text action (the desktop kit's Button variant="text"): muted, underlined at a
+     distance, full strength on hover. The box is 44px tall for a thumb; the text is not. */
+  .text-action {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    gap: 0.375rem;
+    border-radius: var(--em-radius-sm);
+    color: var(--em-foreground-muted);
+    text-decoration-line: underline;
+    text-decoration-color: color-mix(in srgb, var(--em-foreground-passive) 60%, transparent);
+    text-underline-offset: 4px;
+    transition: color 150ms;
+  }
+  .text-action:hover,
+  .text-action:active {
+    color: var(--em-foreground);
+  }
+  .text-action:disabled {
+    color: var(--em-foreground-passive);
+    text-decoration-line: none;
+  }
+
   /* Horizontal scrolling is native; vertical drags and pinches are handled by TerminalView. */
   .terminal-viewport {
     position: relative;
@@ -233,7 +415,7 @@
     overflow-y: hidden;
     overscroll-behavior: contain;
     touch-action: pan-x;
-    background-color: var(--color-terminal);
+    background-color: var(--em-surface-paper);
     scrollbar-width: none;
   }
   .terminal-viewport::-webkit-scrollbar {
@@ -289,4 +471,33 @@
 /* With the on-screen keyboard up, the home-indicator inset is covered by the keyboard. */
 html[data-keyboard-open] .composer {
   padding-bottom: 0.5rem;
+}
+
+/* A phone on its side (844x390): the dock under the terminal folds the key bar and the composer
+   into one row and the header row loses 12px, so the terminal keeps about two thirds of the
+   height instead of half. Unlayered, so it wins over the utilities it adjusts. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .screen-header-row {
+    height: 2.75rem;
+  }
+  .terminal-dock {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: end;
+  }
+  .terminal-dock > * {
+    grid-column: 1 / -1;
+  }
+  .terminal-dock > .keybar {
+    grid-column: 1;
+    padding-bottom: max(env(safe-area-inset-bottom, 0px), 0.5rem);
+  }
+  .terminal-dock > .composer {
+    grid-column: 2;
+    padding-left: 0;
+  }
+  .terminal-dock > [role='status'] p {
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+  }
 }

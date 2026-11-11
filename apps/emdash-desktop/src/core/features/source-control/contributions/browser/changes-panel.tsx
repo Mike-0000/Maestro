@@ -6,7 +6,6 @@ import {
   useToast,
 } from '@emdash/ui/react/primitives';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { GitBranchPlus, RotateCw } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { Fragment, useMemo, useState } from 'react';
 import {
@@ -131,6 +130,7 @@ export const ChangesPanel = observer(function ChangesPanel() {
     if (status?.isDirectory && !status.error && status.isGitRepo === false) {
       return (
         <EmptyState
+          bare
           label="This folder is not a Git repository"
           description="Initialize Git to enable changes, commits, branches, and worktree-based tasks."
           action={
@@ -141,7 +141,6 @@ export const ChangesPanel = observer(function ChangesPanel() {
               onClick={() => initializeRepositoryMutation.mutate()}
               disabled={initializeRepositoryMutation.isPending}
             >
-              <GitBranchPlus className="size-3.5" />
               {initializeRepositoryMutation.isPending
                 ? 'Initializing…'
                 : 'Initialize Git repository'}
@@ -155,18 +154,20 @@ export const ChangesPanel = observer(function ChangesPanel() {
     if (gitCheckout.error) {
       return (
         <EmptyState
+          bare
+          tone="error"
           label="Git status unavailable"
-          description={gitCheckout.error}
+          description="The changes in this worktree could not be read."
+          details={gitCheckout.error}
           action={
             <Button
-              variant="secondary"
+              variant="text"
               type="button"
               size="sm"
               onClick={() => retryCheckoutMutation.mutate()}
               disabled={retryCheckoutMutation.isPending}
             >
-              <RotateCw className="size-3.5" />
-              {retryCheckoutMutation.isPending ? 'Retrying…' : 'Retry'}
+              {retryCheckoutMutation.isPending ? 'Trying again…' : 'Try again'}
             </Button>
           }
         />

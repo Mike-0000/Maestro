@@ -26,6 +26,11 @@ export interface PageHeaderProps {
    * Default: false.
    */
   draggable?: boolean;
+  /**
+   * Draws a hairline under the title block. Off by default: the redesigned
+   * header separates from the page by space alone (design brief 2.2).
+   */
+  separator?: boolean;
   className?: string;
 }
 
@@ -56,6 +61,7 @@ function PageHeader({
   actions,
   sticky = false,
   draggable = false,
+  separator = false,
   className,
 }: PageHeaderProps) {
   // The title block always gets the drag class if draggable; it is reset on
@@ -72,16 +78,16 @@ function PageHeader({
   const body = (
     <div className={styles.header}>
       <div className={styles.titleBlock} style={titleBlockStyle}>
-        <Text as="h2" variant="h1" tone="default">
+        <Text as="h2" variant="h1" tone="default" className={styles.title}>
           {title}
         </Text>
         {description && (
-          <Text as="p" variant="description" tone="muted">
+          <Text as="p" variant="description" tone="muted" className={styles.description}>
             {description}
           </Text>
         )}
       </div>
-      <div className={styles.separator} />
+      {separator && <div className={styles.separator} />}
       {actions && (
         <div className={styles.actions} style={actionsStyle}>
           {actions}

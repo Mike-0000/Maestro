@@ -203,7 +203,7 @@ message) can keep a conversation going with `message_agent`.
   you were away. Atlas asks: …". Writing to that agent first drops its question from the list.
 - One setting turns the channel off: **Settings → Voice & Conductor → Let agents ask the
   conductor**. New requests are refused, and the ones still open are closed with a denial.
-- A conductor-decided request costs one model turn against the daily token budget.
+- A conductor-decided request costs one model turn against the daily token limit.
 
 ## Out of scope
 

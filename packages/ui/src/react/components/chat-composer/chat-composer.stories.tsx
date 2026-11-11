@@ -638,6 +638,35 @@ export const WithMcpStartupFailure: Story = {
   ),
 };
 
+/**
+ * EmbeddedPromptField — the composer as a draft-only prompt field inside a form (the "New
+ * conductor" dialog): no send button, three resting lines, the model picker in the field's
+ * footer.
+ */
+function EmbeddedPromptFieldDemo() {
+  const [selectedModel, setSelectedModel] = useState<string | undefined>(undefined);
+  return (
+    // A dialog-width column (the dialog's body is about 30rem wide).
+    <Box className={cx(s.mxAuto, s.maxW2xl)} width="full" style={{ width: '30rem' }}>
+      <ChatComposer
+        canSubmit={false}
+        showSubmitButton={false}
+        minRows={3}
+        placeholder="Describe what the agent should do, or use / to select a prompt…"
+        modelOptions={MOCK_MODELS}
+        selectedModel={selectedModel}
+        onModelChange={setSelectedModel}
+        queryCommands={queryCommands}
+        onSubmit={() => {}}
+      />
+    </Box>
+  );
+}
+
+export const EmbeddedPromptField: Story = {
+  render: () => <EmbeddedPromptFieldDemo />,
+};
+
 export const AwaitingProviderControls: Story = {
   render: () => (
     <Box className={cx(s.mxAuto, s.maxW2xl)} width="full">

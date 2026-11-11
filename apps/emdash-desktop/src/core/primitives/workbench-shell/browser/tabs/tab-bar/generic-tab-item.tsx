@@ -132,21 +132,31 @@ export const GenericTabItem = observer(function GenericTabItem({
           }}
           title={fullTitle}
           data-tabid={tab.tabId}
+          data-active={tab.isActive || undefined}
           className={cn(
-            'group relative flex h-full cursor-pointer flex-col text-sm',
-            tab.isActive ? 'text-foreground' : 'text-foreground-muted hover:text-foreground'
+            // The active tab is cut from the content's surface and opens into it; the rest are
+            // text on the strip. In a pane without focus the active tab's text steps down.
+            'group relative flex h-[33px] cursor-pointer items-center rounded-t-md text-sm transition-colors outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset',
+            tab.isActive
+              ? cn(
+                  'bg-(--em-surface-paper)',
+                  isFocusedPane ? 'text-foreground' : 'text-foreground-muted'
+                )
+              : 'text-foreground-passive hover:text-foreground-muted'
           )}
         >
-          {tab.isActive && (
-            <div
-              className={cn(
-                'absolute inset-x-0 bottom-0 h-0.5',
-                isFocusedPane ? 'bg-(--primary-button-background)' : 'bg-border-1'
-              )}
-            />
-          )}
-          <div className="flex h-full items-center pr-3 pl-4">
-            {preSlot}
+          <div className="flex h-full items-center pr-2 pl-3">
+            {preSlot && (
+              // Inactive tabs are text first: their icons sit back until hovered.
+              <span
+                className={cn(
+                  'flex shrink-0 items-center transition-opacity',
+                  !tab.isActive && 'opacity-60 group-hover:opacity-100'
+                )}
+              >
+                {preSlot}
+              </span>
+            )}
             {isEditing ? (
               <input
                 ref={(el) => {
@@ -155,7 +165,7 @@ export const GenericTabItem = observer(function GenericTabItem({
                 }}
                 defaultValue={renameValue ?? label}
                 maxLength={renameMaxLength}
-                className="h-6 max-w-30 min-w-0 rounded bg-background-1 px-1.5 text-sm text-foreground ring-1 ring-foreground/20 outline-none focus:ring-foreground/40"
+                className="h-6 max-w-30 min-w-0 rounded-sm bg-(--em-surface-sunken) px-1.5 text-sm text-foreground ring-1 ring-border-1 outline-none focus:ring-ring"
                 onClick={(e) => e.stopPropagation()}
                 onDoubleClick={(e) => e.stopPropagation()}
                 onBlur={(e) => commit(e.target.value)}
@@ -193,13 +203,14 @@ export const GenericTabItem = observer(function GenericTabItem({
 });
 
 /**
- * Generic drag ghost for any tab kind.
+ * Generic drag ghost for any tab kind: the tab lifted one surface step, with a hairline instead
+ * of a shadow (dark draws none), at the tab's own height.
  */
 export function GenericTabDragPreview({ preSlot, label }: { preSlot?: ReactNode; label: string }) {
   return (
-    <div className="surface-paper flex cursor-grabbing items-center gap-1.5 rounded-md border border-border bg-(--em-surface) px-2 py-1 text-sm opacity-80 shadow-lg">
+    <div className="surface-elevated flex h-8 cursor-grabbing items-center gap-1.5 rounded-md bg-surface px-3 text-sm text-foreground ring-1 ring-border-subtle">
       {preSlot}
-      <span className="max-w-[200px] truncate">{label}</span>
+      <span className="max-w-50 truncate">{label}</span>
     </div>
   );
 }

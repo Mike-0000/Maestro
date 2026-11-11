@@ -1,5 +1,7 @@
 import '@styles/layers.css';
 import { style } from '@vanilla-extract/css';
+import { vars } from '@theme/core/contract/contract.css';
+import { tokenVars } from '@theme/tokens.css';
 
 export const root = style({
   '@layer': {
@@ -32,6 +34,13 @@ export const title = style({
       flex: '1 1 auto',
       alignItems: 'center',
       overflow: 'hidden',
+      // Page-title role for the identity line (design brief 2.4); callers'
+      // own heading classes still win (recipes layer).
+      fontSize: tokenVars.textXl,
+      lineHeight: tokenVars.textXlLineHeight,
+      fontWeight: 500,
+      letterSpacing: '-0.01em',
+      color: vars.foreground,
     },
   },
 });

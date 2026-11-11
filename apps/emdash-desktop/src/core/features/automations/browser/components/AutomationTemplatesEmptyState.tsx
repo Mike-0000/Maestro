@@ -1,4 +1,4 @@
-import { Label } from '@emdash/ui/react/primitives';
+import { EmptyState } from '@emdash/ui/react/components';
 import type { BuiltinAutomationTemplate } from '../automation-template';
 import { AutomationTemplateCard } from './AutomationTemplateCard';
 
@@ -7,29 +7,32 @@ interface AutomationTemplatesEmptyStateProps {
   onSelectTemplate: (template: BuiltinAutomationTemplate) => void;
 }
 
+/**
+ * The page-level empty state for Automations (the project task list's shape): a quiet title,
+ * one sentence, then the templates as a short list of ways in. Choosing one opens the create
+ * sheet filled from it.
+ */
 export function AutomationTemplatesEmptyState({
   templates,
   onSelectTemplate,
 }: AutomationTemplatesEmptyStateProps) {
   return (
-    <section className="flex flex-col gap-4 py-2">
-      <div className="flex flex-col gap-1">
-        <Label>Start with a template</Label>
-        <p className="max-w-xl text-sm text-foreground-muted">
-          Choose a template and adjust it before creating your first automation
-        </p>
-      </div>
-      <div className="grid grid-cols-3 gap-3">
-        {templates.map((template) => (
-          <div key={template.id} className="h-full min-w-0">
+    <EmptyState
+      bare
+      size="page"
+      label="No automations yet"
+      description="An automation runs an agent on a schedule. Start from a template and change anything before it runs."
+      action={
+        <div className="flex w-[30rem] max-w-full flex-col gap-0.5 text-left">
+          {templates.map((template) => (
             <AutomationTemplateCard
+              key={template.id}
               template={template}
               onSelect={onSelectTemplate}
-              className="h-full"
             />
-          </div>
-        ))}
-      </div>
-    </section>
+          ))}
+        </div>
+      }
+    />
   );
 }

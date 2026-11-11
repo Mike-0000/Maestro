@@ -933,7 +933,7 @@ export function createLocalUpdateService(
       if (!current?.enabled) return release;
       const joined = await joinTask(projectId, repositoryPath, taskId);
       if (!joined)
-        throw new Error('Chorus cannot start this agent until its local Git worktree is ready.');
+        throw new Error('Maestro cannot start this agent until its local Git worktree is ready.');
       await coordinator.invalidate({ repositoryPath, taskId });
       await assertInstallTargetAvailable();
       return release;

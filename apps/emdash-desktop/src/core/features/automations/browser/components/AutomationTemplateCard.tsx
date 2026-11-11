@@ -8,6 +8,11 @@ interface AutomationTemplateCardProps {
   className?: string;
 }
 
+/**
+ * One template as a quiet row (the project task list's "ways in" rows): a passive icon, the
+ * name, one line of what it does, and its category in the caption role on the right. No box:
+ * the hover step and the focus ring carry the interaction.
+ */
 export function AutomationTemplateCard({
   template,
   onSelect,
@@ -20,28 +25,28 @@ export function AutomationTemplateCard({
       type="button"
       onClick={() => onSelect(template)}
       className={cn(
-        'group flex shrink-0 flex-col justify-between rounded-lg border border-border bg-background-1 p-3 text-left transition-colors outline-none hover:bg-background-2 focus-visible:ring-3',
+        'group flex w-full min-w-0 items-start gap-3 rounded-md px-3 py-2 text-left transition-colors',
+        'hover:bg-surface-hover focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none',
         className
       )}
     >
-      <span className="flex min-w-0 flex-col gap-1.5">
-        <div className="flex items-center gap-2">
-          <Icon className="size-4 text-foreground-muted" />
-          <span className="line-clamp-1 text-sm text-foreground">{template.name}</span>
-        </div>
+      <Icon
+        className="mt-0.5 size-4 shrink-0 text-foreground-passive transition-colors group-hover:text-foreground-muted"
+        aria-hidden
+      />
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-sm text-foreground">{template.name}</span>
         <span
-          className={
-            compact
-              ? 'line-clamp-2 text-xs leading-relaxed text-foreground-muted'
-              : 'line-clamp-3 text-xs leading-relaxed text-foreground-muted'
-          }
+          className={cn('text-xs text-foreground-muted', compact ? 'line-clamp-1' : 'line-clamp-2')}
         >
           {template.description}
         </span>
       </span>
-      <span className="mt-3 line-clamp-1 text-[11px] text-foreground-passive">
-        {template.category}
-      </span>
+      {!compact && (
+        <span className="mt-0.5 shrink-0 text-tiny text-foreground-passive">
+          {template.category}
+        </span>
+      )}
     </button>
   );
 }

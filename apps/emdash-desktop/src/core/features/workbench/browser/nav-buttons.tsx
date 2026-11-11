@@ -12,43 +12,52 @@ export function applyHistoryEntry(entry: HistoryEntry): boolean {
   return getNavigation().applyEntry(entry);
 }
 
+/**
+ * Back and forward through the view history: two passive ghost glyphs on the chrome that come
+ * to full strength on hover (the kit's icon-button face). A direction with no history is
+ * disabled and dims.
+ */
 export const NavButtons = observer(function NavButtons() {
   const { canGoBack, canGoForward } = getNavigationHistory();
   return (
     <div className="flex items-center gap-0.5 [-webkit-app-region:no-drag]">
       <Tooltip.Root>
-        <Tooltip.Trigger>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="size-7 p-0"
-            aria-label="Go back"
-            disabled={!canGoBack}
-            onClick={() => getNavigationHistory().back(applyHistoryEntry)}
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
+        <Tooltip.Trigger
+          render={
+            <Button
+              variant="ghost"
+              size="sm"
+              icon
+              aria-label="Go back"
+              disabled={!canGoBack}
+              onClick={() => getNavigationHistory().back(applyHistoryEntry)}
+            />
+          }
+        >
+          <ArrowLeft className="size-4" />
         </Tooltip.Trigger>
         <Tooltip.Content>
-          Go Back
+          Go back
           <BoundShortcut command="app.navigateBack" variant="keycaps" />
         </Tooltip.Content>
       </Tooltip.Root>
       <Tooltip.Root>
-        <Tooltip.Trigger>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="size-7 p-0"
-            aria-label="Go forward"
-            disabled={!canGoForward}
-            onClick={() => getNavigationHistory().forward(applyHistoryEntry)}
-          >
-            <ArrowRight className="h-4 w-4" />
-          </Button>
+        <Tooltip.Trigger
+          render={
+            <Button
+              variant="ghost"
+              size="sm"
+              icon
+              aria-label="Go forward"
+              disabled={!canGoForward}
+              onClick={() => getNavigationHistory().forward(applyHistoryEntry)}
+            />
+          }
+        >
+          <ArrowRight className="size-4" />
         </Tooltip.Trigger>
         <Tooltip.Content>
-          Go Forward
+          Go forward
           <BoundShortcut command="app.navigateForward" variant="keycaps" />
         </Tooltip.Content>
       </Tooltip.Root>

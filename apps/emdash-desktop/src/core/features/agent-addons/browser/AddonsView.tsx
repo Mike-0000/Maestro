@@ -8,7 +8,7 @@ export const AddonsView: React.FC = () => (
     header={{
       title: 'Add-ons',
       description:
-        'Install skills, worker agents, and standing instructions into the coding agents on this computer',
+        'Install skills, worker agents and standing instructions into the coding agents on this computer.',
     }}
   />
 );

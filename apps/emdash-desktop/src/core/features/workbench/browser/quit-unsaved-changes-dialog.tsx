@@ -10,27 +10,33 @@ export interface QuitUnsavedChangesDialogArgs {
 
 export function QuitUnsavedChangesDialog({ count }: QuitUnsavedChangesDialogArgs) {
   const controller = useModalController('quitUnsavedChangesModal');
-  const label = count === 1 ? 'file has' : 'files have';
+  const files = count === 1 ? '1 file has' : `${count} files have`;
 
+  // The platform's quit-with-changes layout: the throwaway choice on its own at the left (its
+  // text lined up with the title), Cancel and the one move on the right.
   return (
     <>
       <Dialog.Header showCloseButton={false}>
         <Dialog.Title>Save changes before quitting?</Dialog.Title>
+        <Dialog.Description>
+          {files} changes that are not saved. Save them before Maestro quits, or discard them.
+        </Dialog.Description>
       </Dialog.Header>
-      <Dialog.Body className="pt-0">
-        <p>
-          {count} {label} unsaved changes. Save them before quitting Emdash?
-        </p>
-      </Dialog.Body>
       <Dialog.Footer>
-        <Button variant="secondary" onClick={controller.dismiss}>
+        {/* Cancel comes first in the DOM so it takes the dialog's first focus; Discard is only
+            drawn first, at the left. */}
+        <Button variant="ghost" onClick={controller.dismiss}>
           Cancel
         </Button>
-        <Button variant="secondary" onClick={() => controller.complete('discard')}>
-          Discard
-        </Button>
         <Button variant="primary" onClick={() => controller.complete('save-all')}>
-          Save All
+          Save all
+        </Button>
+        <Button
+          variant="ghost"
+          className="sm:order-first sm:mr-auto sm:-ml-3"
+          onClick={() => controller.complete('discard')}
+        >
+          Discard
         </Button>
       </Dialog.Footer>
     </>

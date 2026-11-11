@@ -2,7 +2,6 @@ import type { SurfaceStatusName } from '@emdash/theme';
 import { cx } from '@styles/utilities/cx';
 import { AlertCircleIcon, AlertTriangleIcon, CheckCircleIcon, InfoIcon, XIcon } from 'lucide-react';
 import * as React from 'react';
-import { Surface } from '../surface/surface';
 import * as styles from './alert.css';
 
 // ── Status icon map ───────────────────────────────────────────────────────────
@@ -50,15 +49,15 @@ function AlertRoot({ status, icon, onDismiss, className, children, ...props }: A
   const resolvedIcon = icon === null ? null : (icon ?? STATUS_ICONS[status]);
 
   return (
-    <Surface
+    <div
       role="alert"
-      status={status}
       data-slot="alert"
+      data-status={status}
       className={cx(styles.alertRoot, className)}
       {...props}
     >
       {resolvedIcon != null && (
-        <span className={styles.alertIcon} aria-hidden>
+        <span className={styles.alertIcon} data-slot="alert-icon" aria-hidden>
           {resolvedIcon}
         </span>
       )}
@@ -67,13 +66,14 @@ function AlertRoot({ status, icon, onDismiss, className, children, ...props }: A
         <button
           type="button"
           aria-label="Dismiss"
+          data-slot="alert-dismiss"
           className={styles.alertDismiss}
           onClick={onDismiss}
         >
           <XIcon aria-hidden />
         </button>
       )}
-    </Surface>
+    </div>
   );
 }
 

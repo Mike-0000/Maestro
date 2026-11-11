@@ -1,4 +1,4 @@
-import { Dialog } from '@emdash/ui/react/primitives';
+import { Button, Dialog, ModalLayout } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
 import { useMemo } from 'react';
 import { useClaudeAccountPicker } from '@core/features/claude-accounts/contributions/browser/claude-account-picker';
@@ -14,7 +14,6 @@ import { useTaskSettings } from '@core/features/tasks/api/browser/hooks/useTaskS
 import { taskHostActionAvailability } from '@core/features/tasks/api/browser/task-state/task-selectors';
 import { ConversationField } from '@core/features/tasks/contributions/browser/task-config/conversation-field';
 import { useInitialConversationState } from '@core/features/tasks/contributions/browser/task-config/initial-conversation-section';
-import { TaskConfigPanel } from '@core/features/tasks/contributions/browser/task-config/task-config-panel';
 import { TaskStateProvider } from '@core/features/tasks/contributions/browser/task-config/task-state-context';
 import { WorkspaceSettingsSection } from '@core/features/tasks/contributions/browser/task-config/workspace-settings-section';
 import { useModalController } from '@core/manifests/browser/modal-api';
@@ -24,6 +23,7 @@ import { defineModal } from '@core/primitives/modals/react';
 import { useNavigate } from '@core/primitives/navigation/browser/navigation-hooks';
 import { getNavigation } from '@core/primitives/navigation/browser/navigation-selectors';
 import type { PullRequest } from '@core/services/pull-requests/api';
+import { DetailRow } from './detail-row';
 import { LinkedEntitySection } from './linked-entity-section';
 import { TaskNameField } from './task-name-field';
 import { useCreateTaskCallback } from './use-create-task-callback';
@@ -54,7 +54,7 @@ export const CreateTaskModal = observer(function CreateTaskModal({
   initialPR?: PullRequest;
   initialWorkspaceId?: string;
 }) {
-  const { complete } = useModalController('taskModal');
+  const { complete, dismiss } = useModalController('taskModal');
   const selectedProjectId = useDefaultProjectId(projectId);
 
   const projectData = selectedProjectId
@@ -124,71 +124,71 @@ export const CreateTaskModal = observer(function CreateTaskModal({
         projectAvailabilityUi.defaultLiveActionDisabledReason)
       : undefined;
 
+  // Prompt first, options quiet, one primary action (design brief 2.9). The prompt with its
+  // agent row leads; the name, the issue or PR it starts from and the workspace follow as
+  // labelled detail rows; the footer holds Cancel and the one Create.
   return (
-    <>
-      <Dialog.Header className="flex items-center gap-2">
-        <Dialog.Title>Create Conductor</Dialog.Title>
-      </Dialog.Header>
-      <Dialog.Body>
-        <div className="flex w-full flex-col gap-5">
-          <TaskNameField state={state.taskName} />
-          <LinkedEntitySection
-            state={state}
-            hasAnyIssueIntegration={hasAnyIssueIntegration}
-            hasPrSupport={hasPrSupport}
-            projectId={selectedProjectId}
-            repositoryUrl={repositoryUrl}
-            projectPath={projectPath}
-          />
-          <TaskStateProvider
-            workspaceConfig={state.workspaceConfig}
-            initialConversation={initialConversation}
-            projectId={selectedProjectId}
-            isUnborn={isUnborn}
-            hasRepository={hasRepository}
-            hasPR={state.linkedType === 'pr' && state.linkedPR !== null}
-            linkedIssue={
-              state.linkedType === 'issue' ? (state.linkedIssue ?? undefined) : undefined
+    <ModalLayout
+      title="New conductor"
+      leading={
+        createDisabledReason ? (
+          <span className="text-xs text-foreground-muted">{createDisabledReason}</span>
+        ) : undefined
+      }
+      actions={
+        <>
+          <Button variant="ghost" onClick={dismiss}>
+            Cancel
+          </Button>
+          <ConfirmButton
+            variant="primary"
+            onClick={handleCreateTask}
+            disabled={
+              !canCreate || initialConversation.issueContextEditorOpen || !!createDisabledReason
             }
-            includeIssueContextByDefault={includeIssueContextByDefault}
+            title={createDisabledReason}
+            aria-label={createDisabledReason ? `Create. ${createDisabledReason}` : 'Create'}
           >
-            <TaskConfigPanel
-              tabs={[
-                {
-                  value: 'conversation',
-                  label: 'Initial Conversation',
-                  content: <ConversationField claudeAccount={claudeAccount} />,
-                },
-                {
-                  value: 'workspace',
-                  label: 'Workspace Settings',
-                  content: <WorkspaceSettingsSection defaultOpen={!!initialWorkspaceId} />,
-                },
-              ]}
-            />
-          </TaskStateProvider>
-        </div>
-      </Dialog.Body>
-      <Dialog.Footer>
-        <ConfirmButton
-          variant="primary"
-          size="sm"
-          onClick={handleCreateTask}
-          disabled={
-            !canCreate || initialConversation.issueContextEditorOpen || !!createDisabledReason
-          }
-          title={createDisabledReason}
-          aria-label={createDisabledReason ? `Create. ${createDisabledReason}` : 'Create'}
+            Create
+          </ConfirmButton>
+        </>
+      }
+    >
+      <Dialog.Body>
+        <TaskStateProvider
+          workspaceConfig={state.workspaceConfig}
+          initialConversation={initialConversation}
+          projectId={selectedProjectId}
+          isUnborn={isUnborn}
+          hasRepository={hasRepository}
+          hasPR={state.linkedType === 'pr' && state.linkedPR !== null}
+          linkedIssue={state.linkedType === 'issue' ? (state.linkedIssue ?? undefined) : undefined}
+          includeIssueContextByDefault={includeIssueContextByDefault}
         >
-          Create
-        </ConfirmButton>
-      </Dialog.Footer>
-    </>
+          <ConversationField claudeAccount={claudeAccount} autoFocus />
+          <div className="flex flex-col gap-3 pt-1 pb-3">
+            <TaskNameField state={state.taskName} />
+            <LinkedEntitySection
+              state={state}
+              hasAnyIssueIntegration={hasAnyIssueIntegration}
+              hasPrSupport={hasPrSupport}
+              projectId={selectedProjectId}
+              repositoryUrl={repositoryUrl}
+              projectPath={projectPath}
+            />
+            <DetailRow label="Workspace">
+              <WorkspaceSettingsSection defaultOpen={!!initialWorkspaceId} />
+            </DetailRow>
+          </div>
+        </TaskStateProvider>
+      </Dialog.Body>
+    </ModalLayout>
   );
 });
 
 export const taskModal = defineModal<void>()({
   id: 'taskModal',
   component: CreateTaskModal,
+  size: 'lg',
   ignoreOutsidePressAfterWindowBlur: true,
 });

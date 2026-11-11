@@ -1,4 +1,5 @@
-import { Button, MicroLabel, Popover, RelativeTime, Separator } from '@emdash/ui/react/primitives';
+import { FactGrid } from '@emdash/ui/react/patterns';
+import { Button, Popover, RelativeTime } from '@emdash/ui/react/primitives';
 import { Clock } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useState } from 'react';
@@ -32,55 +33,53 @@ export const AutomationRunPill = observer(function AutomationRunPill({
     }
   }
 
+  // A quiet chip in the title bar; the popover is a small fact list and, for a run that is
+  // still an automation's, one text action to make it a regular task (design brief 2.7).
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger
         className={cn(
-          'ml-1 flex items-center gap-1.5 rounded-lg px-2 py-1 bg-background-1',
-          'text-xs text-foreground-muted hover:border-border-muted hover:text-foreground',
-          'transition-colors'
+          'flex h-6 items-center gap-1.5 rounded-md px-1.5 text-xs text-foreground-muted transition-colors outline-none',
+          'hover:bg-surface-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring',
+          'data-popup-open:bg-surface-hover data-popup-open:text-foreground'
         )}
       >
-        <Clock className="size-3" />
+        <Clock className="size-3.5 shrink-0 text-foreground-passive" />
         <span className="max-w-28 truncate">{automationName}</span>
         {timestamp != null && (
-          <RelativeTime value={timestamp} compact className="text-foreground-passive" />
+          <RelativeTime
+            value={timestamp}
+            compact
+            className="text-tiny text-foreground-passive tabular-nums"
+          />
         )}
       </Popover.Trigger>
-      <Popover.Content align="start" className="flex w-72 flex-col gap-3 p-4">
-        <div className="flex flex-col gap-1">
-          <MicroLabel className="text-foreground-passive">Automation</MicroLabel>
-          <span className="text-sm tracking-tight">{automationName}</span>
-        </div>
-        {timestamp != null && (
-          <div className="flex flex-col gap-1">
-            <MicroLabel className="text-foreground-passive">Run date</MicroLabel>
-            <span className="text-sm">
+      <Popover.Content align="start" className="w-72">
+        <FactGrid labelWidth="5rem">
+          <FactGrid.Row label="Automation">{automationName}</FactGrid.Row>
+          {timestamp != null && (
+            <FactGrid.Row label="Ran">
               {new Date(timestamp).toLocaleString(undefined, {
                 dateStyle: 'medium',
                 timeStyle: 'short',
               })}
-            </span>
-          </div>
-        )}
+            </FactGrid.Row>
+          )}
+        </FactGrid>
         {!isConverted && (
-          <>
-            <Separator />
-            <div className="flex flex-col gap-1">
-              <p className="text-xs text-foreground-muted">
-                Convert to a regular task to manage it independently.
-              </p>
-              <Button
-                variant="secondary"
-                size="sm"
-                className="w-full"
-                disabled={isConverting}
-                onClick={() => void handleConvert()}
-              >
-                {isConverting ? 'Converting…' : 'Convert to task'}
-              </Button>
-            </div>
-          </>
+          <div className="flex flex-col items-start gap-1.5">
+            <p className="text-xs text-pretty text-foreground-muted">
+              Convert to a regular task to manage it independently.
+            </p>
+            <Button
+              variant="text"
+              size="sm"
+              disabled={isConverting}
+              onClick={() => void handleConvert()}
+            >
+              {isConverting ? 'Converting…' : 'Convert to task'}
+            </Button>
+          </div>
         )}
       </Popover.Content>
     </Popover.Root>

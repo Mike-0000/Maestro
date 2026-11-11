@@ -1,3 +1,4 @@
+import '@emdash/ui/style.css';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -24,7 +25,9 @@ describe('WorkspacePresetPicker', () => {
     host.remove();
   });
 
-  it('leaves enough height for its label and description', async () => {
+  // The closed picker is one field line with the preset's name (the redesign moved each
+  // preset's sentence into the open list); the label must fit without clipping.
+  it('shows the preset label in a field line without clipping it', async () => {
     await act(async () => {
       root.render(
         <WorkspacePresetPicker
@@ -38,6 +41,8 @@ describe('WorkspacePresetPicker', () => {
 
     const trigger = host.querySelector<HTMLElement>('[data-slot="select-trigger"]');
     expect(trigger).not.toBeNull();
-    expect(trigger!.getBoundingClientRect().height).toBeGreaterThanOrEqual(68);
+    expect(trigger!.textContent).toContain('Create new worktree');
+    expect(trigger!.getBoundingClientRect().height).toBeGreaterThanOrEqual(28);
+    expect(trigger!.scrollHeight).toBeLessThanOrEqual(trigger!.clientHeight);
   });
 });

@@ -1,4 +1,3 @@
-import { AgentStatus } from '@emdash/ui/react/components';
 import { Command } from 'cmdk';
 import { MessageSquare } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
@@ -6,6 +5,7 @@ import { AgentIcon } from '@core/features/agents/contributions/browser/agent-ico
 import type { ConversationStore } from '@core/features/conversations/api/browser/conversation-manager';
 import { formatConversationTitleForDisplay } from '@core/features/conversations/api/browser/conversation-title-utils';
 import { conversationRegistry } from '@core/features/conversations/api/browser/stores/conversation-registry';
+import { ConversationStateGlyph } from '@core/features/conversations/browser/conversation-state-glyph';
 import { taskViewDef } from '@core/features/tasks/contributions/views';
 import { getTaskComposition } from '@core/features/workbench/api/browser/task-composition-selectors';
 import { useNavigate } from '@core/primitives/navigation/browser/navigation-hooks';
@@ -13,13 +13,11 @@ import {
   type PaletteProviderDef,
   type PaletteProviderRenderProps,
 } from '@core/primitives/palette/api';
+import { PALETTE_ITEM_CLASS } from '@core/primitives/palette/browser/palette-item-styles';
 import {
   conversationPaletteSource,
   type ConversationPaletteMatch,
 } from './conversation-palette-source';
-
-const PALETTE_ITEM_CLASS =
-  'flex cursor-pointer items-center gap-2.5 text-foreground-muted aria-selected:text-foreground rounded-md px-2 py-2 text-sm aria-selected:bg-background-2';
 
 const ConversationPaletteItem = observer(function ConversationPaletteItem({
   conversation,
@@ -36,9 +34,9 @@ const ConversationPaletteItem = observer(function ConversationPaletteItem({
   );
   return (
     <Command.Item value={value} onSelect={onSelect} className={PALETTE_ITEM_CLASS}>
-      <AgentIcon id={conversation.data.providerId} size={16} />
-      <span className="flex-1 truncate">{title}</span>
-      <AgentStatus status={conversation.indicatorStatus} />
+      <AgentIcon id={conversation.data.providerId} size={16} className="shrink-0" />
+      <span className="min-w-0 flex-1 truncate">{title}</span>
+      <ConversationStateGlyph status={conversation.indicatorStatus} className="flex shrink-0" />
     </Command.Item>
   );
 });
@@ -68,8 +66,8 @@ function ConversationPaletteProviderRow({
   }
   return (
     <Command.Item value={value} onSelect={handleSelect} className={PALETTE_ITEM_CLASS}>
-      <MessageSquare size={14} className="shrink-0 text-foreground/40" />
-      <span className="flex-1 truncate">{item.title}</span>
+      <MessageSquare className="size-4 shrink-0 text-foreground-passive" aria-hidden />
+      <span className="min-w-0 flex-1 truncate">{item.title}</span>
     </Command.Item>
   );
 }

@@ -20,7 +20,7 @@ function agent(name: string, overrides: Partial<AnnouncedAgent> = {}): Announced
 }
 
 describe('announcementText', () => {
-  it('says what a finished agent did, from its completion synopsis', () => {
+  it('leads with the task, then says what the agent did, from its completion synopsis', () => {
     expect(
       announcementText([
         agent('Kilo', {
@@ -30,8 +30,74 @@ describe('announcementText', () => {
         }),
       ])
     ).toBe(
-      'Kilo researched TTS models across three areas: naturalness, latency, and multilingual support.'
+      'TTS research is finished. Kilo researched TTS models across three areas: naturalness, latency, and multilingual support.'
     );
+  });
+
+  it('names the agent as a handle when the synopsis is not past tense', () => {
+    expect(
+      announcementText([
+        agent('Kilo', { taskName: 'TTS research', completionSummary: 'TTS model comparison' }),
+      ])
+    ).toBe('TTS research is finished, on Kilo: TTS model comparison.');
+  });
+
+  it('does not double a title the synopsis already says', () => {
+    expect(
+      announcementText([
+        agent('Kilo', {
+          taskName: 'Flaky login test',
+          completionSummary: 'fixed the flaky login test',
+        }),
+      ])
+    ).toBe('Kilo fixed the flaky login test.');
+  });
+
+  it('leads one waiting agent with its task, and keeps several in the compact form', () => {
+    const atlas = agent('Atlas', {
+      status: 'awaiting-input',
+      notificationType: 'permission_prompt',
+      riskLevel: 'high',
+      taskName: 'Login fix',
+    });
+    expect(announcementText([atlas])).toBe(
+      'Login fix needs permission for something risky, on Atlas.'
+    );
+    expect(
+      announcementText([
+        atlas,
+        agent('Bravo', {
+          status: 'awaiting-input',
+          notificationType: 'idle_prompt',
+          taskName: 'Docs pass',
+        }),
+      ])
+    ).toBe('Atlas needs permission for something risky, Bravo needs you.');
+  });
+
+  it('ends with one offer when asked and exactly one agent finished', () => {
+    const kilo = agent('Kilo', {
+      taskName: 'TTS research',
+      completionSummary: 'TTS model comparison',
+    });
+    expect(announcementText([kilo], { offer: true })).toBe(
+      'TTS research is finished, on Kilo: TTS model comparison. Want to see it?'
+    );
+    expect(announcementText([kilo], { offer: false })).toBe(
+      'TTS research is finished, on Kilo: TTS model comparison.'
+    );
+    expect(announcementText([kilo])).not.toContain('Want to see it?');
+    // Two finished agents: no single thing to show.
+    expect(announcementText([kilo, agent('Zulu')], { offer: true })).not.toContain(
+      'Want to see it?'
+    );
+    // Past the count collapse there is no offer either.
+    expect(
+      announcementText(
+        ['A', 'B', 'C', 'D'].map((name) => agent(name)),
+        { offer: true }
+      )
+    ).toBe('4 agents need you.');
   });
 
   it('says where a finished agent reported its app running', () => {

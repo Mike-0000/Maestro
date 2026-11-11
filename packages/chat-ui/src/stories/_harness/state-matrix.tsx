@@ -18,7 +18,7 @@ import type {
   TranscriptTurn,
 } from '@/model';
 import { createChatState } from '@/state/chat-state';
-import { storyViewport } from './chat-host.css';
+import { storyRowLabel, storyViewport } from './chat-host.css';
 
 export type MatrixStatus = ToolStatus;
 
@@ -90,17 +90,7 @@ function MatrixRows(props: {
       <For each={props.rows}>
         {(row) => (
           <div>
-            <div
-              style={{
-                'font-size': '11px',
-                'font-family': 'monospace',
-                color: '#888',
-                'margin-bottom': '4px',
-                'padding-left': '4px',
-              }}
-            >
-              {row.label}
-            </div>
+            <div class={storyRowLabel}>{row.label}</div>
             <div
               class={storyViewport}
               style={{ width: `${props.width}px`, height: `${props.rowHeight}px` }}

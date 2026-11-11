@@ -1,5 +1,5 @@
 import { observable, runInAction } from 'mobx';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { taskManagerStoreToken } from '@core/features/tasks/contributions/browser/project-store-tokens';
 import type { WorkbenchSidebarState } from '@core/features/workbench/contributions/mementos';
 import type { MementoHandle } from '@core/primitives/mementos/browser';
@@ -18,6 +18,20 @@ vi.mock('@core/features/conversations/browser/acp/acp-chat-store', () => ({
 vi.mock('@core/features/conversations/browser/acp/acp-chat-panel', () => ({
   AcpChatPanel: () => null,
 }));
+
+/** Each task's agents, as its conversations report them: status and whether it was looked at. */
+const taskAgents = vi.hoisted(() => new Map<string, { status: string; seen: boolean }[]>());
+
+vi.mock('@core/features/conversations/api/browser/conversation-selectors', () => ({
+  getConversationsForTask: (taskId: string) => {
+    const agents = taskAgents.get(taskId);
+    return agents ? { conversations: new Map(agents.map((agent, i) => [`c${i}`, agent])) } : null;
+  },
+}));
+
+function setAgent(taskId: string, status: string, seen = false): void {
+  taskAgents.set(taskId, [{ status, seen }]);
+}
 
 function projectManager(projects: { id: string; createdAt: string }[]): SidebarProjectManager {
   return {
@@ -289,5 +303,127 @@ describe('SidebarStore project ordering', () => {
     ]);
     expect(store.visibleTaskIdsForProject('project-1')).toEqual([]);
     expect(store.sidebarRows).toEqual([{ kind: 'project', projectId: 'project-1' }]);
+  });
+});
+
+describe('SidebarStore task ordering', () => {
+  afterEach(() => taskAgents.clear());
+
+  // task-old is the older task: created first and last touched first.
+  function store(sortBy: WorkbenchSidebarState['taskSortBy']): SidebarStore {
+    const sidebar = new SidebarStore(
+      projectManagerWithTasks([
+        {
+          id: 'project-1',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          taskIds: ['task-old', 'task-new'],
+        },
+      ])
+    );
+    sidebar.attachMemento(
+      mementoHandle({
+        version: '1',
+        expandedProjectIds: ['project-1'],
+        projectOrder: [],
+        taskOrderByProject: {},
+        taskSortBy: sortBy,
+      })
+    );
+    return sidebar;
+  }
+
+  for (const sortBy of ['created-at', 'updated-at'] as const) {
+    it(`puts a task waiting for input above a newer idle one (${sortBy})`, () => {
+      expect(store(sortBy).visibleTaskIdsForProject('project-1')).toEqual(['task-new', 'task-old']);
+
+      setAgent('task-old', 'awaiting-input');
+      setAgent('task-new', 'idle');
+      const sidebar = store(sortBy);
+      expect(sidebar.visibleTaskIdsForProject('project-1')).toEqual(['task-old', 'task-new']);
+      expect(sidebar.visibleTaskEntries.map((entry) => entry.taskId)).toEqual([
+        'task-old',
+        'task-new',
+      ]);
+    });
+  }
+
+  it('keeps the sort key among tasks that both wait for input', () => {
+    setAgent('task-old', 'awaiting-input');
+    setAgent('task-new', 'awaiting-input');
+    expect(store('created-at').visibleTaskIdsForProject('project-1')).toEqual([
+      'task-new',
+      'task-old',
+    ]);
+  });
+
+  // The ownership line's rule: waiting stays yours once seen; a finish or failure until seen.
+  it('keeps a seen task that waits for input first', () => {
+    setAgent('task-old', 'awaiting-input', true);
+    expect(store('created-at').visibleTaskIdsForProject('project-1')).toEqual([
+      'task-old',
+      'task-new',
+    ]);
+  });
+
+  it('puts an unseen finish or failure first, and drops it back once seen', () => {
+    for (const status of ['completed', 'error']) {
+      setAgent('task-old', status, false);
+      expect(store('created-at').visibleTaskIdsForProject('project-1')).toEqual([
+        'task-old',
+        'task-new',
+      ]);
+      setAgent('task-old', status, true);
+      expect(store('created-at').visibleTaskIdsForProject('project-1')).toEqual([
+        'task-new',
+        'task-old',
+      ]);
+    }
+  });
+
+  it('does not put a working task first', () => {
+    setAgent('task-old', 'working');
+    expect(store('created-at').visibleTaskIdsForProject('project-1')).toEqual([
+      'task-new',
+      'task-old',
+    ]);
+  });
+
+  it('keeps a hand-dragged order over needs-you-first, but lifts a new task that is yours', () => {
+    const manager = projectManagerWithTasks([
+      {
+        id: 'project-1',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        taskIds: ['task-a', 'task-b', 'task-c', 'task-d'],
+      },
+    ]);
+    const sidebar = new SidebarStore(manager);
+    sidebar.setTaskOrder('project-1', ['task-a', 'task-b']);
+    setAgent('task-b', 'awaiting-input');
+    setAgent('task-c', 'awaiting-input');
+    // task-c and task-d are not in the manual order: they come first, yours before the rest;
+    // task-a and task-b keep their dragged order although task-b waits for input.
+    expect(sidebar.visibleTaskIdsForProject('project-1')).toEqual([
+      'task-c',
+      'task-d',
+      'task-a',
+      'task-b',
+    ]);
+  });
+
+  it('puts a waiting task first among pinned tasks', () => {
+    const manager = projectManagerWithTasks([
+      { id: 'project-1', createdAt: '2026-01-01T00:00:00.000Z', taskIds: ['task-old', 'task-new'] },
+    ]);
+    const project = manager.projects.get('project-1')!;
+    const context = project.context?.kind === 'available' ? project.context.context : undefined;
+    for (const pinned of context!.get(taskManagerStoreToken).tasks.values()) {
+      pinned.data.isPinned = true;
+    }
+    setAgent('task-old', 'awaiting-input', true);
+
+    expect(new SidebarStore(manager).pinnedSidebarEntries.map((entry) => entry.taskId)).toEqual([
+      'task-old',
+      'task-new',
+    ]);
   });
 });

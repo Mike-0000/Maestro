@@ -15,7 +15,7 @@ export const row = style({
   alignItems: 'center',
   gap: '0.5rem',
   border: 0,
-  borderRadius: '6px',
+  borderRadius: tokenVars.radiusSm,
   backgroundColor: 'transparent',
   padding: '0 8px 0 var(--file-tree-row-indent, 4px)',
   color: vars.foreground,
@@ -27,23 +27,25 @@ export const row = style({
     '&:not(:disabled)': {
       cursor: 'default',
     },
+    // Rows lift one surface step on hover and two when selected; the open file
+    // keeps the hover step. Keyboard focus draws a thin inset accent ring.
     '&:not(:disabled):hover': {
-      backgroundColor: vars.background1,
+      backgroundColor: vars.surfaceHover,
     },
     '&:not(:disabled):focus-visible': {
-      boxShadow: `inset 0 0 0 1px ${vars.borderFocus}`,
+      boxShadow: `inset 0 0 0 1px ${vars.focusRing}`,
     },
     '&[data-opened]': {
-      backgroundColor: vars.background1,
+      backgroundColor: vars.surfaceHover,
     },
     '&[data-opened]:hover': {
-      backgroundColor: vars.background1,
+      backgroundColor: vars.surfaceHover,
     },
     '&[data-selected]': {
-      backgroundColor: vars.background2,
+      backgroundColor: vars.surfaceSelected,
     },
     '&[data-selected]:hover': {
-      backgroundColor: vars.background2,
+      backgroundColor: vars.surfaceSelected,
     },
     '&[data-drop-target]': {
       backgroundColor: vars.selection,
@@ -78,7 +80,7 @@ export const name = style({
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
-  fontSize: '13px',
+  fontSize: tokenVars.textSm,
   selectors: {
     '&[data-tone="success"]': {
       color: vars.foregroundSuccess,

@@ -11,10 +11,11 @@ export function DraggableTab({ id, children }: { id: string; children: React.Rea
         setDragRef(el);
         setDropRef(el);
       }}
+      // Tabs hang from the bottom of the strip so the active one meets the content below.
       style={{
         display: 'flex',
         height: '100%',
-        alignItems: 'center',
+        alignItems: 'flex-end',
         position: 'relative',
       }}
       {...attributes}
@@ -27,7 +28,9 @@ export function DraggableTab({ id, children }: { id: string; children: React.Rea
 }
 
 function DropIndicator() {
-  return <div className="pointer-events-none absolute inset-y-1 left-0 z-10 w-0.5 bg-foreground" />;
+  return (
+    <div className="pointer-events-none absolute top-2.5 bottom-1.5 left-0 z-10 w-0.5 rounded-full bg-foreground" />
+  );
 }
 
 export function PaneDropZone({ paneId }: { paneId: string }) {

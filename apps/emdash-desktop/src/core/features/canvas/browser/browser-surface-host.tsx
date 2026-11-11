@@ -69,7 +69,8 @@ const HostedBrowser = observer(function HostedBrowser({ browserId }: { browserId
     <div
       ref={ref}
       data-browser-surface={browserId}
-      className="absolute overflow-hidden rounded-b-xl bg-background"
+      // Rounded like the bottom of the window it sits in (`rounded-lg`).
+      className="absolute overflow-hidden rounded-b-lg bg-background"
       style={style}
       onPointerDownCapture={() => {
         host.touch(browserId);
