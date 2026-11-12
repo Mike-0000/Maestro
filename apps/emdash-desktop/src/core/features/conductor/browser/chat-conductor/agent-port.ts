@@ -243,6 +243,12 @@ export function createTaskAgentPort(canvas: CanvasStore, taskId: string): TaskAg
       return NO_OUTPUT_NOTE.test(output.trim()) ? '' : output;
     },
 
+    async readTranscript(chatId) {
+      // Every line there is: the whole chat transcript, or all of the terminal's scrollback.
+      const output = await readAgentOutput(need(chatId), Number.MAX_SAFE_INTEGER);
+      return NO_OUTPUT_NOTE.test(output.trim()) ? '' : output;
+    },
+
     async finishedReport(chatId): Promise<CompletionReport | null> {
       const entry = find(chatId);
       if (!entry) return null;

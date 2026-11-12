@@ -57,6 +57,18 @@ describe('chat conductor voice', () => {
     );
   });
 
+  it('tells the conductor it can read further back and search a chat', () => {
+    const prompt = CHAT_CONDUCTOR_SYSTEM_PROMPT;
+    expect(prompt).toContain('You are shown only the end of each chat');
+    expect(prompt).toContain('search_chat finds a string anywhere in a chat');
+    expect(prompt).toContain('before you guess or ask the developer what was said');
+    const tools = chatConductorToolDefinitions();
+    const read = tools.find((tool) => tool.name === 'read_chat');
+    expect(read?.description).toContain('there is no limit');
+    const search = tools.find((tool) => tool.name === 'search_chat');
+    expect(search?.description).toContain('The numbers are the ones read_chat uses');
+  });
+
   it('holds no date or per-user value, so the prompt stays byte-stable', () => {
     const prompt = CHAT_CONDUCTOR_SYSTEM_PROMPT;
     expect(prompt).not.toMatch(/\b20\d\d-\d\d-\d\d\b/);

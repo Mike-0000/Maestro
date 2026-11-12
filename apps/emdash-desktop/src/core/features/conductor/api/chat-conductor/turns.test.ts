@@ -72,6 +72,7 @@ describe('chat conductor tools', () => {
       'list_browsers',
       'close_browser',
       'post_digest',
+      'search_chat',
     ]);
     for (const tool of tools) {
       expect(tool.input_schema.type).toBe('object');
@@ -100,6 +101,21 @@ describe('chat conductor tools', () => {
       chatConductorToolSchemas.set_status.safeParse({ state: 'needs_you', headline: 'Pick one' })
         .success
     ).toBe(true);
+    // A read takes any number of lines: there is no upper limit to raise later.
+    const read = chatConductorToolSchemas.read_chat;
+    expect(read.safeParse({}).success).toBe(true);
+    expect(read.safeParse({ lines: 1_000_000 }).success).toBe(true);
+    expect(read.safeParse({ chat: 'Bravo', from: 40, to: 90 }).success).toBe(true);
+    expect(read.safeParse({ lines: 0 }).success).toBe(false);
+    expect(read.safeParse({ from: 0 }).success).toBe(false);
+    const search = chatConductorToolSchemas.search_chat;
+    expect(search.safeParse({ query: 'migration' }).success).toBe(true);
+    expect(search.safeParse({ chat: 'Bravo', query: 'x', context: 0, matches: 500 }).success).toBe(
+      true
+    );
+    expect(search.safeParse({ query: '' }).success).toBe(false);
+    expect(search.safeParse({}).success).toBe(false);
+    expect(CHAT_ACTING_TOOLS.has('search_chat')).toBe(false);
     expect(chatConductorToolSchemas.restart_agent.safeParse({}).success).toBe(true);
     expect(
       chatConductorToolSchemas.restart_agent.safeParse({ claude_account: 'Work', prompt: 'Go on.' })
@@ -452,7 +468,14 @@ describe('storeChatHistory', () => {
 
 describe('gateChatTool', () => {
   const acting = [...CHAT_ACTING_TOOLS];
-  const passive = ['read_chat', 'list_chats', 'update_notes', 'set_status', 'list_accounts'];
+  const passive = [
+    'read_chat',
+    'search_chat',
+    'list_chats',
+    'update_notes',
+    'set_status',
+    'list_accounts',
+  ];
 
   it('always allows tools that do not act', () => {
     for (const tool of passive) {
