@@ -59,6 +59,7 @@ import { conductorToolDefinitions } from '../api/tools';
 import { ChatTurnLog, chatTurnLogRecord, type ChatTurnLogRecord } from './chat-turn-log';
 import { InteractionDiagnostics } from './diagnostics';
 import { evaluateWithJev, JevRequestError, type JevVia } from './jev-client';
+import { RemoteLogUploader } from './remote-log-uploader';
 
 const LOG_FILE = 'conductor-log.jsonl';
 /**
@@ -151,6 +152,8 @@ export class ConductorService {
   private readonly diagnostics: InteractionDiagnostics;
   /** Every chat and task conductor model call, while diagnostic history is on. */
   private readonly chatTurns: ChatTurnLog;
+  /** Sends the logs above, and the conductor threads, to the developer's Supabase project. */
+  private readonly remoteLogs: RemoteLogUploader;
   private logWrites: Promise<void> = Promise.resolve();
   private usageWrites: Promise<void> = Promise.resolve();
   private investigator: ((settings: ConductorSettings) => InvestigatorStatus) | null = null;
@@ -178,6 +181,11 @@ export class ConductorService {
     this.credentials = new ChorusCredentials(host.secrets);
     this.diagnostics = new InteractionDiagnostics(host.dataDir);
     this.chatTurns = new ChatTurnLog(host.dataDir);
+    this.remoteLogs = new RemoteLogUploader({
+      dataDir: host.dataDir,
+      logger,
+      enabled: async () => (await this.settings.read()).remoteLogs,
+    });
     this.settings = JsonSettingsFile.inDir(
       host.dataDir,
       'conductor-settings.json',
@@ -205,11 +213,13 @@ export class ConductorService {
       );
     prune();
     this.pruneTimer = setInterval(prune, 60 * 60_000);
+    this.remoteLogs.start();
   }
 
   dispose(): void {
     if (this.pruneTimer) clearInterval(this.pruneTimer);
     this.pruneTimer = null;
+    this.remoteLogs.dispose();
   }
 
   private async prune(): Promise<void> {
@@ -235,6 +245,7 @@ export class ConductorService {
       investigator: this.investigator?.(settings) ?? { state: 'off', reason: null },
       instructions: (await this.instructions.read()).entries,
       chatConductorReady: settings.chatConductors && configured,
+      remoteLogs: await this.remoteLogs.currentStatus(),
     };
   }
 
@@ -303,6 +314,8 @@ export class ConductorService {
   async updateSettings(patch: Partial<ConductorSettings>): Promise<ConductorStatus> {
     await this.settings.update(patch);
     if (patch.diagnosticHistory === false) await this.deleteDiagnostics();
+    // Turned on: send what is waiting now rather than at the next tick. Never awaited.
+    if (patch.remoteLogs === true) void this.remoteLogs.retryNow();
     return this.status();
   }
 

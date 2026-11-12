@@ -844,6 +844,29 @@ describe('ConductorService.runChatTurn', () => {
     expect(await conductor.readChatTurnLog(10)).toEqual([]);
   });
 
+  it('turns remote logs on by default and reports whether a project is configured', async () => {
+    const conductor = service();
+    const before = await conductor.status();
+    expect(before.settings.remoteLogs).toBe(true);
+    expect(before.remoteLogs).toMatchObject({
+      configured: false,
+      project: null,
+      configPath: join(dataDir, 'remote-logs.json'),
+    });
+    writeFileSync(
+      join(dataDir, 'remote-logs.json'),
+      JSON.stringify({
+        url: 'https://abc.supabase.co',
+        anonKey: `sb_publishable_${'k'.repeat(30)}`,
+      })
+    );
+    expect((await conductor.status()).remoteLogs).toMatchObject({
+      configured: true,
+      project: 'abc.supabase.co',
+    });
+    expect((await conductor.updateSettings({ remoteLogs: false })).settings.remoteLogs).toBe(false);
+  });
+
   it('loads a settings file written before chat conductors existed without resetting it', async () => {
     writeFileSync(
       join(dataDir, 'conductor-settings.json'),
