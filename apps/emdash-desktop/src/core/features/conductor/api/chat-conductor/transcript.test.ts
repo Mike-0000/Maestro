@@ -26,7 +26,6 @@ describe('transcriptWindow', () => {
     expect(window).toMatchObject({ total: 500, first: 421, last: 500 });
     expect(window.lines).toHaveLength(TRANSCRIPT_DEFAULT_LINES);
     expect(window.lines[0]).toBe('row 421');
-    expect(window.left).toBeUndefined();
     expect(describeWindow(window)).toBe(
       'Lines 421 to 500 of 500. Lines 1 to 420 are earlier: ask for more lines, or a range.'
     );
@@ -46,7 +45,6 @@ describe('transcriptWindow', () => {
     const window = transcriptWindow(lines, { lines: 12_000 });
     expect(window).toMatchObject({ first: 3_001, last: 15_000 });
     expect(window.lines).toHaveLength(12_000);
-    expect(window.left).toBeUndefined();
 
     const more = transcriptWindow(lines, { lines: 1_000_000_000 });
     expect(more).toMatchObject({ first: 1, last: 15_000 });
@@ -79,7 +77,6 @@ describe('transcriptWindow', () => {
     const window = transcriptWindow(rows(100), { from: 90, to: 500 });
     expect(window).toMatchObject({ total: 100, first: 90, last: 100 });
     expect(window.lines).toHaveLength(11);
-    expect(window.left).toBeUndefined();
   });
 
   it('clamps a range that reaches back past the start of the transcript', () => {
@@ -106,22 +103,15 @@ describe('transcriptWindow', () => {
     expect(describeWindow(transcriptWindow(['only'], { from: 3 }))).toContain('has 1 line,');
   });
 
-  it('keeps the newest lines of a tail too large for one result, and names what is left', () => {
-    // Each line is 10 characters and a line break: 100 characters hold 9 of them.
-    const lines = Array.from({ length: 50 }, (_, index) => `line ${String(index + 1).padStart(5)}`);
-    const window = transcriptWindow(lines, { lines: 40 }, 100);
-    expect(window).toMatchObject({ first: 42, last: 50, left: { first: 11, last: 41 } });
-    expect(describeWindow(window)).toBe(
-      'Lines 42 to 50 of 50. Lines 11 to 41 did not fit in one result: read them with from and to.'
-    );
-    // Reading what is left, part by part, reaches every line that was asked for.
-    const next = transcriptWindow(lines, { from: 11, to: 41 }, 100);
-    expect(next).toMatchObject({ first: 11, last: 19, left: { first: 20, last: 41 } });
-  });
-
-  it('always shows at least one line, however long it is', () => {
-    const window = transcriptWindow(['x'.repeat(500), 'y'.repeat(500)], { lines: 2 }, 100);
-    expect(window).toMatchObject({ first: 2, last: 2, left: { first: 1, last: 1 } });
+  it('has no cap on the size of a result: every long line asked for comes back', () => {
+    // 2,000 lines of 1,000 characters: 2 MB in one read.
+    const lines = Array.from({ length: 2_000 }, (_, index) => `${index + 1} ${'x'.repeat(995)}`);
+    const window = transcriptWindow(lines, { lines: 2_000 });
+    expect(window).toMatchObject({ first: 1, last: 2_000 });
+    expect(windowText(window).length).toBeGreaterThan(2_000_000);
+    expect(describeWindow(window)).toBe('Lines 1 to 2000 of 2000.');
+    const range = transcriptWindow(lines, { from: 500, to: 1_999 });
+    expect(range.lines).toHaveLength(1_500);
   });
 });
 
@@ -201,10 +191,10 @@ describe('searchTranscript', () => {
     expect(all.shown).toHaveLength(100);
   });
 
-  it('shows fewer matches when they would not fit in one result', () => {
-    const lines = Array.from({ length: 40 }, () => 'needle 123');
-    const search = searchTranscript(lines, { query: 'needle', context: 0, matches: 40 }, 55);
-    expect(search.found).toHaveLength(40);
-    expect(search.shown).toEqual([36, 37, 38, 39, 40]);
+  it('shows every match asked for, however large the result', () => {
+    const lines = Array.from({ length: 5_000 }, (_, index) => `needle ${index} ${'y'.repeat(500)}`);
+    const search = searchTranscript(lines, { query: 'needle', context: 0, matches: 5_000 });
+    expect(search.shown).toHaveLength(5_000);
+    expect(searchText(search).length).toBeGreaterThan(2_500_000);
   });
 });

@@ -3,15 +3,12 @@
  * string (`search_chat`). Lines are numbered from 1 at the oldest line that can be read, the same
  * way in both, so a search hit can be opened with a window around its number.
  *
- * Neither puts a limit on how many lines may be asked for. One result is bounded by its size in
- * characters instead, because a result larger than the model's context fails the whole turn; what
- * was left out is always named, so the rest can be read with another call.
+ * Neither puts a limit on how much is read: a window gives every line asked for, and a search
+ * shows every match asked for, however large the result.
  */
 
 /** Lines a read gives when none are asked for: about a screenful. */
 export const TRANSCRIPT_DEFAULT_LINES = 80;
-/** Characters one result may hold (roughly 50,000 tokens). */
-export const TRANSCRIPT_RESULT_CHARS = 200_000;
 export const SEARCH_DEFAULT_CONTEXT = 3;
 export const SEARCH_DEFAULT_MATCHES = 20;
 
@@ -31,8 +28,6 @@ export type TranscriptWindow = {
   readonly first: number;
   readonly last: number;
   readonly lines: readonly string[];
-  /** The lines asked for that did not fit in one result. */
-  readonly left?: { readonly first: number; readonly last: number };
   /** Why nothing is shown, when the window lies outside the transcript. */
   readonly note?: string;
 };
@@ -49,13 +44,11 @@ function count(total: number): string {
 /**
  * The window of `lines` that was asked for. With neither `from` nor `to` it is the end of the
  * transcript; a range is clamped to the lines there are, and one that lies wholly outside them
- * shows nothing and says how long the transcript is. When the window is larger than `maxChars`,
- * the end of a tail or the start of a range is kept, and `left` names the rest.
+ * shows nothing and says how long the transcript is.
  */
 export function transcriptWindow(
   lines: readonly string[],
-  input: TranscriptWindowInput = {},
-  maxChars: number = TRANSCRIPT_RESULT_CHARS
+  input: TranscriptWindowInput = {}
 ): TranscriptWindow {
   const total = lines.length;
   const nothing = (note: string): TranscriptWindow => ({
@@ -90,29 +83,7 @@ export function transcriptWindow(
   if (last < 1) return nothing(`The transcript starts at line 1. It has ${count(total)}.`);
   first = Math.max(1, first);
   last = Math.min(total, last);
-
-  // Keep what fits: the newest lines of a tail, the first lines of a range.
-  let used = 0;
-  let kept = 0;
-  for (let step = 0; step < last - first + 1; step++) {
-    const index = tail ? last - 1 - step : first - 1 + step;
-    const size = (lines[index]?.length ?? 0) + 1;
-    if (kept > 0 && used + size > maxChars) break;
-    used += size;
-    kept++;
-  }
-  const whole = kept === last - first + 1;
-  const shownFirst = tail ? last - kept + 1 : first;
-  const shownLast = tail ? last : first + kept - 1;
-  return {
-    total,
-    first: shownFirst,
-    last: shownLast,
-    lines: lines.slice(shownFirst - 1, shownLast),
-    ...(whole
-      ? {}
-      : { left: tail ? { first, last: shownFirst - 1 } : { first: shownLast + 1, last } }),
-  };
+  return { total, first, last, lines: lines.slice(first - 1, last) };
 }
 
 function numbered(lines: readonly string[], first: number, mark?: ReadonlySet<number>): string[] {
@@ -130,11 +101,7 @@ export function describeWindow(window: TranscriptWindow): string {
       ? `Line ${window.first}`
       : `Lines ${window.first} to ${window.last}`;
   const parts = [`${shown} of ${window.total}.`];
-  if (window.left) {
-    parts.push(
-      `Lines ${window.left.first} to ${window.left.last} did not fit in one result: read them with from and to.`
-    );
-  } else if (window.first > 1) {
+  if (window.first > 1) {
     parts.push(`Lines 1 to ${window.first - 1} are earlier: ask for more lines, or a range.`);
   }
   return parts.join(' ');
@@ -165,13 +132,12 @@ export type TranscriptSearch = {
 
 /**
  * The lines that hold `query`, compared without regard to case, with the lines around them. The
- * newest matches are shown when there are more than asked for, and fewer still when they would
- * not fit in `maxChars`; `found` always holds every match, so an older one can be read by number.
+ * newest matches are shown when there are more than asked for; `found` always holds every match,
+ * so an older one can be read by number.
  */
 export function searchTranscript(
   lines: readonly string[],
-  input: TranscriptSearchInput,
-  maxChars: number = TRANSCRIPT_RESULT_CHARS
+  input: TranscriptSearchInput
 ): TranscriptSearch {
   const total = lines.length;
   const needle = input.query.trim().toLowerCase();
@@ -183,22 +149,8 @@ export function searchTranscript(
       if (line.toLowerCase().includes(needle)) found.push(index + 1);
     });
   }
-  // Newest first, until the count or the room runs out.
-  const shown: number[] = [];
-  let used = 0;
-  let covered = total + 1;
-  for (let at = found.length - 1; at >= 0 && shown.length < wanted; at--) {
-    const match = found[at];
-    if (match === undefined) continue;
-    const first = Math.max(1, match - context);
-    const last = Math.min(total, match + context, covered - 1);
-    let size = 0;
-    for (let number = first; number <= last; number++) size += (lines[number - 1]?.length ?? 0) + 1;
-    if (shown.length > 0 && used + size > maxChars) break;
-    used += size;
-    covered = first;
-    shown.unshift(match);
-  }
+  // The newest matches, as many as were asked for.
+  const shown = found.slice(Math.max(0, found.length - wanted));
   const blocks: { first: number; last: number }[] = [];
   for (const match of shown) {
     const first = Math.max(1, match - context);

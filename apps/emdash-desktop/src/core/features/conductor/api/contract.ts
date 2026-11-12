@@ -131,6 +131,12 @@ export const conductorSettingsSchema = z.object({
    * falls back to the rules.
    */
   conductorDecidesAttention: z.boolean(),
+  /**
+   * Remote logs: the conductor's logs and threads on this computer are also sent, in full with
+   * secrets and tokens redacted, to the developer's own Supabase project, named in
+   * `remote-logs.json` in the data folder. Nothing is sent while that file names no project.
+   */
+  remoteLogs: z.boolean(),
 });
 export type ConductorSettings = z.infer<typeof conductorSettingsSchema>;
 
@@ -167,6 +173,7 @@ export const DEFAULT_CONDUCTOR_SETTINGS: ConductorSettings = {
   chatConductorEffort: 'medium',
   chatConductorAutonomy: true,
   conductorDecidesAttention: true,
+  remoteLogs: true,
 };
 
 /**
@@ -194,6 +201,21 @@ export const investigatorStatusSchema = z.object({
 });
 export type InvestigatorStatus = z.infer<typeof investigatorStatusSchema>;
 
+/** Where remote log upload stands; see `RemoteLogUploader`. */
+export const remoteLogStatusSchema = z.object({
+  /** `remote-logs.json` names a project and a usable key. */
+  configured: z.boolean(),
+  /** Where that file is, so the developer can fill it in. */
+  configPath: z.string(),
+  /** The project's host, when configured. */
+  project: z.string().nullable(),
+  lastUploadAt: z.string().nullable(),
+  lastError: z.string().nullable(),
+  /** Records sent since the app started. */
+  uploaded: z.number(),
+});
+export type RemoteLogStatus = z.infer<typeof remoteLogStatusSchema>;
+
 export const conductorStatusSchema = z.object({
   configured: z.boolean(),
   /** Jev is enabled and a key for its source is available. */
@@ -214,6 +236,11 @@ export const conductorStatusSchema = z.object({
    * fixtures build a partial status, so read it as `status?.chatConductorReady ?? false`.
    */
   chatConductorReady: z.boolean(),
+  /**
+   * Remote log upload. Test fixtures build a partial status, so read it as
+   * `status?.remoteLogs`.
+   */
+  remoteLogs: remoteLogStatusSchema,
 });
 export type ConductorStatus = z.infer<typeof conductorStatusSchema>;
 
