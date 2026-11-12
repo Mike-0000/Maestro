@@ -31,23 +31,33 @@ Delete them by hand in the Supabase dashboard when they are no longer wanted.
 
 ## Keys and access
 
-- The app holds only the project's **anon** or **publishable** key, read from `remote-logs.json`
-  in the data folder. That file is never in the repository.
+- The app holds only the project's **anon** or **publishable** key. It is built into each
+  installer by the push script from `%LOCALAPPDATA%\Chorus\ReleaseConfig\remote-logs.json` on the
+  release machine (as `MAIN_VITE_REMOTE_LOGS_URL` and `MAIN_VITE_REMOTE_LOGS_KEY`, main process
+  only). Neither value is ever in the repository.
+- A `remote-logs.json` in a computer's data folder (`%APPDATA%\chorus\chorus\`) overrides the
+  built-in project on that computer; a placeholder or broken file is ignored.
 - Row level security is on for every table, with one policy: insert. Select, update and delete are
   revoked from `anon` and `authenticated`, so the app's key can add rows and can never read them.
-- The app refuses a `sb_secret_…` key or a JWT whose role is not `anon`: the service-role key never
-  goes in the app.
+- Anyone who pulls the key out of an installer can add rows, but nothing more. Each row is limited
+  to 256 KiB of record and short identifying fields
+  (`supabase/migrations/20261112010000_maestro_remote_logs_row_limit.sql`); the app sends a record
+  over 200 KB as a marked stub with its start, so a real record is never refused. If the key is
+  ever abused, rotate it in Supabase, update the release file, and push.
+- The app and the push script both refuse a `sb_secret_…` key or a JWT whose role is not `anon`:
+  the service-role key never goes in the app.
 - Read the rows in the Supabase dashboard (Table Editor or SQL Editor), or with the service-role
   key from a script on your own machine. Keep that key out of this repository.
 
 ## Setting it up
 
 1. Create a free project at <https://supabase.com/dashboard>.
-2. In that project, open **SQL Editor**, paste the whole of
-   `supabase/migrations/20261112000000_maestro_remote_logs.sql`, and run it. It is safe to run again.
+2. In that project, open **SQL Editor** and run, in order, the files in `supabase/migrations/`.
+   They are safe to run again.
 3. In **Project Settings → API**, copy the **Project URL** and the **anon public** (or
    **publishable**) key.
-4. Open `%APPDATA%\chorus\chorus\remote-logs.json` and replace the two placeholder values:
+4. On the machine that runs `/push`, save them as
+   `%LOCALAPPDATA%\Chorus\ReleaseConfig\remote-logs.json`:
 
    ```json
    {
@@ -56,8 +66,11 @@ Delete them by hand in the Supabase dashboard when they are no longer wanted.
    }
    ```
 
-Maestro reads the file on its next pass, within a minute; no restart is needed. **Settings → Voice
-& Conductor → Troubleshooting** shows where the logs go, the last upload, and any error.
+Every installer pushed after that sends logs with no step on the computer that runs it. To point
+one computer elsewhere, put the same kind of file at `%APPDATA%\chorus\chorus\remote-logs.json`;
+Maestro reads it on its next pass, within a minute. **Settings → Voice & Conductor →
+Troubleshooting** shows where the logs go (and whether the project is built in), the last upload,
+and any error.
 
 ## How the upload works
 

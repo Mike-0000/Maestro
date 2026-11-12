@@ -874,6 +874,7 @@ describe('ConductorService.runChatTurn', () => {
     expect(before.settings.remoteLogs).toBe(true);
     expect(before.remoteLogs).toMatchObject({
       configured: false,
+      source: null,
       project: null,
       configPath: join(dataDir, 'remote-logs.json'),
     });

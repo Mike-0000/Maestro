@@ -12,10 +12,12 @@ import type { RemoteLogStatus } from '../api/contract';
  * the interaction trace, every chat and task conductor model call, and the conductor threads the
  * developer reads. Full text goes up, with secrets and tokens redacted once more on the way out.
  *
- * Nothing leaves the computer unless the setting is on and `remote-logs.json` in the data folder
- * names a project and its anon (publishable) key. That key may only insert (see the migration in
+ * Nothing leaves the computer unless the setting is on and a project is known: the one named in
+ * `remote-logs.json` in the data folder, or else the one built into the app (the push script sets
+ * `MAIN_VITE_REMOTE_LOGS_URL` and `MAIN_VITE_REMOTE_LOGS_KEY` from a file outside the repository,
+ * so neither is ever committed). Its anon (publishable) key may only insert (see the migrations in
  * `supabase/migrations`), so the app can never read back what it or anyone else sent. A secret or
- * service-role key in that file is refused.
+ * service-role key is refused, wherever it comes from.
  *
  * The local log files are rewritten on every append (old records are dropped by age and size), so
  * a byte offset would point at a different record later. What was sent is tracked per record
@@ -58,6 +60,12 @@ const THREAD_SOURCES = [
 export const REMOTE_LOG_THREADS_TABLE = 'maestro_conductor_threads';
 /** A thread file larger than this is skipped, as the thread store itself does. */
 const MAX_THREAD_BYTES = 4 * 1024 * 1024;
+/**
+ * The most one row's record may hold as JSON. The tables refuse rows over 256 KiB (see the
+ * row-limit migration); this stays well under it, since Postgres prints jsonb with extra spaces.
+ * A larger record is sent as its start, marked, rather than refused again on every pass.
+ */
+export const REMOTE_LOG_MAX_RECORD_BYTES = 200_000;
 
 const configSchema = z.object({ url: z.string(), anonKey: z.string() });
 export type RemoteLogConfig = z.infer<typeof configSchema>;
@@ -87,8 +95,19 @@ export type RemoteLogUploaderOptions = {
   fetch?: typeof fetch;
   /** Overrides reading Electron's app version (tests). */
   appVersion?: string | null;
+  /** Overrides the project built into the app (tests). */
+  builtIn?: RemoteLogConfig | null;
   now?: () => number;
 };
+
+/** The project built into this build of the app, if the push script gave it one. */
+export function builtInRemoteLogConfig(): RemoteLogConfig | null {
+  const env = import.meta.env as Record<string, string | undefined>;
+  return usableRemoteLogConfig({
+    url: env.MAIN_VITE_REMOTE_LOGS_URL ?? '',
+    anonKey: env.MAIN_VITE_REMOTE_LOGS_KEY ?? '',
+  });
+}
 
 function jwtRole(key: string): string | null {
   const payload = key.split('.')[1];
@@ -146,6 +165,27 @@ export function redactRecord(record: unknown): { value: unknown; text: string } 
   }
 }
 
+/** How much of an oversized record is kept: its JSON escaped again stays under the cap. */
+const OVERSIZED_HEAD_BYTES = 90_000;
+
+/**
+ * A record whose JSON is over `REMOTE_LOG_MAX_RECORD_BYTES` becomes a marked stub with the start of
+ * its JSON, so the row fits the table's limit; any other record is returned as it is.
+ */
+export function capRecord(redacted: { value: unknown; text: string }): {
+  value: unknown;
+  text: string;
+} {
+  const bytes = Buffer.byteLength(redacted.text);
+  if (bytes <= REMOTE_LOG_MAX_RECORD_BYTES) return redacted;
+  const value = {
+    oversized: true,
+    bytes,
+    head: Buffer.from(redacted.text).subarray(0, OVERSIZED_HEAD_BYTES).toString('utf8'),
+  };
+  return { value, text: JSON.stringify(value) };
+}
+
 function hashOf(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 32);
 }
@@ -187,6 +227,7 @@ export class RemoteLogUploader {
     this.status = {
       configured: false,
       configPath: join(options.dataDir, REMOTE_LOG_CONFIG_FILE),
+      source: null,
       project: null,
       lastUploadAt: null,
       lastError: null,
@@ -255,18 +296,23 @@ export class RemoteLogUploader {
     });
   }
 
+  /** The project in `remote-logs.json` when it names a usable one, else the built-in one. */
   private async config(): Promise<RemoteLogConfig | null> {
-    let config: RemoteLogConfig | null = null;
+    let fromFile: RemoteLogConfig | null = null;
     try {
-      config = usableRemoteLogConfig(
-        JSON.parse(await readFile(this.status.configPath, 'utf8')) as unknown
-      );
+      // A file saved by Windows PowerShell starts with a byte-order mark, which JSON refuses.
+      const raw = (await readFile(this.status.configPath, 'utf8')).replace(/^﻿/, '');
+      fromFile = usableRemoteLogConfig(JSON.parse(raw) as unknown);
     } catch {
-      config = null;
+      fromFile = null;
     }
+    const builtIn =
+      this.options.builtIn === undefined ? builtInRemoteLogConfig() : this.options.builtIn;
+    const config = fromFile ?? builtIn;
     this.status = {
       ...this.status,
       configured: config !== null,
+      source: fromFile ? 'file' : config ? 'built-in' : null,
       project: config ? new URL(config.url).host : null,
     };
     return config;
@@ -423,7 +469,7 @@ export class RemoteLogUploader {
       recordedAt: string | null
     ) => {
       // Secrets and tokens only: the text itself is what a review needs.
-      const { value, text } = redactRecord(record);
+      const { value, text } = capRecord(redactRecord(record));
       const hash = hashOf(text);
       if (scan.hashes.has(hash)) return;
       scan.hashes.add(hash);
