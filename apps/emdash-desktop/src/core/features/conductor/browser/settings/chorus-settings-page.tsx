@@ -109,15 +109,16 @@ const RemoteLogsStatus = observer(function RemoteLogsStatus() {
   const remote = conductor.status?.remoteLogs;
   if (!remote) return null;
   const on = conductor.settings?.remoteLogs ?? true;
+  const project = `${remote.project ?? 'your project'}${remote.source === 'built-in' ? ' (built into Maestro)' : ''}`;
   const text = !remote.configured
     ? `Nothing is sent yet: put your Supabase project URL and anon key in ${remote.configPath}.`
     : !on
-      ? `Off. Logs would go to ${remote.project ?? 'your project'}.`
+      ? `Off. Logs would go to ${project}.`
       : remote.lastError
-        ? `Sending to ${remote.project ?? 'your project'} failed, retrying: ${remote.lastError}`
+        ? `Sending to ${project} failed, retrying: ${remote.lastError}`
         : remote.lastUploadAt
-          ? `Sending to ${remote.project ?? 'your project'}. Last upload ${new Date(remote.lastUploadAt).toLocaleString()}, ${remote.uploaded} records since Maestro started.`
-          : `Sending to ${remote.project ?? 'your project'}; the first upload runs within a minute.`;
+          ? `Sending to ${project}. Last upload ${new Date(remote.lastUploadAt).toLocaleString()}, ${remote.uploaded} records since Maestro started.`
+          : `Sending to ${project}; the first upload runs within a minute.`;
   return (
     <p role="status" className="text-xs text-foreground-muted">
       {text}
@@ -283,7 +284,7 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
           <DiagnosticControls enabled={conductorSettings?.diagnosticHistory ?? false} />
           <SettingsRow
             label="Send conductor logs to your Supabase project"
-            description="Leaves this computer: the full text of your messages to the conductors and their replies, everything each task conductor's model was given and answered (agent output, tool calls and results, prompts sent to agents), the conductor threads and notes, and the voice history above. API keys, tokens and passwords are removed first; nothing else is. It goes only to the project in remote-logs.json, is never deleted there automatically, and stays there when you turn this off."
+            description="Leaves this computer: the full text of your messages to the conductors and their replies, everything each task conductor's model was given and answered (agent output, tool calls and results, prompts sent to agents), the conductor threads and notes, and the voice history above. API keys, tokens and passwords are removed first; nothing else is. It goes only to the developer's Supabase project built into this build of Maestro, or the one in remote-logs.json when that file names one, is never deleted there automatically, and stays there when you turn this off."
             control={
               <Switch
                 checked={conductorSettings?.remoteLogs ?? true}

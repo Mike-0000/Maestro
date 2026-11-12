@@ -4,12 +4,16 @@ import { join } from 'node:path';
 import type { Logger } from '@emdash/shared/logger';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  builtInRemoteLogConfig,
+  capRecord,
   REMOTE_LOG_CONFIG_FILE,
+  REMOTE_LOG_MAX_RECORD_BYTES,
   REMOTE_LOG_PLACEHOLDER,
   REMOTE_LOG_STATE_FILE,
   redactRecord,
   RemoteLogUploader,
   usableRemoteLogConfig,
+  type RemoteLogConfig,
 } from './remote-log-uploader';
 
 const PUBLISHABLE = `sb_publishable_${'k'.repeat(30)}`;
@@ -42,13 +46,14 @@ const fakeFetch = (async (url: string, init: RequestInit) => {
   return respond();
 }) as unknown as typeof fetch;
 
-function uploader(): RemoteLogUploader {
+function uploader(builtIn: RemoteLogConfig | null = null): RemoteLogUploader {
   return new RemoteLogUploader({
     dataDir: dir,
     logger,
     enabled: async () => enabled,
     fetch: fakeFetch,
     appVersion: '1.2.6-test',
+    builtIn,
     now: () => clock,
   });
 }
@@ -307,6 +312,79 @@ describe('RemoteLogUploader', () => {
     // What failed was never marked sent, so it went once it worked, and only once.
     await up.runOnce();
     expect(calls).toHaveLength(3);
+  });
+
+  it('uploads on a fresh install with no config file, to the project built into the app', async () => {
+    const builtIn = { url: 'https://builtinproject.supabase.co', anonKey: PUBLISHABLE };
+    jsonl('conductor-log.jsonl', [{ at: '2026-11-12T10:00:00.000Z', utterance: 'go' }]);
+    const up = uploader(builtIn);
+    await up.runOnce();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe('https://builtinproject.supabase.co/rest/v1/maestro_voice_turns');
+    expect(calls[0]?.headers.apikey).toBe(PUBLISHABLE);
+    expect(up.getStatus()).toMatchObject({
+      configured: true,
+      source: 'built-in',
+      project: 'builtinproject.supabase.co',
+    });
+  });
+
+  it('lets remote-logs.json override the built-in project, and falls back when it is a placeholder', async () => {
+    const builtIn = { url: 'https://builtinproject.supabase.co', anonKey: PUBLISHABLE };
+    jsonl('conductor-log.jsonl', [{ at: '2026-11-12T10:00:00.000Z', utterance: 'go' }]);
+    configure();
+    const up = uploader(builtIn);
+    await up.runOnce();
+    expect(calls[0]?.url).toBe(`${URL}/rest/v1/maestro_voice_turns`);
+    expect(up.getStatus()).toMatchObject({ source: 'file', project: 'abcdefghij.supabase.co' });
+
+    configure(REMOTE_LOG_PLACEHOLDER);
+    expect(await up.currentStatus()).toMatchObject({
+      source: 'built-in',
+      project: 'builtinproject.supabase.co',
+    });
+  });
+
+  it('reads a config file saved with a byte-order mark', async () => {
+    writeFileSync(
+      join(dir, REMOTE_LOG_CONFIG_FILE),
+      `\uFEFF${JSON.stringify({ url: URL, anonKey: PUBLISHABLE })}`
+    );
+    expect(await uploader().currentStatus()).toMatchObject({ configured: true, source: 'file' });
+  });
+
+  it('has no built-in project in a build the push script did not configure', () => {
+    expect(builtInRemoteLogConfig()).toBeNull();
+  });
+
+  it('sends a record too large for one row as a marked start, once', async () => {
+    configure();
+    const huge = { at: '2026-11-12T10:00:00.000Z', input: 'x'.repeat(300_000) };
+    jsonl('chat-conductor-log.jsonl', [huge, { at: '2026-11-12T10:01:00.000Z', input: 'small' }]);
+    const up = uploader();
+    await up.runOnce();
+    const rows = rowsFor('maestro_chat_conductor_calls');
+    expect(rows).toHaveLength(2);
+    const stub = rows[0]?.record as { oversized: boolean; bytes: number; head: string };
+    expect(stub.oversized).toBe(true);
+    expect(stub.bytes).toBeGreaterThan(300_000);
+    expect(stub.head.startsWith('{"at":"2026-11-12T10:00:00.000Z"')).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(rows[0]?.record))).toBeLessThanOrEqual(
+      REMOTE_LOG_MAX_RECORD_BYTES
+    );
+    expect(rows[1]?.record).toEqual({ at: '2026-11-12T10:01:00.000Z', input: 'small' });
+    await up.runOnce();
+    expect(rowsFor('maestro_chat_conductor_calls')).toHaveLength(2);
+  });
+
+  it('keeps a stub under the cap even when its start is all quotes and multi-byte text', () => {
+    for (const filler of ['"'.repeat(400_000), '\u00e9\u4e2d'.repeat(150_000)]) {
+      const capped = capRecord(redactRecord({ text: filler }));
+      expect(Buffer.byteLength(capped.text)).toBeLessThanOrEqual(REMOTE_LOG_MAX_RECORD_BYTES);
+      expect(capped.value).toMatchObject({ oversized: true });
+    }
+    const small = redactRecord({ text: 'fine' });
+    expect(capRecord(small)).toBe(small);
   });
 
   it('survives a network error and a timeout', async () => {

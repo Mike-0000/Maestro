@@ -209,10 +209,12 @@ export type InvestigatorStatus = z.infer<typeof investigatorStatusSchema>;
 
 /** Where remote log upload stands; see `RemoteLogUploader`. */
 export const remoteLogStatusSchema = z.object({
-  /** `remote-logs.json` names a project and a usable key. */
+  /** A project is known: named in `remote-logs.json`, or built into the app. */
   configured: z.boolean(),
   /** Where that file is, so the developer can fill it in. */
   configPath: z.string(),
+  /** Where the project comes from: that file, the one built into the app, or nowhere yet. */
+  source: z.enum(['file', 'built-in']).nullable(),
   /** The project's host, when configured. */
   project: z.string().nullable(),
   lastUploadAt: z.string().nullable(),
