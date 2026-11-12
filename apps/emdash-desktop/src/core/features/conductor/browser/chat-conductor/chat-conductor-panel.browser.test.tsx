@@ -112,6 +112,12 @@ class FakeSession {
   }
   setAutonomy(on: boolean) {
     this.autonomy = on;
+    if (!on) this.yolo = false;
+  }
+  yolo = false;
+  setYolo(on: boolean) {
+    this.yolo = on;
+    if (on) this.autonomy = true;
   }
   catchUp() {}
   stop() {
@@ -409,5 +415,23 @@ describe('StatusStrip', () => {
     expect(tabs[0]!.getAttribute('aria-selected')).toBe('true');
     await userEvent.click(tabs[1]!);
     expect(views).toEqual(['raw']);
+  });
+
+  it('switches YOLO mode under the composer, which turns acting for the developer on', async () => {
+    const session = new FakeSession({ autonomy: false });
+    const { host } = mount(session);
+    const yolo = host.querySelector('[aria-label="YOLO"]') as HTMLElement;
+    const acting = host.querySelector('[aria-label="Act on my behalf"]') as HTMLElement;
+    expect(yolo.getAttribute('aria-checked')).toBe('false');
+
+    await userEvent.click(yolo);
+    expect(session.yolo).toBe(true);
+    expect(session.autonomy).toBe(true);
+    await vi.waitFor(() => expect(yolo.getAttribute('aria-checked')).toBe('true'));
+    expect(acting.getAttribute('aria-checked')).toBe('true');
+
+    await userEvent.click(acting);
+    expect(session.autonomy).toBe(false);
+    expect(session.yolo).toBe(false);
   });
 });

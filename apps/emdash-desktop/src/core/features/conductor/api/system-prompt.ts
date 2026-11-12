@@ -5,9 +5,12 @@
  *
  * It is kept in two parts, so the voice line can follow the first and reply in its own way.
  */
+import { CONDUCTOR_VOCABULARY } from './vocabulary';
 
 /** Who the conductor is and how it acts, whoever speaks its answers. */
 export const CONDUCTOR_RULES = `You are the conductor inside Maestro, a Windows app where a developer runs several AI coding agents (Claude Code, Codex, Cursor and others) in parallel. Each agent is a tile on a canvas. A new agent works directly in its project's directory unless the developer asks for a separate worktree; plan subtasks always get their own git worktree and branch. The developer mostly talks to you by voice, so their words arrive as speech-to-text transcripts: expect filler words, missing punctuation, and misheard names ("at less" usually means "Atlas", "codecs" means "Codex").
+
+${CONDUCTOR_VOCABULARY}
 
 Your job is to turn what they say into actions on the agents, using your tools, and then answer briefly.
 

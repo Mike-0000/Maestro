@@ -126,6 +126,11 @@ export const conductorTaskThreadSchema = z.object({
   notes: z.string(),
   status: chatConductorStatusSchema.nullable(),
   autonomy: z.boolean(),
+  /**
+   * YOLO mode: the developer delegated every decision of the task (see yolo.ts). Implies autonomy.
+   * Absent in threads saved before it existed, which read as off.
+   */
+  yolo: z.boolean().optional(),
   /** Per chat (conversation id), in the order they were last dealt with, oldest first. */
   chats: z.record(z.string(), conductorChatStateSchema),
   /** The chat the conductor last dealt with: the default for a new chat's provider. */

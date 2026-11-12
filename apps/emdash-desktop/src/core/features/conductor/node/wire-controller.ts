@@ -84,7 +84,7 @@ export function createConductorWireController(options: {
   if (stopTaskDeleted) options.scope.add(stopTaskDeleted);
   return createController(conductorContract, {
     runTurn: ({ mode, messages }) => service.runTurn(mode, messages),
-    runChatTurn: ({ messages, taskId }) => service.runChatTurn(messages, taskId),
+    runChatTurn: ({ messages, taskId, yolo }) => service.runChatTurn(messages, taskId, yolo),
     readChatThread: ({ conversationId }) => chatThreads.read(conversationId),
     saveChatThread: (thread) => chatThreads.save(thread),
     deleteChatThread: ({ conversationId }) => chatThreads.delete(conversationId),

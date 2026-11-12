@@ -20,6 +20,7 @@ import {
 } from '../api/attention-verdict';
 import { CHAT_CONDUCTOR_SYSTEM_PROMPT } from '../api/chat-conductor/prompt';
 import { chatConductorToolDefinitions } from '../api/chat-conductor/tools';
+import { CHAT_YOLO_RULES } from '../api/chat-conductor/yolo';
 import {
   conductorSettingsSchema,
   conductorTurnRecordSchema,
@@ -337,15 +338,18 @@ export class ConductorService {
   /**
    * One model call for a chat's own conductor. It shares the conductor's provider, key, daily
    * budget and usage record, and differs in what it sends: the chat conductor's prompt and tools,
-   * and no standing instructions, which the developer gave to Maestro's conductor. Each call is
-   * written to the chat conductors' log (see chat-turn-log.ts) while diagnostic history is on.
+   * and no standing instructions, which the developer gave to Maestro's conductor. In YOLO mode
+   * its rules follow the prompt as a second system block, so the cached prompt is unchanged. Each
+   * call is written to the chat conductors' log (see chat-turn-log.ts) while diagnostic history
+   * is on.
    */
   async runChatTurn(
     messages: Anthropic.Beta.BetaMessageParam[],
-    taskId?: string
+    taskId?: string,
+    yolo = false
   ): Promise<Result<ConductorTurnResult, ConductorError>> {
     const startedAt = performance.now();
-    const outcome = await this.callChatModel(messages);
+    const outcome = await this.callChatModel(messages, yolo);
     const settings = await this.settings.read();
     if (settings.diagnosticHistory) {
       // Not awaited: the turn does not wait for its own log line.
@@ -375,7 +379,8 @@ export class ConductorService {
   }
 
   private async callChatModel(
-    messages: Anthropic.Beta.BetaMessageParam[]
+    messages: Anthropic.Beta.BetaMessageParam[],
+    yolo: boolean
   ): Promise<Result<ConductorTurnResult, ConductorError>> {
     const settings = await this.settings.read();
     if (!settings.chatConductors) {
@@ -386,7 +391,7 @@ export class ConductorService {
     }
     return this.runModelTurn(settings, messages, async () => ({
       system: CHAT_CONDUCTOR_SYSTEM_PROMPT,
-      standing: '',
+      standing: yolo ? CHAT_YOLO_RULES : '',
       tools: this.chatTools,
       maxTokens: CHAT_TURN_MAX_TOKENS,
       effort: settings.chatConductorEffort,

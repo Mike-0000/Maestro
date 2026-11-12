@@ -1107,6 +1107,19 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
             }
           />
           <SettingsRow
+            label="New chats start in YOLO mode"
+            description="Give a chat's conductor a goal and it carries it through on its own, asking only when it is truly blocked: a sign-in, a payment, a step that cannot be undone, or one beyond the project. Each task can still switch it under its composer."
+            control={
+              <Switch
+                checked={conductorSettings?.chatConductorYolo ?? false}
+                disabled={!conductorSettings}
+                onCheckedChange={(chatConductorYolo) =>
+                  void conductor.updateSettings({ chatConductorYolo })
+                }
+              />
+            }
+          />
+          <SettingsRow
             label="Conductors decide when you are told"
             description="Each chat's conductor decides whether its agent needs you and whether to alert you."
             control={

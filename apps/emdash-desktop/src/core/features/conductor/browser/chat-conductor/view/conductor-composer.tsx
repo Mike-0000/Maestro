@@ -73,16 +73,24 @@ export interface ComposerToolsProps {
   ready: boolean;
   autonomy: boolean;
   onAutonomyChange: (on: boolean) => void;
+  /** YOLO mode: the conductor makes every decision and asks only when blocked. */
+  yolo: boolean;
+  onYoloChange: (on: boolean) => void;
   onCatchUp: () => void;
   canClear: boolean;
   onClear: () => void;
 }
 
-/** The small controls under the composer: acting on the developer's behalf, catch-up, the menu. */
+/**
+ * The small controls under the composer: acting on the developer's behalf, YOLO mode, catch-up,
+ * the menu.
+ */
 export function ComposerTools({
   ready,
   autonomy,
   onAutonomyChange,
+  yolo,
+  onYoloChange,
   onCatchUp,
   canClear,
   onClear,
@@ -107,6 +115,34 @@ export function ComposerTools({
           On: when the agent finishes or asks something while you are away, the conductor may prompt
           it, answer it or interrupt it, within what you asked for. Off: it only tells you what
           happened and what it would do. What you ask for directly is always done.
+        </Tooltip.Content>
+      </Tooltip.Root>
+      <Tooltip.Root>
+        <Tooltip.Trigger
+          render={<span className="flex h-6 items-center gap-2 rounded-md pr-1 pl-0.5" />}
+        >
+          <Switch
+            size="sm"
+            checked={yolo}
+            onCheckedChange={(on) => onYoloChange(on)}
+            aria-label="YOLO"
+          />
+          <span
+            className={cn(
+              'cursor-pointer select-none',
+              yolo && 'font-medium text-foreground-warning'
+            )}
+            onClick={() => onYoloChange(!yolo)}
+          >
+            YOLO
+          </span>
+        </Tooltip.Trigger>
+        <Tooltip.Content side="top" align="start" className="max-w-xs">
+          On: give the conductor a goal and it carries it through to the end, making every decision
+          itself, answering the agents and their permission prompts, and telling you when it is
+          done. It asks only when truly blocked: a sign-in or secret, a payment, a step that cannot
+          be undone, or one that reaches beyond this project, such as a push to a shared branch.
+          Turns on acting for you.
         </Tooltip.Content>
       </Tooltip.Root>
       <Button type="button" variant="ghost" size="xs" disabled={!ready} onClick={onCatchUp}>
