@@ -80,6 +80,7 @@ function harness(options: { thread?: ConductorTaskThread | null; autonomy?: bool
     },
     facts: () => ({ taskName: 'Fix login', projectName: 'Shop' }),
     readOutput: vi.fn(async (_chatId: string, _lines: number) => 'raw output'),
+    readTranscript: vi.fn(async (_chatId: string) => 'raw output'),
     finishedReport: vi.fn(async (_chatId: string) => null),
     send: vi.fn(async (_chatId: string, _message: string, _late: (m: string) => void) => 'Sent.'),
     interrupt: vi.fn(async (_chatId: string) => 'Interrupted.'),

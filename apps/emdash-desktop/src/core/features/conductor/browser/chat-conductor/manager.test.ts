@@ -30,6 +30,7 @@ vi.mock('./agent-port', () => ({
     snapshot: () => null,
     watch: () => () => {},
     readOutput: async () => '',
+    readTranscript: async () => '',
   }),
 }));
 const tasks = vi.hoisted(() => ({ projects: new Map<string, Set<string>>() }));
