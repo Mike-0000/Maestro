@@ -43,7 +43,7 @@ import {
   developerTurnText,
   gateChatTool,
   markedForAgent,
-  MAX_UNATTENDED_ACTIONS,
+  maxUnattendedActions,
   sentByConductor,
   storeChatHistory,
   type ChatEvent,
@@ -51,6 +51,7 @@ import {
   type ChatFacts,
   type SubmittedPrompt,
 } from '../../api/chat-conductor/turns';
+import { gateYoloStatus } from '../../api/chat-conductor/yolo';
 import { markInputLines, type InputLineLabels } from '../../api/completion-follow-up';
 import { cleanTerminalOutput } from '../../api/terminal-text';
 import {
@@ -223,7 +224,8 @@ type TurnStatus = ChatConductorStatus & {
 };
 
 export interface ChatConductorPorts {
-  runTurn(messages: Message[]): Promise<ChatTurnResult>;
+  /** One model call; `yolo` sends the YOLO rules with the prompt. */
+  runTurn(messages: Message[], options: { yolo: boolean }): Promise<ChatTurnResult>;
   readThread(): Promise<ConductorTaskThread | null>;
   saveThread(thread: ConductorTaskThread): Promise<void>;
   deleteThread(): Promise<void>;
@@ -239,6 +241,8 @@ export interface ChatConductorPorts {
   ready(): boolean;
   /** Whether a new task's conductor starts out allowed to act on its own. */
   defaultAutonomy(): boolean;
+  /** Whether a new task's conductor starts in YOLO mode (off when not given). */
+  defaultYolo?(): boolean;
   now(): Date;
   newId(): string;
   warn(message: string, data?: Record<string, unknown>): void;
@@ -425,6 +429,11 @@ export class ChatConductorSession {
   status: ChatConductorStatus | null = null;
   notes = '';
   autonomy: boolean;
+  /**
+   * YOLO mode: the developer delegated every decision, so the conductor asks only at a blocker
+   * (see yolo.ts). On implies autonomy on.
+   */
+  yolo: boolean;
   /** A turn is running or waiting to run. */
   busy = false;
   /** What the running turn is doing right now, in a few words. */
@@ -473,18 +482,21 @@ export class ChatConductorSession {
     readonly taskId: string,
     private readonly ports: ChatConductorPorts
   ) {
-    this.autonomy = ports.defaultAutonomy();
+    this.yolo = ports.defaultYolo?.() ?? false;
+    this.autonomy = ports.defaultAutonomy() || this.yolo;
     makeObservable(this, {
       entries: observable.ref,
       status: observable.ref,
       notes: observable,
       autonomy: observable,
+      yolo: observable,
       busy: observable,
       activity: observable,
       loaded: observable,
       attached: observable,
       draft: observable,
       setAutonomy: action,
+      setYolo: action,
       setDraft: action,
     });
   }
@@ -510,7 +522,7 @@ export class ChatConductorSession {
 
   /** How many actions the conductor may still take on its own before the developer writes. */
   get unattendedActionsLeft(): number {
-    return Math.max(0, MAX_UNATTENDED_ACTIONS - this.unattendedActions);
+    return Math.max(0, maxUnattendedActions(this.yolo) - this.unattendedActions);
   }
 
   /** Reads the saved thread once, and takes in the own threads of the task's loaded chats. */
@@ -534,7 +546,9 @@ export class ChatConductorSession {
         this.messages = merged.messages;
         this.notes = merged.notes;
         this.status = merged.status;
-        this.autonomy = merged.autonomy;
+        // A task with no saved thread starts from the YOLO setting; a saved one keeps its own.
+        this.yolo = thread ? merged.yolo === true : (this.ports.defaultYolo?.() ?? false);
+        this.autonomy = merged.autonomy || this.yolo;
         this.restoreChats(merged);
         this.loaded = true;
       });
@@ -665,9 +679,19 @@ export class ChatConductorSession {
     this.draft = text;
   }
 
+  /** Turning autonomy off turns YOLO mode off too: YOLO is a level of acting on their behalf. */
   setAutonomy(on: boolean): void {
     if (this.autonomy === on) return;
     this.autonomy = on;
+    if (!on) this.yolo = false;
+    this.persist();
+  }
+
+  /** Turning YOLO mode on turns autonomy on too; turning it off leaves autonomy as it is. */
+  setYolo(on: boolean): void {
+    if (this.yolo === on) return;
+    this.yolo = on;
+    if (on) this.autonomy = true;
     this.persist();
   }
 
@@ -1203,6 +1227,7 @@ export class ChatConductorSession {
       })),
       lastChat: chats.find((chat) => chat.id === this.lastChatId)?.name ?? null,
       autonomy: this.autonomy,
+      yolo: this.yolo,
       notes: this.notes,
       status: this.status,
       now: this.ports.now().toLocaleString('en-US', {
@@ -1265,7 +1290,7 @@ export class ChatConductorSession {
       this.setActivity('Thinking…');
       let result: ChatTurnResult;
       try {
-        result = await this.ports.runTurn(messages);
+        result = await this.ports.runTurn(messages, { yolo: this.yolo });
       } catch (error) {
         result = { success: false, error: { type: 'api-error', message: errorMessage(error) } };
       }
@@ -1350,6 +1375,7 @@ export class ChatConductorSession {
       tool: name,
       trigger,
       autonomy: this.autonomy,
+      yolo: this.yolo,
       unattendedActionsLeft: this.unattendedActionsLeft,
       targetWorking: chat?.status === 'working',
     });
@@ -1369,6 +1395,11 @@ export class ChatConductorSession {
     }
     if (!parsed.success) {
       return { content: `Invalid input for ${name}: ${parsed.error.message}`, isError: true };
+    }
+    if (name === 'set_status') {
+      const { state, blocker } = parsed.data as ChatConductorToolInput<'set_status'>;
+      const asked = gateYoloStatus({ yolo: this.yolo, state, blocker });
+      if (!asked.allowed) return { content: asked.reason, isError: true };
     }
     if (target && 'error' in target) return { content: target.error, isError: true };
     if (chat) this.lastChatId = chat.id;
@@ -1616,6 +1647,7 @@ export class ChatConductorSession {
       notes: this.notes,
       status: this.status,
       autonomy: this.autonomy,
+      ...(this.yolo ? { yolo: true } : {}),
       chats: Object.fromEntries(
         [...this.chatStates].map(([chatId, state]) => [
           chatId,

@@ -15,6 +15,7 @@ import type { ChorusHostServices } from '@core/primitives/chorus-host/api/host-s
 import type { SecretStore } from '@core/primitives/secrets/api/secret-store';
 import { CHAT_CONDUCTOR_SYSTEM_PROMPT } from '../api/chat-conductor/prompt';
 import { chatConductorToolDefinitions } from '../api/chat-conductor/tools';
+import { CHAT_YOLO_RULES } from '../api/chat-conductor/yolo';
 import { CONDUCTOR_SYSTEM_PROMPT } from '../api/system-prompt';
 import { ConductorService } from './conductor-service';
 
@@ -702,6 +703,29 @@ describe('ConductorService.runChatTurn', () => {
     ]);
     expect((own.tools as { name: string }[]).map((tool) => tool.name)).toContain('propose_plan');
     expect(own.max_tokens).toBe(4096);
+  });
+
+  it('sends the YOLO rules after the cached prompt in YOLO mode, leaving the prompt as it was', async () => {
+    await withKey();
+    const conductor = service();
+    await conductor.runChatTurn(userTurn, 'task-1', true);
+    expect(captured[0]?.body.system).toEqual([
+      {
+        type: 'text',
+        text: CHAT_CONDUCTOR_SYSTEM_PROMPT,
+        cache_control: { type: 'ephemeral', ttl: '1h' },
+      },
+      { type: 'text', text: CHAT_YOLO_RULES },
+    ]);
+    await conductor.runChatTurn(userTurn, 'task-1', false);
+    expect(captured[1]?.body.system).toHaveLength(1);
+  });
+
+  it('starts new tasks out of YOLO mode unless the setting says so', async () => {
+    const conductor = service();
+    expect((await conductor.status()).settings.chatConductorYolo).toBe(false);
+    await conductor.updateSettings({ chatConductorYolo: true });
+    expect((await conductor.status()).settings.chatConductorYolo).toBe(true);
   });
 
   it('follows its own effort setting and records usage against the shared budget', async () => {

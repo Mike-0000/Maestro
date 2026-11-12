@@ -4,6 +4,7 @@ import { cleanTerminalOutput } from '../terminal-text';
 import { CHAT_NOTHING_NEW } from './prompt';
 import type { ChatConductorStatus } from './thread';
 import { CHAT_ACTING_TOOLS, type ChatConductorToolName } from './tools';
+import { MAX_UNATTENDED_ACTIONS_YOLO } from './yolo';
 
 /**
  * The messages a chat conductor's turn starts with, and the rules the renderer applies around
@@ -79,6 +80,11 @@ export const CHAT_PROMPT_CHARS = 1_500;
 /** Actions a conductor may take on chat events before the developer has to write again. */
 export const MAX_UNATTENDED_ACTIONS = 12;
 
+/** The unattended action cap for a conductor in this mode: higher in YOLO mode, never none. */
+export function maxUnattendedActions(yolo: boolean): number {
+  return yolo ? MAX_UNATTENDED_ACTIONS_YOLO : MAX_UNATTENDED_ACTIONS;
+}
+
 /** One of the task's chats, as the context lists it. */
 export type ChatSummary = {
   name: string;
@@ -96,6 +102,8 @@ export type ChatFacts = {
   /** The chat the conductor last dealt with, by name. */
   lastChat: string | null;
   autonomy: boolean;
+  /** YOLO mode: the developer delegated every decision (see yolo.ts). Implies autonomy. */
+  yolo?: boolean;
   notes: string;
   status: ChatConductorStatus | null;
   now: string;
@@ -121,6 +129,11 @@ function autonomyLine(facts: ChatFacts): string {
     return 'Autonomy: off. On a chat event you may read and report but not act: put what you would do to the developer. In a turn the developer starts, you act as they direct.';
   }
   const left = Math.max(0, Math.floor(facts.unattendedActionsLeft));
+  if (facts.yolo) {
+    return left === 0
+      ? "Autonomy: YOLO, but Maestro's cap on actions you may take on your own is reached until the developer writes again. Report where things stand and what you would do next."
+      : `Autonomy: YOLO. Every decision is yours: carry the goal through without asking, and stop only at a blocker. ${left} unattended ${left === 1 ? 'action is' : 'actions are'} left before Maestro's safety cap.`;
+  }
   if (left === 0) {
     return 'Autonomy: on, but the actions you may take on your own are used up until the developer writes again. On a chat event, put what you would do to them.';
   }
@@ -471,6 +484,8 @@ export function gateChatTool(input: {
   tool: string;
   trigger: 'developer' | 'event';
   autonomy: boolean;
+  /** YOLO mode raises the cap on unattended actions; nothing else here changes with it. */
+  yolo?: boolean;
   unattendedActionsLeft: number;
   /** The chat the tool acts on is mid-turn (its agent is working). */
   targetWorking?: boolean;
@@ -494,7 +509,7 @@ export function gateChatTool(input: {
   if (!(input.unattendedActionsLeft > 0)) {
     return {
       allowed: false,
-      reason: `${input.tool} was not run: you have taken ${MAX_UNATTENDED_ACTIONS} actions on your own since the developer last wrote, which is the limit. Tell the developer where things stand and what you would do next; you can act again once they reply.`,
+      reason: `${input.tool} was not run: you have taken ${maxUnattendedActions(input.yolo === true)} actions on your own since the developer last wrote, which is the limit. Tell the developer where things stand and what you would do next; you can act again once they reply.`,
     };
   }
   return { allowed: true };

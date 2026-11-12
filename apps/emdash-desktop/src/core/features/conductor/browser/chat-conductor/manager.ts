@@ -305,7 +305,8 @@ export class ChatConductorManager implements FrontConductorSource {
 
   private ports(taskId: string): ChatConductorPorts {
     return {
-      runTurn: async (messages) => (await getConductorClient()).runChatTurn({ messages, taskId }),
+      runTurn: async (messages, { yolo }) =>
+        (await getConductorClient()).runChatTurn({ messages, taskId, ...(yolo ? { yolo } : {}) }),
       readThread: async () => (await getConductorClient()).readTaskThread({ taskId }),
       saveThread: async (thread) => (await getConductorClient()).saveTaskThread(thread),
       deleteThread: async () => (await getConductorClient()).deleteTaskThread({ taskId }),
@@ -323,6 +324,9 @@ export class ChatConductorManager implements FrontConductorSource {
       defaultAutonomy: () =>
         this.conductor.status?.settings?.chatConductorAutonomy ??
         DEFAULT_CONDUCTOR_SETTINGS.chatConductorAutonomy,
+      defaultYolo: () =>
+        this.conductor.status?.settings?.chatConductorYolo ??
+        DEFAULT_CONDUCTOR_SETTINGS.chatConductorYolo,
       now: () => new Date(),
       newId: () => crypto.randomUUID(),
       warn: (message, data) => log.warn(message, data),

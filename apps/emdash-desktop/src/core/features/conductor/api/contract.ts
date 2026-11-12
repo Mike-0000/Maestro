@@ -125,6 +125,11 @@ export const conductorSettingsSchema = z.object({
   /** Whether a new chat's conductor starts out allowed to act on its own; each chat keeps its own. */
   chatConductorAutonomy: z.boolean(),
   /**
+   * Whether a new task's conductor starts in YOLO mode: every decision delegated to it, asking only
+   * at a blocker (see chat-conductor/yolo.ts). Implies autonomy; each task keeps its own.
+   */
+  chatConductorYolo: z.boolean(),
+  /**
    * A chat's conductor decides when its agent shows as needing the developer or done, and whether
    * a notification (sound, desktop, phone) goes out, in place of the rules and attention verdicts.
    * Takes effect only while chat conductors run; whatever the conductor cannot decide in time
@@ -172,6 +177,7 @@ export const DEFAULT_CONDUCTOR_SETTINGS: ConductorSettings = {
   chatConductors: true,
   chatConductorEffort: 'medium',
   chatConductorAutonomy: true,
+  chatConductorYolo: false,
   conductorDecidesAttention: true,
   remoteLogs: true,
 };
@@ -564,6 +570,8 @@ export const conductorContract = defineContract({
       messages: z.custom<Anthropic.Beta.BetaMessageParam[]>(),
       /** The task whose conductor is calling, for the log of what conductors did. */
       taskId: z.string().min(1).max(200).optional(),
+      /** The task's conductor is in YOLO mode: its rules go with the prompt. */
+      yolo: z.boolean().optional(),
     }),
     data: conductorTurnResultSchema,
     error: conductorErrorSchema,

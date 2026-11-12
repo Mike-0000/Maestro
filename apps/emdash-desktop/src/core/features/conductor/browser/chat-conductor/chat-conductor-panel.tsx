@@ -324,6 +324,8 @@ export const ChatConductorPanel = observer(function ChatConductorPanel({
             ready={ready}
             autonomy={session.autonomy}
             onAutonomyChange={(on) => session.setAutonomy(on)}
+            yolo={session.yolo}
+            onYoloChange={(on) => session.setYolo(on)}
             onCatchUp={catchUp}
             canClear={entries.length > 0 || busy}
             onClear={() => void session.reset()}

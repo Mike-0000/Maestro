@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { DECISION_DETAIL_CHARS } from '@core/primitives/agents/api/conductor-decisions';
 import { postDigestInputSchema } from './digest';
 import { CHAT_THREAD_LIMITS, chatConductorStateSchema } from './thread';
+import { yoloBlockerSchema } from './yolo';
 
 /**
  * A chat conductor's tools. Definitions are shared: the main process sends them to the model, the
@@ -117,6 +118,11 @@ export const chatConductorToolSchemas = {
       .optional()
       .describe(
         'On a chat event with needs_you or done: whether a notification (sound, desktop, phone) goes out. Omit it for the default: needs_you notifies; done notifies only when the developer asked to hear about every finished agent.'
+      ),
+    blocker: yoloBlockerSchema
+      .optional()
+      .describe(
+        'With needs_you in YOLO mode: what blocks you, from the list in the YOLO rules. Required there; leave it out otherwise.'
       ),
   }),
   restart_agent: z.object({

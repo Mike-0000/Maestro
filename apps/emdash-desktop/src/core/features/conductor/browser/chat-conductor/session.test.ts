@@ -10,6 +10,7 @@ import {
   MAX_UNATTENDED_ACTIONS,
   type SubmittedPrompt,
 } from '../../api/chat-conductor/turns';
+import { MAX_UNATTENDED_ACTIONS_YOLO } from '../../api/chat-conductor/yolo';
 import type { AgentSnapshot } from './agent-event';
 import {
   CATCH_UP_REQUEST,
@@ -49,10 +50,17 @@ function deferred<T>() {
 type Chat = { id: string; name: string; providerId: string };
 
 function harness(
-  options: { thread?: ConductorTaskThread | null; autonomy?: boolean; chats?: Chat[] } = {}
+  options: {
+    thread?: ConductorTaskThread | null;
+    autonomy?: boolean;
+    yolo?: boolean;
+    chats?: Chat[];
+  } = {}
 ) {
   const replies: (ChatTurnResult | Promise<ChatTurnResult> | Error)[] = [];
   const calls: Message[][] = [];
+  /** Whether each model call was sent in YOLO mode, in call order. */
+  const yoloCalls: boolean[] = [];
   const saved: ConductorTaskThread[] = [];
   let ready = true;
   const chats: Chat[] = options.chats ?? [{ id: 'conv-1', name: 'Zeus', providerId: 'claude' }];
@@ -142,9 +150,10 @@ function harness(
     publicWebEnabled: async () => browsers.publicWeb,
   };
   const ports: ChatConductorPorts = {
-    runTurn: async (messages) => {
+    runTurn: async (messages, turn) => {
       // The session keeps appending to its array: keep what this call was given.
       calls.push(structuredClone(messages));
+      yoloCalls.push(turn.yolo);
       const next = replies.shift();
       if (!next) throw new Error('no reply scripted');
       if (next instanceof Error) throw next;
@@ -162,6 +171,7 @@ function harness(
     chatOnScreen: () => onScreen,
     ready: () => ready,
     defaultAutonomy: () => options.autonomy ?? true,
+    defaultYolo: () => options.yolo ?? false,
     now: () => new Date('2026-11-10T12:00:00Z'),
     newId: () => `id-${++id}`,
     warn: vi.fn(),
@@ -186,6 +196,7 @@ function harness(
       })),
     replies,
     calls,
+    yoloCalls,
     saved,
     received,
     setReady: (value: boolean) => (ready = value),
@@ -208,7 +219,7 @@ function harness(
 }
 
 /** A session that already follows its chat, with a thread that is not empty. */
-async function following(options: { autonomy?: boolean } = {}) {
+async function following(options: { autonomy?: boolean; yolo?: boolean } = {}) {
   const h = harness(options);
   h.replies.push(says(text('Caught up.')));
   await h.session.attach();
@@ -1611,5 +1622,93 @@ describe('stopping a busy agent on its own', () => {
     h.session.send('Stop Zeus now.');
     await h.idle();
     expect(h.agent.stop).toHaveBeenCalledWith('conv-1');
+  });
+});
+
+describe('YOLO mode', () => {
+  it('starts a new task from the setting, and turns acting for the developer on with it', async () => {
+    const h = harness({ autonomy: false, yolo: true });
+    await h.session.load();
+    expect(h.session.yolo).toBe(true);
+    expect(h.session.autonomy).toBe(true);
+    expect(h.session.unattendedActionsLeft).toBe(MAX_UNATTENDED_ACTIONS_YOLO);
+  });
+
+  it('keeps each task its own: switched with the thread, saved, and read back', async () => {
+    const h = await following({ autonomy: false });
+    expect(h.session.yolo).toBe(false);
+    h.session.setYolo(true);
+    expect(h.session.autonomy).toBe(true);
+    await h.session.flushed();
+    const saved = h.saved.at(-1)!;
+    expect(saved.yolo).toBe(true);
+
+    const again = harness({ thread: saved, yolo: false });
+    await again.session.load();
+    expect(again.session.yolo).toBe(true);
+
+    h.session.setAutonomy(false);
+    expect(h.session.yolo).toBe(false);
+    await h.session.flushed();
+    expect(h.saved.at(-1)!.yolo).toBeUndefined();
+  });
+
+  it('sends its rules with every model call while on, and says so in the context', async () => {
+    const h = await following();
+    h.yoloCalls.length = 0;
+    h.replies.push(says(text('Plain.')));
+    h.session.send('Where is it?');
+    await h.idle();
+    h.session.setYolo(true);
+    h.replies.push(says(text('Carrying it.')));
+    h.session.send('Fix the login and ship it to a branch.');
+    await h.idle();
+    expect(h.yoloCalls).toEqual([false, true]);
+    expect(lastUserText(h.calls.at(-1)!)).toContain('Autonomy: YOLO');
+  });
+
+  it('refuses needs_you without a blocker, and lets it stand with one', async () => {
+    const h = await following({ yolo: true });
+    h.replies.push(
+      says(tool('set_status', { state: 'needs_you', headline: 'Login: which library?' })),
+      says(tool('set_status', { state: 'working', headline: 'Login: using jose' })),
+      says(text('Picked jose, the one the project already uses.'))
+    );
+    h.session.send('Fix the login.');
+    await h.idle();
+    expect(JSON.stringify(h.calls[1]!.at(-1))).toContain('YOLO mode is on');
+    expect(h.session.status).toEqual({ state: 'working', headline: 'Login: using jose' });
+
+    h.replies.push(
+      says(
+        tool('set_status', {
+          state: 'needs_you',
+          headline: 'Login: needs the staging API token',
+          blocker: 'credential',
+        })
+      ),
+      says(text('I need the staging token.'))
+    );
+    h.session.send('Carry on.');
+    await h.idle();
+    expect(h.session.status).toEqual({
+      state: 'needs_you',
+      headline: 'Login: needs the staging API token',
+    });
+  });
+
+  it('acts on its own past the usual cap, up to its own', async () => {
+    const h = await following({ yolo: true });
+    let turn = 0;
+    for (let count = 0; count < MAX_UNATTENDED_ACTIONS + 1; count++) {
+      h.replies.push(says(tool('send_to_agent', { message: 'Next.' })), says(text('On it.')));
+      h.agentIs(working);
+      h.agentIs(finished(`Reply ${++turn}`));
+      await h.idle();
+    }
+    expect(h.agent.send).toHaveBeenCalledTimes(MAX_UNATTENDED_ACTIONS + 1);
+    expect(h.session.unattendedActionsLeft).toBe(
+      MAX_UNATTENDED_ACTIONS_YOLO - MAX_UNATTENDED_ACTIONS - 1
+    );
   });
 });
