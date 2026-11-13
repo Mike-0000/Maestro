@@ -126,7 +126,7 @@ function describeAction(action: LedgerAction, textChars: number): string {
       : action.status === 'failed'
         ? ` (FAILED, it did not happen: ${clip(action.outcome, 100)})`
         : '';
-  const text = action.text ? `: “${clip(action.text, textChars)}”` : '';
+  const text = action.text && textChars > 0 ? `: “${clip(action.text, textChars)}”` : '';
   switch (action.tool) {
     case 'send_to_agent':
       return `${failed ? 'tried to send' : 'sent'} to ${action.agent ?? 'an agent'}${failed}${text}`;
@@ -138,6 +138,27 @@ function describeAction(action: LedgerAction, textChars: number): string {
     default:
       return `${action.tool}${action.agent ? ` ${action.agent}` : ''} → ${clip(action.outcome, 80)}`;
   }
+}
+
+/** How much of one action's result a spoken summary keeps. */
+const SPOKEN_OUTCOME_CHARS = 120;
+
+/**
+ * What a turn's actions did, to be said aloud: "started Delta in Chorus; sent to Atlas". Actions
+ * that did not happen are left out; empty when none did. Sends and starts read as the activity
+ * lines do, without the text; any other action by its result.
+ */
+export function spokenDone(actions: readonly ConductorTurnRecord['actions'][number][]): string {
+  return actions
+    .filter((action) => !action.status)
+    .map(ledgerAction)
+    .map((action) =>
+      action.tool === 'send_to_agent' || action.tool === 'spawn_agent'
+        ? describeAction(action, 0)
+        : clip(action.outcome, SPOKEN_OUTCOME_CHARS).replace(/[.!]$/, '')
+    )
+    .filter(Boolean)
+    .join('; ');
 }
 
 export class ActivityLedger {

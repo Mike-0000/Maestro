@@ -304,6 +304,8 @@ export const conductorTurnRecordSchema = z.object({
   modelReply: z.string().optional(),
   /** Set when the model's turn did not complete (an error, a timeout, or no answer). */
   modelFailed: z.boolean().optional(),
+  /** Why the model's turn failed, redacted and short, when it did. */
+  error: z.string().optional(),
   latencyMs: z.number(),
   tokens: z.number().optional(),
   /** What an agent's request asked, as the agent wrote it: redacted and bounded. */
@@ -544,6 +546,13 @@ export const folderCheckSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(false), reason: z.string() }),
 ]);
 export type FolderCheck = z.infer<typeof folderCheckSchema>;
+
+/**
+ * Wire call options for `runTurn` and `runChatTurn`. A model call may take well over the default
+ * 30 s Wire deadline, which ended turns with no answer while the main process kept the request
+ * going.
+ */
+export const MODEL_TURN_CALL = { timeoutMs: 120_000 } as const;
 
 export const conductorContract = defineContract({
   /** One Jev (System One) evaluation: typed questions about a state, answered in parallel. */

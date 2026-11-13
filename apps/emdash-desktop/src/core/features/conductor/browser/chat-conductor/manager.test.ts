@@ -6,8 +6,10 @@ import { ChatConductorManager } from './manager';
 
 // Which conductor is in front, and which of its task's chats is on screen.
 
+const client = vi.hoisted(() => ({ runChatTurn: vi.fn(async () => ({ success: true })) }));
 vi.mock('../../api/browser/client', () => ({
   getConductorClient: async () => ({
+    runChatTurn: client.runChatTurn,
     readTaskThread: async () => null,
     listTaskThreads: async () => [],
     listChatThreads: async () => [],
@@ -209,6 +211,23 @@ describe('the conductor in front', () => {
     manager.showOnScreen('pane-2', screen('conv-cid', 'task-docs', { focusedPane: false }));
     expect(manager.chatOnScreen('task-login')).toBe('conv-bravo');
     expect(manager.chatOnScreen('task-docs')).toBe('conv-cid');
+    manager.dispose();
+  });
+});
+
+describe("a task conductor's model call", () => {
+  it('waits longer than the default Wire deadline, since the model may take a while', async () => {
+    const { manager } = setup();
+    const ports = (
+      manager as unknown as {
+        ports(taskId: string): { runTurn(messages: [], options: { yolo: boolean }): unknown };
+      }
+    ).ports('task-login');
+    await ports.runTurn([], { yolo: false });
+    expect(client.runChatTurn).toHaveBeenCalledWith(
+      { messages: [], taskId: 'task-login' },
+      { timeoutMs: 120_000 }
+    );
     manager.dispose();
   });
 });

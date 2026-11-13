@@ -38,7 +38,7 @@ import {
 import type { ConductorDecisionMark } from '@core/primitives/agents/api/conductor-decisions';
 import { log } from '@core/primitives/logging/browser/logger';
 import { playNotificationSound } from '@core/primitives/notifications/browser/notification-sound';
-import { ActivityLedger, formatAgo } from '../api/activity-ledger';
+import { ActivityLedger, formatAgo, spokenDone } from '../api/activity-ledger';
 import {
   describeAdjustableSettings,
   parseSettingChange,
@@ -95,6 +95,7 @@ import { spokenConfirmation } from '../api/confirm-speech';
 import { announcementsLine, announcementsMode } from '../api/context-facts';
 import {
   DEFAULT_CONDUCTOR_SETTINGS,
+  MODEL_TURN_CALL,
   type ConductorError,
   type ConductorMode,
   type ConductorSettings,
@@ -445,6 +446,8 @@ const UNNAMED_TARGET_REPLY_MS = 2 * 60_000;
 const DEVELOPER_SPEAKING_MS = 2 * 60_000;
 /** A report the developer heard whole stands for the finished turn that follows it this soon. */
 const REPORT_STANDS_MS = 2 * 60_000;
+/** What of a failed model call's reason the diagnostics keep, after redaction. */
+const FAILURE_REASON_CHARS = 200;
 /** What of an agent's request the turn log keeps, after redaction. */
 const REQUEST_LOG_CHARS = 1_000;
 /** How long a clarifying question ("Maple or Maple 2?") waits for its answer. */
@@ -4087,6 +4090,13 @@ export class ConductorStore {
     this.log({ route: 'jev', actions: [record], reply, startedAt });
   }
 
+  /** The model the conductor's turns are set to run on, for the diagnostics. */
+  private configuredModel(): string | null {
+    const settings = this.status?.settings;
+    if (!settings) return null;
+    return settings.provider === 'openrouter' ? settings.openrouterModel : settings.model;
+  }
+
   /** Records a Jev evaluation outside routing (triage, plan review, completions). */
   private traceJev(
     purpose: string,
@@ -4104,7 +4114,14 @@ export class ConductorStore {
           ...extra,
           ...answersDetail(outcome.decision.answers),
         }
-      : { purpose, status: 'failed', reason: outcome.reason, ...extra };
+      : {
+          purpose,
+          status: 'failed',
+          reason: outcome.reason,
+          ms: outcome.latencyMs,
+          error: shortError(outcome.message),
+          ...extra,
+        };
     this.trace('jev', undefined, detail, id);
   }
 
@@ -4211,7 +4228,8 @@ export class ConductorStore {
       { role: 'user', content: conductorUserMessage(context, text) },
     ];
     const actions: ActionRecord[] = [];
-    const { reply, completed, tokens } = await this.modelLoop(
+    const base = this.history.length;
+    const { reply, completed, tokens, error } = await this.modelLoop(
       mode,
       messages,
       actions,
@@ -4220,8 +4238,21 @@ export class ConductorStore {
 
     // Keep history only for turns that ended on an assistant message (valid to resume from).
     if (completed) this.history = this.remember(messages);
+    else if (lineTurnActed(actions)) {
+      // A turn that failed after it changed something keeps its finished steps, closed with what
+      // was said, so asking again does not start a second agent.
+      const kept = keptRequestTurn(messages, base, reply);
+      if (kept) this.history = this.remember(kept);
+    }
     this.setReply(reply, source);
-    this.log({ route: 'llm', actions, reply, startedAt, tokens });
+    this.log({
+      route: 'llm',
+      actions,
+      reply,
+      ...(error !== undefined ? { modelFailed: true, error } : {}),
+      startedAt,
+      tokens,
+    });
   }
 
   /**
@@ -4283,11 +4314,19 @@ export class ConductorStore {
      * would only write a closing line, which a fixed sentence says as well.
      */
     endOnSettle = false
-  ): Promise<{ reply: string; completed: boolean; tokens: number; settled?: boolean }> {
+  ): Promise<{
+    reply: string;
+    completed: boolean;
+    tokens: number;
+    settled?: boolean;
+    /** Why the turn failed (redacted, short); absent when it answered or was cancelled. */
+    error?: string;
+  }> {
     let tokens = 0;
     let reply = '';
     let completed = false;
     let settled = false;
+    let failure: string | undefined;
 
     try {
       const client = await getConductorClient();
@@ -4301,7 +4340,18 @@ export class ConductorStore {
           this.activity = iteration === 0 ? 'Thinking…' : 'Thinking about the results…';
         });
         const requestedAt = performance.now();
-        const result = await client.runTurn({ mode, messages: pruneScreenshots(messages) });
+        const result = await client
+          .runTurn({ mode, messages: pruneScreenshots(messages) }, MODEL_TURN_CALL)
+          .catch((thrown: unknown) => {
+            this.trace('model', undefined, {
+              iteration,
+              ms: Math.round(performance.now() - requestedAt),
+              status: 'exception',
+              model: this.configuredModel(),
+              error: shortError(errorMessage(thrown)),
+            });
+            throw thrown;
+          });
         const ms = Math.round(performance.now() - requestedAt);
         // The request could not be recalled, but nothing it asked for runs.
         if (this.turnCancelled) {
@@ -4310,11 +4360,18 @@ export class ConductorStore {
           break;
         }
         if (!result.success) {
-          this.trace('model', undefined, { iteration, ms, status: result.error.type });
+          failure = result.error.message;
+          this.trace('model', undefined, {
+            iteration,
+            ms,
+            status: result.error.type,
+            model: this.configuredModel(),
+            error: shortError(failure),
+          });
           runInAction(
             () => (this.error = { kind: result.error.type, message: result.error.message })
           );
-          reply = spokenError(result.error);
+          reply = afterDone(actions, spokenError(result.error));
           break;
         }
         const turn = result.data;
@@ -4418,13 +4475,23 @@ export class ConductorStore {
           break;
         }
       }
-      if (!completed && !reply) reply = 'I stopped after several steps. Check the canvas.';
+      if (!completed && !reply) {
+        failure = `No answer after ${maxIterations} model calls.`;
+        reply = afterDone(actions, 'I stopped after several steps. Check the canvas.');
+      }
     } catch (error) {
       log.error('conductor: turn failed', { error });
+      failure = errorMessage(error);
       runInAction(() => (this.error = { kind: 'other', message: errorMessage(error) }));
-      reply = 'Something went wrong talking to the conductor.';
+      reply = afterDone(actions, 'Something went wrong talking to the conductor.');
     }
-    return { reply, completed, tokens, ...(settled ? { settled } : {}) };
+    return {
+      reply,
+      completed,
+      tokens,
+      ...(settled ? { settled } : {}),
+      ...(failure !== undefined ? { error: shortError(failure) } : {}),
+    };
   }
 
   /**
@@ -6294,6 +6361,7 @@ export class ConductorStore {
     let reply = '';
     let rawReply = '';
     let modelFailed = true;
+    let failure: string | undefined;
     let tokens = 0;
     try {
       const providers = await installedProviders();
@@ -6314,6 +6382,7 @@ export class ConductorStore {
       tokens = result.tokens;
       rawReply = result.reply;
       modelFailed = !result.completed;
+      failure = result.error;
       if (result.completed && result.reply) {
         reply = result.reply;
         this.history = this.remember(messages);
@@ -6336,17 +6405,22 @@ export class ConductorStore {
       // A first report the developer never heard still gets the fixed sentence (it finished,
       // and where its app is); a restated one does not get a bare "finished" again.
       const neverHeard = entries.some((entry) => !this.narratedAt.has(entry.conversationId));
+      // A failed turn with none of the agents' own words has only the fixed sentence, which may
+      // be nothing but the task's name: quiet on the same terms as nothing new.
+      const bareFailure = modelFailed && !reply && ownWords.length === 0;
       // Asked to hear only what needs them, the developer hears nothing unless the model said
       // so; when its turn failed, the verdict that these agents are done stands.
       const quiet = attentionOnly
         ? noNews || !reply
-        : noNews && (heardLately || (ownWords.length === 0 && !neverHeard));
+        : (noNews || bareFailure) && (heardLately || (ownWords.length === 0 && !neverHeard));
       const spoken = attentionOnly
         ? quiet
           ? ownWords.join(' ') || fallback
           : reply
         : quiet
-          ? `${names.join(' and ')}: finished a turn with nothing new.`
+          ? bareFailure
+            ? fallback
+            : `${names.join(' and ')}: finished a turn with nothing new.`
           : noNews
             ? ownWords.join(' ') || noNewsLine
             : reply || ownWords.join(' ') || fallback;
@@ -6363,6 +6437,7 @@ export class ConductorStore {
         reply: spoken,
         ...(rawReply !== spoken ? { modelReply: rawReply } : {}),
         ...(modelFailed ? { modelFailed: true } : {}),
+        ...(failure !== undefined ? { error: failure } : {}),
         startedAt,
         tokens,
         utterance: `[completion] ${names.join(', ')}`,
@@ -6390,6 +6465,7 @@ export class ConductorStore {
     let reply = '';
     let settledAs = '';
     let modelFailed = true;
+    let failure: string | undefined;
     let tokens = 0;
     try {
       const providers = await installedProviders();
@@ -6416,6 +6492,7 @@ export class ConductorStore {
       // closing is the fixed sentence the desk says when the model wrote none.
       settledAs = settledSentence(open, actions);
       modelFailed = !result.completed && !settledAs;
+      if (modelFailed) failure = result.error;
       if (result.completed && !result.settled) reply = result.reply;
       if (result.completed || settledAs) {
         // Only a valid sequence is kept: every call answered, ending on the conductor's word.
@@ -6429,6 +6506,7 @@ export class ConductorStore {
         actions,
         reply: reply || settledAs,
         ...(modelFailed ? { modelFailed: true } : {}),
+        ...(failure !== undefined ? { error: failure } : {}),
         startedAt,
         tokens,
         utterance: `[request ${open.id}] ${open.sender.name}: ${open.kind}`,
@@ -7148,6 +7226,8 @@ export class ConductorStore {
     /** The model's own answer, when it differs from what was said. */
     modelReply?: string;
     modelFailed?: boolean;
+    /** Why the model's turn failed, already redacted and short. */
+    error?: string;
     startedAt: number;
     tokens?: number;
     /** What started the turn when it was not the user (a completion follow-up). */
@@ -7167,6 +7247,7 @@ export class ConductorStore {
       reply: entry.reply,
       ...(entry.modelReply !== undefined ? { modelReply: entry.modelReply } : {}),
       ...(entry.modelFailed ? { modelFailed: true } : {}),
+      ...(entry.error ? { error: entry.error } : {}),
       latencyMs: Math.round(performance.now() - entry.startedAt),
       ...(entry.tokens ? { tokens: entry.tokens } : {}),
       ...(entry.request
@@ -7374,6 +7455,20 @@ function spokenError(error: ConductorError): string {
     default:
       return 'The conductor hit an API error.';
   }
+}
+
+/** A failure's reason for the diagnostics: redacted, on one line, and short. */
+function shortError(message: string): string {
+  return truncate(redactReply(message).replace(/\s+/g, ' ').trim(), FAILURE_REASON_CHARS);
+}
+
+/**
+ * A model turn that failed after it changed something says what it did before why it stopped:
+ * the developer must not think nothing happened and ask again.
+ */
+function afterDone(actions: readonly ActionRecord[], failure: string): string {
+  const done = spokenDone(actions.filter((action) => lineTurnActed([action])));
+  return done ? `Done so far: ${done}. ${failure}` : failure;
 }
 
 function delay(ms: number): Promise<void> {
