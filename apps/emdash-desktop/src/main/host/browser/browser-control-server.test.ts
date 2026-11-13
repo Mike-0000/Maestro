@@ -189,6 +189,7 @@ describe('BrowserControlServer', () => {
     }
     expect(byName.use_app.annotations).toMatchObject({ readOnlyHint: false });
     expect(byName.app_screenshot.description).toMatch(/Read-only/);
+    for (const tool of tools) expect(tool.description).not.toMatch(/canvas browser/);
   });
 
   describe('read-only screenshot', () => {
@@ -342,6 +343,44 @@ describe('BrowserControlServer', () => {
     expect(text).toContain('It shows no page yet.');
     expect(text).not.toContain('about:blank');
     expect(text).toContain('No dev server detected yet');
+  });
+
+  it("open_app names the browser it opened: the task view's, beside the chat", async () => {
+    control.describeTaskBrowser.mockReturnValue({
+      browserId: 'b1',
+      url: 'http://localhost:4100/',
+      live: true,
+      control: 'agents',
+      surface: 'task-view',
+      isolated: true,
+      allowedOrigins: ['http://localhost:4100'],
+    } as never);
+    const text = JSON.stringify((await server.callTool(scope, 'open_app', {})).content);
+    expect(text).toContain("task's own view");
+    expect(text).not.toContain('canvas');
+    expect(text).toContain('http://localhost:4100/');
+  });
+
+  it("says the developer's own-profile tab is the browser in use and how to get it", async () => {
+    control.findTaskBrowser.mockReturnValue(null);
+    control.describeTaskBrowser.mockReturnValue({
+      browserId: 'b1',
+      url: null,
+      live: true,
+      control: 'user',
+      surface: 'task-view',
+      isolated: false,
+      allowedOrigins: [],
+    } as never);
+    for (const name of ['app_screenshot', 'look_at_app', 'app_console']) {
+      const result = await server.callTool(scope, name, { mode: 'text' });
+      expect(result.isError).toBe(true);
+      const text = JSON.stringify(result.content);
+      expect(text).toContain("developer's own browser profile");
+      expect(text).toContain('open_app');
+      expect(text).not.toMatch(/suspended|No app browser is open/);
+    }
+    expect(control.observe).not.toHaveBeenCalled();
   });
 
   it('points at open_app when the task has no browser', async () => {

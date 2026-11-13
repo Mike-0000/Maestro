@@ -19,6 +19,7 @@ import {
   type BrowserObserveInput,
   type BrowserOpenAccess,
   type BrowserOpenDenial,
+  type BrowserSurfaceKind,
   type NavigationPolicy,
 } from '@core/primitives/browser/api';
 import type { BrowserAutomation } from './browser-automation';
@@ -34,6 +35,11 @@ import type { BrowserWebContentsRegistry } from './browser-webcontents-registry'
  * outline, text, console) its own task's tile while the user drives it, since watching changes
  * nothing. While a model holds the control lease, navigations the page starts on its own are held
  * to the same origin policy.
+ *
+ * A task can have several browsers: its canvas tile and browser tabs in its own view. Agents use
+ * the one the developer looked at last that still has a page (see `primaryEntry`), so they drive
+ * what the developer sees, never a copy hidden elsewhere. A browser on the developer's own profile
+ * is registered too, only so that agents are told it is the one in use; it is never read or driven.
  */
 
 export type BrowserControl = 'user' | 'agents';
@@ -52,6 +58,8 @@ export type SetBrowserControlInput = BrowserTaskIdentity & {
   origins?: string[];
   /** Public origins the user approved for the conductor in this tile. */
   publicOrigins?: string[];
+  /** Where the browser is shown (default: a canvas tile). */
+  surface?: BrowserSurfaceKind;
 };
 
 type ControlEntry = BrowserTaskIdentity & {
@@ -59,6 +67,7 @@ type ControlEntry = BrowserTaskIdentity & {
   control: BrowserControl;
   origins: string[];
   publicOrigins: string[];
+  surface: BrowserSurfaceKind;
   lease: {
     actorKey: string;
     actor: BrowserAutomationActor;
@@ -78,7 +87,10 @@ type PendingOpen = {
 type BindWaiter = (webContents: WebContents | null) => void;
 
 export type BrowserControlDeps = {
-  registry: Pick<BrowserWebContentsRegistry, 'getBoundWebContents' | 'getPartition' | 'onBinding'>;
+  registry: Pick<
+    BrowserWebContentsRegistry,
+    'getBoundWebContents' | 'getPartition' | 'onBinding' | 'getShownAt'
+  >;
   automation: Pick<BrowserAutomation, 'observe' | 'act' | 'release'>;
   consoleBuffer: Pick<
     BrowserConsoleBuffer,
@@ -154,6 +166,7 @@ export class BrowserControlService {
         .map((origin) => evaluatePublicUrl(origin))
         .flatMap((decision) => (decision.ok ? [decision.origin] : []))
         .slice(0, 16),
+      surface: input.surface ?? 'canvas',
       lease: input.control === 'agents' ? (previous?.lease ?? null) : null,
     };
     this.entries.set(input.browserId, entry);
@@ -183,37 +196,59 @@ export class BrowserControlService {
   }
 
   /**
-   * A task's canvas browser, if one is registered. `control` finds only a tile handed to agents;
-   * `observe` also finds the tile while the user drives it (always an isolated partition).
+   * The task's browser agents use: the one the developer looked at last among those with a live
+   * page, else the one looked at last (it is brought back on use). Ties keep registration order,
+   * so a task with only its canvas tile behaves as before.
    */
-  findTaskBrowser(taskId: string, access: BrowserOpenAccess = 'control'): string | null {
-    let observable: string | null = null;
+  private primaryEntry(taskId: string): ControlEntry | null {
+    let best: { entry: ControlEntry; live: boolean; shownAt: number } | null = null;
     for (const entry of this.entries.values()) {
       if (entry.taskId !== taskId) continue;
-      if (entry.control === 'agents') return entry.browserId;
-      if (access === 'observe' && observable === null && this.isIsolated(entry.browserId)) {
-        observable = entry.browserId;
+      const live = this.deps.registry.getBoundWebContents(entry.browserId) !== null;
+      const shownAt = this.deps.registry.getShownAt(entry.browserId);
+      if (!best || (live && !best.live) || (live === best.live && shownAt > best.shownAt)) {
+        best = { entry, live, shownAt };
       }
     }
-    return observable;
+    return best?.entry ?? null;
   }
 
+  /**
+   * The task's browser for agents (see `primaryEntry`), when agents may use it: `observe` needs
+   * an isolated partition, `control` also needs it handed to agents. Null otherwise; acting then
+   * asks the renderer (and the developer) to hand that same browser over, never another one.
+   */
+  findTaskBrowser(taskId: string, access: BrowserOpenAccess = 'control'): string | null {
+    const entry = this.primaryEntry(taskId);
+    if (!entry || !this.isIsolated(entry.browserId)) return null;
+    if (access === 'control' && entry.control !== 'agents') return null;
+    return entry.browserId;
+  }
+
+  /**
+   * What agents are told about the task's browser. A browser on the developer's own profile is
+   * described only by where it is: its page and address are not shared with agents.
+   */
   describeTaskBrowser(taskId: string): {
     browserId: string;
     url: string | null;
     live: boolean;
     control: BrowserControl;
+    surface: BrowserSurfaceKind;
+    isolated: boolean;
     allowedOrigins: string[];
   } | null {
-    const browserId = this.findTaskBrowser(taskId, 'observe');
-    const entry = browserId ? this.entries.get(browserId) : undefined;
-    if (!browserId || !entry) return null;
-    const webContents = this.deps.registry.getBoundWebContents(browserId);
+    const entry = this.primaryEntry(taskId);
+    if (!entry) return null;
+    const isolated = this.isIsolated(entry.browserId);
+    const webContents = this.deps.registry.getBoundWebContents(entry.browserId);
     return {
-      browserId,
-      url: webContents?.getURL() ?? null,
+      browserId: entry.browserId,
+      url: isolated ? (webContents?.getURL() ?? null) : null,
       live: webContents !== null,
       control: entry.control,
+      surface: entry.surface,
+      isolated,
       allowedOrigins: this.allowedOrigins(entry),
     };
   }

@@ -40,7 +40,12 @@ function harness(settings: Partial<CanvasBrowserSettings> = {}) {
   const partitions = new Map<string, string>([
     ['b-iso', ISOLATED],
     ['b-profile', PROFILE],
+    // Browser tabs in the task's own view: one on the task's isolated profile, one on the
+    // developer's own profile.
+    ['b-tab-iso', ISOLATED],
+    ['b-tab-shared', PROFILE],
   ]);
+  const shownAt = new Map<string, number>();
   const bound = new Map<string, ReturnType<typeof fakeContents>>();
   let bindingListener: BrowserBindingListener | null = null;
   const events: BrowserEvent[] = [];
@@ -62,6 +67,7 @@ function harness(settings: Partial<CanvasBrowserSettings> = {}) {
     registry: {
       getPartition: (id: string) => partitions.get(id) ?? null,
       getBoundWebContents: (id: string) => (bound.get(id) as unknown as WebContents) ?? null,
+      getShownAt: (id: string) => shownAt.get(id) ?? 0,
       onBinding: (listener: BrowserBindingListener) => {
         bindingListener = listener;
         return () => {};
@@ -91,6 +97,9 @@ function harness(settings: Partial<CanvasBrowserSettings> = {}) {
     consoleBuffer,
     events,
     bind,
+    unbind: (browserId: string) => bound.delete(browserId),
+    /** The browser's surface came on screen now. */
+    show: (browserId: string) => shownAt.set(browserId, now),
     advance: (ms: number) => {
       now += ms;
     },
@@ -268,6 +277,89 @@ describe('BrowserControlService', () => {
 
     it('never offers a shared-profile tile to agents, even to watch', () => {
       expect(h.service.findTaskBrowser('t9', 'observe')).toBeNull();
+    });
+  });
+
+  describe('the browser the developer is using for the task', () => {
+    const tab = (browserId: string, control: 'user' | 'agents') => ({
+      browserId,
+      control,
+      surface: 'task-view' as const,
+      ...identity,
+    });
+
+    beforeEach(() => {
+      // An agent tile on the canvas, alive but off screen: the developer is not on that canvas.
+      h.service.setControl({ browserId: 'b-iso', control: 'agents', ...identity });
+    });
+
+    it('is the one shown last: the task view tab while the developer works there', () => {
+      h.service.setControl(tab('b-tab-iso', 'agents'));
+      h.bind('b-tab-iso');
+      h.advance(10);
+      h.show('b-tab-iso');
+
+      expect(h.service.findTaskBrowser('t1', 'control')).toBe('b-tab-iso');
+      expect(h.service.findTaskBrowser('t1', 'observe')).toBe('b-tab-iso');
+      expect(h.service.describeTaskBrowser('t1')).toMatchObject({
+        browserId: 'b-tab-iso',
+        surface: 'task-view',
+        isolated: true,
+        live: true,
+      });
+
+      h.advance(10);
+      h.show('b-iso');
+      expect(h.service.findTaskBrowser('t1', 'control')).toBe('b-iso');
+      expect(h.service.describeTaskBrowser('t1')).toMatchObject({ surface: 'canvas' });
+    });
+
+    it('is not swapped for a hidden agent tile while the developer drives the tab', () => {
+      h.service.setControl(tab('b-tab-iso', 'user'));
+      h.bind('b-tab-iso');
+      h.advance(10);
+      h.show('b-tab-iso');
+
+      // Acting asks the developer to hand this tab over instead of driving the hidden tile.
+      expect(h.service.findTaskBrowser('t1', 'control')).toBeNull();
+      expect(h.service.findTaskBrowser('t1', 'observe')).toBe('b-tab-iso');
+    });
+
+    it("never reads a tab on the developer's own profile, and says which browser it is", async () => {
+      expect(h.service.setControl(tab('b-tab-shared', 'user')).success).toBe(true);
+      h.bind('b-tab-shared');
+      h.advance(10);
+      h.show('b-tab-shared');
+
+      expect(h.service.findTaskBrowser('t1', 'observe')).toBeNull();
+      expect(h.service.findTaskBrowser('t1', 'control')).toBeNull();
+      expect(h.service.describeTaskBrowser('t1')).toEqual(
+        expect.objectContaining({ surface: 'task-view', isolated: false, url: null })
+      );
+      expect(h.service.setControl(tab('b-tab-shared', 'agents')).success).toBe(false);
+      const read = await h.service.observe(agent, { browserId: 'b-tab-shared', mode: 'text' });
+      expect(read).toMatchObject({ success: false, error: { type: 'not-controllable' } });
+      expect(h.automation.observe).not.toHaveBeenCalled();
+    });
+
+    it('falls back to a live surface once the shown one has no page (its view closed)', () => {
+      h.service.setControl(tab('b-tab-iso', 'agents'));
+      h.bind('b-tab-iso');
+      h.advance(10);
+      h.show('b-tab-iso');
+      h.unbind('b-tab-iso');
+
+      expect(h.service.findTaskBrowser('t1', 'control')).toBe('b-iso');
+    });
+
+    it('forgets a closed tab', () => {
+      h.service.setControl(tab('b-tab-iso', 'agents'));
+      h.bind('b-tab-iso');
+      h.advance(10);
+      h.show('b-tab-iso');
+      h.service.forget('b-tab-iso');
+
+      expect(h.service.findTaskBrowser('t1', 'control')).toBe('b-iso');
     });
   });
 

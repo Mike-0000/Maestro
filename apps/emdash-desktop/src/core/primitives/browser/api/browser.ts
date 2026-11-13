@@ -35,6 +35,13 @@ export type BrowserEvent =
 
 export type BrowserOpenAccess = 'observe' | 'control';
 
+/**
+ * Where a task's browser is shown: a tile on the canvas, or a browser tab in the task's own view
+ * (beside its chat). Agents use whichever of the task's browsers the developer looked at last.
+ */
+export type BrowserSurfaceKind = 'canvas' | 'task-view';
+export const BROWSER_SURFACE_KINDS = ['canvas', 'task-view'] as const;
+
 /** Why the renderer answered an open request without a browser. */
 export type BrowserOpenDenial = 'disabled' | 'declined' | 'consent-pending';
 
