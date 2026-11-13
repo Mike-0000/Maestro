@@ -10,13 +10,18 @@
  */
 export type VibeEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
+export type VibeModel = 'fable' | 'opus' | 'sonnet' | 'haiku';
+
 export type VibeTier = {
   /** Agent name, and the `subagent_type` the director spawns. */
   name: string;
   /** Short role name for tables and the roster. */
   role: string;
-  model: 'fable' | 'opus' | 'sonnet' | 'haiku';
+  model: VibeModel;
   modelName: string;
+  /** Model the director passes instead while pro mode is on, when it differs from `model`. */
+  proModel?: VibeModel;
+  proModelName?: string;
   /** Standard effort, which the agent file pins. */
   effort: VibeEffort;
   /** Effort the director passes instead while pro mode is on: one level higher. */
@@ -113,15 +118,17 @@ export const VIBE_TIERS: readonly VibeTier[] = [
   {
     name: 'vibe-designer',
     role: 'Designer',
-    model: 'fable',
-    modelName: 'Fable 5.2',
+    model: 'opus',
+    modelName: 'Opus 5.5',
+    proModel: 'fable',
+    proModelName: 'Fable 5.2',
     effort: 'medium',
     proEffort: 'high',
     routing:
       'Front-end design: anything that invents new UI, layout, CSS, styles, theme tokens, ' +
       'motion, or visual polish, and reviews of how a UI looks',
     description:
-      'Vibe-mode designer (Fable, medium effort; high in pro mode) for front-end design: new UI, layouts, CSS, styles, theme tokens, and visual polish. Spawned only by the /vibe director.',
+      'Vibe-mode designer (Opus, medium effort; high in pro mode, on Fable) for front-end design: new UI, layouts, CSS, styles, theme tokens, and visual polish. Spawned only by the /vibe director.',
     brief:
       'You get front-end design: inventing new UI, layouts, CSS, styles, theme tokens, ' +
       'motion, and visual polish, and reviewing how an interface looks. Start from the ' +
@@ -149,6 +156,16 @@ export const VIBE_TIERS: readonly VibeTier[] = [
     edits: false,
   },
 ];
+
+/** The model alias the director passes in pro mode. */
+export function proModelOf(tier: VibeTier): VibeModel {
+  return tier.proModel ?? tier.model;
+}
+
+/** The model the tier runs on in pro mode, as shown to the user and the director. */
+export function proModelNameOf(tier: VibeTier): string {
+  return tier.proModelName ?? tier.modelName;
+}
 
 /** The tier for work that fits no other row. */
 export const VIBE_DEFAULT_TIER = 'vibe-builder';
@@ -187,6 +204,7 @@ export function renderWorker(tier: VibeTier): string {
     `effort, or ${tier.proEffort} when the director runs pro mode), taking direction from a ` +
       'director agent. The director cannot see your tool calls,',
     'only your final message, and it may send you follow-ups on the same workstream later.',
+    ...(tier.proModel ? [`In pro mode the director runs you on ${proModelNameOf(tier)}.`] : []),
     '',
     tier.brief,
     '',
@@ -206,11 +224,12 @@ export function renderTierTable(): string {
   const rows = VIBE_TIERS.map(
     (tier) =>
       `| \`${tier.name}\` | ${tier.modelName} | \`${tier.model}\` | \`${tier.effort}\` | ` +
-      `\`${tier.proEffort}\` | ${tier.routing} |`
+      `${proModelNameOf(tier)} | \`${proModelOf(tier)}\` | \`${tier.proEffort}\` | ${tier.routing} |`
   );
   return [
-    '| Tier (`subagent_type`) | Model | `model` | `effort` | `effort` in pro mode | Use it for |',
-    '| --- | --- | --- | --- | --- | --- |',
+    '| Tier (`subagent_type`) | Model | `model` | `effort` | Model in pro mode | ' +
+      '`model` in pro mode | `effort` in pro mode | Use it for |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- |',
     ...rows,
   ].join('\n');
 }

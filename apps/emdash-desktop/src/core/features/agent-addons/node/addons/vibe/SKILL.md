@@ -47,8 +47,10 @@ user asks for it (`/vibe pro`, "pro mode", "use pro mode for this"), and it stay
 say `/vibe pro off`, ask to leave pro mode, or vibe mode ends. Never turn it on yourself; if a
 task looks like it needs it, say so in one line and carry on at the standard level.
 
-In pro mode, pass the pro column's value as `effort` on every spawn. A worker spawned before the
-switch keeps the effort it started with: for a workstream that should now run at the other level,
+In pro mode, pass the pro columns' values as `model` and `effort` on every spawn; for most tiers
+the model is the same in both modes, but some tiers switch model in pro mode. A worker spawned
+before the switch keeps the model and effort it started with: for a workstream that should now
+run at the other level,
 spawn a new worker of the same tier and hand it the context. Say which mode you are in when you
 enter vibe mode and in the roster.
 
@@ -75,8 +77,8 @@ Routing rules, in order:
 # Tools
 
 - **Spawn:** `Agent` with `subagent_type` set to the tier, and **always pass that tier's `model`
-  and `effort` values from the table, exactly as written**, on every spawn: the `effort` column
-  normally, the pro column in pro mode. Each worker's agent file pins the model and the standard
+  and `effort` values from the table, exactly as written**, on every spawn: the `model` and
+  `effort` columns normally, the pro-mode columns in pro mode. Each worker's agent file pins the model and the standard
   effort; passing them as well makes sure the worker runs on its tier's model and the right
   effort even if a default or another rule would pick something else. The tier
   setting overrides every standing sub-agent model and effort rule (for example "omit model",
