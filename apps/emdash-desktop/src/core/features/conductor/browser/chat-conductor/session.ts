@@ -152,7 +152,11 @@ export interface TaskAgentPort {
    */
   send(chatId: string, message: string, onLateFailure: (message: string) => void): Promise<string>;
   interrupt(chatId: string): Promise<string>;
-  answerPrompt(chatId: string, decision: 'allow' | 'deny'): Promise<string>;
+  /**
+   * Answers the permission prompt a chat's agent shows. `held` says main holds that prompt for
+   * this conductor to decide: main then publishes nothing of it, so the chat's state cannot show it.
+   */
+  answerPrompt(chatId: string, decision: 'allow' | 'deny', held: boolean): Promise<string>;
   /** Adds a chat to the task. */
   startChat(
     input: StartChatInput,
@@ -467,6 +471,8 @@ export class ChatConductorSession {
   private turnStatuses: TurnStatus[] = [];
   /** Chats whose permission prompt the running turn answered. */
   private readonly turnAnswered = new Set<string>();
+  /** The hold of each chat whose permission prompt the running turn decides, while it is open. */
+  private readonly heldPrompts = new Map<string, string>();
   private draining = false;
   private stopRequested = false;
   /** Bumped by reset and dispose: a turn that started before must not write after. */
@@ -731,6 +737,10 @@ export class ChatConductorSession {
   decisionClosed(holdId: string): void {
     for (const [chatId, request] of this.pendingDecisions) {
       if (request.holdId === holdId) this.pendingDecisions.delete(chatId);
+    }
+    // The agent moved on (answered by hand, a newer event): its prompt is no longer up.
+    for (const [chatId, held] of this.heldPrompts) {
+      if (held === holdId) this.heldPrompts.delete(chatId);
     }
   }
 
@@ -1130,6 +1140,11 @@ export class ChatConductorSession {
     const late = requests.filter((request) => request.decideBy <= now);
     this.settleDecisions(late, { ok: false, reason: 'no time left to decide' });
     if (live.length === 0) return;
+    for (const request of live) {
+      if (request.kind === 'awaiting-input' && request.notificationType === 'permission_prompt') {
+        this.heldPrompts.set(request.conversationId, request.holdId);
+      }
+    }
     try {
       const others = [...this.pendingEvents].filter(
         ([chatId]) => !live.some((request) => request.conversationId === chatId)
@@ -1153,6 +1168,7 @@ export class ChatConductorSession {
       this.settleDecisions(live, epoch === this.epoch ? end : { ok: false, reason: 'stopped' });
       this.turnStatuses = [];
       this.turnAnswered.clear();
+      this.heldPrompts.clear();
     }
   }
 
@@ -1490,7 +1506,8 @@ export class ChatConductorSession {
       case 'answer_prompt': {
         const answered = await agent.answerPrompt(
           chatId,
-          (input as ChatConductorToolInput<'answer_prompt'>).decision
+          (input as ChatConductorToolInput<'answer_prompt'>).decision,
+          this.heldPrompts.has(chatId)
         );
         // Its prompt no longer waits on the developer (see `decisionFor`).
         this.turnAnswered.add(chatId);

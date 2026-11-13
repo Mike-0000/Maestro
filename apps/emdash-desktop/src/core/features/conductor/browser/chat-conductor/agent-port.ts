@@ -297,11 +297,14 @@ export function createTaskAgentPort(canvas: CanvasStore, taskId: string): TaskAg
       return 'Interrupted the agent.';
     },
 
-    async answerPrompt(chatId, decision) {
+    async answerPrompt(chatId, decision, held) {
       const entry = need(chatId);
       // Answering presses a key in the terminal: only when a permission prompt is what it shows.
-      if (!showsPermissionPrompt(snapshotOf(entry))) {
-        throw new Error('The agent is not showing a permission prompt, so nothing was pressed.');
+      // One main holds for this conductor is on screen though its state says nothing of it yet.
+      if (!held && !showsPermissionPrompt(snapshotOf(entry))) {
+        throw new Error(
+          "Maestro can't see a permission prompt on this agent's screen right now (it may not be drawn yet), so nothing was pressed. This does not mean anyone answered it."
+        );
       }
       await answerPermission(entry, decision);
       return decision === 'allow'

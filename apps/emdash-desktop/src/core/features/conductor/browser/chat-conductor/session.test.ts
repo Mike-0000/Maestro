@@ -1419,8 +1419,41 @@ describe('deciding what the developer is told', () => {
       held({ kind: 'awaiting-input', notificationType: 'permission_prompt', text: null })
     );
     await h.idle();
-    expect(h.agent.answerPrompt).toHaveBeenCalledWith('conv-1', 'allow');
+    expect(h.agent.answerPrompt).toHaveBeenCalledWith('conv-1', 'allow', true);
     expect(h.resolved()[0]?.decision).toEqual({ kind: 'quiet', answered: true });
+  });
+
+  it('answers the permission prompt it is deciding, though the chat still shows working', async () => {
+    const h = await following();
+    // Main shows nothing of a held prompt: the chat's state stays at working while it decides.
+    h.agentIs(working);
+    await h.idle();
+    h.replies.push(says(tool('answer_prompt', { decision: 'deny' })), says(text('Denied it.')));
+    h.session.decide(
+      held({ kind: 'awaiting-input', notificationType: 'permission_prompt', text: null })
+    );
+    await h.idle();
+    expect(h.agent.answerPrompt).toHaveBeenLastCalledWith('conv-1', 'deny', true);
+  });
+
+  it('does not take a prompt as held once main closed the hold, or outside a decision', async () => {
+    const h = await following();
+    const blocked = deferred<ChatTurnResult>();
+    h.replies.push(blocked.promise, says(text('Tried.')));
+    h.session.decide(
+      held({ kind: 'awaiting-input', notificationType: 'permission_prompt', text: null })
+    );
+    await vi.waitFor(() => expect(h.session.busy).toBe(true));
+    // The developer answered it by hand: the agent went on, and main closed the hold.
+    h.session.decisionClosed('hold-1');
+    blocked.resolve(says(tool('answer_prompt', { decision: 'allow' })));
+    await h.idle();
+    expect(h.agent.answerPrompt).toHaveBeenLastCalledWith('conv-1', 'allow', false);
+
+    h.replies.push(says(tool('answer_prompt', { decision: 'allow' })), says(text('Done.')));
+    h.session.send('Allow it.');
+    await h.idle();
+    expect(h.agent.answerPrompt).toHaveBeenLastCalledWith('conv-1', 'allow', false);
   });
 
   it('falls back on every way a turn can fail', async () => {
