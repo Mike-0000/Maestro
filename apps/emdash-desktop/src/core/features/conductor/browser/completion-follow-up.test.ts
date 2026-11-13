@@ -335,6 +335,28 @@ describe('completion follow-ups', () => {
     expect(store.reply).toBe('Zulu: finished a turn with nothing new.');
   });
 
+  it('keeps a failed follow-up on the HUD once the developer has heard about the agent', async () => {
+    const { store, speech, announce } = setup(agent({ taskName: 'Fill the Jar yesterday toggle' }));
+    mocks.runTurn
+      .mockResolvedValueOnce(text('Zulu started the build loop; it is at step 28 of 31.'))
+      .mockResolvedValue({
+        success: false,
+        error: { type: 'rate-limited', message: 'OpenRouter is rate limited right now.' },
+      });
+    await announce();
+    for (const step of [29, 30]) {
+      await announce([
+        agent({
+          taskName: 'Fill the Jar yesterday toggle',
+          completionReport: buildCompletionReport(`Still running, step ${step} of 31.`),
+        }),
+      ]);
+    }
+    expect(mocks.runTurn).toHaveBeenCalledTimes(3);
+    expect(speech.announce).toHaveBeenCalledTimes(1);
+    expect(store.reply).toContain('Zulu');
+  });
+
   it("speaks the fixed sentence when an agent's first report is called nothing new", async () => {
     const { speech, announce } = setup();
     mocks.runTurn.mockResolvedValueOnce(text('NO_NEWS.'));

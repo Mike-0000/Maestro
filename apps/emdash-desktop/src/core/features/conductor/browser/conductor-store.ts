@@ -6335,17 +6335,22 @@ export class ConductorStore {
       // A first report the developer never heard still gets the fixed sentence (it finished,
       // and where its app is); a restated one does not get a bare "finished" again.
       const neverHeard = entries.some((entry) => !this.narratedAt.has(entry.conversationId));
+      // A failed turn with none of the agents' own words has only the fixed sentence, which may
+      // be nothing but the task's name: quiet on the same terms as nothing new.
+      const bareFailure = modelFailed && !reply && ownWords.length === 0;
       // Asked to hear only what needs them, the developer hears nothing unless the model said
       // so; when its turn failed, the verdict that these agents are done stands.
       const quiet = attentionOnly
         ? noNews || !reply
-        : noNews && (heardLately || (ownWords.length === 0 && !neverHeard));
+        : (noNews || bareFailure) && (heardLately || (ownWords.length === 0 && !neverHeard));
       const spoken = attentionOnly
         ? quiet
           ? ownWords.join(' ') || fallback
           : reply
         : quiet
-          ? `${names.join(' and ')}: finished a turn with nothing new.`
+          ? bareFailure
+            ? fallback
+            : `${names.join(' and ')}: finished a turn with nothing new.`
           : noNews
             ? ownWords.join(' ') || noNewsLine
             : reply || ownWords.join(' ') || fallback;
