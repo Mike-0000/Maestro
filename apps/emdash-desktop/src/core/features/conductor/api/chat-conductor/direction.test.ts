@@ -87,6 +87,14 @@ describe("the conductor's mark", () => {
       '❯ [Pasted text #1 +4 lines]',
     ]);
   });
+
+  it('knows its mark wrapped short by a narrow terminal, but not a few words of it', () => {
+    expect(startsWithConductorMark(CHAT_CONDUCTOR_MARK.slice(0, 28))).toBe(true);
+    expect(startsWithConductorMark(CHAT_CONDUCTOR_MARK.slice(0, 12))).toBe(false);
+    const labels = { sent: '[mine]', maestro: '[maestro]', other: '[theirs]' };
+    const wrapped = `❯ ${CHAT_CONDUCTOR_MARK.slice(0, 30)}`;
+    expect(markInputLines(wrapped, [], labels)).toBe(`${wrapped} [mine]`);
+  });
 });
 
 describe('prompts the agent received from others', () => {

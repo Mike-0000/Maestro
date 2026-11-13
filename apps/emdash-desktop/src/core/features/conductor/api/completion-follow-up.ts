@@ -73,23 +73,50 @@ const MAESTRO_LABELS: InputLineLabels = {
 const PASTE_PLACEHOLDER = /^\[pasted text\b/i;
 
 /**
+ * Lines behind a prompt glyph that nobody typed: the cursor on a menu option ("1. Yes, proceed
+ * (y)", "No, and tell Codex what to do differently (esc)", an MCP "Accept" / "Decline"), and the
+ * hint an empty input shows. Codex's hints rotate; Claude Code's start with `Try "`.
+ */
+const NEVER_INPUT = [
+  /^\d{1,2}[.)]\s/,
+  /^(?:accept|decline|cancel)$/i,
+  /\((?:y|n|a|esc)\)$/i,
+  /^try "/i,
+  /^(?:ask codex to do anything|explain this codebase|summarize recent commits|implement \{feature\}|find and fix a bug in @filename|write tests for @filename|improve documentation in @filename|run \/review on my current changes|use \/skills to list available skills)$/i,
+];
+
+/** How what Maestro types into an agent starts: its events and replies, agents' messages, a brief. */
+const MAESTRO_PREFIXES = [
+  '[maestro',
+  '[reply from agent',
+  '[message from agent',
+  'the full task context could not be passed intact',
+];
+
+/**
  * Says who typed each input line in a terminal tail. The conductor once asked whether to pass on
  * "push it", a line the developer had typed into the agent themselves, as if it were the agent's
  * own words. Lines the reader sent (`sentByConductor`, or a chat conductor's mark line) or Maestro
- * sent are marked so, and every other is the developer's. A paste placeholder is left unmarked.
+ * sent are marked so, and every other is the developer's. A paste placeholder, a menu option and
+ * an input hint are left unmarked. `plainAnglePrompt: false` reads a line starting with a plain
+ * ">" as a quote, not input: the chat agents' prompts are "❯" and "›".
  */
 export function markInputLines(
   text: string,
   sentByConductor: readonly string[] = [],
-  labels: InputLineLabels = MAESTRO_LABELS
+  labels: InputLineLabels = MAESTRO_LABELS,
+  options: { plainAnglePrompt?: boolean } = {}
 ): string {
   const sent = sentByConductor.map(comparable).filter(Boolean);
+  const plainAnglePrompt = options.plainAnglePrompt ?? true;
   return text
     .split('\n')
     .map((line) => {
       const match = INPUT_LINE.exec(line);
       const typed = match?.[2];
       if (!match || !typed || PASTE_PLACEHOLDER.test(typed)) return line;
+      if (!plainAnglePrompt && match[1]?.trim() === '>') return line;
+      if (NEVER_INPUT.some((pattern) => pattern.test(typed))) return line;
       const said = comparable(typed);
       // A terminal wraps long input: the visible start is enough to tell a sent text apart.
       const head = said.slice(0, 60);
@@ -97,7 +124,7 @@ export function markInputLines(
         // A chat conductor's message starts with its mark (`CHAT_CONDUCTOR_MARK`).
         startsWithConductorMark(typed) ||
         sent.some((text) => text.startsWith(head) || head.startsWith(text.slice(0, 60)));
-      const byMaestro = said.startsWith('[maestro') || said.startsWith('[reply from agent');
+      const byMaestro = MAESTRO_PREFIXES.some((prefix) => said.startsWith(prefix));
       const label = byReader ? labels.sent : byMaestro ? labels.maestro : labels.other;
       return `${line} ${label}`;
     })

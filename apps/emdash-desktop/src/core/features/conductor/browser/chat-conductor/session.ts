@@ -963,7 +963,9 @@ export class ChatConductorSession {
 
   /** Raw terminal text with its input lines marked by who typed them, as far as it can tell. */
   private markInput(chatId: string, text: string): string {
-    return markInputLines(text, this.chatState(chatId).sentToAgent, CHAT_INPUT_LABELS);
+    return markInputLines(text, this.chatState(chatId).sentToAgent, CHAT_INPUT_LABELS, {
+      plainAnglePrompt: false,
+    });
   }
 
   /**
