@@ -17,10 +17,12 @@ const identity = { projectId: 'p1', workspaceId: 'w1', taskId: 't1' };
 
 type Harness = ReturnType<typeof harness>;
 
-function fakeContents(id: number) {
+function fakeContents(id: number, partition: string = ISOLATED) {
   const listeners = new Map<string, Array<(...args: unknown[]) => void>>();
   return {
     id,
+    /** Stands in for `webContents.session`: the partition the guest really runs on. */
+    partition,
     isDestroyed: () => false,
     isLoading: () => false,
     getURL: () => 'http://localhost:5173/',
@@ -66,6 +68,14 @@ function harness(settings: Partial<CanvasBrowserSettings> = {}) {
   const service = new BrowserControlService({
     registry: {
       getPartition: (id: string) => partitions.get(id) ?? null,
+      isIsolatedGuest: (id: string, contents: WebContents) => {
+        const partition = partitions.get(id);
+        return (
+          partition !== undefined &&
+          partition.startsWith('persist:emdash-browser-isolated-') &&
+          (contents as unknown as { partition: string }).partition === partition
+        );
+      },
       getBoundWebContents: (id: string) => (bound.get(id) as unknown as WebContents) ?? null,
       getShownAt: (id: string) => shownAt.get(id) ?? 0,
       onBinding: (listener: BrowserBindingListener) => {
@@ -81,8 +91,8 @@ function harness(settings: Partial<CanvasBrowserSettings> = {}) {
     reservedPorts: () => [40111],
     now: () => now,
   });
-  function bind(browserId: string) {
-    const contents = fakeContents(bound.size + 1);
+  function bind(browserId: string, guestPartition?: string) {
+    const contents = fakeContents(bound.size + 1, guestPartition ?? partitions.get(browserId));
     bound.set(browserId, contents);
     bindingListener?.({
       type: 'bound',
@@ -97,6 +107,8 @@ function harness(settings: Partial<CanvasBrowserSettings> = {}) {
     consoleBuffer,
     events,
     bind,
+    /** The renderer re-registered the browser on another partition (a profile switch). */
+    repartition: (browserId: string, partition: string) => partitions.set(browserId, partition),
     unbind: (browserId: string) => bound.delete(browserId),
     /** The browser's surface came on screen now. */
     show: (browserId: string) => shownAt.set(browserId, now),
@@ -375,6 +387,77 @@ describe('BrowserControlService', () => {
       h.service.forget('b-tab-iso');
 
       expect(h.service.findTaskBrowser('t1', 'control')).toBe('b-iso');
+    });
+  });
+
+  describe("a page on the developer's own profile never reaches automation", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('when the tab switches to their profile while a call waits for it to bind', async () => {
+      // The isolated tab is mounting (not bound yet) when an agent looks at it.
+      h.service.setControl({
+        browserId: 'b-tab-iso',
+        control: 'agents',
+        surface: 'task-view',
+        ...identity,
+      });
+      const look = h.service.observe(agent, { browserId: 'b-tab-iso', mode: 'screenshot' });
+      await vi.advanceTimersByTimeAsync(100);
+      // The developer switches the tab to their own profile; that guest binds.
+      h.repartition('b-tab-iso', PROFILE);
+      h.bind('b-tab-iso');
+
+      const result = await look;
+      expect(result.success).toBe(false);
+      expect(h.automation.observe).not.toHaveBeenCalled();
+
+      const act = h.service.act(agent, { browserId: 'b-tab-iso', action: { kind: 'reload' } });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect((await act).success).toBe(false);
+      expect(h.automation.act).not.toHaveBeenCalled();
+    });
+
+    it('when a guest from another partition is bound under an isolated id', async () => {
+      h.service.setControl({ browserId: 'b-iso', control: 'agents', ...identity });
+      h.bind('b-iso', PROFILE);
+      const look = await h.service.observe(agent, { browserId: 'b-iso', mode: 'text' });
+      expect(look.success).toBe(false);
+      expect(h.automation.observe).not.toHaveBeenCalled();
+    });
+
+    it('when an open request is answered with a browser now on their profile', async () => {
+      const pending = h.service.requestOpen(agent, null, 'control');
+      await vi.advanceTimersByTimeAsync(0);
+      const request = h.events.find((event) => event.type === 'open-request');
+      if (request?.type !== 'open-request') throw new Error('no request');
+      h.service.setControl({
+        browserId: 'b-tab-iso',
+        control: 'agents',
+        surface: 'task-view',
+        ...identity,
+      });
+      h.service.ackOpenRequest(request.requestId, 'b-tab-iso');
+      h.repartition('b-tab-iso', PROFILE);
+      h.bind('b-tab-iso');
+      expect((await pending).success).toBe(false);
+    });
+
+    it('and its console is not kept for agents', () => {
+      h.service.setControl({
+        browserId: 'b-tab-shared',
+        control: 'user',
+        surface: 'task-view',
+        ...identity,
+      });
+      h.consoleBuffer.attach.mockClear();
+      h.bind('b-tab-shared');
+      expect(h.consoleBuffer.attach).not.toHaveBeenCalled();
     });
   });
 

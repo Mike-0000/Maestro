@@ -13,6 +13,7 @@ import { desktopHostEvents } from '@core/features/workbench/node';
 import { buildBrowserClaims, type BrowserClaim } from '@core/manifests/shared/browser-claims';
 import {
   browserProfilePartition,
+  isIsolatedBrowserPartition,
   isNamedBrowserProfileId,
   normalizeBrowserUrl,
   type BrowserDataClearKind,
@@ -96,6 +97,19 @@ export class BrowserWebContentsRegistry {
 
   getPartition(browserId: string): string | null {
     return this.sessionsByBrowserId.get(browserId)?.partition ?? null;
+  }
+
+  /**
+   * Whether a guest may be given to a model as this browser: the browser is registered on an
+   * isolated per-task partition and the guest itself runs in that partition's session (read
+   * from the webContents, not from what the renderer registered).
+   */
+  isIsolatedGuest(browserId: string, webContents: WebContents): boolean {
+    const partition = this.sessionsByBrowserId.get(browserId)?.partition;
+    if (!partition || !isIsolatedBrowserPartition(partition) || webContents.isDestroyed()) {
+      return false;
+    }
+    return webContents.session === session.fromPartition(partition);
   }
 
   private notifyBinding(event: Parameters<BrowserBindingListener>[0]): void {

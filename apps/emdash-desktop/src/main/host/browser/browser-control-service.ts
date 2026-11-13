@@ -89,7 +89,7 @@ type BindWaiter = (webContents: WebContents | null) => void;
 export type BrowserControlDeps = {
   registry: Pick<
     BrowserWebContentsRegistry,
-    'getBoundWebContents' | 'getPartition' | 'onBinding' | 'getShownAt'
+    'getBoundWebContents' | 'getPartition' | 'onBinding' | 'getShownAt' | 'isIsolatedGuest'
   >;
   automation: Pick<BrowserAutomation, 'observe' | 'act' | 'release'>;
   consoleBuffer: Pick<
@@ -132,7 +132,10 @@ export class BrowserControlService {
     );
     deps.registry.onBinding((event) => {
       if (event.type === 'bound') {
-        deps.consoleBuffer.attach(event.browserId, event.webContents);
+        // Console output of a page on the developer's own profile is never kept for models.
+        if (deps.registry.isIsolatedGuest(event.browserId, event.webContents)) {
+          deps.consoleBuffer.attach(event.browserId, event.webContents);
+        }
         this.installNavigationGuards(event.browserId, event.webContents);
         const waiters = this.bindWaiters.get(event.browserId);
         this.bindWaiters.delete(event.browserId);
@@ -302,7 +305,11 @@ export class BrowserControlService {
     });
     if (!answer.browserId) return err(openDenied(answer.denial));
     // The ack only says a tile exists; agents can use it once its webview has attached.
-    if (!(await this.waitForBinding(answer.browserId))) {
+    const opened = await this.waitForBinding(answer.browserId);
+    if (opened && !this.deps.registry.isIsolatedGuest(answer.browserId, opened)) {
+      return err(ownProfileError());
+    }
+    if (!opened) {
       return err({
         type: 'not-bound',
         message:
@@ -327,6 +334,10 @@ export class BrowserControlService {
     const authorized = await this.authorize(scope, input.browserId, 'observe');
     if (!authorized.success) return authorized;
     const { entry, webContents } = authorized.data;
+    // Re-checked last: the browser may have moved to another profile while the call waited.
+    if (!this.deps.registry.isIsolatedGuest(input.browserId, webContents)) {
+      return err(ownProfileError());
+    }
     const result = await this.deps.automation.observe(webContents, input);
     if (result.success && input.includeConsole) {
       result.data.console = this.deps.consoleBuffer.tail(input.browserId, 15);
@@ -357,6 +368,10 @@ export class BrowserControlService {
     }
     if (this.busy.has(entry.browserId)) {
       return err({ type: 'busy', message: 'Another action is still running in this browser.' });
+    }
+    // Re-checked last: the browser may have moved to another profile while the call waited.
+    if (!this.deps.registry.isIsolatedGuest(input.browserId, webContents)) {
+      return err(ownProfileError());
     }
     this.busy.add(entry.browserId);
     const actorKey = actorKeyOf(scope);
@@ -643,6 +658,14 @@ export class BrowserControlService {
       detail,
     });
   }
+}
+
+function ownProfileError(): BrowserAutomationError {
+  return {
+    type: 'not-controllable',
+    message:
+      "This browser is now on the developer's own profile, so agents cannot see or use it. Call open_app to ask for the task's app browser again.",
+  };
 }
 
 function openDenied(denial: BrowserOpenDenial | undefined): BrowserAutomationError {

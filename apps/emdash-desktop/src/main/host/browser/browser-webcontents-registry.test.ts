@@ -143,6 +143,18 @@ describe('BrowserWebContentsRegistry', () => {
     expect(registry.getBoundWebContents('browser-1')).toBe(replacement);
   });
 
+  it('admits a guest for models only on an isolated partition it really runs in', () => {
+    const registry = new BrowserWebContentsRegistry();
+    const isolated = 'persist:emdash-browser-isolated-p-w-t';
+    registry.registerSession({ browserId: 'iso', partition: isolated });
+    registry.registerSession({ browserId: 'shared', partition: PROFILE_PARTITION });
+
+    expect(registry.isIsolatedGuest('iso', fakeWebContents(isolated))).toBe(true);
+    expect(registry.isIsolatedGuest('iso', fakeWebContents(PROFILE_PARTITION))).toBe(false);
+    expect(registry.isIsolatedGuest('shared', fakeWebContents(PROFILE_PARTITION))).toBe(false);
+    expect(registry.isIsolatedGuest('missing', fakeWebContents(isolated))).toBe(false);
+  });
+
   it('records when a browser was last shown, and never for unknown browsers', () => {
     let now = 1_000;
     const registry = new BrowserWebContentsRegistry(() => now);
