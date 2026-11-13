@@ -1,6 +1,10 @@
 import { scriptsContract } from '@emdash/core/runtimes/scripts/api';
 import type { TerminalDevServer, TerminalDevServerList } from '@emdash/core/runtimes/terminals/api';
 import { terminalsContract } from '@emdash/core/runtimes/terminals/api';
+import {
+  tuiAgentsContract,
+  type TuiAgentDevServerList,
+} from '@emdash/core/runtimes/tui-agents/api';
 import { createScope } from '@emdash/shared/concurrency';
 import { observe, remote, whenReady } from '@emdash/wire/state';
 import {
@@ -18,7 +22,11 @@ import {
   createLifecycleScriptTerminalId,
   lifecycleScriptNodeIdFromTerminalId,
 } from '@core/primitives/terminals/api';
-import type { ScriptsRuntimeClient, TerminalsRuntimeClient } from '@main/gateway/desktop-workers';
+import type {
+  ScriptsRuntimeClient,
+  TerminalsRuntimeClient,
+  TuiAgentsRuntimeClient,
+} from '@main/gateway/desktop-workers';
 import { log } from '@main/lib/logger';
 
 export type DevServerBridge = {
@@ -72,7 +80,12 @@ export type DevServerBridgeDependencies = {
 export type DevServerBridgeClient = {
   terminals: TerminalsRuntimeClient;
   scripts: ScriptsRuntimeClient;
+  /** Agent sessions' self-started dev servers; passed for the local host only. */
+  tuiAgents?: TuiAgentsRuntimeClient;
 };
+
+/** Terminal-id prefix of servers found in an agent session's process tree. */
+const AGENT_SOURCE_PREFIX = 'agent:';
 
 export async function createDevServerBridge(
   client: DevServerBridgeClient,
@@ -82,6 +95,7 @@ export async function createDevServerBridge(
   let previous = new Map<string, TerminalDevServer>();
   let terminalList: TerminalDevServerList = {};
   let scriptList: TerminalDevServerList = {};
+  let agentList: TerminalDevServerList = {};
   let syncChain = Promise.resolve();
   let disposed = false;
   const scope = createScope({ label: 'dev-server-bridge' });
@@ -95,9 +109,16 @@ export async function createDevServerBridge(
     lingerMs: 15_000,
   });
   const scriptMember = scriptDevServers(undefined);
+  const agentMember = client.tuiAgents
+    ? remote(tuiAgentsContract.devServers, client.tuiAgents.devServers, {
+        scope,
+        lingerMs: 15_000,
+      })(undefined)
+    : null;
   const stopHandler = async (server: PreviewServer) => {
     const devServer = await findDevServerForPreview(dependencies, previous, server);
-    if (!devServer) return;
+    // A server an agent started belongs to the agent; stopping the preview only forgets it.
+    if (!devServer || devServer.key.id.startsWith(AGENT_SOURCE_PREFIX)) return;
     const result = await sendInterrupt(client, devServer);
     if (!result.success) {
       log.warn('dev-server-bridge: failed to interrupt dev server terminal', {
@@ -111,7 +132,7 @@ export async function createDevServerBridge(
     stopHandler
   );
   const enqueueSync = () => {
-    const list: TerminalDevServerList = { ...terminalList, ...scriptList };
+    const list: TerminalDevServerList = { ...terminalList, ...scriptList, ...agentList };
     const next = new Map(Object.entries(list));
     syncChain = syncChain
       .then(async () => {
@@ -163,8 +184,19 @@ export async function createDevServerBridge(
       },
       { scope }
     );
+    if (agentMember) {
+      observe(
+        agentMember.states.list,
+        (snapshot) => {
+          agentList = projectAgentDevServers(snapshot.value ?? {}, hostContext);
+          enqueueSync();
+        },
+        { scope }
+      );
+    }
     await whenReady(member.states.list, { scope });
     await whenReady(scriptMember.states.list, { scope });
+    if (agentMember) await whenReady(agentMember.states.list, { scope });
     await syncChain;
   } catch (error) {
     unregisterStopHandler();
@@ -186,6 +218,35 @@ export async function createDevServerBridge(
       }
     },
   };
+}
+
+/**
+ * Projects agent-started servers onto the terminal shape, under the terminal id
+ * `agent:<conversationId>`, so workspace resolution and preview sources stay uniform.
+ */
+function projectAgentDevServers(
+  list: TuiAgentDevServerList,
+  hostContext: DevServerHostContext
+): TerminalDevServerList {
+  return Object.fromEntries(
+    Object.entries(list).map(([id, server]) => [
+      `${AGENT_SOURCE_PREFIX}${id}`,
+      {
+        key: {
+          workspace: hostFileRefFromNativePath(
+            server.cwd,
+            hostContext.transport === 'ssh' ? hostContext.connectionId : undefined
+          ),
+          id: `${AGENT_SOURCE_PREFIX}${server.conversationId}`,
+        },
+        protocol: server.protocol,
+        host: server.host,
+        port: server.port,
+        urlPath: server.urlPath,
+        detectedAt: server.detectedAt,
+      } satisfies TerminalDevServer,
+    ])
+  );
 }
 
 async function syncDevServers(

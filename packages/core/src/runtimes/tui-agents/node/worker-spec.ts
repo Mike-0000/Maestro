@@ -19,6 +19,8 @@ export type TuiAgentsWorkerSpecInput = {
   logger?: Logger;
   dependencies: ProvidedWireComponentRequirements<TuiAgentsComponent['requirements']>;
   intentsFilePath: string;
+  /** Detect dev servers agents start themselves; only for a runtime on the user's own computer. */
+  detectDevServers?: boolean;
 };
 
 /**
@@ -42,6 +44,7 @@ export function tuiAgentsWorkerSpec(
       dependencies: input.dependencies,
       config: {
         intentsFilePath: input.intentsFilePath,
+        ...(input.detectDevServers ? { detectDevServers: true } : {}),
         lifecycle: {
           session: { kind: 'always' },
         },

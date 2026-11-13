@@ -10,5 +10,6 @@ export function createTuiAgentsController(runtime: TuiAgentsRuntime) {
     output: (key) => runtime.outputLog(key),
     sessions: runtime.sessionsLiveModel,
     agentStates: runtime.agentStatesLiveModel,
+    devServers: runtime.devServersLiveModel,
   });
 }

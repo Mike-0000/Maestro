@@ -9,6 +9,10 @@ import { describe, expect, it, vi } from 'vitest';
 import type { TuiAgentStartInput } from '#runtimes/tui-agents/api';
 import { tuiAgentsContract } from '#runtimes/tui-agents/api';
 import type {
+  ListeningSocket,
+  ProcessTableRow,
+} from '#runtimes/tui-agents/node/dev-servers/listening-ports';
+import type {
   AgentPluginHost,
   ITrustBehavior,
   ResolvedTuiProvider,
@@ -45,6 +49,7 @@ function createRuntime(
     commandEnv?: Record<string, string>;
     command?: string;
     args?: string[];
+    devServerDetection?: ConstructorParameters<typeof TuiAgentsRuntime>[0]['devServerDetection'];
   } = {}
 ) {
   const spawner = new FakePtySpawner();
@@ -95,6 +100,7 @@ function createRuntime(
     platform: options.platform,
     lifecycle: options.lifecycle,
     spillPrompt: options.spillPrompt,
+    devServerDetection: options.devServerDetection,
     logger: noopLogger,
   });
   return { runtime, spawner, agentHost, exec };
@@ -115,6 +121,74 @@ function startInput(overrides: Partial<TuiAgentStartInput> = {}): TuiAgentStartI
 }
 
 describe('TuiAgentsRuntime', () => {
+  describe('dev servers an agent starts itself', () => {
+    // The fake spawner gives the first session pid 1: agent 1, its shell 101, the server 102 on
+    // 4100. Pid 999 is some other program on the computer, listening on 5432.
+    const processes: ProcessTableRow[] = [
+      { pid: 1, ppid: 0 },
+      { pid: 101, ppid: 1 },
+      { pid: 102, ppid: 101 },
+      { pid: 999, ppid: 0 },
+    ];
+
+    function detection(listeners: { current: ListeningSocket[] }) {
+      return {
+        snapshotter: {
+          listListeners: async () => listeners.current,
+          listProcesses: async () => processes,
+        },
+        httpProbe: async () => 'http:' as const,
+        intervalMs: 60_000,
+      };
+    }
+
+    it("publishes a server listening in the session's process tree, and drops it when it stops", async () => {
+      const listeners = {
+        current: [
+          { pid: 102, address: '0.0.0.0', port: 4100 },
+          { pid: 999, address: '127.0.0.1', port: 5432 },
+        ],
+      };
+      const { runtime } = createRuntime({ devServerDetection: detection(listeners) });
+      const devServers = () => peek(runtime['devServersList']);
+      try {
+        await runtime.startSession(startInput({ cwd: '/repo/worktree' }));
+
+        await vi.waitFor(() =>
+          expect(Object.values(devServers())).toEqual([
+            {
+              conversationId: 'conversation-1',
+              cwd: '/repo/worktree',
+              protocol: 'http:',
+              host: 'localhost',
+              port: 4100,
+              urlPath: '/',
+              pid: 102,
+              detectedAt: expect.any(Number),
+            },
+          ])
+        );
+
+        listeners.current = [{ pid: 999, address: '127.0.0.1', port: 5432 }];
+        await runtime['devServerDetector']!.poll();
+        expect(devServers()).toEqual({});
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it('publishes nothing when detection is off (a remote workspace server)', async () => {
+      const { runtime } = createRuntime();
+      try {
+        await runtime.startSession(startInput());
+        expect(runtime['devServerDetector']).toBeNull();
+        expect(peek(runtime['devServersList'])).toEqual({});
+      } finally {
+        await runtime.dispose();
+      }
+    });
+  });
+
   it.each(['fresh', 'resume'] as const)(
     'recovers a %s launch using the session id captured after switching sessions',
     async (mode) => {
