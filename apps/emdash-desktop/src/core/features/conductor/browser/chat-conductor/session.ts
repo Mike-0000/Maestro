@@ -1348,6 +1348,16 @@ export class ChatConductorSession {
         result = { success: false, error: { type: 'api-error', message: errorMessage(error) } };
       }
       if (epoch !== this.epoch) return { ok: false, reason: 'the turn was cut short' };
+      if (result.success && result.data.content.length === 0 && answered) {
+        // After its tool results the model may end the turn with nothing more to say (a report
+        // card tells it to end there): what it wrote beside its tools is its reply. Taking this
+        // for a failure posted an error under a reply the developer had just been given, and
+        // handed the chats' decisions back to the rules.
+        if (spoken && !(trigger === 'event' && spoken === CHAT_NOTHING_NEW)) {
+          show({ kind: 'conductor', text: spoken });
+        }
+        break;
+      }
       if (result.success && result.data.content.length === 0) {
         result = {
           success: false,

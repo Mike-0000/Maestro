@@ -1361,6 +1361,45 @@ describe('deciding what the developer is told', () => {
     ]);
   });
 
+  it('takes an empty answer after its tool calls as the end of the turn, not a failure', async () => {
+    const h = await following();
+    // The model sets the status beside its message, then ends with no further content.
+    h.replies.push(
+      says(
+        text('Zeus wants a release name.'),
+        tool('set_status', { state: 'needs_you', headline: 'Zeus wants a release name' })
+      ),
+      says()
+    );
+    h.session.decide(held());
+    await h.idle();
+    expect(h.kinds().slice(-2)).toEqual(['event', 'conductor']);
+    expect(h.session.entries.at(-1)).toMatchObject({ text: 'Zeus wants a release name.' });
+    // The turn ended well, so the decision is the conductor's, not the rules'.
+    expect(h.resolved()[0]?.decision).toMatchObject({ kind: 'surface', state: 'needs_you' });
+  });
+
+  it('posts no error when a developer turn ends empty after its tools', async () => {
+    const h = await following();
+    h.replies.push(says(text('Noted.'), tool('update_notes', { notes: 'Goal: ship.' })), says());
+    h.session.send('Remember the goal is to ship.');
+    await h.idle();
+    expect(h.kinds().slice(-2)).toEqual(['developer', 'conductor']);
+    expect(h.session.entries.at(-1)).toMatchObject({ text: 'Noted.' });
+    expect(h.session.notes).toBe('Goal: ship.');
+  });
+
+  it('still reports an empty first answer as an error', async () => {
+    const h = await following();
+    h.replies.push(says());
+    h.session.send('Where is it?');
+    await h.idle();
+    expect(h.session.entries.at(-1)).toMatchObject({
+      kind: 'error',
+      text: 'The conductor returned an empty reply.',
+    });
+  });
+
   it('notifies done only when every finished agent is announced, unless told otherwise', async () => {
     const h = await following();
     h.announce.mode = 'attention_only';
