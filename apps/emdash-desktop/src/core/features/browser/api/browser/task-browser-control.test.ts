@@ -63,7 +63,7 @@ describe('TaskBrowserControlStore', () => {
     const stop = store.track('tab-1', 'user');
     await settle();
 
-    expect(await store.handOver('tab-1')).toBe(true);
+    expect(await store.handOver('tab-1', ['http://localhost:4100/'])).toBe(true);
     expect(browserSessionStore.getSession('tab-1')?.partition).toBe(ISOLATED);
     expect(browserSessionStore.getSession('tab-1')?.currentUrl).toBe('http://localhost:4100/');
     expect(client.registerSession).toHaveBeenLastCalledWith({
@@ -78,6 +78,27 @@ describe('TaskBrowserControlStore', () => {
     const controlOrder = client.setControl.mock.invocationCallOrder.at(-1)!;
     expect(registerOrder).toBeLessThan(controlOrder);
     stop();
+  });
+
+  it('never carries a page the developer had open on their own profile over to agents', async () => {
+    // A magic sign-in link on another local port: its address and page must not reach agents.
+    openTab('tab-1', 'default', 'http://localhost:4300/login?token=secret');
+    const stop = store.track('tab-1', 'user');
+    await settle();
+
+    expect(await store.handOver('tab-1', ['http://localhost:4100/'])).toBe(true);
+    const session = browserSessionStore.getSession('tab-1');
+    expect(session?.partition).toBe(ISOLATED);
+    expect(session?.currentUrl).toBe('http://localhost:4100/');
+    expect(JSON.stringify(client.setControl.mock.calls.at(-1))).not.toContain('4300');
+    stop();
+
+    openTab('tab-2', 'default', 'https://mail.example.com/inbox');
+    const stopOther = store.track('tab-2', 'user');
+    await settle();
+    expect(await store.handOver('tab-2', [])).toBe(true);
+    expect(browserSessionStore.getSession('tab-2')?.currentUrl).toBe('about:blank');
+    stopOther();
   });
 
   it('gives the tab back to the developer when they take it back or leave the isolated profile', async () => {

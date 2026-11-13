@@ -64,15 +64,29 @@ export class TaskBrowserControlStore {
 
   /**
    * Hands a task-view tab to agents: moves it to the task's isolated profile if it is on the
-   * developer's own one (its page reloads there, without their logins), then tells main. False
-   * when main refused.
+   * developer's own one, then tells main. False when main refused.
+   *
+   * What the tab showed on the developer's profile stays theirs: it may be a capability URL (a
+   * magic or signed link) that would work again on the isolated profile. So the moved tab keeps
+   * its page only when it is on one of the task's dev servers (`devServerUrls`); otherwise it
+   * opens the first dev server, or a blank page.
    */
-  async handOver(browserId: string): Promise<boolean> {
+  async handOver(browserId: string, devServerUrls: readonly string[] = []): Promise<boolean> {
     const session = browserSessionStore.getSession(browserId);
     if (!session) return false;
     runInAction(() => {
       if (!isIsolatedBrowserPartition(session.partition)) {
+        const origin = httpOrigin(session.currentUrl);
+        const onDevServer = devServerUrls.some((url) => httpOrigin(url) === origin);
+        const url = onDevServer ? session.currentUrl : (devServerUrls[0] ?? 'about:blank');
         browserSessionStore.setSessionProfile(browserId, BROWSER_ISOLATED_PROFILE_ID);
+        browserSessionStore.updateSession(browserId, {
+          currentUrl: url,
+          title: '',
+          faviconUrl: null,
+          canGoBack: false,
+          canGoForward: false,
+        });
       }
       this.setControl(browserId, 'agents');
     });

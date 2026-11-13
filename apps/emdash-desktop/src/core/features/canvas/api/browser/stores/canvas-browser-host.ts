@@ -664,9 +664,9 @@ export class CanvasBrowserHost {
         this.askToShare(event.taskId, event.actor, {
           title: `${actorName(event.actor)} wants to use the browser beside its chat`,
           description: route.isolate
-            ? "It is on your own browser profile, so it moves to this task's isolated profile first: the page reloads there, without your logins. Take it back any time."
+            ? "It is on your own browser profile, so it moves to this task's isolated profile first and opens the task's app there (your page and logins stay behind). Take it back any time."
             : "Agents can already see it. Allow clicking and typing on this task's app? Take it back any time.",
-          allow: () => taskBrowserControl.handOver(browserId),
+          allow: () => taskBrowserControl.handOver(browserId, this.devServerUrls(event)),
         }),
         CONSENT_ANSWER_MS
       );
