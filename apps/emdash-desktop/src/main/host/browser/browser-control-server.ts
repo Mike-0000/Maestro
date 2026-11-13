@@ -128,11 +128,13 @@ export class BrowserControlServer extends LoopbackMcpServer<AgentBrowserScope> {
             : url;
         const opened = await this.control.requestOpen(scope, resolvedUrl, 'control');
         if (!opened.success) return errorResult(opened.error);
+        // requestOpen succeeds only once the tile's page is attached, so agents can use it now.
         const described = this.control.describeTaskBrowser(scope.taskId);
+        const shown = described?.url && described.url !== 'about:blank' ? described.url : null;
         return textResult(
           [
             'The app browser is open on the Maestro canvas and agents may drive it.',
-            described?.url ? `URL: ${described.url}` : null,
+            shown ? `URL: ${shown}` : 'It shows no page yet.',
             described?.allowedOrigins.length
               ? `Allowed origins: ${described.allowedOrigins.join(', ')}`
               : 'No dev server detected yet; start it, then call open_app again.',

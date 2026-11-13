@@ -228,7 +228,10 @@ export class CanvasBrowserHost {
     options: { control?: BrowserTileEntry['control']; focus?: boolean } = {}
   ): string {
     const existing = this.canvas.browserForTask(input.taskId);
-    const url = input.url ?? existing?.url ?? this.devServerUrls(input)[0] ?? 'about:blank';
+    const shown = existing?.url && existing.url !== 'about:blank' ? existing.url : undefined;
+    // A tile showing a page keeps it; an empty one moves to the dev server once one runs.
+    const target = input.url ?? (shown ? undefined : this.devServerUrls(input)[0]);
+    const url = target ?? shown ?? 'about:blank';
     this.canvas.openBrowser({
       ...input,
       url,
@@ -238,8 +241,13 @@ export class CanvasBrowserHost {
     const entry = this.canvas.browserForTask(input.taskId);
     if (!entry) return '';
     this.ensureSession(entry);
-    if (input.url && existing) {
-      browserSessionStore.updateSession(entry.browserId, { currentUrl: input.url });
+    // Load it as if typed in the toolbar: the tile's webview may already be up on another page.
+    if (
+      target &&
+      existing &&
+      browserSessionStore.getSession(entry.browserId)?.currentUrl !== target
+    ) {
+      browserSessionStore.requestNavigation(entry.browserId, target);
     }
     this.ensureAlive(entry.browserId);
     return entry.browserId;

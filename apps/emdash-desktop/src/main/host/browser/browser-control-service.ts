@@ -75,6 +75,8 @@ type PendingOpen = {
   timer: ReturnType<typeof setTimeout>;
 };
 
+type BindWaiter = (webContents: WebContents | null) => void;
+
 export type BrowserControlDeps = {
   registry: Pick<BrowserWebContentsRegistry, 'getBoundWebContents' | 'getPartition' | 'onBinding'>;
   automation: Pick<BrowserAutomation, 'observe' | 'act' | 'release'>;
@@ -100,6 +102,8 @@ const OBSERVE_LIMIT = { count: 20, windowMs: 10_000 };
 export class BrowserControlService {
   private readonly entries = new Map<string, ControlEntry>();
   private readonly pendingOpens = new Map<string, PendingOpen>();
+  /** Calls waiting for a browser's webview to attach, by browser id. */
+  private readonly bindWaiters = new Map<string, Set<BindWaiter>>();
   private readonly busy = new Set<string>();
   private readonly guardsByWebContentsId = new Map<number, () => void>();
   private readonly now: () => number;
@@ -118,6 +122,9 @@ export class BrowserControlService {
       if (event.type === 'bound') {
         deps.consoleBuffer.attach(event.browserId, event.webContents);
         this.installNavigationGuards(event.browserId, event.webContents);
+        const waiters = this.bindWaiters.get(event.browserId);
+        this.bindWaiters.delete(event.browserId);
+        for (const wake of waiters ?? []) wake(event.webContents);
       } else {
         deps.consoleBuffer.detachWebContents(event.webContentsId);
         this.guardsByWebContentsId.get(event.webContentsId)?.();
@@ -258,6 +265,14 @@ export class BrowserControlService {
       });
     });
     if (!answer.browserId) return err(openDenied(answer.denial));
+    // The ack only says a tile exists; agents can use it once its webview has attached.
+    if (!(await this.waitForBinding(answer.browserId))) {
+      return err({
+        type: 'not-bound',
+        message:
+          "Maestro put the app browser on the canvas, but its page did not come up, so agents cannot see or use it yet. Check that the Maestro window is open, start the task's dev server if it is not running, then call open_app again.",
+      });
+    }
     return ok(answer.browserId);
   }
 
@@ -409,7 +424,8 @@ export class BrowserControlService {
     if (!webContents) {
       return err({
         type: 'not-bound',
-        message: 'The browser is not live right now (suspended or its canvas is closed).',
+        message:
+          'The app browser is not live right now (suspended, closed, or its page did not come up). Call open_app to bring it back, then retry.',
       });
     }
     return ok({ entry, webContents, settings });
@@ -434,17 +450,36 @@ export class BrowserControlService {
       actor: publicActor(scope),
       access,
     });
-    const deadline = this.now() + BIND_TIMEOUT_MS;
-    while (this.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      const webContents = this.deps.registry.getBoundWebContents(entry.browserId);
-      if (webContents) {
-        // A freshly attached guest needs its first load before it can be read.
-        if (webContents.isLoading()) await waitForStop(webContents, 5_000);
-        return webContents;
-      }
+    return this.waitForBinding(entry.browserId);
+  }
+
+  /**
+   * The browser's webContents once its webview attaches (now, or within the bind timeout), after
+   * its first load; null if it never attaches.
+   */
+  private async waitForBinding(browserId: string): Promise<WebContents | null> {
+    let webContents = this.deps.registry.getBoundWebContents(browserId);
+    if (!webContents) {
+      webContents = await new Promise<WebContents | null>((resolve) => {
+        const waiters = this.bindWaiters.get(browserId) ?? new Set<BindWaiter>();
+        const wake: BindWaiter = (bound) => {
+          clearTimeout(timer);
+          waiters.delete(wake);
+          if (waiters.size === 0 && this.bindWaiters.get(browserId) === waiters) {
+            this.bindWaiters.delete(browserId);
+          }
+          resolve(bound);
+        };
+        const timer = setTimeout(() => wake(null), BIND_TIMEOUT_MS);
+        waiters.add(wake);
+        this.bindWaiters.set(browserId, waiters);
+      });
     }
-    return null;
+    // A freshly attached guest needs its first load before it can be read.
+    if (webContents && !webContents.isDestroyed() && webContents.isLoading()) {
+      await waitForStop(webContents, 5_000);
+    }
+    return webContents && !webContents.isDestroyed() ? webContents : null;
   }
 
   private actorDenied(
