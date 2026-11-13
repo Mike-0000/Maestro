@@ -1,22 +1,34 @@
+import os from 'node:os';
 import { noopLogger, type Logger } from '@emdash/shared/logger';
 import type { DetectedPreviewUrl } from '#services/preview-detection/node';
 import { collectDescendantProcesses } from '#services/pty/api';
 import {
   createLocalProcessPortSnapshotter,
+  directoryMention,
+  isDesktopOrEditorProcess,
+  isSpecificDirectory,
+  type DirectoryMention,
   loopbackProbeHost,
   probeHttpPort,
   type HttpPortProbe,
   type ListeningSocket,
   type ProcessPortSnapshotter,
+  type ProcessTableRow,
 } from './listening-ports';
 
 /** How often listeners are read while at least one root process is running. */
 export const PROCESS_PORT_POLL_INTERVAL_MS = 5_000;
 /** A listener that has not answered HTTP after this many probes is left alone until it closes. */
 const MAX_HTTP_PROBE_ATTEMPTS = 3;
+/** How far up a listener's live ancestors are searched for a command line naming a root's cwd. */
+const MAX_ANCESTOR_HOPS = 16;
 
-/** A process whose tree is watched for listening sockets, such as an agent session's PTY child. */
-export type ProcessTreeRoot = { id: string; pid: number };
+/**
+ * A process whose tree is watched for listening sockets, such as an agent session's PTY child.
+ * `cwd` is the directory the root works in (a task's worktree): a listener outside the tree whose
+ * command line, or a live ancestor's, names a path inside it is also the root's.
+ */
+export type ProcessTreeRoot = { id: string; pid: number; cwd?: string };
 
 /** A server found in a root's process tree; `pid` owns the listening socket. */
 export type ProcessTreeServer = DetectedPreviewUrl & { pid: number };
@@ -37,6 +49,8 @@ export type ProcessTreePortDetectorOptions = {
   httpProbe?: HttpPortProbe;
   intervalMs?: number;
   logger?: Logger;
+  /** Never used as a root's cwd for command-line matching (it would claim too much). */
+  homeDirectory?: string;
 };
 
 type Candidate = { rootId: string; pid: number; port: number; probeHost: string };
@@ -59,6 +73,7 @@ export function createProcessTreePortDetector(
   const httpProbe = options.httpProbe ?? probeHttpPort;
   const intervalMs = options.intervalMs ?? PROCESS_PORT_POLL_INTERVAL_MS;
   const logger = options.logger ?? noopLogger;
+  const homeDirectory = options.homeDirectory ?? os.homedir();
 
   /** Listening pid → the root whose tree holds it, or null when it belongs to none. */
   const owners = new Map<number, string | null>();
@@ -142,7 +157,8 @@ export function createProcessTreePortDetector(
         }
       }
       for (const pid of listening) {
-        if (!owners.has(pid)) owners.set(pid, treeOwner.get(pid) ?? null);
+        if (owners.has(pid)) continue;
+        owners.set(pid, treeOwner.get(pid) ?? directoryOwner(pid, processes, roots, homeDirectory));
       }
     }
 
@@ -197,6 +213,86 @@ export function createProcessTreePortDetector(
       probeFailures.clear();
     },
   };
+}
+
+/**
+ * The root a listener belongs to by the directory it was started for, when its tree link is gone.
+ * An agent's shell commonly exits right after starting a background server (`npm run dev &`, a
+ * background shell), which leaves the server's parent id pointing at a dead process, so the tree
+ * walk cannot reach it. Its command line, or a live ancestor's, still names the worktree it runs
+ * from (`node C:\wt\node_modules\vite\bin\vite.js`).
+ *
+ * The fallback is narrow, because a command line naming a folder proves little on its own:
+ * - the listener's chain of live ancestors must end in a broken link (a parent that is gone,
+ *   pruned as a reused pid, or init), within a few hops: the server was orphaned;
+ * - no process on that chain is the desktop shell, an editor or an IDE (a chain back to the
+ *   developer's desktop, `code C:\wt`, `idea64.exe C:\wt` and their helpers never count);
+ * - where creation times are known, the chain's top process started after the root did;
+ * - only a root whose cwd is specific (not a drive root, a top-level folder or the home directory)
+ *   can claim it; the most specific matching root wins, and a server named only through an outer
+ *   root's node_modules while another root sits inside that root is left alone (ambiguous).
+ * Roots with the same cwd are one worktree, so the first is kept: the bridge resolves the server's
+ * workspace from that cwd either way.
+ */
+function directoryOwner(
+  pid: number,
+  processes: ProcessTableRow[],
+  roots: ProcessTreeRoot[],
+  homeDirectory: string
+): string | null {
+  const byPid = new Map(processes.map((row) => [row.pid, row]));
+  const chain: ProcessTableRow[] = [];
+  let top: ProcessTableRow | null = null;
+  let current = byPid.get(pid);
+  while (current && chain.length <= MAX_ANCESTOR_HOPS && !chain.includes(current)) {
+    chain.push(current);
+    const parent = current.ppid > 1 ? byPid.get(current.ppid) : undefined;
+    if (!parent) {
+      top = current;
+      break;
+    }
+    current = parent;
+  }
+  if (!top || chain.some((row) => isDesktopOrEditorProcess(row.commandLine))) return null;
+  const orphanedAt = top.createdAt;
+
+  const matches = roots.flatMap((root) => {
+    if (!root.cwd || !isSpecificDirectory(root.cwd) || sameDirectory(root.cwd, homeDirectory)) {
+      return [];
+    }
+    const rootCreatedAt = byPid.get(root.pid)?.createdAt;
+    if (orphanedAt !== undefined && rootCreatedAt !== undefined && orphanedAt < rootCreatedAt) {
+      return [];
+    }
+    let strength: DirectoryMention = 'none';
+    for (const row of chain) {
+      const mention = row.commandLine ? directoryMention(row.commandLine, root.cwd) : 'none';
+      if (mention === 'direct') strength = 'direct';
+      else if (mention === 'node_modules' && strength === 'none') strength = 'node_modules';
+    }
+    return strength === 'none' ? [] : [{ root: { id: root.id, cwd: root.cwd }, strength }];
+  });
+  if (matches.length === 0) return null;
+  const depth = (cwd: string) => comparableDirectory(cwd).length;
+  const best = matches.reduce((winner, match) =>
+    depth(match.root.cwd) > depth(winner.root.cwd) ? match : winner
+  );
+  if (best.strength === 'node_modules') {
+    const bestDir = comparableDirectory(best.root.cwd);
+    const nested = roots.some(
+      (root) => root.cwd && comparableDirectory(root.cwd).startsWith(`${bestDir}/`)
+    );
+    if (nested) return null;
+  }
+  return best.root.id;
+}
+
+function comparableDirectory(value: string): string {
+  return value.toLowerCase().replace(/\\/g, '/').replace(/\/+$/, '');
+}
+
+function sameDirectory(left: string, right: string): boolean {
+  return right !== '' && comparableDirectory(left) === comparableDirectory(right);
 }
 
 function candidatesFor(

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  commandLineMentionsDirectory,
   loopbackProbeHost,
+  parsePosixProcessTable,
   parseLsofListeners,
   parseNetstatListeners,
   parseWindowsProcessTable,
@@ -107,6 +109,72 @@ describe('parseWindowsProcessTable', () => {
       { pid: 102, ppid: 101, createdAt: 13438950001000 },
       { pid: 999, ppid: 640, createdAt: 13438940300000 },
     ]);
+  });
+});
+
+describe('parseWindowsProcessTable with command lines', () => {
+  it('keeps the command line, spaces and all', () => {
+    expect(
+      parseWindowsProcessTable(
+        [
+          '501 500 13438950001000 "C:\\Program Files\\nodejs\\node.exe"  C:\\wt\\vite.js --port 4100',
+          '4 0 13438940295639 ',
+        ].join('\r\n')
+      )
+    ).toEqual([
+      {
+        pid: 501,
+        ppid: 500,
+        createdAt: 13438950001000,
+        commandLine: '"C:\\Program Files\\nodejs\\node.exe"  C:\\wt\\vite.js --port 4100',
+      },
+      { pid: 4, ppid: 0, createdAt: 13438940295639 },
+    ]);
+  });
+});
+
+describe('parsePosixProcessTable', () => {
+  it('reads pid, parent pid and the full command line', () => {
+    expect(
+      parsePosixProcessTable(
+        [
+          '  501   500 node /home/me/wt/node_modules/.bin/vite --port 4100',
+          '    1     0 /sbin/init',
+          '',
+        ].join('\n')
+      )
+    ).toEqual([
+      { pid: 501, ppid: 500, commandLine: 'node /home/me/wt/node_modules/.bin/vite --port 4100' },
+      { pid: 1, ppid: 0, commandLine: '/sbin/init' },
+    ]);
+  });
+});
+
+describe('commandLineMentionsDirectory', () => {
+  it('matches the directory as a whole path, in Windows, forward-slash and MSYS spellings', () => {
+    const dir = 'C:\\Work\\shop\\checkout';
+    expect(commandLineMentionsDirectory('node C:\\work\\shop\\checkout\\vite.js', dir)).toBe(true);
+    expect(commandLineMentionsDirectory('node "c:/work/shop/checkout/vite.js"', dir)).toBe(true);
+    expect(
+      commandLineMentionsDirectory('bash -c "cd /c/work/shop/checkout && npm run dev"', dir)
+    ).toBe(true);
+    expect(
+      commandLineMentionsDirectory('cmd.exe /d /s /c "cd /d C:\\work\\shop\\checkout && vite"', dir)
+    ).toBe(true);
+  });
+
+  it('does not match a longer sibling path or the directory under another root', () => {
+    const dir = 'C:\\work\\shop\\checkout';
+    expect(commandLineMentionsDirectory('node C:\\work\\shop\\checkout2\\vite.js', dir)).toBe(
+      false
+    );
+    expect(commandLineMentionsDirectory('node D:\\c\\work\\shop\\checkout\\x.js', dir)).toBe(false);
+    expect(commandLineMentionsDirectory('node vite.js', dir)).toBe(false);
+  });
+
+  it('matches POSIX paths', () => {
+    expect(commandLineMentionsDirectory('node /home/me/wt/vite.js', '/home/me/wt/')).toBe(true);
+    expect(commandLineMentionsDirectory('node /home/me/wtx/vite.js', '/home/me/wt')).toBe(false);
   });
 });
 

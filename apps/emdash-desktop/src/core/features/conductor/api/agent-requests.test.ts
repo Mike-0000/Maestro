@@ -393,10 +393,12 @@ describe('what the conductor reads and writes', () => {
     expect(padded).toContain('truncated="true"');
   });
 
-  it('allows only reading and settling while a request is decided', () => {
+  it('allows only reading, settling and showing the app while a request is decided', () => {
     expect(isRequestTurnTool('answer_request')).toBe(true);
     expect(isRequestTurnTool('read_agent')).toBe(true);
-    for (const tool of ['spawn_agent', 'send_to_agent', 'stop_agent', 'show_app', 'use_app']) {
+    // Opening the asking agent's local app is view-only; public sites stay refused (app tools).
+    expect(isRequestTurnTool('show_app')).toBe(true);
+    for (const tool of ['spawn_agent', 'send_to_agent', 'stop_agent', 'use_app', 'start_app']) {
       expect(isRequestTurnTool(tool)).toBe(false);
     }
   });

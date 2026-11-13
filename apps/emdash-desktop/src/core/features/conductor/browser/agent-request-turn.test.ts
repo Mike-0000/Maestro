@@ -4,6 +4,7 @@ import type {
   AgentTileEntry,
   CanvasStore,
 } from '@core/features/canvas/api/browser/stores/canvas-store';
+import { getCanvasBrowserHost } from '@core/features/canvas/contributions/browser/app-stores';
 import type { AgentRequest, AgentRequestAck } from '../api/agent-requests';
 import { DEFAULT_CONDUCTOR_SETTINGS, type ConductorStatus } from '../api/contract';
 import { HEARD_MS } from './agent-requests';
@@ -214,9 +215,12 @@ function request(kind: string, payload: unknown): AgentRequest {
 const spawnRequest = () =>
   request('spawn_agent', { provider: 'codex', task_name: 'Check the PCB order', brief: BRIEF });
 
-function setup(settings: Partial<ConductorStatus['settings']> = {}) {
+function setup(
+  settings: Partial<ConductorStatus['settings']> = {},
+  canvas: CanvasStore = fakeCanvas([agent()])
+) {
   const speech = voice();
-  const store = new ConductorStore(fakeCanvas([agent()]), speech);
+  const store = new ConductorStore(canvas, speech);
   store.status = status(settings);
   store['requestPending'] = vi.fn(async () => true);
   const acks: AgentRequestAck[] = [];
@@ -344,6 +348,81 @@ describe('agent requests in the conductor', () => {
     );
     expect(store.requests.watching('conv-new')).toBe(true);
     expect(store.busy).toBe(false);
+  });
+
+  it("can open the asking agent's app while deciding, but never a public website", async () => {
+    const host = {
+      devServerUrls: vi.fn(() => ['http://localhost:4100/']),
+      openForTask: vi.fn(() => 'b1'),
+      appRunning: vi.fn(() => true),
+      approvePublicOrigin: vi.fn(async () => {}),
+      conductorPublicWebEnabled: vi.fn(async () => true),
+      publicOriginApproved: vi.fn(() => false),
+    };
+    vi.mocked(getCanvasBrowserHost).mockReturnValue(host as never);
+    const { speech, receive } = setup();
+    mocks.runTurn
+      .mockResolvedValueOnce(
+        toolUses(
+          { name: 'show_app', input: { agent: 'Zulu' } },
+          { name: 'show_app', input: { agent: 'Zulu', url: 'https://hub-dev.example.io/' } }
+        )
+      )
+      .mockResolvedValueOnce(text("I opened Zulu's app."));
+
+    await receive(spawnRequest());
+    await vi.waitFor(() => expect(speech.announce).toHaveBeenCalled());
+
+    const results = toolResults(1);
+    expect(results.map((result) => result.is_error ?? false)).toEqual([false, true]);
+    expect(String(results[0]!.content)).toContain("Showing Zulu's app");
+    expect(String(results[1]!.content)).toContain("opens only Zulu's detected dev servers");
+    expect(host.openForTask).toHaveBeenCalledTimes(1);
+    expect(host.openForTask).toHaveBeenCalledWith(expect.objectContaining({ taskId: 'task-z' }));
+    expect(host.approvePublicOrigin).not.toHaveBeenCalled();
+  });
+
+  it("limits show_app while deciding to the asking agent's own app on its dev servers", async () => {
+    const host = {
+      devServerUrls: vi.fn(() => ['http://localhost:4100/']),
+      openForTask: vi.fn(() => 'b1'),
+      appRunning: vi.fn(() => true),
+      approvePublicOrigin: vi.fn(async () => {}),
+      conductorPublicWebEnabled: vi.fn(async () => true),
+      publicOriginApproved: vi.fn(() => false),
+    };
+    vi.mocked(getCanvasBrowserHost).mockReturnValue(host as never);
+    const canvas = fakeCanvas([
+      agent(),
+      agent({ tileId: 'tile-y', conversationId: 'conv-y', taskId: 'task-y', workspaceId: 'ws-y' }),
+    ]);
+    const names: Record<string, string> = { 'conv-z': 'Zulu', 'conv-y': 'Yankee' };
+    Object.assign(canvas, {
+      spokenName: (conversationId: string) => names[conversationId] ?? 'Agent',
+      browserForTask: (taskId: string) =>
+        taskId === 'task-y' ? { browserId: 'by', url: 'http://localhost:7000/secret' } : undefined,
+    });
+    const { speech, receive } = setup({}, canvas);
+    mocks.runTurn
+      .mockResolvedValueOnce(
+        toolUses(
+          { name: 'show_app', input: { agent: 'Yankee' } },
+          { name: 'show_app', input: { agent: 'Zulu', url: 'http://localhost:9229/json' } },
+          { name: 'show_app', input: { agent: 'Zulu', url: 'http://localhost:4100/cart' } }
+        )
+      )
+      .mockResolvedValueOnce(text('Opened.'));
+
+    await receive(spawnRequest());
+    await vi.waitFor(() => expect(speech.announce).toHaveBeenCalled());
+
+    const results = toolResults(1);
+    expect(results.map((result) => result.is_error ?? false)).toEqual([true, true, false]);
+    expect(String(results[0]!.content)).not.toContain('localhost:7000');
+    expect(host.openForTask).toHaveBeenCalledTimes(1);
+    expect(host.openForTask).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: 'task-z', url: 'http://localhost:4100/cart' })
+    );
   });
 
   it('refuses every acting tool in the decision turn, and does not wait for the developer', async () => {

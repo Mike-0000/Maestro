@@ -41,6 +41,8 @@ export type BrowserOperations = {
     taskId: string;
     control: 'user' | 'agents';
     origins?: string[];
+    publicOrigins?: string[];
+    surface?: 'canvas' | 'task-view';
   }): Result<void, BrowserAutomationError>;
   stopLease(browserId: string): BrowserActionResult;
   forgetControl(browserId: string): BrowserActionResult;

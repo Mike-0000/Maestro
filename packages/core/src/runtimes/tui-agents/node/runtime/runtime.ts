@@ -773,12 +773,12 @@ export class TuiAgentsRuntime {
    * child is the tmux client) or in WSL (its tree runs in the distro) has no such descendants on
    * this computer, so it simply yields nothing.
    */
-  private devServerRoots(): Array<{ id: string; pid: number }> {
-    const roots: Array<{ id: string; pid: number }> = [];
+  private devServerRoots(): Array<{ id: string; pid: number; cwd: string }> {
+    const roots: Array<{ id: string; pid: number; cwd: string }> = [];
     for (const session of Object.values(peek(this.sessionsList.states.list))) {
       if (session.status !== 'running' || session.isRemote) continue;
       if (session.pid === undefined || session.pid <= 0 || !session.cwd) continue;
-      roots.push({ id: session.conversationId, pid: session.pid });
+      roots.push({ id: session.conversationId, pid: session.pid, cwd: session.cwd });
     }
     return roots;
   }

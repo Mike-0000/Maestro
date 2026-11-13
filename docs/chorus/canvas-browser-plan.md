@@ -819,6 +819,35 @@ Known limits: an agent can still read or act on whatever page its task's tile sh
 public page the conductor opened there; subresource requests are not filtered; a public name
 that resolves to a private address is not detected.
 
+### Agents use the browser the developer is looking at (follow-up, 2026-11-13)
+
+Laptop logs showed an agent's tools driving (and reporting suspended) the canvas tile while the
+developer worked in the task's own view, with a browser tab beside the chat. Now:
+
+- **One task, several browsers.** Task-view browser tabs register with `setControl` as
+  `surface: 'task-view'` (`TaskBrowserControlStore`, tracked by `BrowserTabResource`); canvas tiles
+  as `'canvas'`. `BrowserControlService.findTaskBrowser` targets the browser the developer looked
+  at last among those with a live page (`BrowserWebContentsRegistry.getShownAt`, set when a
+  surface calls `setActiveBrowser`). If that browser is not handed to agents, acting asks for
+  that same browser; another one is never used instead.
+- **The developer's own profile.** A tab on the shared profile is registered as `user` only, so
+  agents are told it is the browser in use; it is never read or driven and its address is not
+  shared. On "Let agents drive" it moves to the task's isolated profile (the page reloads there
+  without the developer's logins). The registry drops a browser's binding the moment its partition
+  changes, so the old guest is never handed out.
+- **Open requests** carry the `browserId` main wants; the renderer
+  (`routeAppBrowserRequest`) serves a task-view tab, opens a new isolated tab beside the chat when
+  the developer is in the task view without one, or falls back to the canvas tile.
+- **Dev servers an agent orphans** (`npm run dev &`, a background shell that exited) are detected
+  when the listener's command line, or a live ancestor's, names the session's worktree.
+- **Origins**: refusals now say how a local origin gets allowed (start it from the worktree, or the
+  developer types it into the task's browser) and that public sites go through the conductor.
+- **Conductor**: `show_app` is allowed while it decides an agent's request (no public sites).
+
+Known limit: with an agent-controlled canvas tile alive and no browser tab in the task view,
+agents keep using the tile (it is the only live browser) even while the developer is in the task
+view; `open_app` reports that it is on the canvas.
+
 ### Deferred or not done
 
 - Shift+Esc to take control back from a lease (Stop button and You toggle exist).

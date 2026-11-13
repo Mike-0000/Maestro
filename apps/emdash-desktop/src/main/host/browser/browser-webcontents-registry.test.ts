@@ -115,6 +115,64 @@ describe('BrowserWebContentsRegistry', () => {
     expect(registry.getActiveBrowser()).toBe('browser-2');
   });
 
+  it("drops a browser's binding when it is re-registered on another partition", () => {
+    // A task-view tab switched from the developer's profile to the task's isolated profile: until
+    // its new webview binds, the old guest (with the developer's cookies) must not be handed out.
+    const registry = new BrowserWebContentsRegistry();
+    const isolated = 'persist:emdash-browser-isolated-p-w-t';
+    const unbound = vi.fn();
+    registry.onBinding((event) => {
+      if (event.type === 'unbound') unbound(event.browserId);
+    });
+    registry.registerSession({ browserId: 'browser-1', partition: PROFILE_PARTITION });
+    const shared = fakeWebContents();
+    registry.handleWebviewAttached(shared);
+    registry.bindWebContents('browser-1', shared);
+
+    registry.registerSession({ browserId: 'browser-1', partition: PROFILE_PARTITION });
+    expect(registry.getBoundWebContents('browser-1')).toBe(shared);
+
+    registry.registerSession({ browserId: 'browser-1', partition: isolated });
+    expect(registry.getBoundWebContents('browser-1')).toBeNull();
+    expect(unbound).toHaveBeenCalledWith('browser-1');
+    expect(registry.bindWebContents('browser-1', shared)).toBe(false);
+
+    const replacement = fakeWebContents(isolated);
+    registry.handleWebviewAttached(replacement);
+    expect(registry.bindWebContents('browser-1', replacement)).toBe(true);
+    expect(registry.getBoundWebContents('browser-1')).toBe(replacement);
+  });
+
+  it('admits a guest for models only on an isolated partition it really runs in', () => {
+    const registry = new BrowserWebContentsRegistry();
+    const isolated = 'persist:emdash-browser-isolated-p-w-t';
+    registry.registerSession({ browserId: 'iso', partition: isolated });
+    registry.registerSession({ browserId: 'shared', partition: PROFILE_PARTITION });
+
+    expect(registry.isIsolatedGuest('iso', fakeWebContents(isolated))).toBe(true);
+    expect(registry.isIsolatedGuest('iso', fakeWebContents(PROFILE_PARTITION))).toBe(false);
+    expect(registry.isIsolatedGuest('shared', fakeWebContents(PROFILE_PARTITION))).toBe(false);
+    expect(registry.isIsolatedGuest('missing', fakeWebContents(isolated))).toBe(false);
+  });
+
+  it('records when a browser was last shown, and never for unknown browsers', () => {
+    let now = 1_000;
+    const registry = new BrowserWebContentsRegistry(() => now);
+    registry.registerSession({ browserId: 'browser-1', partition: PROFILE_PARTITION });
+    expect(registry.getShownAt('browser-1')).toBe(0);
+
+    registry.setActiveBrowser('browser-1');
+    expect(registry.getShownAt('browser-1')).toBe(1_000);
+    now = 2_000;
+    registry.setActiveBrowser(null);
+    registry.setActiveBrowser('missing');
+    expect(registry.getShownAt('browser-1')).toBe(1_000);
+    expect(registry.getShownAt('missing')).toBe(0);
+
+    registry.unregisterSession('browser-1');
+    expect(registry.getShownAt('browser-1')).toBe(0);
+  });
+
   it('rejects binding for unknown browsers, unattached or already-bound webContents', () => {
     const registry = new BrowserWebContentsRegistry();
     registry.registerSession({ browserId: 'browser-1', partition: PROFILE_PARTITION });

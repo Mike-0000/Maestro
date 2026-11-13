@@ -1,5 +1,6 @@
 import { defineContract, eventStream, fallible, procedure } from '@emdash/wire/rpc';
 import { z } from 'zod';
+import { BROWSER_SURFACE_KINDS } from '@core/primitives/browser/api';
 import type {
   BrowserAction,
   BrowserActResult,
@@ -91,6 +92,8 @@ export const browserContract = defineContract({
       origins: z.array(z.string()).max(16).optional(),
       /** Public origins the user approved for the conductor in this browser. */
       publicOrigins: z.array(z.string()).max(16).optional(),
+      /** Where the browser is shown; agents use the task's browser the developer saw last. */
+      surface: z.enum(BROWSER_SURFACE_KINDS).optional(),
     }),
     data: z.void(),
     error: z.custom<BrowserAutomationError>(),

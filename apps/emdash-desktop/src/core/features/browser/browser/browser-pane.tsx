@@ -1,5 +1,7 @@
+import { Button } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
 import { useCallback } from 'react';
+import { taskBrowserControl } from '@core/features/browser/api/browser/task-browser-control';
 import { BrowserSurface } from '@core/features/browser/contributions/browser/browser-surface';
 import { usePreviewServers } from '@core/features/workbench/api/browser/task-composition-context';
 import {
@@ -25,12 +27,30 @@ export const BrowserPane = observer(function BrowserPane({
     },
     [scopeInstance]
   );
+  const agentsDrive = taskBrowserControl.control(browserId) === 'agents';
   return (
-    <BrowserSurface
-      browserId={browserId}
-      visible={visible}
-      devServerUrls={previewServers.urls}
-      onCycleTab={cycleTab}
-    />
+    <div className="flex h-full min-h-0 flex-col">
+      {agentsDrive && (
+        // While agents may drive the tab the developer always sees so, with a way to take it back.
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border-subtle px-3 py-1 text-xs text-foreground-muted">
+          <span>This task&apos;s agents can see and use this browser (isolated profile).</span>
+          <Button
+            type="button"
+            variant="text"
+            onClick={() => taskBrowserControl.takeBack(browserId)}
+          >
+            Take back
+          </Button>
+        </div>
+      )}
+      <div className="min-h-0 flex-1">
+        <BrowserSurface
+          browserId={browserId}
+          visible={visible}
+          devServerUrls={previewServers.urls}
+          onCycleTab={cycleTab}
+        />
+      </div>
+    </div>
   );
 });

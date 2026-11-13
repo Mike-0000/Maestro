@@ -206,7 +206,7 @@ export function describeNavigationDenial(
     case 'reserved-port':
       return `${url} belongs to Chorus itself and cannot be opened by agents.`;
     case 'origin-not-allowed':
-      return `${url} is outside this task's app. Agents can only open the task's dev-server origins or origins the user allowed.`;
+      return describeOriginNotAllowed(url);
     case 'insecure-public-url':
     case 'embedded-credentials':
       return describePublicUrlDenial(decision.reason, url);
@@ -215,6 +215,30 @@ export function describeNavigationDenial(
     case 'public-origin-not-approved':
       return `${url} is a public website the user has not approved for this browser. Open it with show_app so they can confirm it.`;
   }
+}
+
+/**
+ * Why an origin is outside the task's app, and the only ways it gets in: a local origin is
+ * allowed once Maestro detects it as the task's dev server or the developer opens it in the
+ * task's browser themselves; a public website is never open to agents, only to the conductor
+ * with its setting on and the developer's confirmation. Nothing here widens the list.
+ */
+function describeOriginNotAllowed(url: string): string {
+  let parsed: URL | null = null;
+  try {
+    parsed = new URL(url);
+  } catch {
+    // Described below without an origin.
+  }
+  const origin = parsed?.origin ?? url;
+  const host = parsed ? classifyHost(parsed.hostname) : 'private';
+  if (host === 'loopback') {
+    return `${origin} is outside this task's app: agents may open only the task's detected dev servers and local origins the developer opened in the task's browser. If ${origin} is this task's app, start its dev server from the task's worktree (Maestro detects it within a few seconds, then call open_app again), or ask the developer to type ${origin} into the address bar of the task's browser, which allows it for agents.`;
+  }
+  if (host === 'public') {
+    return `${origin} is a public website. Agents cannot open public websites in Maestro's browser, and Maestro does not add them on request. To have it checked, ask the conductor (conductor_request): it can open public https sites in the task's browser for the developer when "Conductor can open public websites" is on in Settings, Browser, and the developer confirms the site.`;
+  }
+  return `${url} is outside this task's app. Agents may open only the task's detected dev servers and local origins the developer opened in the task's browser.`;
 }
 
 /**

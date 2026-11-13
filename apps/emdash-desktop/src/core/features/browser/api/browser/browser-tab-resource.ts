@@ -9,6 +9,7 @@ import type {
 } from '@core/primitives/workbench-shell/browser/tabs/core/tab-provider';
 import type { BrowserState } from '../../browser/browser-tab-provider';
 import { getBrowserClient } from './client';
+import { taskBrowserControl } from './task-browser-control';
 
 /**
  * Domain resource for a single open browser tab.
@@ -26,6 +27,8 @@ export class BrowserTabResource implements TabResource {
   readonly browserId: string;
   private _unsubscribeOpenInNewTab: () => void = () => {};
   private readonly _disposeSessionSync: () => void;
+  private readonly _disposeControl: () => void;
+  private readonly _disposeControlSync: () => void;
   private _disposed = false;
 
   constructor(entry: TabEntry<BrowserState>, handle: TabHandle) {
@@ -37,6 +40,16 @@ export class BrowserTabResource implements TabResource {
     if (!browserSessionStore.getSession(payload.browserId)) {
       browserSessionStore.restoreSession(payload.session, undefined);
     }
+
+    // One of the task's browsers for its agents: main points them at the tab the developer is
+    // looking at. Who drives it is kept in the tab's state, so it survives a restart.
+    this._disposeControl = taskBrowserControl.track(this.browserId, payload.control ?? 'user');
+    this._disposeControlSync = reaction(
+      () => taskBrowserControl.control(this.browserId),
+      (control) => {
+        entry.state = { ...entry.state, control };
+      }
+    );
 
     // Subscribe to open-in-new-tab requests for this browser.
     void this._subscribeOpenInNewTab(handle);
@@ -57,6 +70,8 @@ export class BrowserTabResource implements TabResource {
     this._disposed = true;
     this._unsubscribeOpenInNewTab();
     this._disposeSessionSync();
+    this._disposeControlSync();
+    this._disposeControl();
     browserDiagnosticsStore.clearBrowser(this.browserId);
     browserSessionStore.removeSession(this.browserId);
     void getBrowserClient().then((client) =>
