@@ -177,6 +177,35 @@ describe('TuiAgentsRuntime', () => {
       }
     });
 
+    it("publishes a server whose launching shell exited when it runs from the session's worktree", async () => {
+      // `npm run dev &`: the shell (gone) was the server's parent, so 700's parent id is dead.
+      const orphaned: ProcessTableRow[] = [
+        ...processes,
+        { pid: 700, ppid: 4242, commandLine: 'node /repo/worktree/node_modules/vite/bin/vite.js' },
+      ];
+      const { runtime } = createRuntime({
+        devServerDetection: {
+          snapshotter: {
+            listListeners: async () => [{ pid: 700, address: '::1', port: 4100 }],
+            listProcesses: async () => orphaned,
+          },
+          httpProbe: async () => 'http:' as const,
+          intervalMs: 60_000,
+          homeDirectory: '/home/me',
+        },
+      });
+      try {
+        await runtime.startSession(startInput({ cwd: '/repo/worktree' }));
+        await vi.waitFor(() =>
+          expect(Object.values(peek(runtime['devServersList']))).toEqual([
+            expect.objectContaining({ conversationId: 'conversation-1', port: 4100, pid: 700 }),
+          ])
+        );
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
     it('publishes nothing when detection is off (a remote workspace server)', async () => {
       const { runtime } = createRuntime();
       try {

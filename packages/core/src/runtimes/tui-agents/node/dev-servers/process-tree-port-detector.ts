@@ -1,22 +1,32 @@
+import os from 'node:os';
 import { noopLogger, type Logger } from '@emdash/shared/logger';
 import type { DetectedPreviewUrl } from '#services/preview-detection/node';
 import { collectDescendantProcesses } from '#services/pty/api';
 import {
+  commandLineMentionsDirectory,
   createLocalProcessPortSnapshotter,
+  isSpecificDirectory,
   loopbackProbeHost,
   probeHttpPort,
   type HttpPortProbe,
   type ListeningSocket,
   type ProcessPortSnapshotter,
+  type ProcessTableRow,
 } from './listening-ports';
 
 /** How often listeners are read while at least one root process is running. */
 export const PROCESS_PORT_POLL_INTERVAL_MS = 5_000;
 /** A listener that has not answered HTTP after this many probes is left alone until it closes. */
 const MAX_HTTP_PROBE_ATTEMPTS = 3;
+/** How far up a listener's live ancestors are searched for a command line naming a root's cwd. */
+const MAX_ANCESTOR_HOPS = 16;
 
-/** A process whose tree is watched for listening sockets, such as an agent session's PTY child. */
-export type ProcessTreeRoot = { id: string; pid: number };
+/**
+ * A process whose tree is watched for listening sockets, such as an agent session's PTY child.
+ * `cwd` is the directory the root works in (a task's worktree): a listener outside the tree whose
+ * command line, or a live ancestor's, names a path inside it is also the root's.
+ */
+export type ProcessTreeRoot = { id: string; pid: number; cwd?: string };
 
 /** A server found in a root's process tree; `pid` owns the listening socket. */
 export type ProcessTreeServer = DetectedPreviewUrl & { pid: number };
@@ -37,6 +47,8 @@ export type ProcessTreePortDetectorOptions = {
   httpProbe?: HttpPortProbe;
   intervalMs?: number;
   logger?: Logger;
+  /** Never used as a root's cwd for command-line matching (it would claim too much). */
+  homeDirectory?: string;
 };
 
 type Candidate = { rootId: string; pid: number; port: number; probeHost: string };
@@ -59,6 +71,7 @@ export function createProcessTreePortDetector(
   const httpProbe = options.httpProbe ?? probeHttpPort;
   const intervalMs = options.intervalMs ?? PROCESS_PORT_POLL_INTERVAL_MS;
   const logger = options.logger ?? noopLogger;
+  const homeDirectory = options.homeDirectory ?? os.homedir();
 
   /** Listening pid → the root whose tree holds it, or null when it belongs to none. */
   const owners = new Map<number, string | null>();
@@ -142,7 +155,8 @@ export function createProcessTreePortDetector(
         }
       }
       for (const pid of listening) {
-        if (!owners.has(pid)) owners.set(pid, treeOwner.get(pid) ?? null);
+        if (owners.has(pid)) continue;
+        owners.set(pid, treeOwner.get(pid) ?? directoryOwner(pid, processes, roots, homeDirectory));
       }
     }
 
@@ -197,6 +211,46 @@ export function createProcessTreePortDetector(
       probeFailures.clear();
     },
   };
+}
+
+/**
+ * The root a listener belongs to by the directory it was started for, when its tree link is gone.
+ * An agent's shell commonly exits right after starting a background server (`npm run dev &`, a
+ * background shell), which leaves the server's parent id pointing at a dead process, so the tree
+ * walk cannot reach it. Its command line, or a live ancestor's, still names the worktree it runs
+ * from (`node C:\wt\node_modules\vite\bin\vite.js`). Only a root whose cwd is specific (not a
+ * drive root, a top-level folder or the home directory) can claim a process this way.
+ */
+function directoryOwner(
+  pid: number,
+  processes: ProcessTableRow[],
+  roots: ProcessTreeRoot[],
+  homeDirectory: string
+): string | null {
+  const directories = roots.flatMap((root) =>
+    root.cwd && isSpecificDirectory(root.cwd) && !sameDirectory(root.cwd, homeDirectory)
+      ? [{ id: root.id, cwd: root.cwd }]
+      : []
+  );
+  if (directories.length === 0) return null;
+  const byPid = new Map(processes.map((row) => [row.pid, row]));
+  const seen = new Set<number>();
+  let current = byPid.get(pid);
+  for (let hop = 0; current && hop <= MAX_ANCESTOR_HOPS && !seen.has(current.pid); hop++) {
+    seen.add(current.pid);
+    const commandLine = current.commandLine;
+    if (commandLine) {
+      const owner = directories.find((root) => commandLineMentionsDirectory(commandLine, root.cwd));
+      if (owner) return owner.id;
+    }
+    current = byPid.get(current.ppid);
+  }
+  return null;
+}
+
+function sameDirectory(left: string, right: string): boolean {
+  const normalize = (value: string) => value.toLowerCase().replace(/\\/g, '/').replace(/\/+$/, '');
+  return right !== '' && normalize(left) === normalize(right);
 }
 
 function candidatesFor(

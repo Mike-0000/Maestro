@@ -4,7 +4,7 @@ import https from 'node:https';
 import path from 'node:path';
 import { recordSpawn } from '@emdash/shared/perf';
 import type { PreviewServerProtocol } from '#services/preview-detection/node';
-import { parseProcessTable, type PidPpidPair } from '#services/pty/api';
+import type { PidPpidPair } from '#services/pty/api';
 
 /** A TCP socket in the LISTEN state and the process that owns it. */
 export type ListeningSocket = {
@@ -14,8 +14,11 @@ export type ListeningSocket = {
   port: number;
 };
 
-/** A process-table row; `createdAt` (ms, any epoch) lets stale parent links be told apart. */
-export type ProcessTableRow = PidPpidPair & { createdAt?: number };
+/**
+ * A process-table row; `createdAt` (ms, any epoch) lets stale parent links be told apart, and
+ * `commandLine` ties a process whose parent already exited to the directory it was started for.
+ */
+export type ProcessTableRow = PidPpidPair & { createdAt?: number; commandLine?: string };
 
 /** Host data the process-tree port detector reads: listening sockets and the process table. */
 export type ProcessPortSnapshotter = {
@@ -77,20 +80,91 @@ export function parseLsofListeners(output: string): ListeningSocket[] {
 
 /**
  * Parses the Windows process table printed by {@link WINDOWS_PROCESS_TABLE_SCRIPT}: one
- * `<pid> <ppid> <createdAtMs>` row per process.
+ * `<pid> <ppid> <createdAtMs> <command line>` row per process (the command line may be empty).
  */
 export function parseWindowsProcessTable(output: string): ProcessTableRow[] {
   const rows: ProcessTableRow[] = [];
   for (const line of output.split(/\r?\n/)) {
-    const parts = line.trim().split(/\s+/);
-    if (parts.length < 2) continue;
-    const pid = Number(parts[0]);
-    const ppid = Number(parts[1]);
-    if (!Number.isInteger(pid) || !Number.isInteger(ppid)) continue;
-    const createdAt = Number(parts[2]);
-    rows.push({ pid, ppid, ...(Number.isFinite(createdAt) && createdAt > 0 ? { createdAt } : {}) });
+    const match = /^\s*(\d+)\s+(\d+)(?:\s+(\d+))?(?:\s(.*))?$/.exec(line);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    const ppid = Number(match[2]);
+    const createdAt = Number(match[3]);
+    const commandLine = match[4]?.trim();
+    rows.push({
+      pid,
+      ppid,
+      ...(Number.isFinite(createdAt) && createdAt > 0 ? { createdAt } : {}),
+      ...(commandLine ? { commandLine } : {}),
+    });
   }
   return rows;
+}
+
+/** Parses `ps -A -o pid=,ppid=,args=`: pid, parent pid, then the full command line. */
+export function parsePosixProcessTable(output: string): ProcessTableRow[] {
+  const rows: ProcessTableRow[] = [];
+  for (const line of output.split(/\r?\n/)) {
+    const match = /^\s*(\d+)\s+(\d+)(?:\s+(.*))?$/.exec(line);
+    if (!match) continue;
+    const commandLine = match[3]?.trim();
+    rows.push({
+      pid: Number(match[1]),
+      ppid: Number(match[2]),
+      ...(commandLine ? { commandLine } : {}),
+    });
+  }
+  return rows;
+}
+
+/** Lower-cased, forward slashes, no doubled or trailing slash: how paths are compared. */
+function comparablePath(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\\/g, '/')
+    .replace(/\/{2,}/g, '/');
+}
+
+/**
+ * Whether a directory is narrow enough to tie a process to it: at least two segments below the
+ * drive or filesystem root (`C:\work\app`, `/home/me/app`), so a root or a top-level folder
+ * never claims every process that mentions it. The caller also excludes the home directory.
+ */
+export function isSpecificDirectory(directory: string): boolean {
+  const segments = comparablePath(directory)
+    .replace(/^[a-z]:/, '')
+    .split('/')
+    .filter(Boolean);
+  return segments.length >= 2;
+}
+
+/**
+ * Whether a command line names `directory` or a path inside it, as a whole path: in Windows
+ * (`C:\a\b`), forward-slash (`C:/a/b`) or MSYS (`/c/a/b`) spelling, case-insensitively. The match
+ * must end at the directory's end or a separator, so `C:\a\b` does not match `C:\a\bc`.
+ */
+export function commandLineMentionsDirectory(commandLine: string, directory: string): boolean {
+  const dir = comparablePath(directory).replace(/\/+$/, '');
+  if (!dir) return false;
+  const line = comparablePath(commandLine);
+  const spellings = [dir];
+  const drive = /^([a-z]):(\/.*)$/.exec(dir);
+  if (drive) spellings.push(`/${drive[1]}${drive[2]}`);
+  for (const spelling of spellings) {
+    let from = 0;
+    for (;;) {
+      const index = line.indexOf(spelling, from);
+      if (index < 0) break;
+      from = index + 1;
+      const before = index === 0 ? '' : line[index - 1]!;
+      const after = line[index + spelling.length] ?? '';
+      // Not the tail of a longer path (`d:/c/a/b` for `/c/a/b`) nor the head of a sibling.
+      if (before && /[a-z0-9._\-:/]/.test(before)) continue;
+      if (after && !/[/"'\s]/.test(after)) continue;
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -136,12 +210,13 @@ function splitHostPort(value: string): { host: string; port: number } | null {
 }
 
 /**
- * Prints `<pid> <ppid> <createdAtMs>` per process. The creation time is milliseconds since 1601,
- * small enough to stay exact in a JavaScript number.
+ * Prints `<pid> <ppid> <createdAtMs> <command line>` per process. The creation time is
+ * milliseconds since 1601, small enough to stay exact in a JavaScript number; line breaks in a
+ * command line are flattened so each process stays on one row.
  */
 const WINDOWS_PROCESS_TABLE_SCRIPT =
-  'Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,CreationDate | ' +
-  "ForEach-Object { $c = 0; if ($_.CreationDate) { $c = [long]($_.CreationDate.ToFileTimeUtc() / 10000) }; '{0} {1} {2}' -f $_.ProcessId, $_.ParentProcessId, $c }";
+  'Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,CreationDate,CommandLine | ' +
+  "ForEach-Object { $c = 0; if ($_.CreationDate) { $c = [long]($_.CreationDate.ToFileTimeUtc() / 10000) }; '{0} {1} {2} {3}' -f $_.ProcessId, $_.ParentProcessId, $c, ($_.CommandLine -replace '[\\r\\n]+', ' ') }";
 
 function runCommand(file: string, args: string[]): Promise<string> {
   recordSpawn('other', path.basename(file));
@@ -196,7 +271,7 @@ export function createLocalProcessPortSnapshotter(
       parseLsofListeners(await runCommand('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-F', 'pn'])),
     // POSIX reparents orphans to init, so a parent id never points at an unrelated process.
     listProcesses: async () =>
-      parseProcessTable(await runCommand('ps', ['-A', '-o', 'pid=,ppid='])),
+      parsePosixProcessTable(await runCommand('ps', ['-A', '-o', 'pid=,ppid=,args='])),
   };
 }
 

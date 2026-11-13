@@ -43,6 +43,7 @@ export interface TuiAgentsRuntimeDeps {
     snapshotter?: ProcessPortSnapshotter;
     httpProbe?: HttpPortProbe;
     intervalMs?: number;
+    homeDirectory?: string;
   };
   logger: Logger;
 }

@@ -164,6 +164,82 @@ describe('createProcessTreePortDetector', () => {
     expect(snapshotter.listListeners).toHaveBeenCalledTimes(2);
   });
 
+  describe('a server whose launching shell already exited', () => {
+    // The agent ran `npm run dev &` (or a background shell) in its worktree: the shell between the
+    // agent and the server is gone, so the server's parent pid points nowhere and the tree walk
+    // cannot reach it. The server's command line still names the worktree.
+    const WORKTREE = 'C:\\work\\shop-worktrees\\checkout';
+    const orphanTable = (commandLine: string): ProcessTableRow[] => [
+      { pid: 1, ppid: 0 },
+      { pid: 100, ppid: 1, commandLine: 'claude.exe' },
+      { pid: 500, ppid: 4242, commandLine: 'node.exe npm-cli.js run dev' },
+      { pid: 501, ppid: 500, commandLine },
+      { pid: 999, ppid: 1, commandLine: 'postgres.exe -D C:\\pgdata' },
+    ];
+    const ORPHAN_SERVER: ListeningSocket = { pid: 501, address: '::1', port: 4100 };
+
+    it("reports it when its command line names the session's worktree", async () => {
+      const { detector, state, servers } = setup({
+        roots: [{ id: 'conversation-1', pid: 100, cwd: WORKTREE }],
+        listeners: [ORPHAN_SERVER, UNRELATED_SERVER],
+      });
+      state.processes = orphanTable(
+        '"C:\\Program Files\\nodejs\\node.exe" C:\\work\\shop-worktrees\\checkout\\node_modules\\vite\\bin\\vite.js --port 4100'
+      );
+
+      await detector.poll();
+
+      expect([...servers.values()]).toEqual([
+        expect.objectContaining({ rootId: 'conversation-1', port: 4100, pid: 501 }),
+      ]);
+      detector.dispose();
+    });
+
+    it('reports it when only a live ancestor names the worktree', async () => {
+      const { detector, state, servers } = setup({
+        roots: [{ id: 'conversation-1', pid: 100, cwd: WORKTREE }],
+        listeners: [ORPHAN_SERVER],
+      });
+      state.processes = orphanTable('node.exe start-server.js').map((row) =>
+        row.pid === 500
+          ? {
+              ...row,
+              commandLine:
+                'node C:/work/shop-worktrees/checkout/node_modules/next/dist/bin/next dev',
+            }
+          : row
+      );
+
+      await detector.poll();
+
+      expect(servers.has('conversation-1:4100')).toBe(true);
+      detector.dispose();
+    });
+
+    it('does not report it for another worktree, a prefix of the path, or a broad cwd', async () => {
+      for (const cwd of [
+        'C:\\work\\shop-worktrees\\check',
+        'C:\\work\\shop-worktrees\\billing',
+        'C:\\',
+        'C:\\work',
+      ]) {
+        const { detector, state, detected, httpProbe } = setup({
+          roots: [{ id: 'conversation-1', pid: 100, cwd }],
+          listeners: [ORPHAN_SERVER],
+        });
+        state.processes = orphanTable(
+          'node.exe C:\\work\\shop-worktrees\\checkout\\node_modules\\vite\\bin\\vite.js'
+        );
+
+        await detector.poll();
+
+        expect(detected, cwd).not.toHaveBeenCalled();
+        expect(httpProbe, cwd).not.toHaveBeenCalled();
+        detector.dispose();
+      }
+    });
+  });
+
   it('keeps polling after a command fails', async () => {
     const { detector, snapshotter, servers } = setup();
     snapshotter.listListeners.mockRejectedValueOnce(new Error('netstat failed'));
