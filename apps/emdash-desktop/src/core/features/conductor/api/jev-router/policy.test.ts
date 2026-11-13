@@ -230,6 +230,22 @@ describe('decideRoute', () => {
     });
   });
 
+  it('does not start a provider the developer named only to rule it out', () => {
+    const request = buildRouterRequest(input('open a new agent here, not a codex agent'));
+    const decision = decideRoute(
+      answers({
+        intent: choice('spawn_blank', 0.95),
+        provider: choice('Codex', 0.95),
+        project: choice(FOCUSED_PROJECT, 0.95),
+        action: choice(catalogKey.spawn(CODEX, CHORUS), 0.9),
+      }),
+      request.plan,
+      options
+    );
+    expect(decision.kind).not.toBe('act');
+    expect(decision.kind === 'llm' && decision.hints).not.toContain('Provider: Codex');
+  });
+
   it('hands a spawn with no project named to the model, which asks, when several are open', () => {
     const request = buildRouterRequest(input('open a new codex agent'));
     const decision = decideRoute(
@@ -528,5 +544,26 @@ describe('planMode and hints', () => {
     );
     expect(hints).toContain('(90%)');
     expect(hints).toContain('"Maple" and "Maple 2"');
+  });
+
+  it('drops the provider hint when the developer names the provider only to rule it out', () => {
+    for (const said of [
+      'Fix the login bug, you should not have to spin up codex agents for this.',
+      'Start an agent for the docs, not a codex agent.',
+      'Start an agent for the docs, no codex.',
+    ]) {
+      const request = buildRouterRequest(input(said));
+      const hints = routerHints(
+        answers({ intent: choice('spawn', 0.9), provider: choice('Codex', 0.81) }),
+        request.plan
+      );
+      expect(hints).not.toContain('Provider: Codex');
+    }
+    const request = buildRouterRequest(input('No, start a codex agent for the docs.'));
+    const hints = routerHints(
+      answers({ intent: choice('spawn', 0.9), provider: choice('Codex', 0.81) }),
+      request.plan
+    );
+    expect(hints).toContain('Provider: Codex (81%)');
   });
 });
