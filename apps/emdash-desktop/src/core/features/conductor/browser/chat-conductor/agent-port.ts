@@ -24,6 +24,7 @@ import { log } from '@core/primitives/logging/browser/logger';
 import { matchInstalledProvider } from '../../api/provider-match';
 import {
   answerPermission,
+  codexApprovalShown,
   interruptAgent,
   readAgentOutput,
   readFinalChatReply,
@@ -301,7 +302,9 @@ export function createTaskAgentPort(canvas: CanvasStore, taskId: string): TaskAg
       const entry = need(chatId);
       // Answering presses a key in the terminal: only when a permission prompt is what it shows.
       // One main holds for this conductor is on screen though its state says nothing of it yet.
-      if (!held && !showsPermissionPrompt(snapshotOf(entry))) {
+      // Codex draws its dialog only after the hook returns: until then a key would miss it.
+      const notDrawn = held && (await codexApprovalShown(entry)) === false;
+      if ((!held && !showsPermissionPrompt(snapshotOf(entry))) || notDrawn) {
         throw new Error(
           "Maestro can't see a permission prompt on this agent's screen right now (it may not be drawn yet), so nothing was pressed. This does not mean anyone answered it."
         );
@@ -310,6 +313,10 @@ export function createTaskAgentPort(canvas: CanvasStore, taskId: string): TaskAg
       return decision === 'allow'
         ? 'Allowed the permission prompt.'
         : 'Denied the permission prompt.';
+    },
+
+    promptOnScreen(chatId) {
+      return codexApprovalShown(need(chatId));
     },
 
     async startChat(input: StartChatInput, onLateFailure) {

@@ -97,6 +97,8 @@ function harness(
     answerPrompt: vi.fn(
       async (_chatId: string, _decision: 'allow' | 'deny') => 'Allowed the permission prompt.'
     ),
+    /** Null: this agent's screen cannot say whether its permission dialog is drawn. */
+    promptOnScreen: vi.fn(async (_chatId: string): Promise<boolean | null> => null),
     startChat: vi.fn(async (input: { name?: string }, _late: (message: string) => void) => {
       const chat = {
         id: `conv-${chats.length + 1}`,
@@ -176,6 +178,7 @@ function harness(
     newId: () => `id-${++id}`,
     warn: vi.fn(),
     eventGatherMs: 0,
+    promptDrawWaitMs: 300,
     resolveDecision: vi.fn(
       (_holdId: string, _conversationId: string, _decision: ConductorDecision) => {}
     ),
@@ -1454,6 +1457,42 @@ describe('deciding what the developer is told', () => {
     h.session.send('Allow it.');
     await h.idle();
     expect(h.agent.answerPrompt).toHaveBeenLastCalledWith('conv-1', 'allow', false);
+  });
+
+  it('reads a held permission prompt only once the agent has drawn its dialog', async () => {
+    const h = await following();
+    // Codex draws its approval dialog only after Maestro's hook returns.
+    const order: string[] = [];
+    h.agent.promptOnScreen.mockImplementation(async () => {
+      order.push('look');
+      return order.length >= 3;
+    });
+    h.agent.readOutput.mockImplementation(async () => {
+      order.push('read');
+      return '› 1. Yes, proceed (y)\n  Press enter to confirm or esc to cancel';
+    });
+    h.replies.push(says(text(CHAT_NOTHING_NEW)));
+    h.session.decide(
+      held({ kind: 'awaiting-input', notificationType: 'permission_prompt', text: null })
+    );
+    await h.idle();
+    expect(order).toEqual(['look', 'look', 'look', 'read']);
+    expect(lastUserText(h.calls[0]!)).not.toContain('may not have drawn');
+  });
+
+  it('says the dialog may not be drawn yet when it never shows, without calling it closed', async () => {
+    const h = await following();
+    h.agent.promptOnScreen.mockResolvedValue(false);
+    h.agent.readOutput.mockResolvedValue('• Working · Running hook');
+    h.replies.push(says(text(CHAT_NOTHING_NEW)));
+    h.session.decide(
+      held({ kind: 'awaiting-input', notificationType: 'permission_prompt', text: null })
+    );
+    await h.idle();
+    const turn = lastUserText(h.calls[0]!);
+    expect(turn).toContain('may not have drawn');
+    expect(turn).toContain('not a sign that it was answered or closed');
+    expect(h.agent.promptOnScreen.mock.calls.length).toBeGreaterThan(1);
   });
 
   it('falls back on every way a turn can fail', async () => {

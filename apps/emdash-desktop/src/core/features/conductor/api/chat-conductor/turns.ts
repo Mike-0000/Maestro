@@ -200,8 +200,16 @@ export type ChatEvent = ChatEventPrompts & {
         source?: 'terminal-tail';
         appUrls: readonly string[];
       }
-    /** A permission prompt or question on screen. */
-    | { kind: 'awaiting-input'; notification: string | null; output: string }
+    /**
+     * A permission prompt or question on screen. `promptNotDrawn`: Maestro waited for the agent
+     * to draw its permission dialog, and the output was read without it.
+     */
+    | {
+        kind: 'awaiting-input';
+        notification: string | null;
+        output: string;
+        promptNotDrawn?: boolean;
+      }
     | { kind: 'error'; output: string }
   );
 
@@ -298,6 +306,11 @@ function eventSection(event: ChatEvent): { lead: string; rest: string[] } {
               ]
             : []),
           fenced('recent-output', tail(event.output, CHAT_EVENT_OUTPUT_CHARS), chat),
+          ...(event.promptNotDrawn
+            ? [
+                "Maestro waited a few seconds and the agent's screen still shows no permission dialog: the agent may not have drawn it yet. That is not a sign that it was answered or closed; the prompt is still waiting, and answer_prompt can answer it once the dialog shows.",
+              ]
+            : []),
         ],
       };
     }

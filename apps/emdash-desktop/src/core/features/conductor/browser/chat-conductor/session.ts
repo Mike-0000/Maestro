@@ -69,6 +69,12 @@ export const MAX_TURN_ROUNDS = 10;
 /** Raw output read for the events that carry it (first open, a prompt, an error). */
 const EVENT_OUTPUT_LINES = 120;
 /**
+ * How long a held permission prompt waits for the agent to draw its dialog before its screen is
+ * read: Codex draws it only once Maestro's hook has returned.
+ */
+const PROMPT_DRAW_WAIT_MS = 3_000;
+const PROMPT_DRAW_POLL_MS = 150;
+/**
  * How long a chat event waits for others before its turn starts: chats that finish close
  * together share one turn.
  */
@@ -157,6 +163,11 @@ export interface TaskAgentPort {
    * this conductor to decide: main then publishes nothing of it, so the chat's state cannot show it.
    */
   answerPrompt(chatId: string, decision: 'allow' | 'deny', held: boolean): Promise<string>;
+  /**
+   * Whether the agent's screen shows its permission dialog now; null when its screen cannot tell
+   * (an agent other than Codex in a terminal, or a screen that cannot be read).
+   */
+  promptOnScreen?(chatId: string): Promise<boolean | null>;
   /** Adds a chat to the task. */
   startChat(
     input: StartChatInput,
@@ -252,6 +263,8 @@ export interface ChatConductorPorts {
   warn(message: string, data?: Record<string, unknown>): void;
   /** Overrides `EVENT_GATHER_MS` (tests use 0). */
   eventGatherMs?: number;
+  /** Overrides `PROMPT_DRAW_WAIT_MS`. */
+  promptDrawWaitMs?: number;
   /** Hands main the decision on a held event. Never throws. */
   resolveDecision(holdId: string, conversationId: string, decision: ConductorDecision): void;
   /** Whether the developer wants to hear about every finished agent, or only those that need them. */
@@ -1178,7 +1191,10 @@ export class ChatConductorSession {
   private async decisionEventFor(request: DecisionRequest): Promise<ChatEvent> {
     const chatId = request.conversationId;
     if (request.kind === 'awaiting-input') {
-      return this.chatEventFor(chatId, {
+      // Its screen is read once the dialog is drawn, or it would show the agent still working.
+      const drawn =
+        request.notificationType === 'permission_prompt' ? await this.promptDrawn(chatId) : null;
+      const event = await this.chatEventFor(chatId, {
         signal: { kind: 'awaiting-input', key: `awaiting-input:${request.notificationType ?? ''}` },
         snapshot: {
           status: 'awaiting-input',
@@ -1186,6 +1202,9 @@ export class ChatConductorSession {
           notification: request.notificationType ?? null,
         },
       });
+      return drawn === false && event.kind === 'awaiting-input'
+        ? { ...event, promptNotDrawn: true }
+        : event;
     }
     const report = request.completionReport;
     return this.chatEventFor(chatId, {
@@ -1195,6 +1214,22 @@ export class ChatConductorSession {
       },
       snapshot: { status: 'completed', report, notification: null },
     });
+  }
+
+  /**
+   * Waits, bounded, for a chat's agent to draw its permission dialog: true once it shows, false
+   * when it did not in time, null when the agent's screen cannot tell (then nothing waits).
+   */
+  private async promptDrawn(chatId: string): Promise<boolean | null> {
+    const { agent } = this.ports;
+    if (!agent.promptOnScreen) return null;
+    const deadline = Date.now() + (this.ports.promptDrawWaitMs ?? PROMPT_DRAW_WAIT_MS);
+    for (;;) {
+      const shown = await agent.promptOnScreen(chatId).catch(() => null);
+      if (shown !== false) return shown;
+      if (Date.now() >= deadline) return false;
+      await new Promise((resolve) => setTimeout(resolve, PROMPT_DRAW_POLL_MS));
+    }
   }
 
   /** Resolves each hold with what the turn decided about its chat, or with the fallback. */
