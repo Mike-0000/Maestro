@@ -1,8 +1,10 @@
 import { getAgentsClient } from '@core/features/agents/api/browser/client';
 import { nextDefaultConversationTitle } from '@core/features/conversations/api/browser/conversation-title-utils';
 import { conversationRegistry } from '@core/features/conversations/api/browser/stores/conversation-registry';
+import { PROJECT_LIVE_ACCESS_REQUIRED_MESSAGE } from '@core/features/projects/api/attachments';
 import {
   asAvailableProject,
+  getProjectHostAccess,
   getProjectManagerStore,
   getProjectStore,
   projectData,
@@ -206,9 +208,14 @@ export async function spawnAgentTask(request: SpawnRequest): Promise<SpawnResult
     },
     workspaceConfig,
   };
+  await waitForLiveHost(request.projectId);
   try {
     await taskManager.createTask(params);
   } catch (error) {
+    // Refused for want of live project access: nothing was created, so there is nothing to wait for.
+    if (error instanceof Error && error.message.includes(PROJECT_LIVE_ACCESS_REQUIRED_MESSAGE)) {
+      throw new Error(PROJECT_RECONNECTING_MESSAGE, { cause: error });
+    }
     // A timed-out createTask call can still have created the task in the main process. Starting
     // that task beats reporting a failure and leaving it idle on the canvas, where a retry would
     // add a second one.
@@ -286,6 +293,23 @@ export async function addAgentChat(request: AddChatRequest): Promise<AddChatResu
 const START_POLL_MS = 400;
 const START_TIMEOUT_MS = 90_000;
 const CREATED_CHECK_TIMEOUT_MS = 15_000;
+const LIVE_WAIT_MS = 10_000;
+const LIVE_POLL_MS = 250;
+const PROJECT_RECONNECTING_MESSAGE =
+  'The project is reconnecting, so the agent could not be started yet. Try again in a few seconds.';
+
+/**
+ * Waits up to `timeoutMs` for the project's host to be live, since a task can only be created
+ * then. Returns at once when it is live or the project has no available context.
+ */
+async function waitForLiveHost(projectId: string, timeoutMs = LIVE_WAIT_MS): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const host = getProjectHostAccess(projectId);
+    if (!host || host.state.kind === 'ready' || Date.now() >= deadline) return;
+    await new Promise((resolve) => setTimeout(resolve, LIVE_POLL_MS));
+  }
+}
 
 /** Whether the task list from the main process shows the task, waiting a little for it to arrive. */
 async function taskWasCreated(
