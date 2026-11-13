@@ -225,7 +225,7 @@ export function buildRouterRequest(input: RouterInput): RouterRequest {
     provider: {
       type: 'choice',
       instructions:
-        'Which coding agent provider does the `utterance` name for new work? Transcripts mishear names.',
+        'Which coding agent provider does the `utterance` ask to use for new work? A provider named only to rule it out ("not a Codex agent", "no Claude") is not asked for. Transcripts mishear names.',
       criteria: providerCriteria,
     },
     agent_count: {

@@ -41,8 +41,15 @@ export function createDevServerBridgeParticipant({
   const attachOnce = async (host: HostRef): Promise<DevServerBridge> => {
     const runtime = await runtimes.client(host);
     if (!runtime.success) throw runtimeResolveErrorAsError(runtime.error);
+    const local = isLocalHostRef(host);
     return await createBridge(
-      { terminals: runtime.data.terminals, scripts: runtime.data.scripts },
+      {
+        terminals: runtime.data.terminals,
+        scripts: runtime.data.scripts,
+        // Agent-started servers are found from local process trees only; a remote workspace
+        // server does not detect them (and an older one does not serve the model at all).
+        ...(local ? { tuiAgents: runtime.data.tuiAgents } : {}),
+      },
       hostContextFor(host)
     );
   };

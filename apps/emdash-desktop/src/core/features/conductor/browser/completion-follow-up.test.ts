@@ -232,6 +232,15 @@ describe('completion follow-ups', () => {
     expect(store.busy).toBe(false);
   });
 
+  it('gives each model call longer than the default Wire deadline', async () => {
+    const { announce } = setup();
+    mocks.runTurn.mockResolvedValueOnce(text('Zulu built the todo app.'));
+    await announce();
+    expect(mocks.runTurn).toHaveBeenCalledWith(expect.objectContaining({ mode: 'command' }), {
+      timeoutMs: 120_000,
+    });
+  });
+
   it('refuses risky tools the model tries on the strength of agent output', async () => {
     const { speech, announce } = setup();
     mocks.runTurn
@@ -333,6 +342,28 @@ describe('completion follow-ups', () => {
     }
     expect(speech.announce).toHaveBeenCalledTimes(1);
     expect(store.reply).toBe('Zulu: finished a turn with nothing new.');
+  });
+
+  it('keeps a failed follow-up on the HUD once the developer has heard about the agent', async () => {
+    const { store, speech, announce } = setup(agent({ taskName: 'Fill the Jar yesterday toggle' }));
+    mocks.runTurn
+      .mockResolvedValueOnce(text('Zulu started the build loop; it is at step 28 of 31.'))
+      .mockResolvedValue({
+        success: false,
+        error: { type: 'rate-limited', message: 'OpenRouter is rate limited right now.' },
+      });
+    await announce();
+    for (const step of [29, 30]) {
+      await announce([
+        agent({
+          taskName: 'Fill the Jar yesterday toggle',
+          completionReport: buildCompletionReport(`Still running, step ${step} of 31.`),
+        }),
+      ]);
+    }
+    expect(mocks.runTurn).toHaveBeenCalledTimes(3);
+    expect(speech.announce).toHaveBeenCalledTimes(1);
+    expect(store.reply).toContain('Zulu');
   });
 
   it("speaks the fixed sentence when an agent's first report is called nothing new", async () => {
@@ -523,13 +554,41 @@ describe('the completion gate when only what needs the developer is announced', 
     expect(store.reply).toContain('Zulu');
   });
 
+  it('traces a failed gate with its latency and the reason', async () => {
+    mocks.decide.mockResolvedValue({
+      success: false,
+      error: { type: 'rate-limited', message: 'Jev is rate limited right now.' },
+    });
+    const { store, announce } = setup(agent(), { announceCompletions: 'attention_only' });
+    store.status = { ...store.status!, jevReady: true };
+    mocks.runTurn.mockResolvedValue(text('NO_NEWS'));
+    const trace = vi.spyOn(
+      store as unknown as { trace: (kind: string, text?: string, detail?: object) => void },
+      'trace'
+    );
+
+    await announce();
+
+    const row = trace.mock.calls.find(([kind]) => kind === 'jev')?.[2];
+    expect(row).toMatchObject({
+      purpose: 'completion',
+      status: 'failed',
+      reason: 'rate-limited',
+      error: 'Jev is rate limited right now.',
+    });
+    expect(typeof (row as { ms?: unknown }).ms).toBe('number');
+  });
+
   it('speaks a question and calls the developer with the attention sound', async () => {
     const { speech, announce } = gated('needs_decision');
 
     await announce();
 
     expect(speech.announce).toHaveBeenCalledTimes(1);
-    expect(speech.announce.mock.calls[0]![0]).toContain('Zulu asks:');
+    // Jev picked a statement as the question: it is said, but not as "Zulu asks:".
+    expect(speech.announce.mock.calls[0]![0]).toBe(
+      'Zulu: I built the Express todo app and started it with npm run dev.'
+    );
     expect(mocks.playNotificationSound).toHaveBeenCalledWith(
       'needs_attention',
       'conductor-attention'

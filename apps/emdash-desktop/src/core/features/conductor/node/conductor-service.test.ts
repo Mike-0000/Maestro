@@ -332,6 +332,65 @@ describe('ConductorService.runTurn via OpenRouter', () => {
     const rejected = await conductor.runTurn('command', userTurn);
     expect(!rejected.success && rejected.error.type).toBe('not-configured');
   });
+
+  const answered = {
+    choices: [{ finish_reason: 'stop', message: { content: 'Done.' } }],
+    usage: { prompt_tokens: 10, completion_tokens: 2 },
+  };
+
+  /** Answers each request with the next responder; the last one repeats. */
+  function inTurn(...responders: ((res: ServerResponse) => void)[]) {
+    let call = 0;
+    respond = (res) => responders[Math.min(call++, responders.length - 1)]!(res);
+  }
+
+  function rateLimited(retryAfter: string) {
+    return (res: ServerResponse) => {
+      res.writeHead(429, { 'content-type': 'application/json', 'retry-after': retryAfter });
+      res.end(JSON.stringify({ error: { message: 'Provider returned error: upstream 429' } }));
+    };
+  }
+
+  it('tries a rate-limited turn once more, after the Retry-After wait', async () => {
+    const conductor = service();
+    await useOpenRouter(conductor);
+    inTurn(rateLimited('0'), json(200, answered));
+    const result = await conductor.runTurn('command', userTurn);
+    expect(captured).toHaveLength(2);
+    expect(result.success).toBe(true);
+  });
+
+  it('tries once more after a gateway error or a dropped connection', async () => {
+    const conductor = service();
+    await useOpenRouter(conductor);
+    inTurn(json(503, { error: { message: 'no provider available' } }), json(200, answered));
+    expect((await conductor.runTurn('command', userTurn)).success).toBe(true);
+    expect(captured).toHaveLength(2);
+    captured = [];
+    inTurn((res) => res.socket?.destroy(), json(200, answered));
+    expect((await conductor.runTurn('command', userTurn)).success).toBe(true);
+    expect(captured).toHaveLength(2);
+  });
+
+  it('keeps the upstream reason when the retry is rate limited too', async () => {
+    const conductor = service();
+    await useOpenRouter(conductor);
+    inTurn(rateLimited('0'));
+    const result = await conductor.runTurn('command', userTurn);
+    expect(captured).toHaveLength(2);
+    expect(!result.success && result.error.type).toBe('rate-limited');
+    expect(!result.success && result.error.message).toContain('upstream 429');
+  });
+
+  it('caps a long Retry-After at about two seconds', async () => {
+    const conductor = service();
+    await useOpenRouter(conductor);
+    inTurn(rateLimited('120'), json(200, answered));
+    const startedAt = performance.now();
+    const result = await conductor.runTurn('command', userTurn);
+    expect(result.success).toBe(true);
+    expect(performance.now() - startedAt).toBeLessThan(4_000);
+  });
 });
 
 describe('ConductorService.decide (Jev)', () => {
@@ -848,6 +907,9 @@ describe('ConductorService.runChatTurn', () => {
       toolCalls: [{ id: 'toolu_1', name: 'focus_agent', input: '{"agent":"Claude 1"}' }],
       stopReason: 'tool_use',
       model: 'claude-opus-5',
+      // Input written to the cache counts with the input; what was read from it is its own.
+      tokens: 130,
+      cacheReadTokens: 50,
     });
     expect(first?.input).toContain('Go. The key is');
     expect(first?.input).not.toContain(key);

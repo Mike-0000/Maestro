@@ -1,5 +1,5 @@
 import type { AgentProviderId } from '@emdash/plugins/agents/types';
-import type { AgentStatus, RunningSubAgent } from '@core/primitives/agents/api';
+import type { AgentStatus, NotificationType, RunningSubAgent } from '@core/primitives/agents/api';
 import type { CompletionReport } from '@core/primitives/agents/api/completion-report';
 import type { ConductorDecisionMark } from '@core/primitives/agents/api/conductor-decisions';
 
@@ -98,6 +98,11 @@ export type ConversationEvent =
        * runtime does not report them; a reader then has `backgroundAgents` alone.
        */
       subAgents?: readonly RunningSubAgent[];
+      /**
+       * With 'awaiting-input': the prompt the agent shows (a permission prompt, a question
+       * dialog...). Absent when the status names none, such as a turn that ended on a question.
+       */
+      notificationType?: NotificationType;
       /**
        * Set when the chat's conductor decided this status: its state, its headline (also in
        * `completionSummary`), and whether a notification went out. Absent when rules or a

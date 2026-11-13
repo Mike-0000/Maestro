@@ -141,6 +141,44 @@ describe('interpretCompletionGate', () => {
     )[0];
     expect(noQuestion).toMatchObject({ fallback: 'Maple: All 42 tests pass now.' });
   });
+
+  it('says "asks:" only of a question, not of a statement picked as one', () => {
+    const agent = candidate(
+      'I staged the changes for review. Nothing will be committed until you say so. The diff is ready.'
+    );
+    const { gate, option } = gateFor(agent);
+    const answers = (confidence: number): JevAnswers => ({
+      a0_kind: choice('needs_decision', confidence),
+      a0_best: choice(option(0)),
+      a0_question: choice(option(1)),
+      a0_followup: noul(0.1),
+    });
+    const [spoken] = interpretCompletionGate(answers(0.9), gate, [agent]);
+    expect(spoken).toEqual({
+      kind: 'speak',
+      text: 'Maple: Nothing will be committed until you say so.',
+      reason: 'needs_decision',
+    });
+    const [unsure] = interpretCompletionGate(answers(0.5), gate, [agent]);
+    expect(unsure).toMatchObject({
+      fallback: 'Maple: Nothing will be committed until you say so.',
+    });
+  });
+});
+
+describe('reportSentences and tool status lines', () => {
+  it('drops a background task status line, keeping the report', () => {
+    expect(
+      reportSentences(
+        'Agent "Fix the login redirect" finished · 29m 41s\nThe redirect now keeps the original page.'
+      )
+    ).toEqual(['The redirect now keeps the original page.']);
+    expect(
+      reportSentences(
+        '⏺ Agent "Audit the release scripts" completed · 4m 2s. All release scripts pass the audit now.'
+      )
+    ).toEqual(['All release scripts pass the audit now.']);
+  });
 });
 
 describe('terminal input and chrome', () => {

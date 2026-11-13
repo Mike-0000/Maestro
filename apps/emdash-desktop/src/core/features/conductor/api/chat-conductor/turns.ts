@@ -29,13 +29,19 @@ export function markedForAgent(text: string): string {
   return `${CHAT_CONDUCTOR_MARK}\n${text}`;
 }
 
+/** The least of the mark a line must hold to be known as it: a narrow terminal wraps it short. */
+const MARK_HEAD_MIN = 20;
+
 /**
  * True for text that starts with the conductor's mark, however a terminal or transcript wrapped
- * or reflowed it: the start of the mark is enough.
+ * or reflowed it: the start of the mark is enough, from its first 20 characters.
  */
 export function startsWithConductorMark(text: string): boolean {
-  const head = comparable(CHAT_CONDUCTOR_MARK).slice(0, 40);
-  return comparable(text).startsWith(head);
+  const mark = comparable(CHAT_CONDUCTOR_MARK);
+  const said = comparable(text);
+  return (
+    said.startsWith(mark.slice(0, 40)) || (said.length >= MARK_HEAD_MIN && mark.startsWith(said))
+  );
 }
 
 function comparable(text: string): string {
@@ -194,8 +200,16 @@ export type ChatEvent = ChatEventPrompts & {
         source?: 'terminal-tail';
         appUrls: readonly string[];
       }
-    /** A permission prompt or question on screen. */
-    | { kind: 'awaiting-input'; notification: string | null; output: string }
+    /**
+     * A permission prompt or question on screen. `promptNotDrawn`: Maestro waited for the agent
+     * to draw its permission dialog, and the output was read without it.
+     */
+    | {
+        kind: 'awaiting-input';
+        notification: string | null;
+        output: string;
+        promptNotDrawn?: boolean;
+      }
     | { kind: 'error'; output: string }
   );
 
@@ -292,6 +306,11 @@ function eventSection(event: ChatEvent): { lead: string; rest: string[] } {
               ]
             : []),
           fenced('recent-output', tail(event.output, CHAT_EVENT_OUTPUT_CHARS), chat),
+          ...(event.promptNotDrawn
+            ? [
+                "Maestro waited a few seconds and the agent's screen still shows no permission dialog: the agent may not have drawn it yet. That is not a sign that it was answered or closed; the prompt is still waiting, and answer_prompt can answer it once the dialog shows.",
+              ]
+            : []),
         ],
       };
     }

@@ -455,7 +455,7 @@ describe('a request turn', () => {
         {
           asked: request('ask_conductor', { question: 'Tabs or spaces?' }),
           decision: 'answer',
-          said: 'Zulu asked me: Tabs or spaces? I answered it.',
+          said: 'Told Zulu: Spaces.',
         },
       ];
     for (const { asked, decision, said } of cases) {
@@ -475,6 +475,29 @@ describe('a request turn', () => {
       expect(store['history'].at(-1)).toEqual({ role: 'assistant', content: said });
       store.dispose();
     }
+  });
+
+  it('says what it answered, not the question cut short with a bare verdict', async () => {
+    const { store, receive } = await setup();
+    const asked = request('ask_conductor', {
+      question: `${'Should I register the self-hosted runner on the build VM now, '.repeat(6)}using one az run-command call?`,
+    });
+    const answer =
+      'Yes, register the runner on the build VM with one az run-command call, then check that it shows as idle in the repository settings before you queue the release job again.';
+    mocks.runTurn.mockResolvedValueOnce(
+      toolUses({
+        name: 'answer_request',
+        input: { request_id: asked.id, decision: 'answer', message: answer },
+      })
+    );
+    await receive(asked);
+    await vi.waitFor(() => expect(store.reply).toMatch(/^Told Zulu: Yes, register the runner/));
+    expect(store.reply).not.toContain('I answered it');
+    expect(store.reply).not.toContain('Should I register');
+    // Cut between two words, never inside one.
+    expect(store.reply).toMatch(/ [A-Za-z-]+…$/);
+    expect(answer).toContain(store.reply.slice('Told Zulu: '.length, -1));
+    store.dispose();
   });
 });
 
@@ -802,14 +825,12 @@ describe('a request turn that does more than settle', () => {
     );
     mocks.runTurn.mockResolvedValue(toolUses({ name: 'list_agents', input: {} }));
     await receive(asked);
-    await vi.waitFor(() =>
-      expect(store.reply).toBe('Zulu asked me: Tabs or spaces? I answered it.')
-    );
+    await vi.waitFor(() => expect(store.reply).toBe('Told Zulu: Spaces.'));
     expect(mocks.runTurn).toHaveBeenCalledTimes(4);
     const history = store['history'];
     expect(history.at(-1)).toEqual({
       role: 'assistant',
-      content: 'Zulu asked me: Tabs or spaces? I answered it.',
+      content: 'Told Zulu: Spaces.',
     });
     // Every call in it has its results right after.
     history.forEach((message, index) => {

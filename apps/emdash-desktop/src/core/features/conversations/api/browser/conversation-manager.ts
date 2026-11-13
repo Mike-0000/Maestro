@@ -736,9 +736,9 @@ export class ConversationStore {
   applyAgentStatusChanged(payload: Extract<ConversationEvent, { type: 'agent-status-changed' }>) {
     this.status = payload.status;
     this.seen = payload.seen;
-    if (payload.status !== 'awaiting-input') {
-      this.lastNotificationType = null;
-    }
+    // The prompt an awaiting-input stands for; a permission prompt lets the conductor answer it.
+    this.lastNotificationType =
+      payload.status === 'awaiting-input' ? (payload.notificationType ?? null) : null;
     // 'awaiting-input' carries them when the turn ended on something the developer must answer.
     const turnEnded = payload.status === 'completed' || payload.status === 'awaiting-input';
     this.completionSummary = turnEnded ? (payload.completionSummary ?? null) : null;

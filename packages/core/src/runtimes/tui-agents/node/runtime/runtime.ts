@@ -1,9 +1,9 @@
 import { err, ok, type Result, type Serializable } from '@emdash/shared';
-import { KeyedMutex } from '@emdash/shared/concurrency';
+import { createScope, KeyedMutex, type Scope } from '@emdash/shared/concurrency';
 import { systemClock, type Clock } from '@emdash/shared/scheduling';
 import { LiveLogSource } from '@emdash/wire/live';
-import { type LiveSource } from '@emdash/wire/rpc';
-import { peek } from '@emdash/wire/state';
+import { type LeasedLiveModelProvider, type LiveSource } from '@emdash/wire/rpc';
+import { cell, expose, observe, peek, type Cell } from '@emdash/wire/state';
 import {
   currentAgentEnvPlatform,
   mergeAgentEnvLayers,
@@ -12,6 +12,7 @@ import {
 import { applyGitCredentialsToEnv } from '#primitives/git-credentials/api';
 import type {
   PersistedTuiAgentStartInput,
+  TuiAgentDevServerList,
   TuiAgentStartInput,
   TuiInputError,
   TuiResumeOutcome,
@@ -21,7 +22,12 @@ import type {
   TuiStartOutcome,
   TuiStartError,
 } from '#runtimes/tui-agents/api';
-import { persistedTuiAgentStartInputSchema } from '#runtimes/tui-agents/api';
+import { persistedTuiAgentStartInputSchema, tuiAgentsContract } from '#runtimes/tui-agents/api';
+import {
+  createProcessTreePortDetector,
+  type ProcessTreePortDetector,
+  type ProcessTreeServer,
+} from '#runtimes/tui-agents/node/dev-servers/process-tree-port-detector';
 import { TuiHookPipeline } from '#runtimes/tui-agents/node/hooks/hook-pipeline';
 import { TuiHookServer } from '#runtimes/tui-agents/node/hooks/hook-server';
 import {
@@ -118,6 +124,15 @@ export class TuiAgentsRuntime {
   readonly agentStatesLiveModel: TuiAgentStatesLiveModel;
   private readonly sessionsList: TuiSessionsListModel;
   private readonly agentStatesList: TuiAgentStatesListModel;
+  private readonly devServersList: Cell<TuiAgentDevServerList> = cell({});
+  readonly devServersLiveModel: LeasedLiveModelProvider<typeof tuiAgentsContract.devServers> =
+    expose(
+      tuiAgentsContract.devServers,
+      { list: this.devServersList },
+      { publish: { list: 'diff' } }
+    );
+  private readonly devServerDetector: ProcessTreePortDetector | null = null;
+  private readonly devServerScope: Scope = createScope({ label: 'tui-agents-dev-servers' });
   private readonly agentStates: TuiAgentStates;
   private readonly hookInstaller: AgentHookInstaller;
   private readonly hookServer: TuiHookServer;
@@ -328,6 +343,18 @@ export class TuiAgentsRuntime {
         },
       },
     });
+    if (deps.devServerDetection) {
+      this.devServerDetector = createProcessTreePortDetector({
+        ...deps.devServerDetection,
+        roots: () => this.devServerRoots(),
+        onDetected: (conversationId, server) => this.upsertDevServer(conversationId, server),
+        onClosed: (conversationId, server) => this.removeDevServer(conversationId, server),
+        logger: deps.logger,
+      });
+      observe(this.sessionsList.states.list, () => this.devServerDetector?.wake(), {
+        scope: this.devServerScope,
+      });
+    }
   }
 
   async startSession(
@@ -493,6 +520,9 @@ export class TuiAgentsRuntime {
 
   async dispose(): Promise<void> {
     this.lifecycle.dispose();
+    this.devServerDetector?.dispose();
+    await this.devServerScope.dispose();
+    void this.devServersLiveModel.dispose();
     for (const conversationId of this.sessions.keys()) {
       this.bumpGeneration(conversationId);
     }
@@ -737,6 +767,49 @@ export class TuiAgentsRuntime {
     });
     return ok(undefined);
   }
+
+  /**
+   * Running sessions whose process tree is watched for dev servers. A session in tmux (its PTY
+   * child is the tmux client) or in WSL (its tree runs in the distro) has no such descendants on
+   * this computer, so it simply yields nothing.
+   */
+  private devServerRoots(): Array<{ id: string; pid: number }> {
+    const roots: Array<{ id: string; pid: number }> = [];
+    for (const session of Object.values(peek(this.sessionsList.states.list))) {
+      if (session.status !== 'running' || session.isRemote) continue;
+      if (session.pid === undefined || session.pid <= 0 || !session.cwd) continue;
+      roots.push({ id: session.conversationId, pid: session.pid });
+    }
+    return roots;
+  }
+
+  private upsertDevServer(conversationId: string, server: ProcessTreeServer): void {
+    const cwd = peek(this.sessionsList.states.list)[conversationId]?.cwd;
+    if (!cwd) return;
+    this.devServersList.update((previous) => ({
+      ...previous,
+      [devServerKey(conversationId, server)]: {
+        conversationId,
+        cwd,
+        protocol: server.protocol,
+        host: server.host,
+        port: server.port,
+        urlPath: server.urlPath,
+        pid: server.pid,
+        detectedAt: this.clock.now(),
+      },
+    }));
+  }
+
+  private removeDevServer(conversationId: string, server: ProcessTreeServer): void {
+    const key = devServerKey(conversationId, server);
+    this.devServersList.update((previous) => {
+      if (!(key in previous)) return previous;
+      const { [key]: _removed, ...rest } = previous;
+      return rest;
+    });
+  }
+
   private createRetainedSession(conversationId: string): TuiAgentSession {
     return {
       conversationId,
@@ -1243,4 +1316,8 @@ function maxNullable(a: number | null, b: number | null | undefined): number | n
   if (a === null) return b ?? null;
   if (b === null || b === undefined) return a;
   return Math.max(a, b);
+}
+
+function devServerKey(conversationId: string, server: Pick<ProcessTreeServer, 'port'>): string {
+  return `${conversationId}:${server.port}`;
 }

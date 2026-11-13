@@ -111,4 +111,22 @@ describe('ConversationStore.applyAgentStatusChanged', () => {
     conversation.setStatus('working');
     expect(conversation.conductorDecision).toBeNull();
   });
+
+  it('keeps which prompt an awaiting-input status stands for, until the agent moves on', () => {
+    const conversation = store();
+    conversation.applyAgentStatusChanged(
+      event({ status: 'awaiting-input', seen: false, notificationType: 'permission_prompt' })
+    );
+    expect(conversation.lastNotificationType).toBe('permission_prompt');
+
+    // A later prompt replaces it; one that names none (a turn that ended on a question) clears it.
+    conversation.applyAgentStatusChanged(event({ status: 'awaiting-input', seen: false }));
+    expect(conversation.lastNotificationType).toBeNull();
+
+    conversation.applyAgentStatusChanged(
+      event({ status: 'awaiting-input', seen: false, notificationType: 'permission_prompt' })
+    );
+    conversation.applyAgentStatusChanged(event({ status: 'working' }));
+    expect(conversation.lastNotificationType).toBeNull();
+  });
 });

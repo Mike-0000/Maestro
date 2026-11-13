@@ -97,6 +97,8 @@ function harness(
     answerPrompt: vi.fn(
       async (_chatId: string, _decision: 'allow' | 'deny') => 'Allowed the permission prompt.'
     ),
+    /** Null: this agent's screen cannot say whether its permission dialog is drawn. */
+    promptOnScreen: vi.fn(async (_chatId: string): Promise<boolean | null> => null),
     startChat: vi.fn(async (input: { name?: string }, _late: (message: string) => void) => {
       const chat = {
         id: `conv-${chats.length + 1}`,
@@ -176,6 +178,7 @@ function harness(
     newId: () => `id-${++id}`,
     warn: vi.fn(),
     eventGatherMs: 0,
+    promptDrawWaitMs: 300,
     resolveDecision: vi.fn(
       (_holdId: string, _conversationId: string, _decision: ConductorDecision) => {}
     ),
@@ -1358,6 +1361,45 @@ describe('deciding what the developer is told', () => {
     ]);
   });
 
+  it('takes an empty answer after its tool calls as the end of the turn, not a failure', async () => {
+    const h = await following();
+    // The model sets the status beside its message, then ends with no further content.
+    h.replies.push(
+      says(
+        text('Zeus wants a release name.'),
+        tool('set_status', { state: 'needs_you', headline: 'Zeus wants a release name' })
+      ),
+      says()
+    );
+    h.session.decide(held());
+    await h.idle();
+    expect(h.kinds().slice(-2)).toEqual(['event', 'conductor']);
+    expect(h.session.entries.at(-1)).toMatchObject({ text: 'Zeus wants a release name.' });
+    // The turn ended well, so the decision is the conductor's, not the rules'.
+    expect(h.resolved()[0]?.decision).toMatchObject({ kind: 'surface', state: 'needs_you' });
+  });
+
+  it('posts no error when a developer turn ends empty after its tools', async () => {
+    const h = await following();
+    h.replies.push(says(text('Noted.'), tool('update_notes', { notes: 'Goal: ship.' })), says());
+    h.session.send('Remember the goal is to ship.');
+    await h.idle();
+    expect(h.kinds().slice(-2)).toEqual(['developer', 'conductor']);
+    expect(h.session.entries.at(-1)).toMatchObject({ text: 'Noted.' });
+    expect(h.session.notes).toBe('Goal: ship.');
+  });
+
+  it('still reports an empty first answer as an error', async () => {
+    const h = await following();
+    h.replies.push(says());
+    h.session.send('Where is it?');
+    await h.idle();
+    expect(h.session.entries.at(-1)).toMatchObject({
+      kind: 'error',
+      text: 'The conductor returned an empty reply.',
+    });
+  });
+
   it('notifies done only when every finished agent is announced, unless told otherwise', async () => {
     const h = await following();
     h.announce.mode = 'attention_only';
@@ -1419,8 +1461,77 @@ describe('deciding what the developer is told', () => {
       held({ kind: 'awaiting-input', notificationType: 'permission_prompt', text: null })
     );
     await h.idle();
-    expect(h.agent.answerPrompt).toHaveBeenCalledWith('conv-1', 'allow');
+    expect(h.agent.answerPrompt).toHaveBeenCalledWith('conv-1', 'allow', true);
     expect(h.resolved()[0]?.decision).toEqual({ kind: 'quiet', answered: true });
+  });
+
+  it('answers the permission prompt it is deciding, though the chat still shows working', async () => {
+    const h = await following();
+    // Main shows nothing of a held prompt: the chat's state stays at working while it decides.
+    h.agentIs(working);
+    await h.idle();
+    h.replies.push(says(tool('answer_prompt', { decision: 'deny' })), says(text('Denied it.')));
+    h.session.decide(
+      held({ kind: 'awaiting-input', notificationType: 'permission_prompt', text: null })
+    );
+    await h.idle();
+    expect(h.agent.answerPrompt).toHaveBeenLastCalledWith('conv-1', 'deny', true);
+  });
+
+  it('does not take a prompt as held once main closed the hold, or outside a decision', async () => {
+    const h = await following();
+    const blocked = deferred<ChatTurnResult>();
+    h.replies.push(blocked.promise, says(text('Tried.')));
+    h.session.decide(
+      held({ kind: 'awaiting-input', notificationType: 'permission_prompt', text: null })
+    );
+    await vi.waitFor(() => expect(h.session.busy).toBe(true));
+    // The developer answered it by hand: the agent went on, and main closed the hold.
+    h.session.decisionClosed('hold-1');
+    blocked.resolve(says(tool('answer_prompt', { decision: 'allow' })));
+    await h.idle();
+    expect(h.agent.answerPrompt).toHaveBeenLastCalledWith('conv-1', 'allow', false);
+
+    h.replies.push(says(tool('answer_prompt', { decision: 'allow' })), says(text('Done.')));
+    h.session.send('Allow it.');
+    await h.idle();
+    expect(h.agent.answerPrompt).toHaveBeenLastCalledWith('conv-1', 'allow', false);
+  });
+
+  it('reads a held permission prompt only once the agent has drawn its dialog', async () => {
+    const h = await following();
+    // Codex draws its approval dialog only after Maestro's hook returns.
+    const order: string[] = [];
+    h.agent.promptOnScreen.mockImplementation(async () => {
+      order.push('look');
+      return order.length >= 3;
+    });
+    h.agent.readOutput.mockImplementation(async () => {
+      order.push('read');
+      return '› 1. Yes, proceed (y)\n  Press enter to confirm or esc to cancel';
+    });
+    h.replies.push(says(text(CHAT_NOTHING_NEW)));
+    h.session.decide(
+      held({ kind: 'awaiting-input', notificationType: 'permission_prompt', text: null })
+    );
+    await h.idle();
+    expect(order).toEqual(['look', 'look', 'look', 'read']);
+    expect(lastUserText(h.calls[0]!)).not.toContain('may not have drawn');
+  });
+
+  it('says the dialog may not be drawn yet when it never shows, without calling it closed', async () => {
+    const h = await following();
+    h.agent.promptOnScreen.mockResolvedValue(false);
+    h.agent.readOutput.mockResolvedValue('• Working · Running hook');
+    h.replies.push(says(text(CHAT_NOTHING_NEW)));
+    h.session.decide(
+      held({ kind: 'awaiting-input', notificationType: 'permission_prompt', text: null })
+    );
+    await h.idle();
+    const turn = lastUserText(h.calls[0]!);
+    expect(turn).toContain('may not have drawn');
+    expect(turn).toContain('not a sign that it was answered or closed');
+    expect(h.agent.promptOnScreen.mock.calls.length).toBeGreaterThan(1);
   });
 
   it('falls back on every way a turn can fail', async () => {

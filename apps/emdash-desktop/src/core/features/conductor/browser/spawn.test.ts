@@ -9,6 +9,7 @@ import { spawnAgentTask, startAgentSession } from './spawn';
 const mocks = vi.hoisted(() => ({
   createTask: vi.fn(),
   getTaskStore: vi.fn(),
+  hostAccess: vi.fn((): { state: { kind: string } } | undefined => undefined),
   listMetadata: vi.fn(async () => [
     { id: 'claude', name: 'Claude Code', capabilities: {} },
     { id: 'codex', name: 'Codex', capabilities: {} },
@@ -24,6 +25,7 @@ vi.mock('@core/features/conversations/api/browser/stores/conversation-registry',
 vi.mock('@core/features/projects/api/browser/stores/project-selectors', () => ({
   asAvailableProject: vi.fn(),
   getProjectManagerStore: vi.fn(() => ({ projects: new Map() })),
+  getProjectHostAccess: mocks.hostAccess,
   getProjectStore: vi.fn(),
   projectData: vi.fn(() => ({ repositoryWorkspaceId: 'ws-1' })),
 }));
@@ -44,6 +46,7 @@ const request = { projectId: 'proj', taskName: 'Fix login', prompt: '' };
 afterEach(() => {
   vi.useRealTimers();
   vi.clearAllMocks();
+  mocks.hostAccess.mockReturnValue(undefined);
 });
 
 describe('spawnAgentTask', () => {
@@ -81,6 +84,33 @@ describe('spawnAgentTask', () => {
     const outcome = expect(spawning).rejects.toThrow('timed out');
     await vi.advanceTimersByTimeAsync(16_000);
     await outcome;
+  });
+
+  it('waits for a reconnecting project before creating the task', async () => {
+    vi.useFakeTimers();
+    const host = { state: { kind: 'degraded' } };
+    mocks.hostAccess.mockReturnValue(host);
+    mocks.createTask.mockResolvedValue(undefined);
+    const spawning = spawnAgentTask({ ...request, providerId: 'claude' });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(mocks.createTask).not.toHaveBeenCalled();
+    host.state = { kind: 'ready' };
+    await vi.advanceTimersByTimeAsync(1_000);
+    await spawning;
+    expect(mocks.createTask).toHaveBeenCalledTimes(1);
+  });
+
+  it('says the project is reconnecting without waiting out the created-task check', async () => {
+    vi.useFakeTimers();
+    mocks.hostAccess.mockReturnValue({ state: { kind: 'degraded' } });
+    mocks.createTask.mockRejectedValue(new Error('This action requires live project access.'));
+    mocks.getTaskStore.mockReturnValue(undefined);
+    const spawning = spawnAgentTask({ ...request, providerId: 'claude' });
+    let settled: unknown = null;
+    spawning.catch((error: unknown) => (settled = error));
+    await vi.advanceTimersByTimeAsync(11_000);
+    expect(settled).toBeInstanceOf(Error);
+    expect((settled as Error).message).toMatch(/reconnecting/);
   });
 
   it('renames a clashing task and notes a busy agent in the same folder', async () => {

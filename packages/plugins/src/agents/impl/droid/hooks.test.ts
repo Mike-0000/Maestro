@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import type { PluginFs } from '@emdash/core/services/agent-plugins/api/plugins';
 import { describe, expect, it } from 'vitest';
 import { DROID_HOOKS_PATH } from './hooks';
@@ -31,7 +32,12 @@ describe('droid provider hooks', () => {
     expect(config.hooks.Notification).toHaveLength(1);
     expect(config.hooks.Stop).toHaveLength(1);
     expect(config.hooks.SessionStart).toHaveLength(1);
-    expect(JSON.stringify(config.hooks)).toContain('EMDASH_HOOK_CONFIG_VERSION=1');
+    const text = JSON.stringify(config.hooks);
+    // On Windows the version marker rides inside each command's encoded PowerShell script.
+    const scripts = [...text.matchAll(/-EncodedCommand ([A-Za-z0-9+/]+=*)/g)].map((match) =>
+      Buffer.from(match[1] ?? '', 'base64').toString('utf16le')
+    );
+    expect([text, ...scripts].join('\n')).toContain('EMDASH_HOOK_CONFIG_VERSION=1');
   });
 
   it('preserves user hooks while replacing managed entries', async () => {

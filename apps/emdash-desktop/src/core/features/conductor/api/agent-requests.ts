@@ -26,7 +26,10 @@ const REASON_CHARS = 600;
 const BRIEF_CHARS = 20_000;
 /** Request text the conductor's model sees; the whole brief still reaches the new agent. */
 export const REQUEST_TURN_BODY_CHARS = 3_000;
-const SPOKEN_CHARS = 240;
+/** How much of an agent's report or question is said; all of it is shown. */
+const SPOKEN_CHARS = 160;
+/** A question put to the developer is shown as said, so more of it is said. */
+const ASKED_CHARS = 240;
 /** The conductor's own note to the asking agent, when its model decides a request. */
 export const REQUEST_TURN_NOTE_CHARS = 300;
 /** The conductor's own answer to a question an agent put to it. */
@@ -172,9 +175,38 @@ export function spokenClip(value: string, max: number): string {
   return `${words.replace(/[\s,;:–—-]+$/, '')}…`;
 }
 
+/** A path of three or more parts, with or without a drive or a leading separator. */
+const PATH = /(?:[A-Za-z]:)?[\\/]?[\w.@~-]+(?:[\\/][\w.@~-]+){2,}[\\/]?/g;
+/** Shorter paths, like "src/main.ts", are said as they are. */
+const SPOKEN_PATH_CHARS = 24;
+
+/**
+ * Text as it is said: a link becomes "a link", a command in code marks "a command", and a long
+ * path "a path", rather than read out character by character. The text shown keeps them.
+ */
+export function speakable(value: string): string {
+  return value
+    .replace(/```[\s\S]*?(?:```|$)/g, ' a command ')
+    .replace(/`([^`\n]+)`/g, (_, code: string) => (/\s/.test(code.trim()) ? 'a command' : code))
+    .replace(/https?:\/\/\S+?(?=[.,;:!?)\]]*(?:\s|$))/g, 'a link')
+    .replace(PATH, (path) => (path.length >= SPOKEN_PATH_CHARS ? 'a path' : path));
+}
+
 /** Ends a spoken clause with a full stop unless it already ends a sentence. */
 function sentence(value: string): string {
   return /[.!?…]$/.test(value) ? value : `${value}.`;
+}
+
+/** How much of the conductor's answer to an agent's question is said aloud. */
+const ANSWER_SPOKEN_CHARS = 140;
+
+/**
+ * What the developer hears once the conductor answered an agent's question: whom it told and
+ * what, not the question again. "Told Lima: Yes, register the runner…"
+ */
+export function answeredLine(senderName: string, answer: string): string {
+  const said = spokenClip(speakable(plainText(answer)), ANSWER_SPOKEN_CHARS);
+  return said ? `Told ${senderName}: ${sentence(said)}` : `Answered ${senderName}.`;
 }
 
 function origin(sender: RequestSender): string {
@@ -207,7 +239,7 @@ export const agentRequestKinds = {
     usage:
       '{ provider, task_name, brief, worktree?, report_back? }. Starts a new agent in this project. provider is an installed agent id such as "claude" or "codex". brief is the complete, self-contained instruction for the new agent: it sees nothing of your conversation. worktree true gives it its own branch and worktree; otherwise it works in the project directory next to you. Unless report_back is false, its final reply is sent back to you when it finishes. Ask for an agent rather than taking on separate or parallel work yourself or leaving it undone. Work that needs computer use (the desktop, another application, a real browser driven by mouse and keyboard) always goes to provider "codex".',
     spoken: (sender, payload) =>
-      `${sender} asks to start a ${payload.provider} agent on “${clip(payload.task_name, 80)}”.`,
+      `${sender} asks to start a ${payload.provider} agent on “${spokenClip(payload.task_name, 80)}”.`,
     body: (payload) =>
       `Start a ${payload.provider} agent on "${payload.task_name}"${payload.worktree ? ' in its own worktree' : ' in the project directory'}. Brief for the new agent (${payload.brief.length.toLocaleString('en-US')} characters; Maestro passes it on unchanged):\n${payload.brief}`,
     provider: (payload) => payload.provider,
@@ -243,7 +275,7 @@ export const agentRequestKinds = {
     usage:
       '{ agent, text, report_back? }. Sends text to another agent on the canvas, by its exact Maestro name (a spawn_agent reply and every passed-on message name the agent). Unless report_back is false, its final reply to that message is sent back to you.',
     spoken: (sender, payload, target) =>
-      `${sender} asks to send ${target ?? clip(payload.agent, 60)} a message.`,
+      `${sender} asks to send ${target ?? spokenClip(payload.agent, 60)} a message.`,
     body: (payload, target) =>
       `Send this message to agent "${target ?? payload.agent}":\n${payload.text}`,
     target: (payload) => payload.agent,
@@ -276,7 +308,9 @@ export const agentRequestKinds = {
     usage:
       "{ question, options? }. The conductor answers you itself, on the developer's behalf, usually within a minute. Use it as soon as you are stuck: a decision about the work, a choice between approaches, an approach that keeps failing, or whether to go on. Say what you tried and what you would do next. Its answer is the decision: act on it without asking the developer to confirm.",
     spoken: (sender, payload) =>
-      `${sender} asked me: ${sentence(clip(payload.question, SPOKEN_CHARS))}`,
+      `${sender} asked me: ${sentence(spokenClip(speakable(payload.question), SPOKEN_CHARS))}`,
+    shown: (sender, payload) =>
+      `${sender} asked me: ${sentence(payload.question.replace(/\s+/g, ' ').trim())}`,
     body: (payload) =>
       `Question for you, the conductor: ${payload.question}${payload.options?.length ? `\nOptions: ${payload.options.join(' | ')}` : ''}`,
   }),
@@ -290,9 +324,9 @@ export const agentRequestKinds = {
       '{ question, options? }. The conductor asks the developer your question aloud and sends their answer back to you. Only for what the developer alone can supply, such as a password, a payment, or access only they can grant. They are often away, so an answer may take long or not come: carry on with everything that does not depend on it. For any other question use ask_conductor.',
     spoken: (sender, payload) => {
       const options = payload.options?.length
-        ? ` Options: ${payload.options.map((option) => clip(option, 60)).join(', ')}.`
+        ? ` Options: ${payload.options.map((option) => spokenClip(option, 60)).join(', ')}.`
         : '';
-      return `${sender} asks: ${sentence(clip(payload.question, SPOKEN_CHARS))}${options}`;
+      return `${sender} asks: ${sentence(spokenClip(payload.question, ASKED_CHARS))}${options}`;
     },
     body: (payload) =>
       `Question for the developer: ${payload.question}${payload.options?.length ? `\nOptions: ${payload.options.join(' | ')}` : ''}`,
@@ -306,7 +340,7 @@ export const agentRequestKinds = {
     usage:
       '{ status: "progress" | "done" | "blocked", message }. The conductor tells the developer in one spoken sentence. No reply follows. Send "blocked" whenever you cannot continue and have no question to ask. Use "progress" and "done" sparingly, for news the developer needs now.',
     spoken: (sender, payload) =>
-      `${reportLead(sender, payload.status)} ${sentence(spokenClip(payload.message, SPOKEN_CHARS))}`,
+      `${reportLead(sender, payload.status)} ${sentence(spokenClip(speakable(payload.message), SPOKEN_CHARS))}`,
     shown: (sender, payload) =>
       `${reportLead(sender, payload.status)} ${sentence(payload.message.replace(/\s+/g, ' ').trim())}`,
     body: (payload) => `${payload.status}: ${payload.message}`,

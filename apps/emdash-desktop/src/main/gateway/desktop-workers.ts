@@ -420,6 +420,7 @@ function startDesktopWorkersWithHost(
             userEnv: userShellEnv,
           },
           intentsFilePath: sessionIntentFilePaths().tuiAgents,
+          detectDevServers: true,
         })
       );
       return { client: await worker.ready(), worker };

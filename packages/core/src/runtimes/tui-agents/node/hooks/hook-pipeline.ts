@@ -39,8 +39,9 @@ export class TuiHookPipeline {
     }
 
     const body = parseHookBody(raw.body);
-    // A stop with no reply is announced from the agent's terminal instead: record why.
-    if (raw.type === 'stop' && raw.body && typeof body.last_assistant_message !== 'string') {
+    // A stop with no reply is announced from the agent's terminal instead: record why. An empty
+    // body counts too: it is what a hook launcher that lost the agent's stdin posts.
+    if (raw.type === 'stop' && typeof body.last_assistant_message !== 'string') {
       this.options.logger.warn('TuiHookPipeline: stop hook carried no final reply', {
         conversationId: config.conversationId,
         providerId: config.providerId,

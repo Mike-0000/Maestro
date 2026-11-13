@@ -148,6 +148,30 @@ export const tuiSessionListSchema = z.record(z.string(), tuiSessionStateSchema);
 
 export type TuiSessionList = z.infer<typeof tuiSessionListSchema>;
 
+/**
+ * A dev server an agent session started itself: a loopback socket answering HTTP whose owning
+ * process is the session's process or one of its descendants. Found by watching the process
+ * tree, since such a server often runs in the background and prints into no Maestro terminal.
+ */
+export const tuiAgentDevServerSchema = z.object({
+  conversationId: z.string(),
+  /** The session's working directory, which names its workspace. */
+  cwd: z.string(),
+  protocol: z.enum(['http:', 'https:']),
+  host: z.enum(['localhost', '127.0.0.1', '::1']),
+  port: z.number().int().min(1).max(65535),
+  urlPath: z.string(),
+  /** The process that owns the listening socket. */
+  pid: z.number().int(),
+  detectedAt: z.number().int(),
+});
+
+export type TuiAgentDevServer = z.infer<typeof tuiAgentDevServerSchema>;
+
+export const tuiAgentDevServerListSchema = z.record(z.string(), tuiAgentDevServerSchema);
+
+export type TuiAgentDevServerList = z.infer<typeof tuiAgentDevServerListSchema>;
+
 export const tuiAgentStateStatusSchema = z.enum([
   'idle',
   'working',

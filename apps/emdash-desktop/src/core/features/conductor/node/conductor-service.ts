@@ -660,19 +660,24 @@ export class ConductorService {
     messages: Anthropic.Beta.BetaMessageParam[]
   ): Promise<Result<ConductorTurnResult, ConductorError>> {
     try {
-      const response = await openRouterChat(key, {
-        model: settings.openrouterModel,
-        max_tokens: spec.maxTokens,
-        messages: toOpenAiMessages(spec.system, messages, {
-          cacheSystem: cachesByBreakpoint(settings.openrouterModel),
-          cacheConversation: cachesByBreakpoint(settings.openrouterModel),
-          standing: spec.standing,
-        }),
-        tools: toOpenAiTools(spec.tools),
-        reasoning: { effort: openRouterEffort(spec.effort) },
-        // Never with provider.order, which turns stickiness off.
-        session_id: spec.openRouterSession,
-      });
+      const response = await openRouterChat(
+        key,
+        {
+          model: settings.openrouterModel,
+          max_tokens: spec.maxTokens,
+          messages: toOpenAiMessages(spec.system, messages, {
+            cacheSystem: cachesByBreakpoint(settings.openrouterModel),
+            cacheConversation: cachesByBreakpoint(settings.openrouterModel),
+            standing: spec.standing,
+          }),
+          tools: toOpenAiTools(spec.tools),
+          reasoning: { effort: openRouterEffort(spec.effort) },
+          // Never with provider.order, which turns stickiness off.
+          session_id: spec.openRouterSession,
+        },
+        // A rate limit or a passing gateway error is tried once more before the turn fails.
+        { retries: 1 }
+      );
       const choice = response.choices?.[0];
       if (!choice) return err({ type: 'api-error', message: 'OpenRouter returned no answer.' });
       const usage = response.usage ?? {};
@@ -695,6 +700,11 @@ export class ConductorService {
       });
     } catch (error) {
       if (error instanceof OpenRouterError) {
+        this.logger.warn('conductor: OpenRouter turn failed', {
+          kind: error.kind,
+          status: error.status,
+          message: error.message,
+        });
         if (error.kind === 'rejected-key')
           return err({ type: 'not-configured', message: error.message });
         if (error.kind === 'rate-limited')

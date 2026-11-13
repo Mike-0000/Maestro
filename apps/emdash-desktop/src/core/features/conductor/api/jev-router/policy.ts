@@ -151,10 +151,30 @@ function bindTarget(answers: JevAnswers, plan: RouterPlan): Bound<RosterAgent> {
   return { ok: true, value: agent, confidence: Math.max(mass, target.confidence) };
 }
 
+const NEGATION =
+  "(?:not|no|never|without|don['’]?t|do not|shouldn['’]?t|should not|won['’]?t|can['’]?t|cannot)";
+
+/**
+ * Whether the utterance names this provider only to rule it out ("not a codex agent", "you
+ * should not have to spin up codex agents", "no codex"): a negation a few words before the
+ * provider's name (or its first word, "claude" for "Claude Code"), within one clause.
+ */
+export function negatesProvider(utterance: string, label: string): boolean {
+  const words = label.trim().split(/\s+/);
+  const names = [...new Set([label.trim(), words[0] ?? ''])].filter(Boolean);
+  return names.some((name) => {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+    return new RegExp(`\\b${NEGATION}(?:\\s+[^\\s,.;:!?]+){0,5}?\\s+${escaped}\\b`, 'i').test(
+      utterance
+    );
+  });
+}
+
 function bindProvider(answers: JevAnswers, plan: RouterPlan): Bound<ProviderOption> {
   const provider = choiceOf(answers, 'provider');
   if (!provider) return fail('no-provider-answer');
   if (provider.choice === NOT_MENTIONED) return fail('provider-not-mentioned');
+  if (negatesProvider(plan.input.utterance, provider.choice)) return fail('provider-negated');
   const { providers, context } = plan.input;
   const found =
     provider.choice === SAME_AS_LAST
@@ -346,7 +366,11 @@ export function routerHints(
   show('target', 'Agent', [SENTINEL.none]);
   const project = projectHint(answers, plan, settled);
   if (project) lines.push(`- ${project}`);
-  show('provider', 'Provider', [NOT_MENTIONED]);
+  const provider = choiceOf(answers, 'provider');
+  // A provider named only to rule it out is not a choice; passing it on starts the wrong agent.
+  if (!provider || !negatesProvider(plan.input.utterance, provider.choice)) {
+    show('provider', 'Provider', [NOT_MENTIONED]);
+  }
   const multi = scoreMass(answers.agent_count, AGENT_COUNT_LEVELS, 1);
   if (multi >= 0.6) lines.push(`- Several new agents (${pct(multi)}).`);
   const verbatim = noulOf(answers, 'wants_verbatim');
