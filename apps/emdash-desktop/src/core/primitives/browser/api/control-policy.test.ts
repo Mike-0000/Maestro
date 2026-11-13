@@ -246,3 +246,22 @@ describe('evaluateNavigation with public websites', () => {
     expect(evaluateNavigation('http://localhost:5173/', disabled)).toEqual({ ok: true });
   });
 });
+
+describe('describeNavigationDenial for an origin outside the task', () => {
+  const denied = { ok: false as const, reason: 'origin-not-allowed' as const };
+
+  it('tells an agent how a local origin gets allowed', () => {
+    const message = describeNavigationDenial(denied, 'http://localhost:4100/');
+    expect(message).toContain('http://localhost:4100');
+    expect(message).toMatch(/worktree/);
+    expect(message).toMatch(/address bar/);
+  });
+
+  it('tells an agent that public sites go through the conductor, never widening its own list', () => {
+    const message = describeNavigationDenial(denied, 'https://hub-dev.example.io/login');
+    expect(message).toContain('https://hub-dev.example.io');
+    expect(message).toMatch(/public website/);
+    expect(message).toMatch(/conductor/);
+    expect(message).toMatch(/Conductor can open public websites/);
+  });
+});
