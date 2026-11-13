@@ -352,6 +352,21 @@ describe('BrowserControlService', () => {
       expect(h.service.findTaskBrowser('t1', 'control')).toBe('b-iso');
     });
 
+    it('asks the renderer for that browser when acting needs it handed over', async () => {
+      h.service.setControl(tab('b-tab-shared', 'user'));
+      h.bind('b-tab-shared');
+      h.advance(10);
+      h.show('b-tab-shared');
+
+      void h.service.requestOpen(agent, null, 'control');
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(h.events.find((event) => event.type === 'open-request')).toMatchObject({
+        browserId: 'b-tab-shared',
+        access: 'control',
+      });
+    });
+
     it('forgets a closed tab', () => {
       h.service.setControl(tab('b-tab-iso', 'agents'));
       h.bind('b-tab-iso');

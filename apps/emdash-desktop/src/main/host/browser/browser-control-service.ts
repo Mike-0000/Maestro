@@ -291,6 +291,7 @@ export class BrowserControlService {
       this.deps.emit({
         type: 'open-request',
         requestId,
+        browserId: this.primaryEntry(scope.taskId)?.browserId ?? null,
         projectId: scope.projectId,
         workspaceId: scope.workspaceId,
         taskId: scope.taskId,
@@ -478,6 +479,7 @@ export class BrowserControlService {
     this.deps.emit({
       type: 'open-request',
       requestId: randomUUID(),
+      browserId: entry.browserId,
       projectId: entry.projectId,
       workspaceId: entry.workspaceId,
       taskId: entry.taskId,

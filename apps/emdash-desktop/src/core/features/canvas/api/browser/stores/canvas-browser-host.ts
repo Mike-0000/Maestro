@@ -2,6 +2,11 @@ import { toast } from '@emdash/ui/react/primitives';
 import { action, comparer, makeObservable, observable, reaction, runInAction } from 'mobx';
 import { browserSessionStore } from '@core/features/browser/api/browser/browser-session-store';
 import { getBrowserClient } from '@core/features/browser/api/browser/client';
+import { taskBrowserControl } from '@core/features/browser/api/browser/task-browser-control';
+import {
+  listTaskViewBrowserTabs,
+  openAgentTaskViewBrowserTab,
+} from '@core/features/browser/api/browser/task-view-browser-tabs';
 import {
   DEFAULT_CANVAS_BROWSER_SETTINGS,
   type CanvasBrowserSettings,
@@ -15,6 +20,7 @@ import {
   getAppSettingValueSnapshot,
 } from '@core/features/settings/api/browser/app-settings-client';
 import { PreviewServerStore } from '@core/features/tasks/api/browser/stores/preview-server-store';
+import { taskViewDef } from '@core/features/tasks/contributions/views';
 import { getLifecycleScriptsClient } from '@core/features/workspaces/api/browser/client';
 import {
   BROWSER_ISOLATED_PROFILE_ID,
@@ -25,6 +31,8 @@ import {
   type BrowserEvent,
 } from '@core/primitives/browser/api';
 import { log } from '@core/primitives/logging/browser/logger';
+import { getNavigation } from '@core/primitives/navigation/browser/navigation-selectors';
+import { routeAppBrowserRequest, type AppBrowserRoute } from '../../app-browser-route';
 import { browsersToSuspend, type TileRect } from '../../canvas-model';
 import type { BrowserTileEntry, CanvasStore } from './canvas-store';
 
@@ -112,8 +120,12 @@ export class CanvasBrowserHost {
         { fireImmediately: true, equals: comparer.structural }
       ),
       // Sessions for every browser on the board; control synced whenever it changes.
+      // The tile's local origin counts as allowed for agents, so a page the user opens resyncs too.
       reaction(
-        () => this.canvas.browserEntries.map((entry) => `${entry.browserId}:${entry.control}`),
+        () =>
+          this.canvas.browserEntries.map(
+            (entry) => `${entry.browserId}:${entry.control}:${httpOrigin(entry.url) ?? ''}`
+          ),
         () => this.syncEntries(),
         { fireImmediately: true }
       ),
@@ -149,6 +161,10 @@ export class CanvasBrowserHost {
 
   isAlive(browserId: string): boolean {
     return this.alive.includes(browserId);
+  }
+
+  private isCanvasBrowser(browserId: string): boolean {
+    return this.canvas.browserEntries.some((entry) => entry.browserId === browserId);
   }
 
   isLeased(browserId: string): boolean {
@@ -356,6 +372,7 @@ export class CanvasBrowserHost {
       workspaceId: entry.workspaceId,
       taskId: entry.taskId,
       control: entry.control,
+      surface: 'canvas',
       ...(localOrigin ? { origins: [localOrigin] } : {}),
       publicOrigins: this.publicOrigins.get(entry.browserId) ?? [],
     });
@@ -502,7 +519,11 @@ export class CanvasBrowserHost {
         if (event.leaseUntil) {
           this.leases.set(event.browserId, { until: event.leaseUntil, actor: event.actor });
           this.scheduleLeaseExpiry(event.browserId, event.leaseUntil);
-          if (!this.isAlive(event.browserId)) this.ensureAlive(event.browserId);
+          // Only canvas tiles are mounted here: a task-view tab lives in its own pane, and a second
+          // webview for it would take its binding away.
+          if (!this.isAlive(event.browserId) && this.isCanvasBrowser(event.browserId)) {
+            this.ensureAlive(event.browserId);
+          }
         } else if (event.action === 'lease') {
           this.leases.delete(event.browserId);
         }
@@ -551,6 +572,22 @@ export class CanvasBrowserHost {
       return;
     }
     const existing = this.canvas.browserForTask(event.taskId);
+    // The browser the developer is using for the task may be a tab in its own view.
+    const route = routeAppBrowserRequest({
+      access: event.access,
+      requestedBrowserId: event.browserId ?? null,
+      canvasBrowserId: existing?.browserId ?? null,
+      taskViewTabs: listTaskViewBrowserTabs(event.projectId, event.taskId),
+      taskViewOnScreen: taskViewOnScreen(event.projectId, event.taskId),
+    });
+    if (route.kind === 'task-tab' || route.kind === 'new-task-tab') {
+      await this.serveFromTaskView(event, route);
+      return;
+    }
+    if (route.kind === 'none') {
+      await client.ackOpenRequest({ requestId: event.requestId, browserId: null });
+      return;
+    }
     if (event.access === 'observe') {
       if (existing) {
         this.ensureSession(existing);
@@ -563,7 +600,17 @@ export class CanvasBrowserHost {
       return;
     }
     if (existing?.control === 'user') {
-      const answer = await withTimeout(this.askToShare(existing, event.actor), CONSENT_ANSWER_MS);
+      const answer = await withTimeout(
+        this.askToShare(event.taskId, event.actor, {
+          description:
+            'Agents can already see it. Allow clicking and typing on this task\'s app? Switch back with "You" any time.',
+          allow: async () => {
+            const current = this.canvas.browserForTask(event.taskId);
+            return current ? this.applyControl(current, 'agents') : false;
+          },
+        }),
+        CONSENT_ANSWER_MS
+      );
       if (answer !== true) {
         await client.ackOpenRequest({
           requestId: event.requestId,
@@ -590,31 +637,88 @@ export class CanvasBrowserHost {
     });
   }
 
-  /** Asks the user to let agents drive a tile they control. Resolves true once handed over. */
-  private askToShare(entry: BrowserTileEntry, actor: BrowserAutomationActor): Promise<boolean> {
-    const pending = this.consents.get(entry.taskId);
+  /**
+   * Serves an agent's open request from the task's own view: the tab the developer is using
+   * (handed over with their consent, and moved off their own profile first), or a new tab beside
+   * the chat on the task's isolated profile when the view has none.
+   */
+  private async serveFromTaskView(
+    event: Extract<BrowserEvent, { type: 'open-request' }>,
+    route: Extract<AppBrowserRoute, { kind: 'task-tab' | 'new-task-tab' }>
+  ): Promise<void> {
+    const client = await getBrowserClient();
+    const ack = (browserId: string | null, denial?: 'declined' | 'consent-pending') =>
+      client.ackOpenRequest({
+        requestId: event.requestId,
+        browserId,
+        ...(denial ? { denial } : {}),
+      });
+    if (route.kind === 'new-task-tab') {
+      const url = event.url ?? this.devServerUrls(event)[0];
+      await ack(await openAgentTaskViewBrowserTab(event.projectId, event.taskId, url));
+      return;
+    }
+    const { browserId } = route;
+    if (route.handOver) {
+      const answer = await withTimeout(
+        this.askToShare(event.taskId, event.actor, {
+          title: `${actorName(event.actor)} wants to use the browser beside its chat`,
+          description: route.isolate
+            ? "It is on your own browser profile, so it moves to this task's isolated profile first: the page reloads there, without your logins. Take it back any time."
+            : "Agents can already see it. Allow clicking and typing on this task's app? Take it back any time.",
+          allow: () => taskBrowserControl.handOver(browserId),
+        }),
+        CONSENT_ANSWER_MS
+      );
+      if (answer !== true) {
+        await ack(null, answer === false ? 'declined' : 'consent-pending');
+        return;
+      }
+    }
+    if (event.url && event.access === 'control') {
+      browserSessionStore.requestNavigation(browserId, event.url);
+    }
+    await ack(browserId);
+  }
+
+  /**
+   * Asks the user to let agents drive a browser they control (one prompt per task at a time).
+   * Resolves true once `allow` handed it over.
+   */
+  private askToShare(
+    taskId: string,
+    actor: BrowserAutomationActor,
+    prompt: { title?: string; description: string; allow: () => Promise<boolean> }
+  ): Promise<boolean> {
+    const pending = this.consents.get(taskId);
     if (pending) return pending;
-    const prompt = new Promise<boolean>((resolve) => {
-      toast(`${actorName(actor)} wants to use the app browser`, {
-        id: `canvas-browser-consent-${entry.taskId}`,
-        description:
-          'Agents can already see it. Allow clicking and typing on this task\'s app? Switch back with "You" any time.',
+    const answer = new Promise<boolean>((resolve) => {
+      toast(prompt.title ?? `${actorName(actor)} wants to use the app browser`, {
+        id: `canvas-browser-consent-${taskId}`,
+        description: prompt.description,
         duration: CONSENT_TOAST_MS,
         action: {
           label: 'Let agents drive',
           onClick: () => {
-            const current = this.canvas.browserForTask(entry.taskId);
-            if (!current) return resolve(false);
-            void this.applyControl(current, 'agents').then(resolve);
+            void prompt.allow().then(resolve, () => resolve(false));
           },
         },
       });
     });
-    const tracked = prompt.finally(() => this.consents.delete(entry.taskId));
-    this.consents.set(entry.taskId, tracked);
-    setTimeout(() => this.consents.delete(entry.taskId), CONSENT_TOAST_MS);
+    const tracked = answer.finally(() => this.consents.delete(taskId));
+    this.consents.set(taskId, tracked);
+    setTimeout(() => this.consents.delete(taskId), CONSENT_TOAST_MS);
     return tracked;
   }
+}
+
+/** The developer is in this task's view right now. */
+function taskViewOnScreen(projectId: string, taskId: string): boolean {
+  const ref = getNavigation().currentRef;
+  const params = ref.params as { projectId?: string; taskId?: string };
+  return (
+    ref.viewId === taskViewDef.id && params.projectId === projectId && params.taskId === taskId
+  );
 }
 
 /** Resolves with the promise's value, or `null` if it has not settled in time. */

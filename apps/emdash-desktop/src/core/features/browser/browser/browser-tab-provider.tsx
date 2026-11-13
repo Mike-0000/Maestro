@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { browserSessionStore } from '@core/features/browser/api/browser/browser-session-store';
 import { BrowserTabResource } from '@core/features/browser/api/browser/browser-tab-resource';
 import { getBrowserClient } from '@core/features/browser/api/browser/client';
+import type { TaskBrowserControl } from '@core/features/browser/api/browser/task-browser-control';
 import { BrowserPane } from '@core/features/browser/browser/browser-pane';
 import { getAppSettingValueSnapshot } from '@core/features/settings/api/browser/app-settings-client';
 import type { TaskTabContext } from '@core/features/workbench/api/browser/tabs/task-tab-context';
@@ -23,10 +24,17 @@ export interface BrowserState {
   browserId: string;
   /** Session snapshot — kept current by BrowserTabResource's MobX reaction. */
   session: BrowserSessionSnapshot;
+  /** Who drives the tab: the developer, or the task's agents (isolated profile only). */
+  control?: TaskBrowserControl;
 }
 
 export interface BrowserOpenArgs {
   initialUrl?: string;
+  /** Opens the tab under a known id (an agent's open request waits for it). */
+  browserId?: string;
+  /** Overrides the default profile (agents get the task's isolated one). */
+  profileId?: string;
+  control?: TaskBrowserControl;
 }
 
 /**
@@ -89,17 +97,22 @@ export const browserTabProvider: TabProvider<
     const taskCtx = ctx as TaskTabContext;
     const browserSettings = getAppSettingValueSnapshot('browser');
     const profileId = normalizeBrowserProfileSelection(
-      browserSettings?.defaultProfileId,
+      args.profileId ?? browserSettings?.defaultProfileId,
       browserSettings?.profiles
     );
     const session = browserSessionStore.createSession({
       projectId: taskCtx.projectId,
       workspaceId: taskCtx.workspaceId,
       taskId: taskCtx.taskId,
+      ...(args.browserId ? { browserId: args.browserId } : {}),
       profileId,
       initialUrl: args.initialUrl,
     });
-    return { browserId: session.browserId, session };
+    return {
+      browserId: session.browserId,
+      session,
+      ...(args.control ? { control: args.control } : {}),
+    };
   },
 
   initialize(

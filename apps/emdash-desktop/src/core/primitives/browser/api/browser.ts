@@ -20,11 +20,13 @@ export type BrowserEvent =
    * Main asks the renderer to open (or resume) the canvas browser of a task. Only the renderer can
    * mount a webview; it answers with `browser.ackOpenRequest`. `access: 'observe'` only needs the
    * page live (a screenshot or outline); `'control'` also needs the tile handed to agents, which
-   * may ask the user.
+   * may ask the user. `browserId` names the task's browser main wants (the one the developer
+   * looked at last), or null when the task has none registered yet.
    */
   | {
       type: 'open-request';
       requestId: string;
+      browserId?: string | null;
       projectId: string;
       workspaceId: string;
       taskId: string;
