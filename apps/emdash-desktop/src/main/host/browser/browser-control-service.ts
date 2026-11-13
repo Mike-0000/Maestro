@@ -211,18 +211,25 @@ export class BrowserControlService {
 
   /**
    * The task's browser agents use: the one the developer looked at last among those with a live
-   * page, else the one looked at last (it is brought back on use). Ties keep registration order,
-   * so a task with only its canvas tile behaves as before.
+   * page. Without a live one, a canvas tile comes first, since it can be brought back (a
+   * task-view tab only has a page while its view is open), then the one looked at last. Ties keep
+   * registration order, so a task with only its canvas tile behaves as before.
    */
   private primaryEntry(taskId: string): ControlEntry | null {
-    let best: { entry: ControlEntry; live: boolean; shownAt: number } | null = null;
+    const rank = (entry: ControlEntry) => {
+      const live = this.deps.registry.getBoundWebContents(entry.browserId) !== null;
+      return [live ? 1 : 0, live || entry.surface === 'canvas' ? 1 : 0] as const;
+    };
+    let best: { entry: ControlEntry; rank: readonly [number, number]; shownAt: number } | null =
+      null;
     for (const entry of this.entries.values()) {
       if (entry.taskId !== taskId) continue;
-      const live = this.deps.registry.getBoundWebContents(entry.browserId) !== null;
-      const shownAt = this.deps.registry.getShownAt(entry.browserId);
-      if (!best || (live && !best.live) || (live === best.live && shownAt > best.shownAt)) {
-        best = { entry, live, shownAt };
-      }
+      const candidate = {
+        entry,
+        rank: rank(entry),
+        shownAt: this.deps.registry.getShownAt(entry.browserId),
+      };
+      if (!best || compareCandidates(candidate, best) > 0) best = candidate;
     }
     return best?.entry ?? null;
   }
@@ -671,6 +678,13 @@ export class BrowserControlService {
       detail,
     });
   }
+}
+
+type Candidate = { rank: readonly [number, number]; shownAt: number };
+
+/** Positive when `a` should be preferred over `b` (see `primaryEntry`). */
+function compareCandidates(a: Candidate, b: Candidate): number {
+  return a.rank[0] - b.rank[0] || a.rank[1] - b.rank[1] || a.shownAt - b.shownAt;
 }
 
 function ownProfileError(): BrowserAutomationError {

@@ -379,6 +379,19 @@ describe('BrowserControlService', () => {
       });
     });
 
+    it('prefers a suspended canvas tile, which can come back, over a tab whose view is closed', () => {
+      h.service.setControl(tab('b-tab-iso', 'agents'));
+      h.bind('b-tab-iso');
+      h.advance(10);
+      h.show('b-tab-iso');
+      // The developer left the task view (the tab's page went away) and the tile is suspended.
+      h.unbind('b-tab-iso');
+      h.unbind('b-iso');
+
+      expect(h.service.findTaskBrowser('t1', 'control')).toBe('b-iso');
+      expect(h.service.describeTaskBrowser('t1')).toMatchObject({ surface: 'canvas' });
+    });
+
     it("tells agents no origins of a tab on the developer's own profile", () => {
       h.service.setControl({ ...tab('b-tab-shared', 'user'), origins: ['http://localhost:4300'] });
       h.bind('b-tab-shared');
