@@ -529,7 +529,10 @@ describe('the completion gate when only what needs the developer is announced', 
     await announce();
 
     expect(speech.announce).toHaveBeenCalledTimes(1);
-    expect(speech.announce.mock.calls[0]![0]).toContain('Zulu asks:');
+    // Jev picked a statement as the question: it is said, but not as "Zulu asks:".
+    expect(speech.announce.mock.calls[0]![0]).toBe(
+      'Zulu: I built the Express todo app and started it with npm run dev.'
+    );
     expect(mocks.playNotificationSound).toHaveBeenCalledWith(
       'needs_attention',
       'conductor-attention'

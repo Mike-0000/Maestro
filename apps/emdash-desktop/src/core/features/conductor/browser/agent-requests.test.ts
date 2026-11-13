@@ -552,6 +552,19 @@ describe('spawn_agent', () => {
     expect(desk.awaitingDeveloper).toBe(false);
   });
 
+  it('says an undecided long question short, without its link, and shows it whole', async () => {
+    const { receive, told, decideWith } = setup();
+    decideWith(async () => '');
+    const question = `The deploy at https://example.com/runs/42 failed. ${'Should I retry the release job on the self-hosted runner or wait for the new image to be published first '.repeat(2)}?`;
+    await receive(request('ask_conductor', { question }));
+    const { text, options } = told.at(-1)!;
+    expect(text).not.toContain('https://');
+    expect(text).toMatch(/^Atlas asked me: The deploy at a link failed\. /);
+    expect(text.length).toBeLessThan(260);
+    expect(options.shown).toContain(question.replace(/\s+/g, ' ').trim());
+    expect(options.shown).toMatch(/I could not decide it, so nothing was done\.$/);
+  });
+
   it('answers a question put to the conductor in its own name, with room to explain', async () => {
     const { receive, desk, decideWith, said, sent } = setup();
     const answer = `Keep the schema and add a nullable column. ${'x'.repeat(2_000)}`;
