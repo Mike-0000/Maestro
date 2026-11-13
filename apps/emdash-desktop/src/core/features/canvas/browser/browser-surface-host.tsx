@@ -86,6 +86,7 @@ const HostedBrowser = observer(function HostedBrowser({ browserId }: { browserId
             : []
         }
         profileLocked
+        keepPageMounted
       />
     </div>
   );

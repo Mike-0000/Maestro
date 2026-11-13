@@ -12,6 +12,7 @@ import {
 } from '@core/features/browser/browser/browser-load-error';
 import { decideBrowserReload } from '@core/features/browser/browser/browser-navigation-controls';
 import { BrowserStartPage } from '@core/features/browser/browser/browser-start-page';
+import { decideBrowserSurfaceContent } from '@core/features/browser/browser/browser-surface-content';
 import { BrowserToolbar } from '@core/features/browser/browser/browser-toolbar';
 import {
   canOpenBrowserUrlExternally,
@@ -38,6 +39,11 @@ export type BrowserSurfaceProps = {
   onCycleTab?: (direction: 'next' | 'previous') => void;
   /** Hides the profile switcher (canvas app browsers stay isolated per task). */
   profileLocked?: boolean;
+  /**
+   * Keeps the webview mounted under the start page and load errors, so models can see and drive
+   * the guest even before it shows a page (canvas app browsers).
+   */
+  keepPageMounted?: boolean;
 };
 
 /**
@@ -51,6 +57,7 @@ export const BrowserSurface = observer(function BrowserSurface({
   devServerUrls,
   onCycleTab,
   profileLocked = false,
+  keepPageMounted = false,
 }: BrowserSurfaceProps) {
   const session = browserSessionStore.getSession(browserId);
   const onCycleTabRef = useRef(onCycleTab);
@@ -290,7 +297,26 @@ export const BrowserSurface = observer(function BrowserSurface({
     });
   }, [adapter, sessionBrowserId]);
 
-  const showsWebview = !loadError && !showStartPage && webviewProps !== null && isRegistered;
+  const { mountWebview, overlay } = decideBrowserSurfaceContent({
+    canMountWebview: webviewProps !== null && isRegistered,
+    showStartPage,
+    hasLoadError: Boolean(loadError && loadErrorPresentation),
+    keepPageMounted,
+  });
+  const showsWebview = mountWebview && overlay === null;
+  const overlayContent =
+    overlay === 'load-error' && loadError && loadErrorPresentation ? (
+      <BrowserLoadErrorView
+        url={loadErrorUrl}
+        presentation={loadErrorPresentation}
+        code={browserLoadErrorCode(loadError)}
+        canOpenExternal={canOpenLoadErrorExternal}
+        onReload={reload}
+        onOpenExternal={() => openBrowserUrlExternally(loadErrorUrl)}
+      />
+    ) : overlay === 'start-page' ? (
+      <BrowserStartPage devServerUrls={devServerUrls} onOpenUrl={navigateTo} />
+    ) : null;
 
   if (!session) {
     return (
@@ -324,35 +350,32 @@ export const BrowserSurface = observer(function BrowserSurface({
       {/*
        * The page area. While a page is up it is a framed white canvas (forced light, as web pages
        * expect) inset on the paper; the start page, errors and the wait sit on the app's own
-       * surface. The element itself never changes, so the webview is never re-parented.
+       * surface. The element itself never changes, so the webview is never re-parented. With
+       * `keepPageMounted` the start page and errors cover the webview instead of replacing it.
        */}
       <div
         className={cn(
-          'min-h-0 flex-1',
+          'relative min-h-0 flex-1',
           showsWebview &&
             'emlight mx-2 mb-2 overflow-hidden rounded-lg bg-background ring-1 ring-border-subtle'
         )}
       >
-        {loadError && loadErrorPresentation ? (
-          <BrowserLoadErrorView
-            url={loadErrorUrl}
-            presentation={loadErrorPresentation}
-            code={browserLoadErrorCode(loadError)}
-            canOpenExternal={canOpenLoadErrorExternal}
-            onReload={reload}
-            onOpenExternal={() => openBrowserUrlExternally(loadErrorUrl)}
-          />
-        ) : showStartPage ? (
-          <BrowserStartPage devServerUrls={devServerUrls} onOpenUrl={navigateTo} />
-        ) : webviewProps && isRegistered ? (
+        {mountWebview && webviewProps ? (
           <webview
             key={`${webviewMount?.browserId ?? 'browser'}:${webviewMount?.partition ?? 'partition'}:${webviewMount?.revision ?? 0}`}
             ref={attachWebview}
             {...webviewProps}
             className="h-full w-full bg-background"
           />
+        ) : null}
+        {overlayContent === null ? (
+          mountWebview ? null : (
+            <EmptyState bare tone="loading" label="Preparing browser session…" />
+          )
+        ) : mountWebview ? (
+          <div className="absolute inset-0 bg-(--em-surface)">{overlayContent}</div>
         ) : (
-          <EmptyState bare tone="loading" label="Preparing browser session…" />
+          overlayContent
         )}
       </div>
     </div>

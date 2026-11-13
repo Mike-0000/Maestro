@@ -318,6 +318,32 @@ describe('BrowserControlServer', () => {
     expect(control.act).not.toHaveBeenCalled();
   });
 
+  it('open_app relays a tile that never came up instead of claiming agents can drive it', async () => {
+    control.requestOpen.mockResolvedValueOnce(
+      err({ type: 'not-bound', message: 'its page did not come up' }) as never
+    );
+    const result = await server.callTool(scope, 'open_app', {});
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain('did not come up');
+    expect(JSON.stringify(result.content)).not.toContain('agents may drive it');
+  });
+
+  it('open_app on an empty tile says it shows no page and asks for the dev server', async () => {
+    control.describeTaskBrowser.mockReturnValue({
+      browserId: 'b1',
+      url: 'about:blank',
+      live: true,
+      control: 'agents',
+      allowedOrigins: [],
+    });
+    const result = await server.callTool(scope, 'open_app', {});
+    expect(result.isError).toBeUndefined();
+    const text = JSON.stringify(result.content);
+    expect(text).toContain('It shows no page yet.');
+    expect(text).not.toContain('about:blank');
+    expect(text).toContain('No dev server detected yet');
+  });
+
   it('points at open_app when the task has no browser', async () => {
     const result = await server.callTool({ ...scope, taskId: 't9' }, 'look_at_app', {
       mode: 'text',

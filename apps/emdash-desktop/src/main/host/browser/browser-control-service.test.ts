@@ -1,6 +1,6 @@
 import { ok } from '@emdash/shared';
 import type { WebContents } from 'electron';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_CANVAS_BROWSER_SETTINGS,
   type CanvasBrowserSettings,
@@ -293,6 +293,53 @@ describe('BrowserControlService', () => {
     if (request?.type !== 'open-request') throw new Error('no request');
     h.service.ackOpenRequest(request.requestId, 'b-iso');
     expect(await pending).toEqual({ success: true, data: 'b-iso' });
+  });
+
+  describe('opening an empty tile (no dev server yet)', () => {
+    async function openUnbound(fresh: Harness) {
+      const pending = fresh.service.requestOpen(agent, null, 'control');
+      await vi.advanceTimersByTimeAsync(0);
+      const request = fresh.events.find((event) => event.type === 'open-request');
+      if (request?.type !== 'open-request') throw new Error('no request');
+      // The renderer created the tile and handed it to agents; its webview is not attached yet.
+      fresh.service.setControl({ browserId: 'b-iso', control: 'agents', ...identity });
+      fresh.service.ackOpenRequest(request.requestId, 'b-iso');
+      return pending;
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('reports the tile open only once its webview attaches, then observes it', async () => {
+      const fresh = harness({ agentControl: true });
+      const pending = openUnbound(fresh);
+      let settled = false;
+      void pending.then(() => (settled = true));
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(settled).toBe(false);
+
+      fresh.bind('b-iso');
+      expect(await pending).toEqual({ success: true, data: 'b-iso' });
+      const look = await fresh.service.observe(agent, { browserId: 'b-iso', mode: 'text' });
+      expect(look.success).toBe(true);
+      expect(fresh.automation.observe).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not claim agents can use a tile whose page never comes up', async () => {
+      const fresh = harness({ agentControl: true });
+      const pending = openUnbound(fresh);
+      await vi.advanceTimersByTimeAsync(10_000);
+      const result = await pending;
+      expect(result).toMatchObject({ success: false, error: { type: 'not-bound' } });
+      if (result.success) throw new Error('expected not-bound');
+      expect(result.error.message).toMatch(/did not come up/);
+      expect(result.error.message).toMatch(/open_app/);
+    });
   });
 
   it.each([
