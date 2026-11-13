@@ -287,3 +287,49 @@ describe('a model failure after spawn_agent ran', () => {
     expect(store['history']).toEqual([]);
   });
 });
+
+describe('a failed model call in the diagnostics', () => {
+  type Traced = (kind: string, text?: string, detail?: Record<string, unknown>) => void;
+  const traced = (store: ConductorStore) =>
+    vi.spyOn(store as unknown as { trace: Traced }, 'trace');
+
+  it('puts the model and the reason on the trace row and the turn record', async () => {
+    const { store } = setup();
+    const trace = traced(store);
+    mocks.runTurn.mockResolvedValueOnce({
+      success: false,
+      error: {
+        type: 'rate-limited',
+        message: `OpenRouter is rate limited right now: ${'upstream busy '.repeat(30)}`,
+      },
+    });
+
+    await store['runModel']('what is Atlas doing', 'typed', performance.now());
+
+    const row = trace.mock.calls.find(([kind]) => kind === 'model')?.[2];
+    expect(row).toMatchObject({ status: 'rate-limited', model: 'claude-opus-5' });
+    expect(String(row?.error)).toContain('OpenRouter is rate limited right now');
+    expect(String(row?.error).length).toBeLessThanOrEqual(200);
+    await vi.waitFor(() => expect(mocks.appendLog).toHaveBeenCalled());
+    const record = mocks.appendLog.mock.calls[0]![0] as Record<string, unknown>;
+    expect(record).toMatchObject({ modelFailed: true });
+    expect(String(record.error)).toContain('OpenRouter is rate limited right now');
+  });
+
+  it('records a model call that threw, such as a Wire timeout', async () => {
+    const { store } = setup();
+    const trace = traced(store);
+    mocks.runTurn.mockRejectedValueOnce(new Error('Call conductor.runTurn timed out'));
+
+    await store['runModel']('what is Atlas doing', 'typed', performance.now());
+
+    const row = trace.mock.calls.find(([kind]) => kind === 'model')?.[2];
+    expect(row).toMatchObject({ status: 'exception', model: 'claude-opus-5' });
+    expect(String(row?.error)).toContain('timed out');
+    await vi.waitFor(() => expect(mocks.appendLog).toHaveBeenCalled());
+    expect(mocks.appendLog.mock.calls[0]![0]).toMatchObject({
+      modelFailed: true,
+      error: 'Call conductor.runTurn timed out',
+    });
+  });
+});

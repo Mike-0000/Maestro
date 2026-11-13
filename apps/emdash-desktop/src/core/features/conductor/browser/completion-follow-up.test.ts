@@ -554,6 +554,31 @@ describe('the completion gate when only what needs the developer is announced', 
     expect(store.reply).toContain('Zulu');
   });
 
+  it('traces a failed gate with its latency and the reason', async () => {
+    mocks.decide.mockResolvedValue({
+      success: false,
+      error: { type: 'rate-limited', message: 'Jev is rate limited right now.' },
+    });
+    const { store, announce } = setup(agent(), { announceCompletions: 'attention_only' });
+    store.status = { ...store.status!, jevReady: true };
+    mocks.runTurn.mockResolvedValue(text('NO_NEWS'));
+    const trace = vi.spyOn(
+      store as unknown as { trace: (kind: string, text?: string, detail?: object) => void },
+      'trace'
+    );
+
+    await announce();
+
+    const row = trace.mock.calls.find(([kind]) => kind === 'jev')?.[2];
+    expect(row).toMatchObject({
+      purpose: 'completion',
+      status: 'failed',
+      reason: 'rate-limited',
+      error: 'Jev is rate limited right now.',
+    });
+    expect(typeof (row as { ms?: unknown }).ms).toBe('number');
+  });
+
   it('speaks a question and calls the developer with the attention sound', async () => {
     const { speech, announce } = gated('needs_decision');
 

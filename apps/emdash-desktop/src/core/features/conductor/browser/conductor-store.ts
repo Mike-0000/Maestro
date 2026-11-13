@@ -445,6 +445,8 @@ const UNNAMED_TARGET_REPLY_MS = 2 * 60_000;
 const DEVELOPER_SPEAKING_MS = 2 * 60_000;
 /** A report the developer heard whole stands for the finished turn that follows it this soon. */
 const REPORT_STANDS_MS = 2 * 60_000;
+/** What of a failed model call's reason the diagnostics keep, after redaction. */
+const FAILURE_REASON_CHARS = 200;
 /** What of an agent's request the turn log keeps, after redaction. */
 const REQUEST_LOG_CHARS = 1_000;
 /** How long a clarifying question ("Maple or Maple 2?") waits for its answer. */
@@ -4087,6 +4089,13 @@ export class ConductorStore {
     this.log({ route: 'jev', actions: [record], reply, startedAt });
   }
 
+  /** The model the conductor's turns are set to run on, for the diagnostics. */
+  private configuredModel(): string | null {
+    const settings = this.status?.settings;
+    if (!settings) return null;
+    return settings.provider === 'openrouter' ? settings.openrouterModel : settings.model;
+  }
+
   /** Records a Jev evaluation outside routing (triage, plan review, completions). */
   private traceJev(
     purpose: string,
@@ -4104,7 +4113,14 @@ export class ConductorStore {
           ...extra,
           ...answersDetail(outcome.decision.answers),
         }
-      : { purpose, status: 'failed', reason: outcome.reason, ...extra };
+      : {
+          purpose,
+          status: 'failed',
+          reason: outcome.reason,
+          ms: outcome.latencyMs,
+          error: shortError(outcome.message),
+          ...extra,
+        };
     this.trace('jev', undefined, detail, id);
   }
 
@@ -4212,7 +4228,7 @@ export class ConductorStore {
     ];
     const actions: ActionRecord[] = [];
     const base = this.history.length;
-    const { reply, completed, tokens } = await this.modelLoop(
+    const { reply, completed, tokens, error } = await this.modelLoop(
       mode,
       messages,
       actions,
@@ -4228,7 +4244,14 @@ export class ConductorStore {
       if (kept) this.history = this.remember(kept);
     }
     this.setReply(reply, source);
-    this.log({ route: 'llm', actions, reply, startedAt, tokens });
+    this.log({
+      route: 'llm',
+      actions,
+      reply,
+      ...(error !== undefined ? { modelFailed: true, error } : {}),
+      startedAt,
+      tokens,
+    });
   }
 
   /**
@@ -4290,11 +4313,19 @@ export class ConductorStore {
      * would only write a closing line, which a fixed sentence says as well.
      */
     endOnSettle = false
-  ): Promise<{ reply: string; completed: boolean; tokens: number; settled?: boolean }> {
+  ): Promise<{
+    reply: string;
+    completed: boolean;
+    tokens: number;
+    settled?: boolean;
+    /** Why the turn failed (redacted, short); absent when it answered or was cancelled. */
+    error?: string;
+  }> {
     let tokens = 0;
     let reply = '';
     let completed = false;
     let settled = false;
+    let failure: string | undefined;
 
     try {
       const client = await getConductorClient();
@@ -4308,10 +4339,18 @@ export class ConductorStore {
           this.activity = iteration === 0 ? 'Thinking…' : 'Thinking about the results…';
         });
         const requestedAt = performance.now();
-        const result = await client.runTurn(
-          { mode, messages: pruneScreenshots(messages) },
-          MODEL_TURN_CALL
-        );
+        const result = await client
+          .runTurn({ mode, messages: pruneScreenshots(messages) }, MODEL_TURN_CALL)
+          .catch((thrown: unknown) => {
+            this.trace('model', undefined, {
+              iteration,
+              ms: Math.round(performance.now() - requestedAt),
+              status: 'exception',
+              model: this.configuredModel(),
+              error: shortError(errorMessage(thrown)),
+            });
+            throw thrown;
+          });
         const ms = Math.round(performance.now() - requestedAt);
         // The request could not be recalled, but nothing it asked for runs.
         if (this.turnCancelled) {
@@ -4320,7 +4359,14 @@ export class ConductorStore {
           break;
         }
         if (!result.success) {
-          this.trace('model', undefined, { iteration, ms, status: result.error.type });
+          failure = result.error.message;
+          this.trace('model', undefined, {
+            iteration,
+            ms,
+            status: result.error.type,
+            model: this.configuredModel(),
+            error: shortError(failure),
+          });
           runInAction(
             () => (this.error = { kind: result.error.type, message: result.error.message })
           );
@@ -4429,14 +4475,22 @@ export class ConductorStore {
         }
       }
       if (!completed && !reply) {
+        failure = `No answer after ${maxIterations} model calls.`;
         reply = afterDone(actions, 'I stopped after several steps. Check the canvas.');
       }
     } catch (error) {
       log.error('conductor: turn failed', { error });
+      failure = errorMessage(error);
       runInAction(() => (this.error = { kind: 'other', message: errorMessage(error) }));
       reply = afterDone(actions, 'Something went wrong talking to the conductor.');
     }
-    return { reply, completed, tokens, ...(settled ? { settled } : {}) };
+    return {
+      reply,
+      completed,
+      tokens,
+      ...(settled ? { settled } : {}),
+      ...(failure !== undefined ? { error: shortError(failure) } : {}),
+    };
   }
 
   /**
@@ -6306,6 +6360,7 @@ export class ConductorStore {
     let reply = '';
     let rawReply = '';
     let modelFailed = true;
+    let failure: string | undefined;
     let tokens = 0;
     try {
       const providers = await installedProviders();
@@ -6326,6 +6381,7 @@ export class ConductorStore {
       tokens = result.tokens;
       rawReply = result.reply;
       modelFailed = !result.completed;
+      failure = result.error;
       if (result.completed && result.reply) {
         reply = result.reply;
         this.history = this.remember(messages);
@@ -6380,6 +6436,7 @@ export class ConductorStore {
         reply: spoken,
         ...(rawReply !== spoken ? { modelReply: rawReply } : {}),
         ...(modelFailed ? { modelFailed: true } : {}),
+        ...(failure !== undefined ? { error: failure } : {}),
         startedAt,
         tokens,
         utterance: `[completion] ${names.join(', ')}`,
@@ -6407,6 +6464,7 @@ export class ConductorStore {
     let reply = '';
     let settledAs = '';
     let modelFailed = true;
+    let failure: string | undefined;
     let tokens = 0;
     try {
       const providers = await installedProviders();
@@ -6433,6 +6491,7 @@ export class ConductorStore {
       // closing is the fixed sentence the desk says when the model wrote none.
       settledAs = settledSentence(open, actions);
       modelFailed = !result.completed && !settledAs;
+      if (modelFailed) failure = result.error;
       if (result.completed && !result.settled) reply = result.reply;
       if (result.completed || settledAs) {
         // Only a valid sequence is kept: every call answered, ending on the conductor's word.
@@ -6446,6 +6505,7 @@ export class ConductorStore {
         actions,
         reply: reply || settledAs,
         ...(modelFailed ? { modelFailed: true } : {}),
+        ...(failure !== undefined ? { error: failure } : {}),
         startedAt,
         tokens,
         utterance: `[request ${open.id}] ${open.sender.name}: ${open.kind}`,
@@ -7165,6 +7225,8 @@ export class ConductorStore {
     /** The model's own answer, when it differs from what was said. */
     modelReply?: string;
     modelFailed?: boolean;
+    /** Why the model's turn failed, already redacted and short. */
+    error?: string;
     startedAt: number;
     tokens?: number;
     /** What started the turn when it was not the user (a completion follow-up). */
@@ -7184,6 +7246,7 @@ export class ConductorStore {
       reply: entry.reply,
       ...(entry.modelReply !== undefined ? { modelReply: entry.modelReply } : {}),
       ...(entry.modelFailed ? { modelFailed: true } : {}),
+      ...(entry.error ? { error: entry.error } : {}),
       latencyMs: Math.round(performance.now() - entry.startedAt),
       ...(entry.tokens ? { tokens: entry.tokens } : {}),
       ...(entry.request
@@ -7391,6 +7454,11 @@ function spokenError(error: ConductorError): string {
     default:
       return 'The conductor hit an API error.';
   }
+}
+
+/** A failure's reason for the diagnostics: redacted, on one line, and short. */
+function shortError(message: string): string {
+  return truncate(redactReply(message).replace(/\s+/g, ' ').trim(), FAILURE_REASON_CHARS);
 }
 
 /**
