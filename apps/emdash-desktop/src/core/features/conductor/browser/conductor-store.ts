@@ -94,6 +94,7 @@ import { spokenConfirmation } from '../api/confirm-speech';
 import { announcementsLine, announcementsMode } from '../api/context-facts';
 import {
   DEFAULT_CONDUCTOR_SETTINGS,
+  MODEL_TURN_CALL,
   type ConductorError,
   type ConductorMode,
   type ConductorSettings,
@@ -4300,7 +4301,10 @@ export class ConductorStore {
           this.activity = iteration === 0 ? 'Thinking…' : 'Thinking about the results…';
         });
         const requestedAt = performance.now();
-        const result = await client.runTurn({ mode, messages: pruneScreenshots(messages) });
+        const result = await client.runTurn(
+          { mode, messages: pruneScreenshots(messages) },
+          MODEL_TURN_CALL
+        );
         const ms = Math.round(performance.now() - requestedAt);
         // The request could not be recalled, but nothing it asked for runs.
         if (this.turnCancelled) {

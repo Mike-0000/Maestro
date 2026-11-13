@@ -545,6 +545,13 @@ export const folderCheckSchema = z.discriminatedUnion('ok', [
 ]);
 export type FolderCheck = z.infer<typeof folderCheckSchema>;
 
+/**
+ * Wire call options for `runTurn` and `runChatTurn`. A model call may take well over the default
+ * 30 s Wire deadline, which ended turns with no answer while the main process kept the request
+ * going.
+ */
+export const MODEL_TURN_CALL = { timeoutMs: 120_000 } as const;
+
 export const conductorContract = defineContract({
   /** One Jev (System One) evaluation: typed questions about a state, answered in parallel. */
   decide: fallible({

@@ -7,7 +7,7 @@ import {
 import { log } from '@core/primitives/logging/browser/logger';
 import { getConductorClient } from '../../api/browser/client';
 import type { ConductorStatus } from '../../api/contract';
-import { DEFAULT_CONDUCTOR_SETTINGS } from '../../api/contract';
+import { DEFAULT_CONDUCTOR_SETTINGS, MODEL_TURN_CALL } from '../../api/contract';
 import { chatName, createTaskAgentPort } from './agent-port';
 import { createTaskBrowserPort } from './browser-port';
 import { DecisionDesk } from './decision-desk';
@@ -306,7 +306,10 @@ export class ChatConductorManager implements FrontConductorSource {
   private ports(taskId: string): ChatConductorPorts {
     return {
       runTurn: async (messages, { yolo }) =>
-        (await getConductorClient()).runChatTurn({ messages, taskId, ...(yolo ? { yolo } : {}) }),
+        (await getConductorClient()).runChatTurn(
+          { messages, taskId, ...(yolo ? { yolo } : {}) },
+          MODEL_TURN_CALL
+        ),
       readThread: async () => (await getConductorClient()).readTaskThread({ taskId }),
       saveThread: async (thread) => (await getConductorClient()).saveTaskThread(thread),
       deleteThread: async () => (await getConductorClient()).deleteTaskThread({ taskId }),

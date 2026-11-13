@@ -232,6 +232,15 @@ describe('completion follow-ups', () => {
     expect(store.busy).toBe(false);
   });
 
+  it('gives each model call longer than the default Wire deadline', async () => {
+    const { announce } = setup();
+    mocks.runTurn.mockResolvedValueOnce(text('Zulu built the todo app.'));
+    await announce();
+    expect(mocks.runTurn).toHaveBeenCalledWith(expect.objectContaining({ mode: 'command' }), {
+      timeoutMs: 120_000,
+    });
+  });
+
   it('refuses risky tools the model tries on the strength of agent output', async () => {
     const { speech, announce } = setup();
     mocks.runTurn
