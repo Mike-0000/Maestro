@@ -3,6 +3,10 @@ import type { Clock } from '@emdash/shared/scheduling';
 import type { LiveLogSourceOptions } from '@emdash/wire/live';
 import type { EnvSource } from '#primitives/exec/api';
 import type { TuiAgentStartInput } from '#runtimes/tui-agents/api';
+import type {
+  HttpPortProbe,
+  ProcessPortSnapshotter,
+} from '#runtimes/tui-agents/node/dev-servers/listening-ports';
 import type { AgentPluginHost } from '#services/agent-plugins/api/plugins';
 import type { ConversationLifecycleReporter } from '#services/conversation-reports/node';
 import type { IExecutionContext } from '#services/exec/api';
@@ -30,6 +34,16 @@ export interface TuiAgentsRuntimeDeps {
     prompt: string,
     options: { spillLineBreaks: boolean }
   ) => Promise<PromptSpillResult>;
+  /**
+   * Watch running sessions' process trees on this computer for dev servers the agents start
+   * themselves (published through the `devServers` live model). Absent: no detection, which is
+   * what a remote workspace server runs with.
+   */
+  devServerDetection?: {
+    snapshotter?: ProcessPortSnapshotter;
+    httpProbe?: HttpPortProbe;
+    intervalMs?: number;
+  };
   logger: Logger;
 }
 

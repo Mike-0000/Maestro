@@ -1,6 +1,7 @@
 import { defineContract, fallible, liveLog, liveModel, liveState } from '@emdash/wire/rpc';
 import { z } from 'zod';
 import {
+  tuiAgentDevServerListSchema,
   tuiAgentStartInputSchema,
   tuiAgentStateListSchema,
   tuiInputErrorSchema,
@@ -103,6 +104,17 @@ export const tuiAgentsContract = defineContract({
     key: z.void().optional(),
     states: {
       list: liveState({ data: tuiSessionListSchema }),
+    },
+  }),
+
+  /**
+   * Dev servers agent sessions started themselves, host-wide (the desktop preview bridge reads
+   * this). Empty unless the runtime was created with dev-server detection on.
+   */
+  devServers: liveModel({
+    key: z.void().optional(),
+    states: {
+      list: liveState({ data: tuiAgentDevServerListSchema }),
     },
   }),
 

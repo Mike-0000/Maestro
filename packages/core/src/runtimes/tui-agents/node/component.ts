@@ -26,6 +26,8 @@ import { userShellEnvContract } from '#services/shell-env/api';
 
 export const tuiAgentsComponentConfigSchema = z.object({
   intentsFilePath: z.string().min(1).optional(),
+  /** Detect dev servers agents start themselves, from their process trees. Local hosts only. */
+  detectDevServers: z.boolean().optional(),
   lifecycle: z
     .object({
       session: idlePolicyConfigSchema.optional(),
@@ -80,6 +82,7 @@ export function createTuiAgentsComponent(options: CreateTuiAgentsComponentOption
         }),
         spawner: new NodePtySpawner(),
         lifecycle: config.lifecycle,
+        ...(config.detectDevServers ? { devServerDetection: {} } : {}),
         logger: runtimeLogger,
       });
       void cleanupStalePromptSpills({
