@@ -11,8 +11,8 @@ say not to.
 Vibe workers are tiered, and each tier is pinned to a model and effort level: `vibe-architect`
 (Fable, medium) for high-level and intense planning, `vibe-planner` (Opus, medium) for light
 planning, `vibe-builder` (Opus, medium) for light implementation and anything unclassified,
-`vibe-engineer` (Opus, medium) for heavy implementation and review, `vibe-designer` (Fable, medium)
-for any new front-end design, CSS, or styles, and `vibe-runner` (Sonnet, low) for running checks.
-When I ask for pro mode, every tier runs one level higher (the vibe skill's pro
-column). When spawning a vibe worker, pass its tier's `model` and `effort` exactly; that overrides
+`vibe-engineer` (Opus, medium) for heavy implementation and review, `vibe-designer` (Opus, medium;
+Fable in pro mode) for any new front-end design, CSS, or styles, and `vibe-runner` (Sonnet, low)
+for running checks. When I ask for pro mode, every tier runs one level higher (the vibe skill's
+pro columns, which also switch the designer to Fable). When spawning a vibe worker, pass its tier's `model` and `effort` exactly; that overrides
 any other sub-agent model or effort rule.

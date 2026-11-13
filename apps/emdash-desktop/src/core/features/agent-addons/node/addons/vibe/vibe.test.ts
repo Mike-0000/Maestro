@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { VIBE_DEFAULT_TIER, VIBE_TIERS } from './tiers';
+import { proModelNameOf, proModelOf, VIBE_DEFAULT_TIER, VIBE_TIERS } from './tiers';
 import { vibeAddon } from './vibe';
 
 const files = vibeAddon.targets[0]!.files;
@@ -26,10 +26,30 @@ describe('vibe add-on', () => {
       'vibe-planner': 'Opus 5.5 medium/high',
       'vibe-builder': 'Opus 5.5 medium/high',
       'vibe-engineer': 'Opus 5.5 medium/high',
-      'vibe-designer': 'Fable 5.2 medium/high',
+      'vibe-designer': 'Opus 5.5 medium/high',
       'vibe-runner': 'Sonnet 5.5 low/medium',
     });
     expect(VIBE_TIERS.map((tier) => tier.name)).toContain(VIBE_DEFAULT_TIER);
+  });
+
+  it('runs the designer on Opus normally and on Fable in pro mode, every other tier unchanged', () => {
+    const proModels = Object.fromEntries(
+      VIBE_TIERS.map((tier) => [tier.name, `${proModelNameOf(tier)} ${proModelOf(tier)}`])
+    );
+    expect(proModels).toEqual({
+      'vibe-architect': 'Fable 5.2 fable',
+      'vibe-planner': 'Opus 5.5 opus',
+      'vibe-builder': 'Opus 5.5 opus',
+      'vibe-engineer': 'Opus 5.5 opus',
+      'vibe-designer': 'Fable 5.2 fable',
+      'vibe-runner': 'Sonnet 5.5 sonnet',
+    });
+    const designer = fileAt('agents/vibe-designer.md');
+    expect(frontmatter(designer).model).toBe('opus');
+    expect(designer).toContain('In pro mode the director runs you on Fable 5.2.');
+    expect(fileAt('skills/vibe/SKILL.md')).toContain(
+      '| `vibe-designer` | Opus 5.5 | `opus` | `medium` | Fable 5.2 | `fable` | `high` |'
+    );
   });
 
   it('writes one agent file per tier whose frontmatter sets that model and effort', () => {
@@ -50,10 +70,10 @@ describe('vibe add-on', () => {
     for (const tier of VIBE_TIERS) {
       expect(skill).toContain(
         `| \`${tier.name}\` | ${tier.modelName} | \`${tier.model}\` | \`${tier.effort}\` | ` +
-          `\`${tier.proEffort}\` |`
+          `${proModelNameOf(tier)} | \`${proModelOf(tier)}\` | \`${tier.proEffort}\` |`
       );
     }
-    expect(skill).toContain('| `effort` | `effort` in pro mode |');
+    expect(skill).toContain('| `model` in pro mode | `effort` in pro mode |');
     expect(skill).toContain('# Pro mode');
     expect(frontmatter(skill).name).toBe('vibe');
   });
