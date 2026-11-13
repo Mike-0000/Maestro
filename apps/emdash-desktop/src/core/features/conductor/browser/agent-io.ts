@@ -217,6 +217,31 @@ export function codexShowsMenu(screen: string[]): boolean {
   return screen.slice(-2).some((row) => CODEX_MENU_HINT.test(row));
 }
 
+/** An option of Codex's approval dialog: "› 1. Yes, proceed (y)", "3. No, and tell Codex… (esc)". */
+const CODEX_APPROVAL_OPTION = /^\s*(?:›\s*)?\d\.\s.*\((?:y|a|p|esc)\)\s*$/;
+/** Rows from the bottom that the approval dialog's options sit in. */
+const CODEX_APPROVAL_ROWS = 12;
+
+/** Whether Codex shows its approval dialog (or another popup Enter would answer). */
+export function codexShowsApproval(screen: string[]): boolean {
+  return (
+    codexShowsMenu(screen) ||
+    screen.slice(-CODEX_APPROVAL_ROWS).some((row) => CODEX_APPROVAL_OPTION.test(row))
+  );
+}
+
+/**
+ * Whether a Codex agent's screen shows its approval dialog now. Codex draws it only once
+ * Maestro's permission hook has returned, so a held request can come before it. Null for other
+ * agents, and when the screen cannot be read.
+ */
+export async function codexApprovalShown(entry: AgentTileEntry): Promise<boolean | null> {
+  if (entry.type === 'acp' || entry.providerId !== 'codex') return null;
+  await connectTerminal(entry);
+  const screen = codexScreen(entry);
+  return screen === null ? null : codexShowsApproval(screen);
+}
+
 /**
  * Codex's composer: the rows from the last one starting with its glyph to the bottom, so a
  * submitted message echoed in the history above is not in it. Null when no composer shows.

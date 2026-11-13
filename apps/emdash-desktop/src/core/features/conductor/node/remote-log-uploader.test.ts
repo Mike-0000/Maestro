@@ -227,6 +227,36 @@ describe('RemoteLogUploader', () => {
     expect(up.getStatus()).toMatchObject({ uploaded: 7, lastError: null });
   });
 
+  it("sends a task conductor's YOLO mode with its thread header, when the thread has it", async () => {
+    configure();
+    mkdirSync(join(dir, 'task-conductors'));
+    const thread = (taskId: string, extra: Record<string, unknown>) =>
+      writeFileSync(
+        join(dir, 'task-conductors', `${taskId}.json`),
+        JSON.stringify({
+          version: 2,
+          taskId,
+          entries: [],
+          messages: [],
+          notes: '',
+          status: null,
+          autonomy: true,
+          updatedAt: '2026-11-12T10:02:00.000Z',
+          ...extra,
+        })
+      );
+    thread('task-1', { yolo: true });
+    thread('task-2', {});
+
+    await uploader().runOnce();
+
+    const headers = rowsFor('maestro_conductor_threads').map((row) => row.record);
+    expect(headers).toContainEqual(expect.objectContaining({ threadId: 'task-1', yolo: true }));
+    const plain = headers.find((record) => (record as { threadId?: string }).threadId === 'task-2');
+    // A thread saved without it keeps the header it had, so it is not sent again.
+    expect(plain).not.toHaveProperty('yolo');
+  });
+
   it('sends a legacy anon key as the bearer too', async () => {
     const anon = jwt({ role: 'anon' });
     configure({ url: URL, anonKey: anon });

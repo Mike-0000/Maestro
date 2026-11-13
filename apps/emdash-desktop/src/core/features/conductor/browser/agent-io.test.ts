@@ -10,6 +10,7 @@ import {
   codexComposerHolds,
   codexIngestBudgetMs,
   CodexNotStartedError,
+  codexShowsApproval,
   codexShowsMenu,
   DeliveryLeftUnsentError,
   sendToAgent,
@@ -803,6 +804,26 @@ describe("reading Codex's screen", () => {
     expect(
       codexShowsMenu(['press enter to continue the migration', 'more', '› ', '  ? for shortcuts'])
     ).toBe(false);
+  });
+
+  it("tells Codex's approval dialog from its screen while the permission hook still runs", () => {
+    // From laptop logs (Nov 12): read at once, the screen showed the hook, not the dialog.
+    expect(codexShowsApproval(['• Working (3s • esc to interrupt) · Running hook', '› '])).toBe(
+      false
+    );
+    expect(
+      codexShowsApproval([
+        'Would you like to run the following command?',
+        '  $ pnpm test',
+        '› 1. Yes, proceed (y)',
+        "  2. Yes, and don't ask again for this command (a)",
+        '  3. No, and tell Codex what to do differently (esc)',
+        '',
+        '  Press enter to confirm or esc to cancel',
+      ])
+    ).toBe(true);
+    // Its options alone are enough when the footer is cut off.
+    expect(codexShowsApproval(['› 1. Yes, proceed (y)', '  2. No (esc)'])).toBe(true);
   });
 
   it('gives a long paste more time to be read than it took on Windows', () => {

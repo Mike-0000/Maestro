@@ -244,10 +244,12 @@ describe('AgentStatusService', () => {
       });
       expect(mocks.emit.mock.calls[1]?.[1]).toMatchObject({
         status: 'awaiting-input',
+        notificationType: 'permission_prompt',
         subAgents: [explore],
       });
       expect(mocks.emit.mock.calls[2]?.[1]).toMatchObject({ status: 'completed' });
       expect(mocks.emit.mock.calls[2]?.[1]).not.toHaveProperty('subAgents');
+      expect(mocks.emit.mock.calls[2]?.[1]).not.toHaveProperty('notificationType');
     });
 
     it('republishes a change as the same turn, with the count kept', async () => {
@@ -844,6 +846,34 @@ describe('AgentStatusService', () => {
       expect(mocks.emit.mock.calls[1]?.[1]).toMatchObject({ status: 'working', seen: true });
       await vi.waitFor(() => expect(handler).toHaveBeenCalledTimes(2));
       expect(handler.mock.calls[1]?.[0]).toMatchObject({ type: 'start' });
+    });
+
+    it('names the permission prompt behind a decided or fallen-back awaiting-input', async () => {
+      const { service } = claimed();
+      const prompt = () =>
+        service.applySignal(
+          signal('notification', { payload: { notificationType: 'permission_prompt' } })
+        );
+      await prompt();
+      mocks.updateRows.push(row(), row());
+      service.decisions.resolve(request().holdId, 'conversation-1', { kind: 'quiet' });
+      await vi.waitFor(() => expect(mocks.emit).toHaveBeenCalledTimes(1));
+      expect(mocks.emit.mock.calls[0]?.[1]).toMatchObject({
+        status: 'awaiting-input',
+        notificationType: 'permission_prompt',
+      });
+
+      events.length = 0;
+      await prompt();
+      service.decisions.resolve(request().holdId, 'conversation-1', {
+        kind: 'fallback',
+        reason: 'budget',
+      });
+      await vi.waitFor(() => expect(mocks.emit).toHaveBeenCalledTimes(2));
+      expect(mocks.emit.mock.calls[1]?.[1]).toMatchObject({
+        status: 'awaiting-input',
+        notificationType: 'permission_prompt',
+      });
     });
 
     it('falls back to the status the event would have had when the conductor cannot decide', async () => {

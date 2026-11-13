@@ -172,6 +172,51 @@ describe('markInputLines', () => {
     expect(markInputLines('❯ ')).toBe('❯ ');
   });
 
+  it('does not take menus, approval options or input placeholders for typed input', () => {
+    // From laptop logs: each of these was labelled as the developer's words.
+    const screen = [
+      '❯ 1. Yes, proceed (y)',
+      '› 2. Yes, and don’t ask again for this command (a)',
+      '› Accept',
+      '› Decline',
+      '❯ No, and tell Codex what to do differently (esc)',
+      '› Ask Codex to do anything',
+      '› Find and fix a bug in @filename',
+      '❯ Try "refactor <filepath>"',
+    ].join('\n');
+    expect(markInputLines(screen)).toBe(screen);
+  });
+
+  it("marks Maestro's own launch brief and agent-to-agent messages as Maestro's", () => {
+    const lines = [
+      '❯ The full task context could not be passed intact on the command line, so it has been',
+      '› [Message from agent Atlas (task "Fix login"), passed on by the Maestro conductor.]',
+      '› [Reply from agent Echo (task "Order check") to your request r-7k2q01, passed on]',
+      '› [Maestro reply r-7k2q01 to your spawn_agent request] Approved.',
+    ];
+    for (const line of lines) {
+      expect(markInputLines(line)).toBe(`${line} [typed by Maestro]`);
+    }
+  });
+
+  it("still labels the developer's own words, and a > quote only where > is a prompt", () => {
+    expect(markInputLines('› merge it')).toBe(
+      "› merge it [typed by the developer into this agent's terminal]"
+    );
+    expect(markInputLines('❯ yes')).toBe(
+      "❯ yes [typed by the developer into this agent's terminal]"
+    );
+    expect(markInputLines('> merge it')).toBe(
+      "> merge it [typed by the developer into this agent's terminal]"
+    );
+    const labels = { sent: '[mine]', maestro: '[maestro]', other: '[theirs]' };
+    const quoted = '> The tests pass on main, so the failure is new.';
+    expect(markInputLines(quoted, [], labels, { plainAnglePrompt: false })).toBe(quoted);
+    expect(markInputLines('› merge it', [], labels, { plainAnglePrompt: false })).toBe(
+      '› merge it [theirs]'
+    );
+  });
+
   it('adds no terminal note when every agent reported a reply', () => {
     const text = completionTurnText([
       { name: 'Zulu', providerLabel: 'Claude', taskName: 't', report },

@@ -281,6 +281,10 @@ export class AgentStatusService implements Hookable<AgentStatusServiceHooks> {
         signal.payload.subAgents?.length
           ? { subAgents: signal.payload.subAgents }
           : {}),
+        // Which prompt the agent waits on: a permission prompt is one a conductor can answer.
+        ...(status === 'awaiting-input' && signal.payload.notificationType
+          ? { notificationType: signal.payload.notificationType }
+          : {}),
         // The final reply leaves the main process only redacted and bounded; reasoning and the
         // rest of the transcript never do.
         // A turn that ended needing the developer still reports what the agent said.
@@ -461,6 +465,9 @@ export class AgentStatusService implements Hookable<AgentStatusServiceHooks> {
       status,
       seen: seen === 1,
       ...(status === 'awaiting-input' && subAgents?.length ? { subAgents } : {}),
+      ...(status === 'awaiting-input' && held.notificationType
+        ? { notificationType: held.notificationType }
+        : {}),
       // The same report the request carried, so the conductor knows this state for the one it
       // decided; the headline stands in for the synopsis.
       ...(finished
