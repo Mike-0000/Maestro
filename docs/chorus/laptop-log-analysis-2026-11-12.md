@@ -343,5 +343,9 @@ checks, boot and user-env tests); `packages/core` hook and agent-plugin tests (a
 for the browser and node projects (clean); `oxfmt` and `oxlint` on every changed file (clean).
 The push script then ran format, lint, typecheck and the delivery tests again.
 
-Not merged here: log-finder's `fix/chat-conductor-empty-final-reply` (`e6dfe9dfa`) merges
-cleanly with these changes; `fix/detect-agent-started-dev-servers` was not touched.
+Also merged, at the developer's request, and shipped in the same push: log-finder's
+`fix/chat-conductor-empty-final-reply` (`e6dfe9dfa`, finding 19) and
+`fix/detect-agent-started-dev-servers` (`ef1122dfc`, which covers the refused `localhost:4100` in
+finding 20). Both merged without conflicts; their tests pass, and the core `tui-agents` and
+desktop gateway suites show the same failures as clean `chorus/main` (17 and 3, Windows
+environment).
