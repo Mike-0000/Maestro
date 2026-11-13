@@ -257,7 +257,7 @@ describe('agent request kinds', () => {
     const { payload } = valid('report', { status: 'done', message });
     const spoken = agentRequestKinds.report.spoken('Iris', payload);
     expect(spoken).toBe(
-      'Iris is done: The Y: drive install finished and the launcher opens. Saves now go to the X: drive as you asked, and the old folder is kept for now. The shortcut on the desktop points at the new launcher, and the old one was removed.'
+      'Iris is done: The Y: drive install finished and the launcher opens. Saves now go to the X: drive as you asked, and the old folder is kept for now.'
     );
     expect(agentRequestKinds.report.shown!('Iris', payload)).toBe(`Iris is done: ${message}`);
     // A short report is said whole, and shown as said.
@@ -265,6 +265,46 @@ describe('agent request kinds', () => {
     expect(agentRequestKinds.report.shown!('Iris', short)).toBe(
       agentRequestKinds.report.spoken('Iris', short)
     );
+  });
+
+  it('says a report without reading links, commands, or long paths aloud, and shows them', () => {
+    const message =
+      'Set the secrets with `gh secret set AZURE_TOKEN --body "$TOKEN"` and the runner picks them up. ' +
+      'Logs are in C:\\Users\\dev\\AppData\\Roaming\\chorus\\logs\\main.log, and the run is at https://github.com/acme/shop/actions/runs/123456789.';
+    const { payload } = valid('report', { status: 'done', message });
+    const spoken = agentRequestKinds.report.spoken('Iris', payload);
+    expect(spoken).toBe(
+      'Iris is done: Set the secrets with a command and the runner picks them up. Logs are in a path, and the run is at a link.'
+    );
+    expect(agentRequestKinds.report.shown!('Iris', payload)).toBe(`Iris is done: ${message}`);
+  });
+
+  it('keeps a spoken report or question short, cut between words, and shows all of it', () => {
+    const long = `${'The release pipeline needs the signing step moved before the upload step '.repeat(5)}today`;
+    const report = valid('report', { status: 'progress', message: long }).payload;
+    const question = valid('ask_conductor', { question: `${long}?` }).payload;
+    for (const [spoken, lead] of [
+      [agentRequestKinds.report.spoken('Iris', report), 'Iris reports: '],
+      [agentRequestKinds.ask_conductor.spoken('Iris', question), 'Iris asked me: '],
+    ] as const) {
+      expect(spoken.startsWith(lead)).toBe(true);
+      expect(spoken.length - lead.length).toBeLessThanOrEqual(161);
+      expect(spoken).toMatch(/ [a-z]+…$/);
+    }
+    expect(agentRequestKinds.report.shown!('Iris', report)).toBe(`Iris reports: ${long}.`);
+    expect(agentRequestKinds.ask_conductor.shown!('Iris', question)).toBe(
+      `Iris asked me: ${long}?`
+    );
+  });
+
+  it('never cuts a question to the developer inside a word', () => {
+    const spoken = agentRequestKinds.ask_developer.spoken(
+      'Iris',
+      valid('ask_developer', {
+        question: `${'Paste the registration token for the runner '.repeat(8)}?`,
+      }).payload
+    );
+    expect(spoken).toMatch(/ (?:Paste|the|registration|token|for|runner)…$/);
   });
 });
 

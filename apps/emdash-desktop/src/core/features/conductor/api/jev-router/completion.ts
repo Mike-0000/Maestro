@@ -1,4 +1,5 @@
 import type { CompletionReport } from '@core/primitives/agents/api/completion-report';
+import { speakable } from '../agent-requests';
 import { INPUT_LINE } from '../completion-follow-up';
 import { choiceOf, noulOf, type JevAnswers, type JevQuestions } from '../jev';
 import { splitSentences } from './spans';
@@ -65,9 +66,9 @@ export function reportSentences(text: string): string[] {
   return [...sentences.slice(0, 30), ...sentences.slice(-(MAX_REPORT_SENTENCES - 30))];
 }
 
-/** "Maple: Tests pass." trimmed for speech: URLs become "a link", cut at a word boundary. */
+/** "Maple: Tests pass." trimmed for speech: links and paths named (`speakable`), cut at a word. */
 export function spokenLine(prefix: string, sentence: string, max = SPOKEN_MAX_CHARS): string {
-  const text = `${prefix} ${sentence.replace(/https?:\/\/\S+/g, 'a link')}`.replace(/\s+/g, ' ');
+  const text = `${prefix} ${speakable(sentence)}`.replace(/\s+/g, ' ');
   if (text.length <= max) return text;
   const cut = text.slice(0, max - 1);
   const space = cut.lastIndexOf(' ');

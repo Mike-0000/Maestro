@@ -446,22 +446,26 @@ export class AgentRequestDesk {
       });
       return;
     }
+    // A question said short is shown whole.
+    const shown = open.valid.spec.shown?.(view.sender.name, open.valid.payload) ?? view.spoken;
     if (!this.host.canDecide()) {
-      // No model to decide it, so only the developer can.
+      // No model to decide it, so only the developer can, and they answer what they see.
       this.ask(
         open,
         open.valid.spec.action
           ? `${view.spoken} Say yes to allow it, or no.`
-          : `${view.spoken} What should I tell it?`
+          : `${shown} What should I tell it?`
       );
       return;
     }
     // The turn failed or ended without a decision. The developer may be away, so the agent is
     // not left waiting for them: it is told nothing was done and carries on.
     this.settle(open, { status: 'undecided' });
-    this.host.say(`${view.spoken} I could not decide it, so nothing was done.`, undefined, {
+    const undecided = 'I could not decide it, so nothing was done.';
+    this.host.say(`${view.spoken} ${undecided}`, undefined, {
       source: 'request',
       agent: from,
+      ...(shown !== view.spoken ? { shown: `${shown} ${undecided}` } : {}),
     });
   }
 
