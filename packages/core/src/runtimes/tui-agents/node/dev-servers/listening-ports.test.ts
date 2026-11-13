@@ -158,7 +158,9 @@ describe('commandLineMentionsDirectory', () => {
     expect(
       commandLineMentionsDirectory('bash -c "cd /c/work/shop/checkout && npm run dev"', dir)
     ).toBe(true);
-    expect(commandLineMentionsDirectory('code C:\\work\\shop\\checkout', dir)).toBe(true);
+    expect(
+      commandLineMentionsDirectory('cmd.exe /d /s /c "cd /d C:\\work\\shop\\checkout && vite"', dir)
+    ).toBe(true);
   });
 
   it('does not match a longer sibling path or the directory under another root', () => {

@@ -3,9 +3,11 @@ import { noopLogger, type Logger } from '@emdash/shared/logger';
 import type { DetectedPreviewUrl } from '#services/preview-detection/node';
 import { collectDescendantProcesses } from '#services/pty/api';
 import {
-  commandLineMentionsDirectory,
   createLocalProcessPortSnapshotter,
+  directoryMention,
+  isDesktopOrEditorProcess,
   isSpecificDirectory,
+  type DirectoryMention,
   loopbackProbeHost,
   probeHttpPort,
   type HttpPortProbe,
@@ -218,8 +220,19 @@ export function createProcessTreePortDetector(
  * An agent's shell commonly exits right after starting a background server (`npm run dev &`, a
  * background shell), which leaves the server's parent id pointing at a dead process, so the tree
  * walk cannot reach it. Its command line, or a live ancestor's, still names the worktree it runs
- * from (`node C:\wt\node_modules\vite\bin\vite.js`). Only a root whose cwd is specific (not a
- * drive root, a top-level folder or the home directory) can claim a process this way.
+ * from (`node C:\wt\node_modules\vite\bin\vite.js`).
+ *
+ * The fallback is narrow, because a command line naming a folder proves little on its own:
+ * - the listener's chain of live ancestors must end in a broken link (a parent that is gone,
+ *   pruned as a reused pid, or init), within a few hops: the server was orphaned;
+ * - no process on that chain is the desktop shell, an editor or an IDE (a chain back to the
+ *   developer's desktop, `code C:\wt`, `idea64.exe C:\wt` and their helpers never count);
+ * - where creation times are known, the chain's top process started after the root did;
+ * - only a root whose cwd is specific (not a drive root, a top-level folder or the home directory)
+ *   can claim it; the most specific matching root wins, and a server named only through an outer
+ *   root's node_modules while another root sits inside that root is left alone (ambiguous).
+ * Roots with the same cwd are one worktree, so the first is kept: the bridge resolves the server's
+ * workspace from that cwd either way.
  */
 function directoryOwner(
   pid: number,
@@ -227,30 +240,59 @@ function directoryOwner(
   roots: ProcessTreeRoot[],
   homeDirectory: string
 ): string | null {
-  const directories = roots.flatMap((root) =>
-    root.cwd && isSpecificDirectory(root.cwd) && !sameDirectory(root.cwd, homeDirectory)
-      ? [{ id: root.id, cwd: root.cwd }]
-      : []
-  );
-  if (directories.length === 0) return null;
   const byPid = new Map(processes.map((row) => [row.pid, row]));
-  const seen = new Set<number>();
+  const chain: ProcessTableRow[] = [];
+  let top: ProcessTableRow | null = null;
   let current = byPid.get(pid);
-  for (let hop = 0; current && hop <= MAX_ANCESTOR_HOPS && !seen.has(current.pid); hop++) {
-    seen.add(current.pid);
-    const commandLine = current.commandLine;
-    if (commandLine) {
-      const owner = directories.find((root) => commandLineMentionsDirectory(commandLine, root.cwd));
-      if (owner) return owner.id;
+  while (current && chain.length <= MAX_ANCESTOR_HOPS && !chain.includes(current)) {
+    chain.push(current);
+    const parent = current.ppid > 1 ? byPid.get(current.ppid) : undefined;
+    if (!parent) {
+      top = current;
+      break;
     }
-    current = byPid.get(current.ppid);
+    current = parent;
   }
-  return null;
+  if (!top || chain.some((row) => isDesktopOrEditorProcess(row.commandLine))) return null;
+  const orphanedAt = top.createdAt;
+
+  const matches = roots.flatMap((root) => {
+    if (!root.cwd || !isSpecificDirectory(root.cwd) || sameDirectory(root.cwd, homeDirectory)) {
+      return [];
+    }
+    const rootCreatedAt = byPid.get(root.pid)?.createdAt;
+    if (orphanedAt !== undefined && rootCreatedAt !== undefined && orphanedAt < rootCreatedAt) {
+      return [];
+    }
+    let strength: DirectoryMention = 'none';
+    for (const row of chain) {
+      const mention = row.commandLine ? directoryMention(row.commandLine, root.cwd) : 'none';
+      if (mention === 'direct') strength = 'direct';
+      else if (mention === 'node_modules' && strength === 'none') strength = 'node_modules';
+    }
+    return strength === 'none' ? [] : [{ root: { id: root.id, cwd: root.cwd }, strength }];
+  });
+  if (matches.length === 0) return null;
+  const depth = (cwd: string) => comparableDirectory(cwd).length;
+  const best = matches.reduce((winner, match) =>
+    depth(match.root.cwd) > depth(winner.root.cwd) ? match : winner
+  );
+  if (best.strength === 'node_modules') {
+    const bestDir = comparableDirectory(best.root.cwd);
+    const nested = roots.some(
+      (root) => root.cwd && comparableDirectory(root.cwd).startsWith(`${bestDir}/`)
+    );
+    if (nested) return null;
+  }
+  return best.root.id;
+}
+
+function comparableDirectory(value: string): string {
+  return value.toLowerCase().replace(/\\/g, '/').replace(/\/+$/, '');
 }
 
 function sameDirectory(left: string, right: string): boolean {
-  const normalize = (value: string) => value.toLowerCase().replace(/\\/g, '/').replace(/\/+$/, '');
-  return right !== '' && normalize(left) === normalize(right);
+  return right !== '' && comparableDirectory(left) === comparableDirectory(right);
 }
 
 function candidatesFor(

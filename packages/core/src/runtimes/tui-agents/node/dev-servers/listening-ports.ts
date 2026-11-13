@@ -144,9 +144,21 @@ export function isSpecificDirectory(directory: string): boolean {
  * must end at the directory's end or a separator, so `C:\a\b` does not match `C:\a\bc`.
  */
 export function commandLineMentionsDirectory(commandLine: string, directory: string): boolean {
+  return directoryMention(commandLine, directory) !== 'none';
+}
+
+/**
+ * How a command line names a directory: `direct` (the directory or a path in it outside its
+ * `node_modules`), `node_modules` (only paths inside its `node_modules`, which a process from a
+ * nested checkout can also resolve to), or `none`.
+ */
+export type DirectoryMention = 'none' | 'node_modules' | 'direct';
+
+export function directoryMention(commandLine: string, directory: string): DirectoryMention {
   const dir = comparablePath(directory).replace(/\/+$/, '');
-  if (!dir) return false;
+  if (!dir) return 'none';
   const line = comparablePath(commandLine);
+  let found: DirectoryMention = 'none';
   const spellings = [dir];
   const drive = /^([a-z]):(\/.*)$/.exec(dir);
   if (drive) spellings.push(`/${drive[1]}${drive[2]}`);
@@ -161,10 +173,74 @@ export function commandLineMentionsDirectory(commandLine: string, directory: str
       // Not the tail of a longer path (`d:/c/a/b` for `/c/a/b`) nor the head of a sibling.
       if (before && /[a-z0-9._\-:/]/.test(before)) continue;
       if (after && !/[/"'\s]/.test(after)) continue;
-      return true;
+      if (!line.startsWith('/node_modules/', index + spelling.length)) return 'direct';
+      found = 'node_modules';
     }
   }
-  return false;
+  return found;
+}
+
+/**
+ * Executables of the desktop shell, editors and IDEs, by lower-cased file name without `.exe`.
+ * They open folders by name (`code C:\wt`) and run servers of their own (extension hosts,
+ * JetBrains' built-in server on 63342), none of which is a task's dev server.
+ */
+const DESKTOP_AND_EDITOR_EXECUTABLES = new Set([
+  'explorer',
+  'code',
+  'code - insiders',
+  'codium',
+  'cursor',
+  'windsurf',
+  'zed',
+  'devenv',
+  'sublime_text',
+  'subl',
+  'atom',
+  'fleet',
+  'idea',
+  'idea64',
+  'webstorm',
+  'webstorm64',
+  'pycharm',
+  'pycharm64',
+  'phpstorm',
+  'phpstorm64',
+  'goland',
+  'goland64',
+  'rider',
+  'rider64',
+  'clion',
+  'clion64',
+  'rubymine',
+  'rubymine64',
+  'datagrip',
+  'datagrip64',
+  'studio',
+  'studio64',
+]);
+
+/** Install folders of editors whose executable has a generic name (macOS `Electron`, helpers). */
+const EDITOR_INSTALL_PATHS = [
+  '/microsoft vs code',
+  '/visual studio code',
+  '/jetbrains/',
+  '/cursor.app/',
+  '/windsurf.app/',
+  '/zed.app/',
+];
+
+/** Whether a process is the desktop shell, an editor or an IDE (see the lists above). */
+export function isDesktopOrEditorProcess(commandLine: string | undefined): boolean {
+  if (!commandLine) return false;
+  const trimmed = commandLine.trim();
+  const executable = trimmed.startsWith('"')
+    ? trimmed.slice(1, Math.max(1, trimmed.indexOf('"', 1)))
+    : (trimmed.split(/\s+/)[0] ?? '');
+  const path = comparablePath(executable);
+  const name = path.slice(path.lastIndexOf('/') + 1).replace(/\.exe$/, '');
+  if (DESKTOP_AND_EDITOR_EXECUTABLES.has(name)) return true;
+  return EDITOR_INSTALL_PATHS.some((folder) => path.includes(folder));
 }
 
 /**
