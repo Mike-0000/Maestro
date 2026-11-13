@@ -77,6 +77,17 @@ type ControlEntry = BrowserTaskIdentity & {
   } | null;
 };
 
+/** What agents are told about one of their task's browsers. */
+export type BrowserDescription = {
+  browserId: string;
+  url: string | null;
+  live: boolean;
+  control: BrowserControl;
+  surface: BrowserSurfaceKind;
+  isolated: boolean;
+  allowedOrigins: string[];
+};
+
 type OpenAnswer = { browserId: string | null; denial?: BrowserOpenDenial };
 
 type PendingOpen = {
@@ -232,17 +243,18 @@ export class BrowserControlService {
    * What agents are told about the task's browser. A browser on the developer's own profile is
    * described only by where it is: its page and address are not shared with agents.
    */
-  describeTaskBrowser(taskId: string): {
-    browserId: string;
-    url: string | null;
-    live: boolean;
-    control: BrowserControl;
-    surface: BrowserSurfaceKind;
-    isolated: boolean;
-    allowedOrigins: string[];
-  } | null {
+  describeTaskBrowser(taskId: string): BrowserDescription | null {
     const entry = this.primaryEntry(taskId);
-    if (!entry) return null;
+    return entry ? this.describeEntry(entry) : null;
+  }
+
+  /** The same description for one browser, such as the one an open request returned. */
+  describeBrowser(browserId: string): BrowserDescription | null {
+    const entry = this.entries.get(browserId);
+    return entry ? this.describeEntry(entry) : null;
+  }
+
+  private describeEntry(entry: ControlEntry): BrowserDescription {
     const isolated = this.isIsolated(entry.browserId);
     const webContents = this.deps.registry.getBoundWebContents(entry.browserId);
     return {
@@ -252,7 +264,8 @@ export class BrowserControlService {
       control: entry.control,
       surface: entry.surface,
       isolated,
-      allowedOrigins: this.allowedOrigins(entry),
+      // Origins of a browser on the developer's own profile are theirs: never told to agents.
+      allowedOrigins: isolated ? this.allowedOrigins(entry) : [],
     };
   }
 

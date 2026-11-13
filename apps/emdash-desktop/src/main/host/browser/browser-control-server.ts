@@ -106,7 +106,13 @@ export class BrowserControlServer extends LoopbackMcpServer<AgentBrowserScope> {
   constructor(
     private readonly control: Pick<
       BrowserControlService,
-      'observe' | 'act' | 'consoleTail' | 'findTaskBrowser' | 'describeTaskBrowser' | 'requestOpen'
+      | 'observe'
+      | 'act'
+      | 'consoleTail'
+      | 'findTaskBrowser'
+      | 'describeTaskBrowser'
+      | 'describeBrowser'
+      | 'requestOpen'
     >,
     logger: Logger,
     onPort: (port: number) => void = () => {}
@@ -142,7 +148,8 @@ export class BrowserControlServer extends LoopbackMcpServer<AgentBrowserScope> {
         const opened = await this.control.requestOpen(scope, resolvedUrl, 'control');
         if (!opened.success) return errorResult(opened.error);
         // requestOpen succeeds only once the tile's page is attached, so agents can use it now.
-        const described = this.control.describeTaskBrowser(scope.taskId);
+        // The browser the renderer opened, which is the one the agent will now act on.
+        const described = this.control.describeBrowser(opened.data);
         const shown = described?.url && described.url !== 'about:blank' ? described.url : null;
         return textResult(
           [

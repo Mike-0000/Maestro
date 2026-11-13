@@ -379,6 +379,20 @@ describe('BrowserControlService', () => {
       });
     });
 
+    it("tells agents no origins of a tab on the developer's own profile", () => {
+      h.service.setControl({ ...tab('b-tab-shared', 'user'), origins: ['http://localhost:4300'] });
+      h.bind('b-tab-shared');
+      h.advance(10);
+      h.show('b-tab-shared');
+
+      expect(h.service.describeTaskBrowser('t1')?.allowedOrigins).toEqual([]);
+      expect(h.service.describeBrowser('b-tab-shared')?.allowedOrigins).toEqual([]);
+      expect(h.service.describeBrowser('b-iso')).toMatchObject({
+        surface: 'canvas',
+        isolated: true,
+      });
+    });
+
     it('forgets a closed tab', () => {
       h.service.setControl(tab('b-tab-iso', 'agents'));
       h.bind('b-tab-iso');

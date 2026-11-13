@@ -45,6 +45,13 @@ function fakeControl() {
       if (taskId !== 't1') return null;
       return access === 'observe' || state.control === 'agents' ? 'b1' : null;
     }),
+    describeBrowser: vi.fn((_browserId: string) => ({
+      browserId: 'b1',
+      url: 'http://localhost:5173/',
+      live: true,
+      control: state.control,
+      allowedOrigins: ['http://localhost:5173'],
+    })),
     describeTaskBrowser: vi.fn(() => ({
       browserId: 'b1',
       url: 'http://localhost:5173/',
@@ -330,7 +337,7 @@ describe('BrowserControlServer', () => {
   });
 
   it('open_app on an empty tile says it shows no page and asks for the dev server', async () => {
-    control.describeTaskBrowser.mockReturnValue({
+    control.describeBrowser.mockReturnValue({
       browserId: 'b1',
       url: 'about:blank',
       live: true,
@@ -346,7 +353,8 @@ describe('BrowserControlServer', () => {
   });
 
   it("open_app names the browser it opened: the task view's, beside the chat", async () => {
-    control.describeTaskBrowser.mockReturnValue({
+    control.requestOpen.mockResolvedValueOnce(ok('b2'));
+    control.describeBrowser.mockReturnValue({
       browserId: 'b1',
       url: 'http://localhost:4100/',
       live: true,
