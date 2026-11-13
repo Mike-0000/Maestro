@@ -177,6 +177,18 @@ function sentence(value: string): string {
   return /[.!?…]$/.test(value) ? value : `${value}.`;
 }
 
+/** How much of the conductor's answer to an agent's question is said aloud. */
+const ANSWER_SPOKEN_CHARS = 140;
+
+/**
+ * What the developer hears once the conductor answered an agent's question: whom it told and
+ * what, not the question again. "Told Lima: Yes, register the runner…"
+ */
+export function answeredLine(senderName: string, answer: string): string {
+  const said = spokenClip(plainText(answer), ANSWER_SPOKEN_CHARS);
+  return said ? `Told ${senderName}: ${sentence(said)}` : `Answered ${senderName}.`;
+}
+
 function origin(sender: RequestSender): string {
   return `agent ${sender.name} (${sender.providerLabel}, task "${sender.taskName}")`;
 }

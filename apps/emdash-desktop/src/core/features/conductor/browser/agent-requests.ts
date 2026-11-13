@@ -2,6 +2,7 @@ import type { AgentTileEntry } from '@core/features/canvas/api/browser/stores/ca
 import type { CompletionReport } from '@core/primitives/agents/api/completion-report';
 import { log } from '@core/primitives/logging/browser/logger';
 import {
+  answeredLine,
   plainText,
   relayedReplyText,
   REQUEST_TURN_ANSWER_CHARS,
@@ -113,6 +114,8 @@ type OpenRequest = {
   asked: { readonly sentence: string; readonly at: number } | null;
   /** How it ended, for the developer, when the model that settled it said nothing. */
   verdict: string;
+  /** The whole closing, in place of its sentence and the verdict, when it says what was decided. */
+  closing?: string;
   /** How it ended, once it did. */
   ended: RequestOutcome['status'] | null;
 };
@@ -430,7 +433,7 @@ export class AgentRequestDesk {
     if (this.open.get(view.id) !== open) {
       // Settled in the turn: the model's sentence says how, or the fixed one does. A routine
       // one is shown and not said; the decision is the same either way.
-      const sentence = closing || `${view.spoken} ${open.verdict}`.trim();
+      const sentence = closing || open.closing || `${view.spoken} ${open.verdict}`.trim();
       const speak = speaksRequestOutcome({
         kind: view.kind,
         status: open.ended,
@@ -571,6 +574,7 @@ export class AgentRequestDesk {
         return refused(`${request.id} is a question: use answer, with the answer as message.`);
       }
       open.verdict = 'I answered it.';
+      open.closing = answeredLine(sender.name, note);
       this.settle(open, { status: 'answered', by, detail: note });
       return {
         outcome: { content: `Passed the answer to ${sender.name}.` },

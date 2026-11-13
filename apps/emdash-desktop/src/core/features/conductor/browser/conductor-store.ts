@@ -45,6 +45,7 @@ import {
   SETTINGS_PAGE_ONLY,
 } from '../api/adjustable-settings';
 import {
+  answeredLine,
   isRequestTurnTool,
   plainText,
   requestLineSummary,
@@ -7394,7 +7395,11 @@ function settledSentence(open: OpenRequestView, actions: readonly ActionRecord[]
   const settle = [...actions]
     .reverse()
     .find((action) => action.tool === 'answer_request' && !action.status);
-  const decision = (settle?.input as { decision?: unknown } | undefined)?.decision;
+  const { decision, message } = (settle?.input ?? {}) as { decision?: unknown; message?: unknown };
+  // An answer is said as what the agent was told, as the request desk says it.
+  if (decision === 'answer' && typeof message === 'string' && message.trim()) {
+    return answeredLine(open.sender.name, message);
+  }
   const verdict = typeof decision === 'string' ? SETTLED_VERDICTS[decision] : undefined;
   return verdict ? `${open.spoken} ${verdict}` : '';
 }
