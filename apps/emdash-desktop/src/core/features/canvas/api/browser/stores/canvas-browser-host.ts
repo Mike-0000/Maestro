@@ -1,6 +1,7 @@
 import { toast } from '@emdash/ui/react/primitives';
 import { action, comparer, makeObservable, observable, reaction, runInAction } from 'mobx';
 import { browserSessionStore } from '@core/features/browser/api/browser/browser-session-store';
+import { browserUserOrigins } from '@core/features/browser/api/browser/browser-user-origins';
 import { getBrowserClient } from '@core/features/browser/api/browser/client';
 import { taskBrowserControl } from '@core/features/browser/api/browser/task-browser-control';
 import {
@@ -24,8 +25,6 @@ import { taskViewDef } from '@core/features/tasks/contributions/views';
 import { getLifecycleScriptsClient } from '@core/features/workspaces/api/browser/client';
 import {
   BROWSER_ISOLATED_PROFILE_ID,
-  httpOrigin,
-  originKey,
   PREVIEW_SCREENSHOT_MAX_EDGE,
   type BrowserAutomationActor,
   type BrowserEvent,
@@ -120,11 +119,12 @@ export class CanvasBrowserHost {
         { fireImmediately: true, equals: comparer.structural }
       ),
       // Sessions for every browser on the board; control synced whenever it changes.
-      // The tile's local origin counts as allowed for agents, so a page the user opens resyncs too.
+      // Local origins the user opened in a tile are allowed for agents, so those resync too.
       reaction(
         () =>
           this.canvas.browserEntries.map(
-            (entry) => `${entry.browserId}:${entry.control}:${httpOrigin(entry.url) ?? ''}`
+            (entry) =>
+              `${entry.browserId}:${entry.control}:${browserUserOrigins.get(entry.browserId).join(',')}`
           ),
         () => this.syncEntries(),
         { fireImmediately: true }
@@ -277,6 +277,7 @@ export class CanvasBrowserHost {
     this.previews.delete(entry.browserId);
     this.leases.delete(entry.browserId);
     this.publicOrigins.delete(entry.browserId);
+    browserUserOrigins.forget(entry.browserId);
     const client = await getBrowserClient();
     await client.forgetControl({ browserId: entry.browserId });
     await client.unregisterSession({ browserId: entry.browserId });
@@ -362,10 +363,9 @@ export class CanvasBrowserHost {
       if (!registered.success) return;
       this.registered.add(entry.browserId);
     }
-    // A local origin the user opened counts as theirs to share; remote origins must come from a
-    // detected dev server (main adds those itself).
-    const origin = httpOrigin(entry.url);
-    const localOrigin = origin && originKey(origin)?.includes('//loopback:') ? origin : null;
+    // Only local origins the user opened in the tile themselves (address bar, start page); where
+    // the page, the conductor or an agent took it never counts. Dev servers main adds itself.
+    const origins = [...browserUserOrigins.get(entry.browserId)];
     const result = await client.setControl({
       browserId: entry.browserId,
       projectId: entry.projectId,
@@ -373,7 +373,7 @@ export class CanvasBrowserHost {
       taskId: entry.taskId,
       control: entry.control,
       surface: 'canvas',
-      ...(localOrigin ? { origins: [localOrigin] } : {}),
+      ...(origins.length > 0 ? { origins } : {}),
       publicOrigins: this.publicOrigins.get(entry.browserId) ?? [],
     });
     if (!result.success) {

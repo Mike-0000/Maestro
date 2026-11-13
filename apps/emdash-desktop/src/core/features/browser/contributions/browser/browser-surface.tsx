@@ -4,6 +4,7 @@ import { observer } from 'mobx-react-lite';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { browserControlsRegistry } from '@core/features/browser/api/browser/browser-controls-registry';
 import { browserSessionStore } from '@core/features/browser/api/browser/browser-session-store';
+import { browserUserOrigins } from '@core/features/browser/api/browser/browser-user-origins';
 import { getBrowserClient } from '@core/features/browser/api/browser/client';
 import {
   browserLoadErrorCode,
@@ -210,6 +211,18 @@ export const BrowserSurface = observer(function BrowserSurface({
     [loadUrl]
   );
 
+  // The developer opened an address themselves (toolbar, start page): agents may open its local
+  // origin too. Addresses asked for from elsewhere (below) never count.
+  const navigateByUser = useCallback(
+    (url: string): boolean => {
+      const normalized = normalizeBrowserUrl(url);
+      if (!normalized.ok || !sessionBrowserId) return navigateTo(url);
+      browserUserOrigins.record(sessionBrowserId, normalized.url);
+      return navigateTo(url);
+    },
+    [navigateTo, sessionBrowserId]
+  );
+
   // An address asked for from outside the toolbar (a task's conductor) loads as if typed there.
   const requestedUrl = browserSessionStore.navigationRequests.get(browserId);
   useEffect(() => {
@@ -315,7 +328,7 @@ export const BrowserSurface = observer(function BrowserSurface({
         onOpenExternal={() => openBrowserUrlExternally(loadErrorUrl)}
       />
     ) : overlay === 'start-page' ? (
-      <BrowserStartPage devServerUrls={devServerUrls} onOpenUrl={navigateTo} />
+      <BrowserStartPage devServerUrls={devServerUrls} onOpenUrl={navigateByUser} />
     ) : null;
 
   if (!session) {
@@ -336,7 +349,7 @@ export const BrowserSurface = observer(function BrowserSurface({
         session={session}
         adapter={adapter}
         autoFocusUrl={showStartPage}
-        onNavigate={navigateTo}
+        onNavigate={navigateByUser}
         onGoBack={goBack}
         onGoForward={goForward}
         onReload={reload}

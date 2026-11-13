@@ -1,6 +1,7 @@
 import { ok } from '@emdash/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { browserSessionStore } from './browser-session-store';
+import { browserUserOrigins } from './browser-user-origins';
 import { TaskBrowserControlStore } from './task-browser-control';
 
 const client = vi.hoisted(() => ({
@@ -30,6 +31,7 @@ describe('TaskBrowserControlStore', () => {
 
   beforeEach(() => {
     browserSessionStore.clear();
+    browserUserOrigins.origins.clear();
     vi.clearAllMocks();
     store = new TaskBrowserControlStore();
   });
@@ -48,7 +50,6 @@ describe('TaskBrowserControlStore', () => {
         browserId: 'tab-1',
         control: 'user',
         surface: 'task-view',
-        origins: ['http://localhost:4100'],
         ...identity,
       })
     );
@@ -99,6 +100,36 @@ describe('TaskBrowserControlStore', () => {
     expect(await store.handOver('tab-2', [])).toBe(true);
     expect(browserSessionStore.getSession('tab-2')?.currentUrl).toBe('about:blank');
     stopOther();
+  });
+
+  it('allows only local origins the developer opened themselves, never where the page went', async () => {
+    openTab('tab-1', 'isolated-per-task');
+    const stop = store.track('tab-1', 'agents');
+    await settle();
+    expect(client.setControl.mock.calls.at(-1)![0]).not.toHaveProperty('origins');
+
+    // The page (or a conductor or agent call) moves the tab to another local service.
+    browserSessionStore.updateSession('tab-1', { currentUrl: 'http://localhost:5432/' });
+    await settle();
+    expect(JSON.stringify(client.setControl.mock.calls)).not.toContain('5432');
+
+    // The developer types an address into the toolbar.
+    browserUserOrigins.record('tab-1', 'http://localhost:4300/admin');
+    await settle();
+    expect(client.setControl).toHaveBeenLastCalledWith(
+      expect.objectContaining({ origins: ['http://localhost:4300'] })
+    );
+    stop();
+  });
+
+  it('drops origins the developer opened on their own profile when the tab moves to agents', async () => {
+    openTab('tab-1');
+    browserUserOrigins.record('tab-1', 'http://localhost:4300/');
+    const stop = store.track('tab-1', 'user');
+    await settle();
+    await store.handOver('tab-1', ['http://localhost:4100/']);
+    expect(JSON.stringify(client.setControl.mock.calls.at(-1))).not.toContain('4300');
+    stop();
   });
 
   it('gives the tab back to the developer when they take it back or leave the isolated profile', async () => {

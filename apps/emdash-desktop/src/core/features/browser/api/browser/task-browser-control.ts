@@ -3,10 +3,10 @@ import {
   BROWSER_ISOLATED_PROFILE_ID,
   httpOrigin,
   isIsolatedBrowserPartition,
-  originKey,
 } from '@core/primitives/browser/api';
 import { log } from '@core/primitives/logging/browser/logger';
 import { browserSessionStore } from './browser-session-store';
+import { browserUserOrigins } from './browser-user-origins';
 import { getBrowserClient } from './client';
 
 export type TaskBrowserControl = 'user' | 'agents';
@@ -47,7 +47,11 @@ export class TaskBrowserControlStore {
       () => {
         const session = browserSessionStore.getSession(browserId);
         return session
-          ? [session.partition, localOrigin(session.currentUrl), this.control(browserId)].join('|')
+          ? [
+              session.partition,
+              browserUserOrigins.get(browserId).join(','),
+              this.control(browserId),
+            ].join('|')
           : null;
       },
       (key) => {
@@ -80,6 +84,8 @@ export class TaskBrowserControlStore {
         const onDevServer = devServerUrls.some((url) => httpOrigin(url) === origin);
         const url = onDevServer ? session.currentUrl : (devServerUrls[0] ?? 'about:blank');
         browserSessionStore.setSessionProfile(browserId, BROWSER_ISOLATED_PROFILE_ID);
+        // Origins the developer opened on their own profile were not opened for agents.
+        browserUserOrigins.forget(browserId);
         browserSessionStore.updateSession(browserId, {
           currentUrl: url,
           title: '',
@@ -112,7 +118,7 @@ export class TaskBrowserControlStore {
       partition: session.partition,
     });
     if (!registered.success) return false;
-    const origin = localOrigin(session.currentUrl);
+    const origins = [...browserUserOrigins.get(browserId)];
     const result = await client.setControl({
       browserId,
       projectId: session.projectId,
@@ -120,7 +126,7 @@ export class TaskBrowserControlStore {
       taskId: session.taskId,
       control,
       surface: 'task-view',
-      ...(origin ? { origins: [origin] } : {}),
+      ...(origins.length > 0 ? { origins } : {}),
     });
     if (!result.success) {
       log.warn('task-browser-control: setControl failed', { error: result.error });
@@ -129,12 +135,6 @@ export class TaskBrowserControlStore {
     }
     return true;
   }
-}
-
-/** A local origin the developer opened in the tab counts as theirs to share with agents. */
-function localOrigin(url: string): string | null {
-  const origin = httpOrigin(url);
-  return origin && originKey(origin)?.includes('//loopback:') ? origin : null;
 }
 
 export const taskBrowserControl = new TaskBrowserControlStore();
