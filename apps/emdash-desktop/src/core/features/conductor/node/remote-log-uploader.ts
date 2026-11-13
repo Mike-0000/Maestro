@@ -530,6 +530,7 @@ export class RemoteLogUploader {
           notes?: unknown;
           status?: unknown;
           autonomy?: unknown;
+          yolo?: unknown;
           updatedAt?: unknown;
         };
         try {
@@ -560,6 +561,8 @@ export class RemoteLogUploader {
             notes: thread.notes ?? '',
             status: thread.status ?? null,
             autonomy: thread.autonomy ?? null,
+            // Only where saved (a task conductor in YOLO mode): other headers stay as sent.
+            ...(typeof thread.yolo === 'boolean' ? { yolo: thread.yolo } : {}),
           },
           timeOf(thread.updatedAt)
         );

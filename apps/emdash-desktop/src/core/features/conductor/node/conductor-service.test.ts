@@ -848,6 +848,9 @@ describe('ConductorService.runChatTurn', () => {
       toolCalls: [{ id: 'toolu_1', name: 'focus_agent', input: '{"agent":"Claude 1"}' }],
       stopReason: 'tool_use',
       model: 'claude-opus-5',
+      // Input written to the cache counts with the input; what was read from it is its own.
+      tokens: 130,
+      cacheReadTokens: 50,
     });
     expect(first?.input).toContain('Go. The key is');
     expect(first?.input).not.toContain(key);

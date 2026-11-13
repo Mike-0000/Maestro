@@ -38,7 +38,10 @@ export const chatTurnLogRecordSchema = z.object({
   reply: z.string(),
   stopReason: z.string().nullable(),
   model: z.string().optional(),
+  /** Input and output tokens; input written to the prompt cache counts as input. */
   tokens: z.number().optional(),
+  /** Input tokens read from the prompt cache, not counted in `tokens`. */
+  cacheReadTokens: z.number().optional(),
   latencyMs: z.number(),
   /** Set when the call failed: its kind and message. */
   error: z.object({ type: z.string(), message: z.string() }).optional(),
@@ -54,7 +57,7 @@ type CallOutcome =
         content: readonly Anthropic.Beta.BetaContentBlock[];
         stopReason: string | null;
         model: string;
-        usage: { inputTokens: number; outputTokens: number };
+        usage: { inputTokens: number; outputTokens: number; cacheReadTokens?: number };
       };
     }
   | { success: false; error: { type: string; message: string } };
@@ -121,6 +124,9 @@ export function chatTurnLogRecord(input: {
       ? {
           model: input.outcome.data.model,
           tokens: input.outcome.data.usage.inputTokens + input.outcome.data.usage.outputTokens,
+          ...(input.outcome.data.usage.cacheReadTokens === undefined
+            ? {}
+            : { cacheReadTokens: input.outcome.data.usage.cacheReadTokens }),
         }
       : { error: input.outcome.error }),
     latencyMs: input.latencyMs,
