@@ -6734,7 +6734,8 @@ export class ConductorStore {
       host: getCanvasBrowserHost(),
       requestPending: (label, kind) => this.requestPending(label, kind),
       resolveTask: (agent) => this.resolveAppTask(agent),
-      actingOnAgentOutput: () => this.followUpActive,
+      // Completion follow-ups and request decisions both act on agent output.
+      actingOnAgentOutput: () => this.followUpActive || this.requestTurnActive,
     });
     return this.appToolsInstance;
   }

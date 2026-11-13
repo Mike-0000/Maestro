@@ -451,7 +451,11 @@ export const AGENT_REQUEST_INSTRUCTIONS =
 
 // ── The conductor's side ─────────────────────────────────────────────────────
 
-/** The only tools the conductor's model may run while it decides a request. */
+/**
+ * The only tools the conductor's model may run while it decides a request: reading state,
+ * settling the request, and opening the asking agent's local app (view only, as in a completion
+ * follow-up; a public website is refused because the turn acts on agent output).
+ */
 export const REQUEST_TURN_TOOLS: ReadonlySet<ConductorToolName> = new Set([
   'list_agents',
   'read_agent',
@@ -459,6 +463,7 @@ export const REQUEST_TURN_TOOLS: ReadonlySet<ConductorToolName> = new Set([
   'agent_details',
   'recent_activity',
   'answer_request',
+  'show_app',
 ]);
 
 export function isRequestTurnTool(name: string): boolean {
@@ -530,7 +535,7 @@ function requestTurnInstruction(open: OpenRequestView): string {
   // minute before. What the developer said wins over the agent and over caution.
   const developerFirst = `What the developer has said in this conversation and in recent conductor activity (on the talk line too) comes first: when the developer asked for what ${name} requests, approve it, and never deny or answer against an instruction the developer gave, even one that sounds risky. The developer wants agents to keep moving without them, so lean towards approving: deny only what is destructive, spends money, or works against what the developer asked for.`;
   const close =
-    'Then say in one short sentence what you decided, for the developer to hear later. Other tools in this turn only read state; read the agent or recent activity first when that helps you decide.';
+    "Then say in one short sentence what you decided, for the developer to hear later. Other tools in this turn only read state, except show_app, which opens the asking agent's local app in its browser when it needs that; read the agent or recent activity first when that helps you decide.";
   if (isQuestionKind(open.kind)) {
     return `${own} ${developerFirst} Use decision "answer" with message as your answer, in a few plain sentences ${name} can act on: pick the option that best serves the work the developer gave it, prefer the reversible and the smaller step, and tell it to carry on with what it can when the question is not yours to answer (a secret, a payment, anything destructive or outside its project). ${close}`;
   }

@@ -4,6 +4,7 @@ import type {
   AgentTileEntry,
   CanvasStore,
 } from '@core/features/canvas/api/browser/stores/canvas-store';
+import { getCanvasBrowserHost } from '@core/features/canvas/contributions/browser/app-stores';
 import type { AgentRequest, AgentRequestAck } from '../api/agent-requests';
 import { DEFAULT_CONDUCTOR_SETTINGS, type ConductorStatus } from '../api/contract';
 import { HEARD_MS } from './agent-requests';
@@ -344,6 +345,38 @@ describe('agent requests in the conductor', () => {
     );
     expect(store.requests.watching('conv-new')).toBe(true);
     expect(store.busy).toBe(false);
+  });
+
+  it("can open the asking agent's app while deciding, but never a public website", async () => {
+    const host = {
+      devServerUrls: vi.fn(() => ['http://localhost:4100/']),
+      openForTask: vi.fn(() => 'b1'),
+      appRunning: vi.fn(() => true),
+      approvePublicOrigin: vi.fn(async () => {}),
+      conductorPublicWebEnabled: vi.fn(async () => true),
+      publicOriginApproved: vi.fn(() => false),
+    };
+    vi.mocked(getCanvasBrowserHost).mockReturnValue(host as never);
+    const { speech, receive } = setup();
+    mocks.runTurn
+      .mockResolvedValueOnce(
+        toolUses(
+          { name: 'show_app', input: { agent: 'Zulu' } },
+          { name: 'show_app', input: { agent: 'Zulu', url: 'https://hub-dev.example.io/' } }
+        )
+      )
+      .mockResolvedValueOnce(text("I opened Zulu's app."));
+
+    await receive(spawnRequest());
+    await vi.waitFor(() => expect(speech.announce).toHaveBeenCalled());
+
+    const results = toolResults(1);
+    expect(results.map((result) => result.is_error ?? false)).toEqual([false, true]);
+    expect(String(results[0]!.content)).toContain("Showing Zulu's app");
+    expect(String(results[1]!.content)).toContain("agent's reply cannot send");
+    expect(host.openForTask).toHaveBeenCalledTimes(1);
+    expect(host.openForTask).toHaveBeenCalledWith(expect.objectContaining({ taskId: 'task-z' }));
+    expect(host.approvePublicOrigin).not.toHaveBeenCalled();
   });
 
   it('refuses every acting tool in the decision turn, and does not wait for the developer', async () => {
