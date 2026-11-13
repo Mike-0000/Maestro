@@ -47,9 +47,17 @@ export type CompletionVerdict =
    */
   | { kind: 'llm'; reason: string; fallback?: string };
 
-/** Report text as speakable sentences: markdown, code, and fragments removed. */
+/**
+ * A coding tool's own status line for a background task, not the agent's words:
+ * 'Agent "Fix login" finished · 29m 41s', 'Background command "npm test" completed (exit code 0)'.
+ */
+const TASK_STATUS =
+  /^[ \t]*(?:[⏺●][ \t]*)?(?:Agent|Task|Background command|Shell)[ \t]+"[^"\n]*"[ \t]+(?:finished|completed|failed|stopped|was stopped|killed|cancelled)\b(?:[ \t]*·[ \t]*(?:\d+h[ \t]*)?(?:\d+m[ \t]*)?(?:\d+(?:\.\d+)?s)?|[ \t]*\([^)\n]*\))?\.?/gmu;
+
+/** Report text as speakable sentences: markdown, code, fragments, and tool status removed. */
 export function reportSentences(text: string): string[] {
   const cleaned = text
+    .replace(TASK_STATUS, '\n')
     .replace(/```[\s\S]*?```/g, '\n')
     .replace(/`([^`\n]*)`/g, '$1')
     .replace(/\*\*|__/g, '')
@@ -73,6 +81,11 @@ export function spokenLine(prefix: string, sentence: string, max = SPOKEN_MAX_CH
   const cut = text.slice(0, max - 1);
   const space = cut.lastIndexOf(' ');
   return `${space > max / 2 ? cut.slice(0, space) : cut}…`;
+}
+
+/** The sentence picked as the agent's question: "Maple asks:" only when it is one. */
+function askedLine(name: string, sentence: string): string {
+  return spokenLine(/\?["'”’)\]]*$/.test(sentence.trim()) ? `${name} asks:` : `${name}:`, sentence);
 }
 
 /** Claude Code's own status marks and lines, which are interface chrome and not the agent's words. */
@@ -182,7 +195,7 @@ export function interpretCompletionGate(
       best.split(' ').length >= BEST_SPEAK_MIN_WORDS;
     const asked = pick(`a${i}_question`);
     const fallback = asked
-      ? spokenLine(`${agent.name} asks:`, asked)
+      ? askedLine(agent.name, asked)
       : best
         ? spokenLine(`${agent.name}:`, best)
         : null;
@@ -215,7 +228,7 @@ export function interpretCompletionGate(
     if (agent.report.source === 'terminal-tail') return llm('terminal-tail');
     if (choice === 'terminal_prompt_only') return llm('terminal-only');
     if (choice === 'needs_decision' && asked) {
-      return { kind: 'speak', text: spokenLine(`${agent.name} asks:`, asked), reason: choice };
+      return { kind: 'speak', text: askedLine(agent.name, asked), reason: choice };
     }
     if (!best) return llm('no-sentence');
     if (!bestSpeakable) return llm('thin-sentence');
