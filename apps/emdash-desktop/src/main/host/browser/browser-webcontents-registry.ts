@@ -74,8 +74,12 @@ export class BrowserWebContentsRegistry {
   private readonly browserIdByWebContentsId = new Map<number, string>();
   private readonly pendingWebContentsIds = new Set<number>();
   private activeBrowserId: string | null = null;
+  /** When each browser's surface last came on screen (its renderer made it the active browser). */
+  private readonly shownAtByBrowserId = new Map<string, number>();
   private browserShortcuts = buildBrowserClaims();
   private readonly bindingListeners = new Set<BrowserBindingListener>();
+
+  constructor(private readonly now: () => number = Date.now) {}
 
   /** Observes webContents binding changes (automation guards, console capture). */
   onBinding(listener: BrowserBindingListener): () => void {
@@ -104,8 +108,23 @@ export class BrowserWebContentsRegistry {
     }
   }
 
+  /**
+   * Registers (or re-registers) a browser's partition. A browser whose partition changes (a tab
+   * switched to another profile) loses its binding at once: the guest still attached belongs to
+   * the old partition, and must never be handed out as this browser while the new one loads.
+   */
   registerSession(input: RegisteredBrowserSession): void {
+    const previous = this.sessionsByBrowserId.get(input.browserId);
+    if (previous && previous.partition !== input.partition) this.dropBinding(input.browserId);
     this.sessionsByBrowserId.set(input.browserId, input);
+  }
+
+  private dropBinding(browserId: string): void {
+    const webContents = this.webContentsByBrowserId.get(browserId);
+    if (!webContents) return;
+    this.webContentsByBrowserId.delete(browserId);
+    this.browserIdByWebContentsId.delete(webContents.id);
+    this.notifyBinding({ type: 'unbound', browserId, webContentsId: webContents.id });
   }
 
   unregisterSession(browserId: string): void {
@@ -116,6 +135,7 @@ export class BrowserWebContentsRegistry {
     }
     this.sessionsByBrowserId.delete(browserId);
     this.webContentsByBrowserId.delete(browserId);
+    this.shownAtByBrowserId.delete(browserId);
     if (this.activeBrowserId === browserId) {
       this.activeBrowserId = null;
     }
@@ -190,9 +210,19 @@ export class BrowserWebContentsRegistry {
     return true;
   }
 
+  /** A renderer surface showing this browser came on screen (null: none is shown). */
   setActiveBrowser(browserId: string | null): void {
     if (browserId !== null && !this.sessionsByBrowserId.has(browserId)) return;
     this.activeBrowserId = browserId;
+    if (browserId !== null) this.shownAtByBrowserId.set(browserId, this.now());
+  }
+
+  /**
+   * When the browser's surface last came on screen, or 0 if it never did. Agents target the
+   * browser of their task the developer looked at last, not one hidden elsewhere.
+   */
+  getShownAt(browserId: string): number {
+    return this.shownAtByBrowserId.get(browserId) ?? 0;
   }
 
   getActiveBrowser(): string | null {
