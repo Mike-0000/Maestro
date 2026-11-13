@@ -35,6 +35,11 @@ export type AppToolDeps = {
   resolveTask(agent: string | undefined): { task: AppTask } | { error: string };
   /** The running turn acts on agent output (a completion follow-up), not on the user's words. */
   actingOnAgentOutput?(): boolean;
+  /**
+   * While an agent's request is decided: the asking agent's task. show_app then opens only that
+   * task's app, on its detected dev servers.
+   */
+  requestScope?(): { taskId: string } | null;
 };
 
 /**
@@ -85,10 +90,20 @@ export class ConductorAppTools {
     const resolved = this.deps.resolveTask(input.agent);
     if ('error' in resolved) return { content: resolved.error, isError: true };
     const { task } = resolved;
+    const scope = this.deps.requestScope?.() ?? null;
+    if (scope && task.taskId !== scope.taskId) {
+      return {
+        content:
+          "While deciding an agent's request, show_app opens only that agent's own app. Leave other agents' apps alone.",
+        isError: true,
+      };
+    }
     const existing = this.deps.canvas.browserForTask(task.taskId);
     const known = existing?.url && existing.url !== 'about:blank' ? existing.url : undefined;
-    const served = this.deps.host.devServerUrls(task)[0];
-    const reported = this.reportedAppUrl(task.taskId);
+    const servers = this.deps.host.devServerUrls(task);
+    const served = servers[0];
+    // An agent's own report is not evidence enough while it is the one asking.
+    const reported = scope ? undefined : this.reportedAppUrl(task.taskId);
     let url: string | undefined;
     let publicOrigin: string | undefined;
     if (input.url) {
@@ -98,6 +113,12 @@ export class ConductorAppTools {
       );
       if (typeof parsed === 'string') return { content: parsed, isError: true };
       if (parsed.kind === 'navigate') url = parsed.url;
+      if (scope && url && !servers.some((server) => sameOrigin(url!, server))) {
+        return {
+          content: `While deciding an agent's request, show_app opens only ${task.name}'s detected dev servers${servers.length ? ` (${servers.join(', ')})` : ' (none is detected yet)'}.`,
+          isError: true,
+        };
+      }
       // Anything else is a public website: off unless enabled, and the user confirms each site.
       if (url && !isLocalAppUrl(url) && !sameOrigin(url, known ?? served)) {
         const admitted = await this.admitPublicUrl(task, url, existing);

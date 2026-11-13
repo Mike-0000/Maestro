@@ -480,6 +480,8 @@ export type OpenRequestView = {
   readonly id: string;
   readonly kind: AgentRequestKind;
   readonly sender: RequestSender;
+  /** The asking agent's conversation; tools in its decision turn are scoped to its task. */
+  readonly senderConversationId?: string;
   readonly at: number;
   /** True once the developer was asked and the request waits for them. */
   readonly awaitingDeveloper: boolean;

@@ -814,6 +814,7 @@ export class AgentRequestDesk {
       id: request.id,
       kind,
       sender,
+      senderConversationId: request.from.conversationId,
       at: open.at,
       awaitingDeveloper: open.state === 'awaiting-developer',
       ...(open.state === 'awaiting-developer' && !told(open) ? { told: false } : {}),

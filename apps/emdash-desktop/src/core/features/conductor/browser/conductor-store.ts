@@ -630,6 +630,8 @@ export class ConductorStore {
   private followUpActive = false;
   /** Set while the model decides an agent request: only that turn's allowlisted tools execute. */
   private requestTurnActive = false;
+  /** The asking agent's task while its request is decided ('' when it is not on the canvas). */
+  private requestTurnTaskId = '';
   /** Completions already announced, by completionKey, with when. */
   private readonly handledCompletions = new Map<string, number>();
   /** When each agent's completion was last spoken, by conversation. */
@@ -6456,6 +6458,9 @@ export class ConductorStore {
     const startedAt = performance.now();
     this.interactionId = crypto.randomUUID();
     this.requestTurnActive = true;
+    this.requestTurnTaskId =
+      this.canvas.agentEntries.find((entry) => entry.conversationId === open.senderConversationId)
+        ?.taskId ?? '';
     runInAction(() => {
       this.phase = 'thinking';
       this.activity = `Reading ${open.sender.name}'s request…`;
@@ -6501,6 +6506,7 @@ export class ConductorStore {
       }
     } finally {
       this.requestTurnActive = false;
+      this.requestTurnTaskId = '';
       this.log({
         route: 'llm',
         actions,
@@ -6736,6 +6742,7 @@ export class ConductorStore {
       resolveTask: (agent) => this.resolveAppTask(agent),
       // Completion follow-ups and request decisions both act on agent output.
       actingOnAgentOutput: () => this.followUpActive || this.requestTurnActive,
+      requestScope: () => (this.requestTurnActive ? { taskId: this.requestTurnTaskId } : null),
     });
     return this.appToolsInstance;
   }
