@@ -74,4 +74,17 @@ describe('TuiHookPipeline', () => {
       expect.objectContaining({ conversationId: 'conv-1', parsed: false })
     );
   });
+
+  it('records a stop that arrived with no body at all', async () => {
+    const { pipeline, applyCanonicalEvent } = createPipeline();
+    vi.mocked(logger.warn).mockClear();
+
+    await pipeline.handle({ ptyId: 'conv-1', type: 'stop', body: '' });
+
+    expect(applyCanonicalEvent).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(
+      'TuiHookPipeline: stop hook carried no final reply',
+      expect.objectContaining({ conversationId: 'conv-1', bodyChars: 0, parsed: false })
+    );
+  });
 });

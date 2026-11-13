@@ -1,6 +1,8 @@
 import { spawn, spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   EMDASH_MARKER,
@@ -11,6 +13,8 @@ import {
   makeStdinHookCommand,
   makeWindowsPowerShellHookCommand,
 } from './hooks';
+
+const GIT_BASH = join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Git', 'bin', 'bash.exe');
 
 describe('hook command helpers', () => {
   it('builds POSIX stdin hook commands', () => {
@@ -56,8 +60,23 @@ describe('hook command helpers', () => {
     }
   );
 
-  it('builds Windows hook commands without a quoted cmd.exe body', () => {
+  it('starts PowerShell directly on Windows by default, with no cmd.exe in front', () => {
     const command = makeNotificationHookCommand('idle_prompt', { platform: 'win32' });
+
+    expect(command).toBe(
+      makeNotificationHookCommand('idle_prompt', {
+        platform: 'win32',
+        windowsLauncher: 'powershell',
+      })
+    );
+    expect(command).not.toContain('cmd.exe');
+  });
+
+  it('builds the cmd.exe launcher without a quoted body when asked for it', () => {
+    const command = makeNotificationHookCommand('idle_prompt', {
+      platform: 'win32',
+      windowsLauncher: 'cmd',
+    });
 
     expect(command).toMatch(
       /^cmd\.exe \/d \/c set EMDASH_HOOK_MARKER=EMDASH_HOOK_CONFIG_VERSION=1 EMDASH_HOOK_PORT&&powershell\.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand [A-Za-z0-9+/]+=*$/
@@ -68,9 +87,9 @@ describe('hook command helpers', () => {
   });
 
   it('emits no redirects (an outer shell parsing >NUL creates a stray NUL file)', () => {
-    const command = makeWindowsPowerShellHookCommand('Write-Output "ok"');
-
-    expect(command).not.toContain('>');
+    for (const launcher of ['cmd', 'powershell'] as const) {
+      expect(makeWindowsPowerShellHookCommand('Write-Output "ok"', launcher)).not.toContain('>');
+    }
   });
 
   it.skipIf(process.platform === 'win32')(
@@ -100,7 +119,7 @@ describe('hook command helpers', () => {
   );
 
   it('keeps the Emdash markers visible to hook config cleanup without PowerShell args', () => {
-    const command = makeWindowsPowerShellHookCommand('Write-Output "ok"');
+    const command = makeWindowsPowerShellHookCommand('Write-Output "ok"', 'cmd');
 
     expect(
       command.startsWith(
@@ -177,6 +196,52 @@ describe('hook command helpers', () => {
       });
 
       expect(await received).toBe(sent);
+    },
+    30_000
+  );
+
+  // Claude Code runs hook commands through Git Bash on Windows. Bash rewrites `/d /c` as paths, so
+  // a `cmd.exe /d /c …` launcher starts an interactive cmd.exe that reads the event JSON from stdin
+  // as commands (running any `&` in the agent's text) and PowerShell posts an empty body.
+  it.runIf(process.platform === 'win32' && existsSync(GIT_BASH))(
+    'delivers the body through Git Bash and never runs text taken from it',
+    async () => {
+      const sent = JSON.stringify({
+        last_assistant_message: 'Done" & echo INJECTED_MARKER & echo "',
+      });
+      let stdout = '';
+      const received = new Promise<string>((resolve) => {
+        const server = http.createServer((req, res) => {
+          const chunks: Buffer[] = [];
+          req.on('data', (chunk: Buffer) => chunks.push(chunk));
+          req.on('end', () => {
+            res.writeHead(200);
+            res.end();
+            server.close();
+            resolve(Buffer.concat(chunks).toString('utf8'));
+          });
+        });
+        server.listen(0, '127.0.0.1', () => {
+          const child = spawn(
+            GIT_BASH,
+            ['-c', makeStdinHookCommand('stop', { platform: 'win32' })],
+            {
+              stdio: ['pipe', 'pipe', 'ignore'],
+              env: {
+                ...process.env,
+                EMDASH_HOOK_PORT: String((server.address() as AddressInfo).port),
+                EMDASH_HOOK_NONCE: 'nonce',
+                EMDASH_PTY_ID: 'pty-1',
+              },
+            }
+          );
+          child.stdout.on('data', (chunk: Buffer) => (stdout += chunk.toString('utf8')));
+          child.stdin.end(sent);
+        });
+      });
+
+      expect(await received).toBe(sent);
+      expect(stdout).not.toContain('INJECTED_MARKER');
     },
     30_000
   );

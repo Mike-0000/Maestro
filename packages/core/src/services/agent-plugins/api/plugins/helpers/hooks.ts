@@ -5,9 +5,12 @@ export type HookCommandOptions = {
   platform?: NodeJS.Platform;
   stdoutJson?: Record<string, unknown>;
   /**
-   * How a Windows command starts PowerShell. `cmd` (the default) chains a marker `set` and
-   * PowerShell with `&&`; `powershell` starts PowerShell directly, for agents that run hook
-   * commands through Windows PowerShell 5.1, which has no `&&` and fails the whole line.
+   * How a Windows command starts PowerShell. `powershell` (the default) starts PowerShell
+   * directly, which every hook shell runs the same way. `cmd` chains a marker `set` and PowerShell
+   * with `&&`. It breaks under Git Bash, where Claude Code runs hooks on Windows: bash rewrites
+   * `/d /c` as paths, so cmd.exe starts interactively, reads the event JSON from stdin as commands
+   * (running any `&` in the agent's text), and PowerShell posts an empty body. It also fails under
+   * Windows PowerShell 5.1, which has no `&&`.
    */
   windowsLauncher?: WindowsHookLauncher;
 };
@@ -66,7 +69,7 @@ function makeWindowsHookPostCommand(
   eventType: string,
   payload: HookPostPayload,
   stdoutJson?: Record<string, unknown>,
-  launcher: WindowsHookLauncher = 'cmd'
+  launcher: WindowsHookLauncher = 'powershell'
 ): string {
   // The agent writes UTF-8, which Windows PowerShell decodes with the console code page and would
   // post as Latin-1, garbling every non-ASCII character. Encoding the text back with the code
@@ -98,7 +101,7 @@ function makeWindowsHookPostCommand(
 
 export function makeWindowsPowerShellHookCommand(
   script: string,
-  launcher: WindowsHookLauncher = 'cmd'
+  launcher: WindowsHookLauncher = 'powershell'
 ): string {
   if (launcher === 'powershell') {
     // One plain command that every shell runs the same way: PowerShell 5.1, pwsh, cmd.exe and
