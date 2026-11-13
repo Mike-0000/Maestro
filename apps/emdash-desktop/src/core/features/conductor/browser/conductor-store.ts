@@ -38,7 +38,7 @@ import {
 import type { ConductorDecisionMark } from '@core/primitives/agents/api/conductor-decisions';
 import { log } from '@core/primitives/logging/browser/logger';
 import { playNotificationSound } from '@core/primitives/notifications/browser/notification-sound';
-import { ActivityLedger, formatAgo } from '../api/activity-ledger';
+import { ActivityLedger, formatAgo, spokenDone } from '../api/activity-ledger';
 import {
   describeAdjustableSettings,
   parseSettingChange,
@@ -4211,6 +4211,7 @@ export class ConductorStore {
       { role: 'user', content: conductorUserMessage(context, text) },
     ];
     const actions: ActionRecord[] = [];
+    const base = this.history.length;
     const { reply, completed, tokens } = await this.modelLoop(
       mode,
       messages,
@@ -4220,6 +4221,12 @@ export class ConductorStore {
 
     // Keep history only for turns that ended on an assistant message (valid to resume from).
     if (completed) this.history = this.remember(messages);
+    else if (lineTurnActed(actions)) {
+      // A turn that failed after it changed something keeps its finished steps, closed with what
+      // was said, so asking again does not start a second agent.
+      const kept = keptRequestTurn(messages, base, reply);
+      if (kept) this.history = this.remember(kept);
+    }
     this.setReply(reply, source);
     this.log({ route: 'llm', actions, reply, startedAt, tokens });
   }
@@ -4317,7 +4324,7 @@ export class ConductorStore {
           runInAction(
             () => (this.error = { kind: result.error.type, message: result.error.message })
           );
-          reply = spokenError(result.error);
+          reply = afterDone(actions, spokenError(result.error));
           break;
         }
         const turn = result.data;
@@ -4421,11 +4428,13 @@ export class ConductorStore {
           break;
         }
       }
-      if (!completed && !reply) reply = 'I stopped after several steps. Check the canvas.';
+      if (!completed && !reply) {
+        reply = afterDone(actions, 'I stopped after several steps. Check the canvas.');
+      }
     } catch (error) {
       log.error('conductor: turn failed', { error });
       runInAction(() => (this.error = { kind: 'other', message: errorMessage(error) }));
-      reply = 'Something went wrong talking to the conductor.';
+      reply = afterDone(actions, 'Something went wrong talking to the conductor.');
     }
     return { reply, completed, tokens, ...(settled ? { settled } : {}) };
   }
@@ -7382,6 +7391,15 @@ function spokenError(error: ConductorError): string {
     default:
       return 'The conductor hit an API error.';
   }
+}
+
+/**
+ * A model turn that failed after it changed something says what it did before why it stopped:
+ * the developer must not think nothing happened and ask again.
+ */
+function afterDone(actions: readonly ActionRecord[], failure: string): string {
+  const done = spokenDone(actions.filter((action) => lineTurnActed([action])));
+  return done ? `Done so far: ${done}. ${failure}` : failure;
 }
 
 function delay(ms: number): Promise<void> {
