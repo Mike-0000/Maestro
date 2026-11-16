@@ -3,7 +3,9 @@
 Maestro can send the conductor's logs from this computer to the developer's own Supabase project,
 so they can be reviewed later from anywhere. The uploader is
 `apps/emdash-desktop/src/core/features/conductor/node/remote-log-uploader.ts`; the database schema
-is `supabase/migrations/20261112000000_maestro_remote_logs.sql`.
+is `supabase/migrations/20261112000000_maestro_remote_logs.sql`; the main process log table is
+`supabase/migrations/20261116000000_maestro_app_log.sql`, which must be run before those rows arrive
+(until then that table alone fails, and the others keep uploading).
 
 ## What is sent
 
@@ -16,10 +18,20 @@ bearer tokens, passwords, private keys, JWTs), by `redactSecrets` from `@emdash/
 | `interaction-trace.jsonl` | `maestro_interaction_trace` | Capture, routing, tool and reply events of each voice interaction. |
 | `chat-conductor-log.jsonl` | `maestro_chat_conductor_calls` | Every task conductor model call: its input (the developer's words or the chat event with agent output), tool results, tool calls with their inputs, and the reply. |
 | `task-conductors/*.json`, `chat-conductors/*.json` | `maestro_conductor_threads` | The conductor threads entry by entry (developer messages, conductor messages, actions, events, reports), and each new version of the notes and status. |
+| `logs/emdash.log` (and `emdash.log.1` after a rotation), in the app's user data folder | `maestro_app_log` | Warnings and errors of the main process and its workers: startup, project attachment, connection, auth, network, update and worker failures. **Not sent in full** (see below). |
 
 The three JSONL files are written only while **Keep a voice history** is on. The threads are
 always on disk. Local files keep their own limits (`diagnosticDays`, up to 30 days, and a size cap
 per file). The uploader runs every minute, so records go up long before they age out locally.
+
+The main process log is reduced line by line first (`app-log-lines.ts`): only `warn`, `error` and
+`fatal` lines (a production build writes nothing lower); no heartbeats and no renderer lines; fields
+that hold output, prompts or text (`chunk`, `data`, `prompt`, `content`, `command`, `stdout` and
+the like) and every secret-named field are dropped; strings are cut to 1,000 characters (stacks to
+2,000); then secrets, tokens, Supabase keys, the upload key itself, emails, IP addresses and user
+names in paths are redacted. The file only grows until it rotates, so it is tracked by time: the
+newest line sent, plus the hashes of the lines sent in the two minutes before it. A first upload
+reaches back seven days.
 
 Every row carries `install_id` (a random id for this install), `app_version`, `source` (the file it
 came from), `recorded_at`, `record_hash` and `record` (the record as JSON).

@@ -1,16 +1,18 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { redactSecrets, type Logger } from '@emdash/shared/logger';
 import { app } from 'electron';
 import { z } from 'zod';
 import type { RemoteLogStatus } from '../api/contract';
+import { appLogRecord } from './app-log-lines';
 
 /**
  * Sends the conductor's local logs to the developer's own Supabase project, so they can be
  * reviewed from another computer. It uploads what is already on disk: the voice conductor's turns,
  * the interaction trace, every chat and task conductor model call, and the conductor threads the
  * developer reads. Full text goes up, with secrets and tokens redacted once more on the way out.
+ * The main process log's warnings and errors go up too, reduced first (see `app-log-lines.ts`).
  *
  * Nothing leaves the computer unless the setting is on and a project is known: the one named in
  * `remote-logs.json` in the data folder, or else the one built into the app (the push script sets
@@ -67,13 +69,38 @@ const MAX_THREAD_BYTES = 4 * 1024 * 1024;
  */
 export const REMOTE_LOG_MAX_RECORD_BYTES = 200_000;
 
+/**
+ * The main process log (`emdash.log`, and the file it last rotated into): its warnings and errors,
+ * reduced by `appLogRecord`, go to this table. The file only grows until it rotates, so what was
+ * sent is tracked by time rather than by a hash per record.
+ */
+export const REMOTE_LOG_APP_TABLE = 'maestro_app_log';
+const APP_LOG_FILE = 'emdash.log';
+/** How far back a first upload reaches. */
+export const REMOTE_LOG_APP_BACKLOG_MS = 7 * 24 * 60 * 60_000;
+/**
+ * Lines from workers are written a little after their own time, so lines up to this long before
+ * the newest one sent are still taken, unless they were sent (their hashes are kept that long).
+ */
+const APP_LOG_OVERLAP_MS = 2 * 60_000;
+const LINE_TIME = /"time":"([^"]+)"/;
+
 const configSchema = z.object({ url: z.string(), anonKey: z.string() });
 export type RemoteLogConfig = z.infer<typeof configSchema>;
+
+const appLogCursorSchema = z.object({
+  /** The newest line sent. */
+  at: z.string(),
+  /** The lines sent within the overlap before it: hash to time. */
+  recent: z.record(z.string(), z.string()),
+});
+type AppLogCursor = z.infer<typeof appLogCursorSchema>;
 
 const stateSchema = z.object({
   installId: z.string().min(1),
   /** Per source, the hashes of its records that were sent and are still on disk. */
   sent: z.record(z.string(), z.array(z.string())),
+  appLog: appLogCursorSchema.optional(),
 });
 
 type Row = {
@@ -85,7 +112,15 @@ type Row = {
   record: unknown;
 };
 
-type Pending = { table: string; source: string; hash: string; row: Row; bytes: number };
+type Pending = {
+  table: string;
+  source: string;
+  hash: string;
+  row: Row;
+  bytes: number;
+  /** For a line of the main process log: its time, tracked by the cursor instead of `sent`. */
+  appLogAt?: string;
+};
 
 export type RemoteLogUploaderOptions = {
   dataDir: string;
@@ -97,8 +132,22 @@ export type RemoteLogUploaderOptions = {
   appVersion?: string | null;
   /** Overrides the project built into the app (tests). */
   builtIn?: RemoteLogConfig | null;
+  /** Overrides where the main process log is (tests); null sends none. */
+  appLogPath?: string | null;
   now?: () => number;
 };
+
+/** Where the main process writes its log, as `main/host/file-logger.ts` sets it up. */
+function defaultAppLogPath(): string | null {
+  const override = process.env.EMDASH_LOG_FILE?.trim();
+  if (override) return resolve(override);
+  try {
+    const logs = (app as typeof app | undefined)?.getPath?.('logs');
+    return logs ? join(logs, APP_LOG_FILE) : null;
+  } catch {
+    return null;
+  }
+}
 
 /** The project built into this build of the app, if the push script gave it one. */
 export function builtInRemoteLogConfig(): RemoteLogConfig | null {
@@ -218,6 +267,9 @@ export class RemoteLogUploader {
   private notBefore = 0;
   private installId: string | null = null;
   private sent = new Map<string, Set<string>>();
+  private appLog: AppLogCursor | null = null;
+  /** The upload keys known at the last read of the config, never sent in a log line. */
+  private keys: string[] = [];
   /** Per source, the signature (size and time) at which everything in it was sent. */
   private clean = new Map<string, string>();
   private version: string | null | undefined;
@@ -309,6 +361,7 @@ export class RemoteLogUploader {
     const builtIn =
       this.options.builtIn === undefined ? builtInRemoteLogConfig() : this.options.builtIn;
     const config = fromFile ?? builtIn;
+    this.keys = [fromFile?.anonKey, builtIn?.anonKey].filter((key): key is string => Boolean(key));
     this.status = {
       ...this.status,
       configured: config !== null,
@@ -326,9 +379,11 @@ export class RemoteLogUploader {
       );
       const state = stateSchema.parse(raw);
       this.sent = new Map(Object.entries(state.sent).map(([key, list]) => [key, new Set(list)]));
+      this.appLog = state.appLog ?? null;
       this.installId = state.installId;
     } catch {
       this.sent = new Map();
+      this.appLog = null;
       this.installId = randomUUID();
     }
     return this.installId;
@@ -339,6 +394,7 @@ export class RemoteLogUploader {
     const state = {
       installId: this.installId,
       sent: Object.fromEntries([...this.sent].map(([key, set]) => [key, [...set]])),
+      ...(this.appLog ? { appLog: this.appLog } : {}),
     };
     await mkdir(this.options.dataDir, { recursive: true });
     const path = join(this.options.dataDir, REMOTE_LOG_STATE_FILE);
@@ -380,47 +436,74 @@ export class RemoteLogUploader {
       list.push(item);
       byTable.set(item.table, list);
     }
+    // A table that refuses rows (one not created yet, say) does not hold back the others.
+    let firstError: unknown = null;
     try {
       for (const [table, items] of byTable) {
-        for (let start = 0; start < items.length; ) {
-          let end = start;
-          let bytes = 0;
-          while (
-            end < items.length &&
-            end - start < BATCH_ROWS &&
-            (end === start || bytes + (items[end]?.bytes ?? 0) <= BATCH_BYTES)
-          ) {
-            bytes += items[end]?.bytes ?? 0;
-            end++;
-          }
-          const batch = items.slice(start, end);
-          await this.send(config, table, batch);
-          for (const item of batch) {
-            const sent = this.sent.get(item.source) ?? new Set<string>();
-            sent.add(item.hash);
-            this.sent.set(item.source, sent);
-          }
-          // Saved after every batch: a later failure never sends these again.
-          await this.saveState();
-          changed = false;
-          this.status = {
-            ...this.status,
-            uploaded: this.status.uploaded + batch.length,
-            lastUploadAt: new Date(this.now()).toISOString(),
-            lastError: null,
-          };
-          start = end;
-          await yieldToApp();
+        try {
+          await this.sendTable(config, table, items);
+        } catch (error) {
+          firstError ??= error;
         }
       }
     } finally {
       if (changed) await this.saveState().catch(() => {});
     }
+    if (firstError !== null) throw firstError;
     // Everything read this pass is now sent: skip those files until they change.
     for (const [source, scan] of scanned) this.clean.set(source, scan.signature);
     this.failures = 0;
     this.notBefore = 0;
     this.status = { ...this.status, lastError: null };
+  }
+
+  /** Sends one table's records in batches, saving what was sent after each. */
+  private async sendTable(config: RemoteLogConfig, table: string, items: Pending[]): Promise<void> {
+    for (let start = 0; start < items.length; ) {
+      let end = start;
+      let bytes = 0;
+      while (
+        end < items.length &&
+        end - start < BATCH_ROWS &&
+        (end === start || bytes + (items[end]?.bytes ?? 0) <= BATCH_BYTES)
+      ) {
+        bytes += items[end]?.bytes ?? 0;
+        end++;
+      }
+      const batch = items.slice(start, end);
+      await this.send(config, table, batch);
+      for (const item of batch) {
+        if (item.appLogAt !== undefined) {
+          this.markAppLogSent(item.hash, item.appLogAt);
+          continue;
+        }
+        const sent = this.sent.get(item.source) ?? new Set<string>();
+        sent.add(item.hash);
+        this.sent.set(item.source, sent);
+      }
+      // Saved after every batch: a later failure never sends these again.
+      await this.saveState();
+      this.status = {
+        ...this.status,
+        uploaded: this.status.uploaded + batch.length,
+        lastUploadAt: new Date(this.now()).toISOString(),
+        lastError: null,
+      };
+      start = end;
+      await yieldToApp();
+    }
+  }
+
+  /** Moves the main process log's cursor past a line just sent. */
+  private markAppLogSent(hash: string, at: string): void {
+    const newest = this.appLog && this.appLog.at > at ? this.appLog.at : at;
+    const floor = new Date(Date.parse(newest) - APP_LOG_OVERLAP_MS).toISOString();
+    const recent: Record<string, string> = {};
+    for (const [key, time] of Object.entries(this.appLog?.recent ?? {})) {
+      if (time >= floor) recent[key] = time;
+    }
+    if (at >= floor) recent[hash] = at;
+    this.appLog = { at: newest, recent };
   }
 
   private async send(config: RemoteLogConfig, table: string, batch: Pending[]): Promise<void> {
@@ -569,6 +652,69 @@ export class RemoteLogUploader {
         await yieldToApp();
       }
     }
+
+    await this.collectAppLog(installId, open, pending);
     return { pending, scanned, existing };
+  }
+
+  /**
+   * The main process log's warnings and errors not sent yet, oldest first: from the file it last
+   * rotated into, then the current one. A first upload reaches back `REMOTE_LOG_APP_BACKLOG_MS`.
+   */
+  private async collectAppLog(
+    installId: string,
+    open: (source: string, path: string) => Promise<{ raw: string; scan: SourceScan } | null>,
+    pending: Pending[]
+  ): Promise<void> {
+    const path =
+      this.options.appLogPath === undefined ? defaultAppLogPath() : this.options.appLogPath;
+    if (!path) return;
+    const backlogFloor = new Date(this.now() - REMOTE_LOG_APP_BACKLOG_MS).toISOString();
+    const cursorFloor = this.appLog
+      ? new Date(Date.parse(this.appLog.at) - APP_LOG_OVERLAP_MS).toISOString()
+      : backlogFloor;
+    const floor = cursorFloor > backlogFloor ? cursorFloor : backlogFloor;
+    // The upload key is never sent, whatever line quotes it.
+    const secrets = this.keys;
+    const found = new Map<string, Pending>();
+
+    for (const suffix of ['.1', '']) {
+      const source = `logs/${APP_LOG_FILE}${suffix}`;
+      const opened = await open(source, path + suffix);
+      if (!opened) continue;
+      for (const line of opened.raw.split('\n')) {
+        // Most lines are older than what was sent: skip them before parsing.
+        const time = LINE_TIME.exec(line)?.[1];
+        if (time === undefined || Number.isNaN(Date.parse(time))) continue;
+        if (new Date(Date.parse(time)).toISOString() < floor) continue;
+        const parsed = appLogRecord(line, secrets);
+        if (!parsed || parsed.recordedAt < floor) continue;
+        const { value, text } = capRecord({
+          value: parsed.record,
+          text: JSON.stringify(parsed.record),
+        });
+        const hash = hashOf(text + parsed.recordedAt);
+        if (found.has(hash) || this.appLog?.recent[hash] !== undefined) continue;
+        found.set(hash, {
+          table: REMOTE_LOG_APP_TABLE,
+          source,
+          hash,
+          bytes: text.length + 200,
+          appLogAt: parsed.recordedAt,
+          row: {
+            install_id: installId,
+            app_version: this.version ?? null,
+            source: APP_LOG_FILE,
+            recorded_at: parsed.recordedAt,
+            record_hash: hash,
+            record: value,
+          },
+        });
+      }
+      await yieldToApp();
+    }
+    const lines = [...found.values()];
+    lines.sort((a, b) => ((a.appLogAt ?? '') < (b.appLogAt ?? '') ? -1 : 1));
+    pending.push(...lines);
   }
 }
