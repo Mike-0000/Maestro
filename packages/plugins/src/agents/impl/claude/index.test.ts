@@ -31,7 +31,9 @@ describe('claude provider delegation policy', () => {
     });
     const appended = args[args.indexOf('--append-system-prompt') + 1];
     expect(appended).toMatch(/new conversation.*fast-forwarding it.*merge the base in/);
-    expect(appended).toMatch(/uncommitted changes.*do not discard or overwrite.*report/);
+    expect(appended).toMatch(/uncommitted changes, in which case do not discard or overwrite/);
+    // Local commits survive a merge, so they must not stop it.
+    expect(appended).not.toMatch(/local commits/);
     expect(JSON.stringify(provider.behavior.acp!.sessionMeta!())).toMatch(/fast-forwarding it/);
   });
 
