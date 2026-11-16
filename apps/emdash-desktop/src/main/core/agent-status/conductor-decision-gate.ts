@@ -5,6 +5,7 @@ import {
   DECISION_ACK_MS,
   DECISION_CLAIM_TTL_MS,
   DECISION_TIMEOUT_MS,
+  DECISION_TURN_END_TIMEOUT_MS,
   getConductorDecisionPolicy,
   type ConductorDecision,
   type ConductorDecisionCloseReason,
@@ -107,6 +108,8 @@ export class ConductorDecisionGate<Options = unknown> implements ConductorDecisi
   hold(conversationId: string, held: HeldEvent<Options>): string {
     this.supersede(conversationId);
     const now = this.clock.now();
+    // A prompt blocks the agent; a turn end blocks nothing and gets the conductor's whole turn.
+    const timeoutMs = held.blocking ? DECISION_TIMEOUT_MS : DECISION_TURN_END_TIMEOUT_MS;
     const request: ConductorDecisionRequest = {
       holdId: randomUUID(),
       conversationId,
@@ -116,7 +119,7 @@ export class ConductorDecisionGate<Options = unknown> implements ConductorDecisi
       completionSummary: held.summary,
       requestedAt: now,
       ackBy: now + DECISION_ACK_MS,
-      decideBy: now + DECISION_TIMEOUT_MS,
+      decideBy: now + timeoutMs,
     };
     const hold: Hold<Options> = { request, held, acked: false, timers: [] };
     this.holds.set(conversationId, hold);
@@ -124,10 +127,7 @@ export class ConductorDecisionGate<Options = unknown> implements ConductorDecisi
       this.clock.setTimeout(() => {
         if (!hold.acked) this.fallBack(hold, 'fallback', 'not acknowledged');
       }, DECISION_ACK_MS),
-      this.clock.setTimeout(
-        () => this.fallBack(hold, 'timed-out', 'no decision'),
-        DECISION_TIMEOUT_MS
-      )
+      this.clock.setTimeout(() => this.fallBack(hold, 'timed-out', 'no decision'), timeoutMs)
     );
     this.emit({ type: 'requested', ...request });
     return request.holdId;

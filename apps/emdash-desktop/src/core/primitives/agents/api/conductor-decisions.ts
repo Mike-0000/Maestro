@@ -8,15 +8,26 @@ import type { CompletionReport } from './completion-report';
  * Main owns the hold: for a conversation the renderer has claimed (`claim`), a turn end or an
  * attention prompt is held, nothing is published or notified, and a `requested` event goes out.
  * The renderer's conductor answers with `resolve`. Whatever goes wrong (no acknowledgement within
- * `DECISION_ACK_MS`, no decision within `DECISION_TIMEOUT_MS`, the claim lapsing, the conductor
+ * `DECISION_ACK_MS`, no decision within `DECISION_TIMEOUT_MS` (`DECISION_TURN_END_TIMEOUT_MS` for a
+ * turn end), the claim lapsing, the conductor
  * unable to run) falls back to the status and notifications the event would have had without a
  * conductor, so a real "needs you" is never lost. Without claims nothing is held.
  */
 
 /** How long the renderer has to acknowledge a request before main falls back. */
 export const DECISION_ACK_MS = 5_000;
-/** How long, from the request, the conductor has to decide before main falls back. */
+/**
+ * How long, from the request, the conductor has to decide a blocking prompt (permission or
+ * elicitation) before main falls back: the agent cannot go on until someone answers it.
+ */
 export const DECISION_TIMEOUT_MS = 45_000;
+/**
+ * How long the conductor has to decide a turn end (or a reminder that ends one). Nothing waits on
+ * it, and a conductor that reads the chat and acts for the developer often takes longer than a
+ * prompt allows; falling back sooner would tell the developer what the conductor is handling.
+ * An unacknowledged request still falls back after `DECISION_ACK_MS`.
+ */
+export const DECISION_TURN_END_TIMEOUT_MS = 180_000;
 /** How long a claim lives without being renewed. */
 export const DECISION_CLAIM_TTL_MS = 45_000;
 /** How often the renderer should renew its claim. */

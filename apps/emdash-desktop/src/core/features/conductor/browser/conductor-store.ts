@@ -5885,7 +5885,17 @@ export class ConductorStore {
     // What a chat's conductor already decided is told as it decided, in its words: never gated,
     // narrated again, or sounded here (the notification service sounds it when it notifies).
     for (const entry of batch) if (entry.conductor) this.tellDecided(entry, entry.conductor);
-    const entries = batch.filter((entry) => !entry.conductor);
+    // An error in a chat whose conductor acts for the developer is that conductor's to handle
+    // (it may already be trying another way): shown, never spoken.
+    const handlingError = batch.filter(
+      (entry) =>
+        !entry.conductor &&
+        entry.status === 'error' &&
+        (this.chats?.actsFor?.(entry.conversationId) ?? false)
+    );
+    const errorText = this.fixedAnnouncement(handlingError, new Map());
+    if (errorText) this.showQuietly(errorText);
+    const entries = batch.filter((entry) => !entry.conductor && !handlingError.includes(entry));
     if (entries.length === 0) return;
     const reports = new Map<string, CompletionReport>();
     const fresh: AgentTileEntry[] = [];

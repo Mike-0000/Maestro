@@ -944,6 +944,26 @@ describe("what a chat's conductor decided", () => {
     all.store.dispose();
   });
 
+  it('shows, not says, an error in a chat whose conductor acts for the developer', async () => {
+    const failed = agent({ status: 'error', seen: false });
+    const handling = await setup([failed]);
+    handling.store.setChatConductors({ front: null, actsFor: (id) => id === 'conv-z' });
+    await handling.store['announceBatch']([failed]);
+    await settle();
+    expect(handling.speech.heard).toEqual([]);
+    expect(handling.store.reply).toContain('Zulu');
+    handling.store.dispose();
+
+    // Nobody acting for the developer there: the error is still said.
+    const alone = await setup([failed]);
+    alone.store.setChatConductors({ front: null, actsFor: () => false });
+    await alone.store['announceBatch']([failed]);
+    await settle();
+    expect(alone.speech.heard).toHaveLength(1);
+    expect(alone.speech.heard[0]).toContain('Zulu');
+    alone.store.dispose();
+  });
+
   it('raises a call with the headline when calls are on', async () => {
     const { store } = await setup([agent()], { calls: 'quiet' });
     await store['announceBatch']([decided('needs_you', true)]);

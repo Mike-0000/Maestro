@@ -211,6 +211,20 @@ export class ChatConductorManager implements FrontConductorSource {
       .flatMap((session) => session.chatIds);
   }
 
+  actsFor(conversationId: string): boolean {
+    if (!this.ready) return false;
+    const entry = this.canvas.agentEntries.find(
+      (candidate) => candidate.conversationId === conversationId
+    );
+    const session = entry ? this.sessions.get(entry.taskId) : undefined;
+    return Boolean(
+      session?.attached &&
+      session.loaded &&
+      session.autonomy &&
+      session.chatIds.includes(conversationId)
+    );
+  }
+
   private readonly decisions = new DecisionDesk({
     claimable: () => this.decidingChats,
     sessionFor: (conversationId) => {
