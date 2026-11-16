@@ -1525,6 +1525,34 @@ describe('deciding what the developer is told', () => {
     expect(h.resolved()[0]?.decision).toEqual({ kind: 'quiet', answered: true });
   });
 
+  it('settles a held prompt as soon as it answers it, not when its turn ends', async () => {
+    const h = await following();
+    const rest = deferred<ChatTurnResult>();
+    h.replies.push(
+      says(tool('answer_prompt', { decision: 'allow' })),
+      rest.promise,
+      says(text('Allowed it.'))
+    );
+    h.session.decide(
+      held({ kind: 'awaiting-input', notificationType: 'permission_prompt', text: null })
+    );
+    // The turn goes on after the answer (it reads, it acts): main already has the decision, so
+    // its deadline cannot pass and tell the developer of a prompt the conductor answered.
+    await vi.waitFor(() => expect(h.calls).toHaveLength(2));
+    expect(h.session.busy).toBe(true);
+    expect(h.resolved()).toEqual([
+      {
+        holdId: 'hold-1',
+        conversationId: 'conv-1',
+        decision: { kind: 'quiet', answered: true },
+      },
+    ]);
+    rest.resolve(says(tool('list_chats')));
+    await h.idle();
+    // It is settled once: the end of the turn does not resolve it again.
+    expect(h.resolved()).toHaveLength(1);
+  });
+
   it('answers the permission prompt it is deciding, though the chat still shows working', async () => {
     const h = await following();
     // Main shows nothing of a held prompt: the chat's state stays at working while it decides.

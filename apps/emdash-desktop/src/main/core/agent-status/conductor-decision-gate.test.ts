@@ -3,6 +3,7 @@ import {
   DECISION_ACK_MS,
   DECISION_CLAIM_TTL_MS,
   DECISION_TIMEOUT_MS,
+  DECISION_TURN_END_TIMEOUT_MS,
   type ConductorDecisionEvent,
   type ConductorDecisionPolicy,
 } from '@core/primitives/agents/api/conductor-decisions';
@@ -61,6 +62,22 @@ const held: HeldEvent<string> = {
   summary: 'Done',
 };
 
+const prompt: HeldEvent<string> = {
+  ...held,
+  signal: {
+    type: 'notification',
+    conversationId: 'c1',
+    timestamp: 1,
+    payload: { notificationType: 'permission_prompt' },
+  },
+  kind: 'awaiting-input',
+  notificationType: 'permission_prompt',
+  blocking: true,
+  reply: undefined,
+  report: null,
+  summary: null,
+};
+
 const surface = {
   kind: 'surface',
   state: 'needs_you',
@@ -107,7 +124,7 @@ describe('ConductorDecisionGate', () => {
       completionSummary: 'Done',
       requestedAt: 1_000,
       ackBy: 1_000 + DECISION_ACK_MS,
-      decideBy: 1_000 + DECISION_TIMEOUT_MS,
+      decideBy: 1_000 + DECISION_TURN_END_TIMEOUT_MS,
     });
     expect(gate.open()).toHaveLength(1);
 
@@ -138,7 +155,7 @@ describe('ConductorDecisionGate', () => {
 
     const slow = setup();
     slow.gate.claim(['c1']);
-    const holdId = slow.gate.hold('c1', held);
+    const holdId = slow.gate.hold('c1', prompt);
     slow.gate.ack(holdId);
     slow.advance(DECISION_ACK_MS);
     expect(slow.fallback).not.toHaveBeenCalled();
@@ -146,6 +163,39 @@ describe('ConductorDecisionGate', () => {
     slow.advance(DECISION_TIMEOUT_MS - DECISION_ACK_MS);
     expect(slow.fallback).toHaveBeenCalledTimes(1);
     expect(slow.events.at(-1)).toMatchObject({ type: 'closed', reason: 'timed-out' });
+  });
+
+  it('gives a turn end the whole conductor turn, not the prompt deadline', () => {
+    const { gate, events, fallback, decide, advance } = setup();
+    gate.claim(['c1']);
+    const holdId = gate.hold('c1', held);
+    expect(events[0]).toMatchObject({ decideBy: 1_000 + DECISION_TURN_END_TIMEOUT_MS });
+    gate.ack(holdId);
+    // A conductor still reading the chat and acting for the developer at 45 s: nothing is told.
+    for (let at = 0; at < DECISION_TIMEOUT_MS + 30_000; at += 15_000) {
+      gate.claim(['c1']);
+      advance(15_000);
+    }
+    expect(fallback).not.toHaveBeenCalled();
+    // It handled it: its decision is applied as a decision, not as a correction after the fact.
+    const quiet = { kind: 'quiet', answered: false } as const;
+    expect(gate.resolve(holdId, 'c1', quiet)).toBe('decision');
+    expect(decide).toHaveBeenCalledWith('c1', held, quiet, false);
+    expect(fallback).not.toHaveBeenCalled();
+
+    // One that never decides still falls back, at the turn-end deadline.
+    const stuck = setup();
+    stuck.gate.claim(['c1']);
+    stuck.gate.ack(stuck.gate.hold('c1', held));
+    for (let at = 0; at < DECISION_TURN_END_TIMEOUT_MS - 15_000; at += 15_000) {
+      stuck.gate.claim(['c1']);
+      stuck.advance(15_000);
+    }
+    expect(stuck.fallback).not.toHaveBeenCalled();
+    stuck.gate.claim(['c1']);
+    stuck.advance(15_000);
+    expect(stuck.fallback).toHaveBeenCalledTimes(1);
+    expect(stuck.events.at(-1)).toMatchObject({ type: 'closed', reason: 'timed-out' });
   });
 
   it('falls back at once when the conductor cannot decide', () => {

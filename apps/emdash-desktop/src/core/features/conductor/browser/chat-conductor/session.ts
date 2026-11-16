@@ -511,6 +511,8 @@ export class ChatConductorSession {
   private readonly turnAnswered = new Set<string>();
   /** The hold of each chat whose permission prompt the running turn decides, while it is open. */
   private readonly heldPrompts = new Map<string, string>();
+  /** The holds the running turn decides, by chat, until they are settled. */
+  private readonly turnDecisions = new Map<string, DecisionRequest>();
   private draining = false;
   private stopRequested = false;
   /** Bumped by reset and dispose: a turn that started before must not write after. */
@@ -802,6 +804,9 @@ export class ChatConductorSession {
     // The agent moved on (answered by hand, a newer event): its prompt is no longer up.
     for (const [chatId, held] of this.heldPrompts) {
       if (held === holdId) this.heldPrompts.delete(chatId);
+    }
+    for (const [chatId, request] of this.turnDecisions) {
+      if (request.holdId === holdId) this.turnDecisions.delete(chatId);
     }
   }
 
@@ -1218,6 +1223,7 @@ export class ChatConductorSession {
       if (request.kind === 'awaiting-input' && request.notificationType === 'permission_prompt') {
         this.heldPrompts.set(request.conversationId, request.holdId);
       }
+      this.turnDecisions.set(request.conversationId, request);
     }
     try {
       const others = [...this.pendingEvents].filter(
@@ -1239,10 +1245,18 @@ export class ChatConductorSession {
         this.addEntry({ kind: 'error', text: `The turn failed: ${errorMessage(error)}` });
       }
     } finally {
-      this.settleDecisions(live, epoch === this.epoch ? end : { ok: false, reason: 'stopped' });
+      // Those settled during the turn (a prompt it answered) or closed by main are not again.
+      const unsettled = live.filter(
+        (request) => this.turnDecisions.get(request.conversationId) === request
+      );
+      this.settleDecisions(
+        unsettled,
+        epoch === this.epoch ? end : { ok: false, reason: 'stopped' }
+      );
       this.turnStatuses = [];
       this.turnAnswered.clear();
       this.heldPrompts.clear();
+      this.turnDecisions.clear();
     }
   }
 
@@ -1631,6 +1645,14 @@ export class ChatConductorSession {
         );
         // Its prompt no longer waits on the developer (see `decisionFor`).
         this.turnAnswered.add(chatId);
+        // The conductor handled the prompt main holds: settle it now, so the rest of a long turn
+        // cannot run past main's deadline and have the developer told of a prompt already
+        // answered. The agent's next turn end is a new event, decided on its own.
+        const deciding = this.turnDecisions.get(chatId);
+        if (deciding?.kind === 'awaiting-input') {
+          this.turnDecisions.delete(chatId);
+          this.ports.resolveDecision(deciding.holdId, chatId, { kind: 'quiet', answered: true });
+        }
         return answered;
       }
       case 'start_chat': {

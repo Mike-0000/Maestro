@@ -31,6 +31,11 @@ export interface FrontConductor {
 export interface FrontConductorSource {
   /** Null when no Conductor view is on screen, or chat conductors cannot run. */
   readonly front: FrontConductor | null;
+  /**
+   * Whether a chat conductor follows this chat and may act on its events for the developer
+   * ("Act on my behalf"): what goes wrong there is that conductor's to handle first.
+   */
+  actsFor?(conversationId: string): boolean;
 }
 
 /** How the HUD names the chat conductor it addresses. */
