@@ -17,6 +17,7 @@ import {
   type ConductorImage,
 } from '../../api/chat-conductor/images';
 import { CHAT_NOTHING_NEW } from '../../api/chat-conductor/prompt';
+import { STEER_TOOLS, type SteerReason } from '../../api/chat-conductor/steer';
 import {
   adoptChatThreads,
   boundThread,
@@ -493,6 +494,8 @@ export class ChatConductorSession {
   private adopted: string[] = [];
   /** Acting tools run in event turns since the developer last wrote. */
   private unattendedActions = 0;
+  /** Per chat, when the conductor messaged its agent on its own since the developer last wrote. */
+  private readonly steerSent = new Map<string, number[]>();
   private readonly developerQueue: DeveloperMessage[] = [];
   /** The newest event of each chat that has not had its turn yet. */
   private readonly pendingEvents = new Map<string, PendingEvent>();
@@ -713,6 +716,7 @@ export class ChatConductorSession {
     });
     // The developer weighed in: the conductor may act on its own again.
     this.unattendedActions = 0;
+    this.steerSent.clear();
     this.developerQueue.push({ text: said, images: attached });
     this.persist();
     this.pump();
@@ -831,6 +835,7 @@ export class ChatConductorSession {
     this.pendingEvents.clear();
     this.pendingAttach = false;
     this.unattendedActions = 0;
+    this.steerSent.clear();
     // An emptied thread stays empty until the developer asks for something.
     this.caughtUp = true;
     this.messages = [];
@@ -1520,15 +1525,19 @@ export class ChatConductorSession {
       yolo: this.yolo,
       unattendedActionsLeft: this.unattendedActionsLeft,
       targetWorking: chat?.status === 'working',
+      steerReason: parsed.success ? (parsed.data as { reason?: SteerReason }).reason : undefined,
+      steerSent: this.steerSent.get(chat?.id ?? '') ?? [],
+      now: this.ports.now().getTime(),
     });
     if (!gate.allowed) {
       show({
         kind: 'action',
         tool: name,
         summary: `Did not ${words.could}: ${
-          this.autonomy
+          gate.why ??
+          (this.autonomy
             ? 'it has reached the limit of what it may do on its own'
-            : 'acting on your behalf is off'
+            : 'acting on your behalf is off')
         }`,
         status: 'refused',
         ...(words.detail ? { detail: words.detail } : {}),
@@ -1547,6 +1556,12 @@ export class ChatConductorSession {
     if (chat) this.lastChatId = chat.id;
     const acting = CHAT_ACTING_TOOLS.has(name);
     if (acting && trigger === 'event') this.unattendedActions++;
+    if (chat && trigger === 'event' && STEER_TOOLS.has(name)) {
+      this.steerSent.set(chat.id, [
+        ...(this.steerSent.get(chat.id) ?? []),
+        this.ports.now().getTime(),
+      ]);
+    }
     this.setActivity(acting ? words.doing : 'Working…');
     const lateFailure = (message: string) => {
       if (epoch !== this.epoch) return;

@@ -2,6 +2,7 @@ import type Anthropic from '@anthropic-ai/sdk';
 import { dropStaleContexts, trimHistory, type HistoryBudget } from '../history';
 import { cleanTerminalOutput } from '../terminal-text';
 import { CHAT_NOTHING_NEW } from './prompt';
+import { gateSteer, STEER_TOOLS, type SteerReason } from './steer';
 import type { ChatConductorStatus } from './thread';
 import { CHAT_ACTING_TOOLS, type ChatConductorToolName } from './tools';
 import { MAX_UNATTENDED_ACTIONS_YOLO } from './yolo';
@@ -508,7 +509,12 @@ export function gateChatTool(input: {
   unattendedActionsLeft: number;
   /** The chat the tool acts on is mid-turn (its agent is working). */
   targetWorking?: boolean;
-}): { allowed: true } | { allowed: false; reason: string } {
+  /** For a message to an agent: the reason the model gave (see steer.ts). */
+  steerReason?: SteerReason;
+  /** Times of the conductor's earlier own messages to the target chat since the developer wrote. */
+  steerSent?: readonly number[];
+  now?: number;
+}): { allowed: true } | { allowed: false; reason: string; why?: string } {
   if (!CHAT_ACTING_TOOLS.has(input.tool as ChatConductorToolName)) return { allowed: true };
   if (input.trigger === 'developer') return { allowed: true };
   if (input.targetWorking && (input.tool === 'stop_agent' || input.tool === 'restart_agent')) {
@@ -530,6 +536,15 @@ export function gateChatTool(input: {
       allowed: false,
       reason: `${input.tool} was not run: you have taken ${maxUnattendedActions(input.yolo === true)} actions on your own since the developer last wrote, which is the limit. Tell the developer where things stand and what you would do next; you can act again once they reply.`,
     };
+  }
+  if (STEER_TOOLS.has(input.tool)) {
+    // Steering is limited in code: a reason from a fixed set, a cooldown, and a cap per chat.
+    return gateSteer({
+      tool: input.tool,
+      reason: input.steerReason,
+      sent: input.steerSent ?? [],
+      now: input.now ?? Date.now(),
+    });
   }
   return { allowed: true };
 }

@@ -715,14 +715,16 @@ describe('ChatConductorSession', () => {
       h.agentIs(finished(`Reply ${++turn}`));
       await h.idle();
     };
+    // An acting tool outside the steering limits, so only the action cap applies.
+    const act = () => says(tool('answer_prompt', { decision: 'allow' }));
     for (let count = 0; count < MAX_UNATTENDED_ACTIONS; count++) {
-      await eventTurn([says(tool('send_to_agent', { message: 'Next.' })), says(text('On it.'))]);
+      await eventTurn([act(), says(text('On it.'))]);
     }
-    expect(h.agent.send).toHaveBeenCalledTimes(MAX_UNATTENDED_ACTIONS);
+    expect(h.agent.answerPrompt).toHaveBeenCalledTimes(MAX_UNATTENDED_ACTIONS);
     expect(h.session.unattendedActionsLeft).toBe(0);
 
-    await eventTurn([says(tool('send_to_agent', { message: 'Next.' })), says(text('Your call.'))]);
-    expect(h.agent.send).toHaveBeenCalledTimes(MAX_UNATTENDED_ACTIONS);
+    await eventTurn([act(), says(text('Your call.'))]);
+    expect(h.agent.answerPrompt).toHaveBeenCalledTimes(MAX_UNATTENDED_ACTIONS);
     expect(h.session.entries.at(-2)).toMatchObject({ kind: 'action', status: 'refused' });
     expect(lastUserText(h.calls.at(-2)!)).toContain('used up');
 
@@ -731,8 +733,54 @@ describe('ChatConductorSession', () => {
     await h.idle();
     expect(h.session.unattendedActionsLeft).toBe(MAX_UNATTENDED_ACTIONS);
 
-    await eventTurn([says(tool('send_to_agent', { message: 'Next.' })), says(text('Sent.'))]);
-    expect(h.agent.send).toHaveBeenCalledTimes(MAX_UNATTENDED_ACTIONS + 1);
+    await eventTurn([act(), says(text('Sent.'))]);
+    expect(h.agent.answerPrompt).toHaveBeenCalledTimes(MAX_UNATTENDED_ACTIONS + 1);
+  });
+
+  it('limits the messages it sends an agent on its own, until the developer writes', async () => {
+    const h = await following();
+    let turn = 0;
+    const eventTurn = async (reply: ChatTurnResult[]) => {
+      h.replies.push(...reply);
+      h.agentIs(working);
+      h.agentIs(finished(`Reply ${++turn}`));
+      await h.idle();
+    };
+    const send = (input: Record<string, unknown>) =>
+      says(tool('send_to_agent', { message: 'Try another way.', ...input }));
+    const lastResult = () =>
+      JSON.stringify((h.calls.at(-1)!.at(-1)!.content as unknown[])[0] ?? null);
+
+    // No reason: refused, and the thread says why.
+    await eventTurn([send({}), says(text('Left it.'))]);
+    expect(h.agent.send).not.toHaveBeenCalled();
+    expect(lastResult()).toContain('reason');
+    expect(h.session.entries.at(-2)).toMatchObject({
+      kind: 'action',
+      status: 'refused',
+      summary: expect.stringContaining('no allowed reason'),
+    });
+
+    // One with a reason goes; a second inside ten minutes does not, unless destructive.
+    await eventTurn([send({ reason: 'looping' }), says(text('Sent.'))]);
+    expect(h.agent.send).toHaveBeenCalledTimes(1);
+    await eventTurn([send({ reason: 'leaving_task' }), says(text('Held.'))]);
+    expect(h.agent.send).toHaveBeenCalledTimes(1);
+    expect(lastResult()).toContain('10 minutes');
+    await eventTurn([send({ reason: 'destructive' }), says(text('Sent.'))]);
+    expect(h.agent.send).toHaveBeenCalledTimes(2);
+
+    // A third is refused: the decision is the developer's.
+    await eventTurn([send({ reason: 'destructive' }), says(text('Your call.'))]);
+    expect(h.agent.send).toHaveBeenCalledTimes(2);
+    expect(lastResult()).toContain('needs_you');
+
+    // The developer writes: the conductor may message the agent again.
+    h.replies.push(says(text('Noted.')));
+    h.session.send('Carry on.');
+    await h.idle();
+    await eventTurn([send({ reason: 'looping' }), says(text('Sent.'))]);
+    expect(h.agent.send).toHaveBeenCalledTimes(3);
   });
 
   it('handles an agent event once', async () => {
@@ -1900,12 +1948,12 @@ describe('YOLO mode', () => {
     const h = await following({ yolo: true });
     let turn = 0;
     for (let count = 0; count < MAX_UNATTENDED_ACTIONS + 1; count++) {
-      h.replies.push(says(tool('send_to_agent', { message: 'Next.' })), says(text('On it.')));
+      h.replies.push(says(tool('answer_prompt', { decision: 'allow' })), says(text('On it.')));
       h.agentIs(working);
       h.agentIs(finished(`Reply ${++turn}`));
       await h.idle();
     }
-    expect(h.agent.send).toHaveBeenCalledTimes(MAX_UNATTENDED_ACTIONS + 1);
+    expect(h.agent.answerPrompt).toHaveBeenCalledTimes(MAX_UNATTENDED_ACTIONS + 1);
     expect(h.session.unattendedActionsLeft).toBe(
       MAX_UNATTENDED_ACTIONS_YOLO - MAX_UNATTENDED_ACTIONS - 1
     );
