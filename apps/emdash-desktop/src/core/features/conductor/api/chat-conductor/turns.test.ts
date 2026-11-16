@@ -518,6 +518,7 @@ describe('gateChatTool', () => {
         autonomy: true,
         unattendedActionsLeft: 5,
         targetWorking: true,
+        steerReason: 'looping',
       })
     ).toEqual({ allowed: true });
   });
@@ -533,7 +534,13 @@ describe('gateChatTool', () => {
   it('allows acting on an event only with autonomy and actions left', () => {
     for (const tool of acting) {
       expect(
-        gateChatTool({ tool, trigger: 'event', autonomy: true, unattendedActionsLeft: 1 })
+        gateChatTool({
+          tool,
+          trigger: 'event',
+          autonomy: true,
+          unattendedActionsLeft: 1,
+          steerReason: 'looping',
+        })
       ).toEqual({ allowed: true });
 
       const off = gateChatTool({
@@ -560,5 +567,100 @@ describe('gateChatTool', () => {
         if (!spent.allowed) expect(spent.reason).toContain(String(MAX_UNATTENDED_ACTIONS));
       }
     }
+  });
+});
+
+describe('gateChatTool steering limits', () => {
+  const now = 1_000_000_000;
+  const minute = 60_000;
+  const onEvent = {
+    trigger: 'event' as const,
+    autonomy: true,
+    unattendedActionsLeft: 5,
+    now,
+  };
+
+  it('refuses a message on an event without an allowed reason', () => {
+    for (const tool of ['send_to_agent', 'interrupt_agent']) {
+      const refused = gateChatTool({ ...onEvent, tool, steerSent: [] });
+      expect(refused.allowed).toBe(false);
+      if (!refused.allowed) {
+        expect(refused.reason).toContain('was not run');
+        expect(refused.reason).toContain('destructive, leaving_task, looping, against_instruction');
+        expect(refused.why).toBeTruthy();
+      }
+    }
+    expect(
+      gateChatTool({ ...onEvent, tool: 'send_to_agent', steerReason: 'looping', steerSent: [] })
+    ).toEqual({ allowed: true });
+    expect(
+      gateChatTool({ ...onEvent, tool: 'send_to_agent', steerReason: 'answer', steerSent: [] })
+    ).toEqual({ allowed: true });
+    // answer is a reply, never a reason to interrupt.
+    expect(
+      gateChatTool({ ...onEvent, tool: 'interrupt_agent', steerReason: 'answer', steerSent: [] })
+        .allowed
+    ).toBe(false);
+  });
+
+  it('refuses a second message within ten minutes unless destructive or an answer', () => {
+    const sent = [now - 5 * minute];
+    const soon = gateChatTool({
+      ...onEvent,
+      tool: 'send_to_agent',
+      steerReason: 'looping',
+      steerSent: sent,
+    });
+    expect(soon.allowed).toBe(false);
+    if (!soon.allowed) expect(soon.reason).toContain('10 minutes');
+    expect(
+      gateChatTool({
+        ...onEvent,
+        tool: 'send_to_agent',
+        steerReason: 'destructive',
+        steerSent: sent,
+      })
+    ).toEqual({ allowed: true });
+    expect(
+      gateChatTool({ ...onEvent, tool: 'send_to_agent', steerReason: 'answer', steerSent: sent })
+    ).toEqual({ allowed: true });
+    expect(
+      gateChatTool({
+        ...onEvent,
+        tool: 'send_to_agent',
+        steerReason: 'looping',
+        steerSent: [now - 11 * minute],
+      })
+    ).toEqual({ allowed: true });
+  });
+
+  it('refuses a third message and hands the decision back to the developer', () => {
+    const sent = [now - 40 * minute, now - 20 * minute];
+    for (const steerReason of ['looping', 'destructive', 'answer'] as const) {
+      const third = gateChatTool({
+        ...onEvent,
+        tool: 'send_to_agent',
+        steerReason,
+        steerSent: sent,
+      });
+      expect(third.allowed).toBe(false);
+      if (!third.allowed) {
+        expect(third.reason).toContain('limit');
+        expect(third.reason).toContain('needs_you');
+      }
+    }
+  });
+
+  it('never limits a message the developer asked for', () => {
+    expect(
+      gateChatTool({
+        tool: 'send_to_agent',
+        trigger: 'developer',
+        autonomy: false,
+        unattendedActionsLeft: 0,
+        steerSent: [now - minute, now - 2 * minute, now - 3 * minute],
+        now,
+      })
+    ).toEqual({ allowed: true });
   });
 });
