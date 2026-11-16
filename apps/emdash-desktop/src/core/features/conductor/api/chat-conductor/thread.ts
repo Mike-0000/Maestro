@@ -31,7 +31,13 @@ const entryBase = { id: z.string(), at: z.string() };
 
 export const chatConductorEntrySchema = z.discriminatedUnion('kind', [
   /** What the developer wrote to the conductor. */
-  z.object({ kind: z.literal('developer'), ...entryBase, text: z.string() }),
+  z.object({
+    kind: z.literal('developer'),
+    ...entryBase,
+    text: z.string(),
+    /** The names of the images sent with it; the images themselves are not kept. */
+    images: z.array(z.string()).optional(),
+  }),
   /** The conductor's message, in markdown. */
   z.object({ kind: z.literal('conductor'), ...entryBase, text: z.string() }),
   /** Something the conductor did. `detail` holds the whole of it, such as the prompt it sent. */

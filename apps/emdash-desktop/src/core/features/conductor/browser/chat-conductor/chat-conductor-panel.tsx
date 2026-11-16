@@ -131,12 +131,12 @@ export const ChatConductorPanel = observer(function ChatConductorPanel({
   /** The developer is reading the end of the thread, so new entries scroll into view. */
   const followingRef = useRef(true);
 
-  const { entries, busy, activity, loaded, draft, status } = session;
+  const { entries, busy, activity, loaded, draft, images, status } = session;
   const blocks = useMemo(() => buildThreadView(entries), [entries]);
   const busySince = useBusySince(busy);
   // Running clocks move every second; ages ("6m ago") only need a slower beat.
   const nowMs = useNow(busy || status?.state === 'needs_you' ? 1_000 : 15_000);
-  const canSend = ready && loaded && draft.trim().length > 0;
+  const canSend = ready && loaded && (draft.trim().length > 0 || images.length > 0);
   /** The setup screen stands in for the thread and the composer. */
   const needsSetup = !ready && entries.length === 0;
   // What the conductor bar, or a card raised from it, covers of this panel's bottom edge. The
@@ -166,8 +166,9 @@ export const ChatConductorPanel = observer(function ChatConductorPanel({
   const send = () => {
     if (!canSend) return;
     followingRef.current = true;
-    session.send(draft);
+    session.send(draft, images);
     session.setDraft('');
+    session.clearImages();
   };
 
   const catchUp = () => {
@@ -319,6 +320,9 @@ export const ChatConductorPanel = observer(function ChatConductorPanel({
             canSend={canSend}
             onChange={(text) => session.setDraft(text)}
             onSend={send}
+            images={images}
+            onAddImages={(added) => session.addImages(added)}
+            onRemoveImage={(id) => session.removeImage(id)}
           />
           <ComposerTools
             ready={ready}

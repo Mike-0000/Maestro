@@ -12,7 +12,7 @@ export type LineEmphasis = 'latest' | 'recent' | 'old';
 export type ActionEntry = Extract<ChatConductorEntry, { kind: 'action' }>;
 
 export type ThreadBlock =
-  | { kind: 'developer'; id: string; at: string; text: string }
+  | { kind: 'developer'; id: string; at: string; text: string; images?: readonly string[] }
   | {
       kind: 'line';
       id: string;
@@ -82,7 +82,13 @@ export function buildThreadView(entries: readonly ChatConductorEntry[]): ThreadB
     const entry = entries[index]!;
     switch (entry.kind) {
       case 'developer':
-        blocks.push({ kind: 'developer', id: entry.id, at: entry.at, text: entry.text });
+        blocks.push({
+          kind: 'developer',
+          id: entry.id,
+          at: entry.at,
+          text: entry.text,
+          ...(entry.images?.length ? { images: entry.images } : {}),
+        });
         break;
       case 'conductor':
         blocks.push({

@@ -77,8 +77,17 @@ export function chatTurnLogRecord(input: {
   latencyMs: number;
 }): ChatTurnLogRecord {
   const last = input.messages[input.messages.length - 1];
-  const text = last?.role === 'user' && typeof last.content === 'string' ? last.content : '';
   const blocks = last?.role === 'user' && typeof last.content !== 'string' ? last.content : [];
+  // A developer's message with images is blocks: its images, then its text.
+  const withImages =
+    blocks.some((block) => block.type === 'image') &&
+    !blocks.some((block) => block.type === 'tool_result');
+  const text =
+    last?.role === 'user' && typeof last.content === 'string'
+      ? last.content
+      : withImages
+        ? blocks.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('\n')
+        : '';
   const toolResults = blocks.flatMap((block) =>
     block.type === 'tool_result'
       ? [
@@ -99,7 +108,9 @@ export function chatTurnLogRecord(input: {
         ? isChatEventTurnStart(last)
           ? 'event'
           : 'developer'
-        : 'tool-results',
+        : withImages
+          ? 'developer'
+          : 'tool-results',
     input: text.slice(0, INPUT_CHARS),
     toolResults: toolResults.slice(0, MAX_TOOLS),
     toolCalls: content

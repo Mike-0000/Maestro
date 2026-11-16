@@ -136,6 +136,8 @@ export function toOpenAiMessages(
     // OpenAI-style tool messages are text-only, so screenshots follow as one user message.
     const texts: string[] = [];
     const images: string[] = [];
+    /** Images the developer sent with their words: they go in one message with that text. */
+    const userImages: string[] = [];
     for (const block of blocks) {
       if (block.type === 'tool_result') {
         const body = textOf(block.content);
@@ -147,6 +149,8 @@ export function toOpenAiMessages(
         });
       } else if (block.type === 'text') {
         texts.push(block.text);
+      } else if (block.type === 'image') {
+        userImages.push(...imagesOf([block]));
       }
     }
     if (images.length > 0) {
@@ -158,7 +162,17 @@ export function toOpenAiMessages(
         ],
       });
     }
-    if (texts.length > 0) out.push({ role: 'user', content: texts.join('\n') });
+    if (userImages.length > 0) {
+      out.push({
+        role: 'user',
+        content: [
+          ...userImages.map<OpenAiUserPart>((url) => ({ type: 'image_url', image_url: { url } })),
+          ...(texts.length > 0 ? [{ type: 'text' as const, text: texts.join('\n') }] : []),
+        ],
+      });
+    } else if (texts.length > 0) {
+      out.push({ role: 'user', content: texts.join('\n') });
+    }
   }
   return out;
 }

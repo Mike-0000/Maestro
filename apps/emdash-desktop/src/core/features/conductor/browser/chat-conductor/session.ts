@@ -10,6 +10,12 @@ import {
 import type { CompletionAnnouncementMode } from '../../api/announcements';
 import { decideBrowserUrl } from '../../api/chat-conductor/browser-policy';
 import { digestFromInput } from '../../api/chat-conductor/digest';
+import {
+  attachedImagesNote,
+  MAX_CONDUCTOR_IMAGES,
+  withTurnImages,
+  type ConductorImage,
+} from '../../api/chat-conductor/images';
 import { CHAT_NOTHING_NEW } from '../../api/chat-conductor/prompt';
 import {
   adoptChatThreads,
@@ -79,6 +85,12 @@ const PROMPT_DRAW_POLL_MS = 150;
  * together share one turn.
  */
 export const EVENT_GATHER_MS = 1_500;
+
+/** The developer's words for a message that is only images. */
+const IMAGES_ONLY_TEXT = 'See the attached images.';
+
+/** A message the developer sent that waits for its turn. */
+type DeveloperMessage = { text: string; images: readonly ConductorImage[] };
 
 /** What the "Catch me up" control asks once the thread already has history. */
 export const CATCH_UP_REQUEST =
@@ -461,6 +473,8 @@ export class ChatConductorSession {
   attached = false;
   /** What the developer has typed and not sent; kept here so it survives a change of view. */
   draft = '';
+  /** Images pasted or dropped into the composer and not sent yet. */
+  images: ConductorImage[] = [];
 
   private messages: Message[] = [];
   private readonly chatStates = new Map<string, ChatState>();
@@ -470,7 +484,7 @@ export class ChatConductorSession {
   private adopted: string[] = [];
   /** Acting tools run in event turns since the developer last wrote. */
   private unattendedActions = 0;
-  private readonly developerQueue: string[] = [];
+  private readonly developerQueue: DeveloperMessage[] = [];
   /** The newest event of each chat that has not had its turn yet. */
   private readonly pendingEvents = new Map<string, PendingEvent>();
   /** The first catch-up turn is waiting. */
@@ -514,9 +528,13 @@ export class ChatConductorSession {
       loaded: observable,
       attached: observable,
       draft: observable,
+      images: observable.ref,
       setAutonomy: action,
       setYolo: action,
       setDraft: action,
+      addImages: action,
+      removeImage: action,
+      clearImages: action,
     });
   }
 
@@ -671,13 +689,18 @@ export class ChatConductorSession {
   }
 
   /** The developer writes to the conductor. Never dropped: it waits for the running turn. */
-  send(text: string): void {
+  send(text: string, images: readonly ConductorImage[] = []): void {
     const said = text.trim();
-    if (!said || this.disposed) return;
-    this.addEntry({ kind: 'developer', text: said });
+    const attached = images.slice(0, MAX_CONDUCTOR_IMAGES);
+    if ((!said && attached.length === 0) || this.disposed) return;
+    this.addEntry({
+      kind: 'developer',
+      text: said,
+      ...(attached.length > 0 ? { images: attached.map((image) => image.name) } : {}),
+    });
     // The developer weighed in: the conductor may act on its own again.
     this.unattendedActions = 0;
-    this.developerQueue.push(said);
+    this.developerQueue.push({ text: said, images: attached });
     this.persist();
     this.pump();
   }
@@ -696,6 +719,20 @@ export class ChatConductorSession {
 
   setDraft(text: string): void {
     this.draft = text;
+  }
+
+  /** Adds pasted or dropped images to the next message, up to the limit. */
+  addImages(images: readonly ConductorImage[]): void {
+    if (images.length === 0) return;
+    this.images = [...this.images, ...images].slice(0, MAX_CONDUCTOR_IMAGES);
+  }
+
+  removeImage(id: string): void {
+    this.images = this.images.filter((image) => image.id !== id);
+  }
+
+  clearImages(): void {
+    if (this.images.length > 0) this.images = [];
   }
 
   /** Turning autonomy off turns YOLO mode off too: YOLO is a level of acting on their behalf. */
@@ -1079,9 +1116,18 @@ export class ChatConductorSession {
         const epoch = this.epoch;
         try {
           if (said !== undefined) {
-            this.turnWords = said;
+            this.turnWords = said.text;
+            const words = [said.text || IMAGES_ONLY_TEXT, attachedImagesNote(said.images)]
+              .filter(Boolean)
+              .join('\n\n');
             try {
-              await this.runTurn('developer', developerTurnText(said, this.facts()), null, epoch);
+              await this.runTurn(
+                'developer',
+                developerTurnText(words, this.facts()),
+                null,
+                epoch,
+                said.images
+              );
             } finally {
               this.turnWords = null;
             }
@@ -1305,11 +1351,14 @@ export class ChatConductorSession {
     trigger: Trigger,
     userText: string,
     marker: string | null,
-    epoch: number
+    epoch: number,
+    /** The developer's images: sent with every model call of this turn, never saved. */
+    images: readonly ConductorImage[] = []
   ): Promise<TurnEnd> {
     let end: TurnEnd = { ok: true };
     const committed = this.messages;
     const messages: Message[] = [...committed, { role: 'user', content: userText }];
+    const turnStart = committed.length;
     let markerShown = marker === null;
     const show = (entry: NewEntry) => {
       if (!markerShown && marker !== null) {
@@ -1343,7 +1392,10 @@ export class ChatConductorSession {
       this.setActivity('Thinking…');
       let result: ChatTurnResult;
       try {
-        result = await this.ports.runTurn(messages, { yolo: this.yolo });
+        result = await this.ports.runTurn(
+          images.length > 0 ? withTurnImages(messages, turnStart, images) : messages,
+          { yolo: this.yolo }
+        );
       } catch (error) {
         result = { success: false, error: { type: 'api-error', message: errorMessage(error) } };
       }

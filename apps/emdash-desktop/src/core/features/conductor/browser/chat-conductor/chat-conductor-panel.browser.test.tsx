@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { userEvent } from 'vitest/browser';
 import type { ChatDigest } from '../../api/chat-conductor/digest';
+import type { ConductorImage } from '../../api/chat-conductor/images';
 import type { ChatConductorEntry, ChatConductorStatus } from '../../api/chat-conductor/thread';
 import { ChatConductorPanel, type ChatConductorPanelProps } from './chat-conductor-panel';
 import type { ChatConductorSession } from './session';
@@ -43,6 +44,14 @@ beforeAll(() => {
     globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }
   ).IS_REACT_ACT_ENVIRONMENT = true;
 });
+
+/** A 1×1 PNG. */
+const PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+function pngFile(name: string): File {
+  const bytes = Uint8Array.from(atob(PNG_BASE64), (char) => char.charCodeAt(0));
+  return new File([bytes], name, { type: 'image/png' });
+}
 
 const NOW = Date.now();
 const ago = (seconds: number) => new Date(NOW - seconds * 1_000).toISOString();
@@ -104,11 +113,23 @@ class FakeSession {
     Object.assign(this, init);
     makeAutoObservable(this);
   }
-  send(text: string) {
+  images: ConductorImage[] = [];
+  sentImages: string[][] = [];
+  send(text: string, images: readonly ConductorImage[] = []) {
     this.sent.push(text);
+    if (images.length > 0) this.sentImages.push(images.map((image) => image.name));
   }
   setDraft(text: string) {
     this.draft = text;
+  }
+  addImages(images: ConductorImage[]) {
+    this.images = [...this.images, ...images];
+  }
+  removeImage(id: string) {
+    this.images = this.images.filter((image) => image.id !== id);
+  }
+  clearImages() {
+    this.images = [];
   }
   setAutonomy(on: boolean) {
     this.autonomy = on;
@@ -387,6 +408,52 @@ describe('ChatConductorPanel', () => {
     const { host } = mount(new FakeSession({ loaded: false }));
     expect(host.querySelector('[aria-label="Loading the thread"]')).toBeTruthy();
     expect(host.querySelector('textarea')).toBeNull();
+  });
+
+  it('takes an image pasted from the clipboard and sends it with the message', async () => {
+    const session = new FakeSession({ entries: thread });
+    const { host } = mount(session);
+    const field = host.querySelector('textarea') as HTMLTextAreaElement;
+    const clipboard = new DataTransfer();
+    clipboard.items.add(pngFile('image.png'));
+    act(() => {
+      field.dispatchEvent(
+        new ClipboardEvent('paste', { clipboardData: clipboard, bubbles: true, cancelable: true })
+      );
+    });
+    await expect.poll(() => session.images.length).toBe(1);
+    expect(session.images[0]).toMatchObject({ name: 'image.png', mediaType: 'image/png' });
+    expect(session.images[0]!.data).toBe(PNG_BASE64);
+    expect(host.querySelector('img[alt="image.png"]')).toBeTruthy();
+
+    // An image alone is enough to send.
+    await userEvent.click(host.querySelector('button[aria-label="Send"]') as HTMLButtonElement);
+    expect(session.sentImages).toEqual([['image.png']]);
+    expect(session.images).toEqual([]);
+  });
+
+  it('takes an image file dropped from the desktop, and refuses what is not an image', async () => {
+    const session = new FakeSession({ entries: thread });
+    const { host } = mount(session);
+    const field = host.querySelector('textarea') as HTMLTextAreaElement;
+    const drag = new DataTransfer();
+    drag.items.add(pngFile('shot.png'));
+    drag.items.add(new File(['hello'], 'notes.txt', { type: 'text/plain' }));
+    act(() => {
+      for (const type of ['dragenter', 'dragover', 'drop']) {
+        field.dispatchEvent(
+          new DragEvent(type, { dataTransfer: drag, bubbles: true, cancelable: true })
+        );
+      }
+    });
+    await expect.poll(() => session.images.map((image) => image.name)).toEqual(['shot.png']);
+    await expect
+      .poll(() => host.querySelector('[role="status"]')?.textContent)
+      .toContain('notes.txt is not a PNG, JPEG, GIF or WebP image.');
+    await userEvent.click(
+      host.querySelector('button[aria-label="Remove shot.png"]') as HTMLButtonElement
+    );
+    expect(session.images).toEqual([]);
   });
 });
 
