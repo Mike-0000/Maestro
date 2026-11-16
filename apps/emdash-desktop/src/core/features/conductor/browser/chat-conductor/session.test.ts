@@ -297,6 +297,39 @@ describe('ChatConductorSession', () => {
     expect(JSON.stringify(saved)).not.toContain('AAAA');
   });
 
+  it("passes the developer's images on to the agent when the conductor asks to", async () => {
+    const h = await following();
+    const image = { id: 'i1', name: 'bug.png', mediaType: 'image/png' as const, data: 'AAAA' };
+    h.replies.push(
+      says(
+        tool('send_to_agent', { message: 'Fix the bug in this screenshot.', include_images: true })
+      ),
+      says(text('Sent it the screenshot.')),
+      says(tool('send_to_agent', { message: 'And this?', include_images: true })),
+      says(text('No images this time.'))
+    );
+    h.session.send('Have it fix this.', [image]);
+    await h.idle();
+
+    expect(h.agent.send).toHaveBeenCalledWith(
+      'conv-1',
+      markedForAgent('Fix the bug in this screenshot.'),
+      expect.any(Function),
+      [image]
+    );
+    expect(h.session.entries).toContainEqual(
+      expect.objectContaining({ kind: 'action', summary: 'Sent Zeus a prompt with the images' })
+    );
+
+    // A later turn has no images to pass on: the tool says so and sends nothing.
+    h.session.send('Send it again.');
+    await h.idle();
+    expect(h.agent.send).toHaveBeenCalledTimes(1);
+    const results = h.calls.at(-1)!.at(-1)!.content as Anthropic.Beta.BetaToolResultBlockParam[];
+    expect(results[0]!.is_error).toBe(true);
+    expect(String(results[0]!.content)).toContain('no images to pass on');
+  });
+
   it('catches the developer up on first attach, and only once', async () => {
     const h = harness();
     h.replies.push(says(text('The agent is waiting for you.')));
