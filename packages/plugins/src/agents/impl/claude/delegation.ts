@@ -51,9 +51,9 @@ export const CLAUDE_CONDUCTOR_POLICY =
 export const CLAUDE_BRANCH_SYNC_POLICY =
   'Before starting work in a new conversation, bring your current branch up to date with its ' +
   'upstream or configured base branch (such as chorus/main) by fast-forwarding it, and if that ' +
-  'is not a fast-forward, merge the base in and resolve any conflicts yourself, unless the ' +
-  'working tree has uncommitted changes or the branch has local commits you did not make, in ' +
-  'which case do not discard or overwrite anything and report the situation instead of merging.';
+  'is not a fast-forward, merge the base in, keeping the commits already on the branch, and ' +
+  'resolve any conflicts yourself, unless the working tree has uncommitted changes, in which ' +
+  'case do not discard or overwrite them and report the situation instead of merging.';
 
 /** Everything Maestro appends to Claude Code's system prompt. */
 export const CLAUDE_SYSTEM_PROMPT_APPEND = `${CLAUDE_DELEGATION_POLICY} ${CLAUDE_CONDUCTOR_POLICY} ${CLAUDE_BRANCH_SYNC_POLICY}`;
