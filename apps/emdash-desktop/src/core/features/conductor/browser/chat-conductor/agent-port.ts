@@ -13,6 +13,7 @@ import {
 import { getConversationsClient } from '@core/features/conversations/api/browser/client';
 import { formatConversationTitleForDisplay } from '@core/features/conversations/api/browser/conversation-title-utils';
 import { conversationRegistry } from '@core/features/conversations/api/browser/stores/conversation-registry';
+import { getTaskStore } from '@core/features/tasks/api/browser/task-state/task-selectors';
 import { developerSubmissionsSince } from '@core/features/terminals/api/browser/pty/developer-typing';
 import { getTaskComposition } from '@core/features/workbench/api/browser/task-composition-selectors';
 import {
@@ -21,6 +22,7 @@ import {
   type CompletionReport,
 } from '@core/primitives/agents/api/completion-report';
 import { log } from '@core/primitives/logging/browser/logger';
+import { actionsFromTerminal, actionsFromTranscript } from '../../api/chat-conductor/observer';
 import { matchInstalledProvider } from '../../api/provider-match';
 import {
   answerPermission,
@@ -53,6 +55,9 @@ const NO_OUTPUT_NOTE =
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+/** Terminal rows the observer reads for a terminal agent's latest tool calls. */
+const OBSERVE_TERMINAL_LINES = 200;
 
 /** Chat-agent turns read back for the prompts they started with. */
 const PROMPT_TURNS_READ = 8;
@@ -414,6 +419,24 @@ export function createTaskAgentPort(canvas: CanvasStore, taskId: string): TaskAg
         prompts: submitted.map((submission) => ({ text: submission.text, by: 'developer' })),
         cursor: now,
       };
+    },
+
+    async recentActions(chatId) {
+      const entry = find(chatId);
+      if (!entry) return [];
+      if (entry.type !== 'acp') {
+        const screen = await readAgentOutput(entry, OBSERVE_TERMINAL_LINES);
+        return NO_OUTPUT_NOTE.test(screen.trim()) ? [] : actionsFromTerminal(screen);
+      }
+      const client = await getConversationsClient();
+      const result = await client.acp.loadHistory({ conversationId: chatId, limit: 1 });
+      if (!result.success || result.data.unavailable) return [];
+      return result.data.turns.flatMap((turn) => actionsFromTranscript(turn.items, turn.id));
+    },
+
+    taskFolder() {
+      const [first] = entries();
+      return first ? (getTaskStore(first.projectId, taskId)?.workspacePath ?? null) : null;
     },
 
     listChats() {

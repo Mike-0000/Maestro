@@ -1,6 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { dropStaleContexts, trimHistory, type HistoryBudget } from '../history';
 import { cleanTerminalOutput } from '../terminal-text';
+import { OBSERVER_LEAD, observationLines, type ChatObservation } from './observer';
 import { CHAT_NOTHING_NEW } from './prompt';
 import { gateSteer, STEER_TOOLS, type SteerReason } from './steer';
 import type { ChatConductorStatus } from './thread';
@@ -115,6 +116,8 @@ export type ChatFacts = {
   status: ChatConductorStatus | null;
   now: string;
   unattendedActionsLeft: number;
+  /** The observer's running summary of each chat it has seen act (observer.ts). */
+  observations?: readonly { name: string; observation: ChatObservation }[];
 };
 
 const CONTEXT_TAG = /<\/?context\b[^>]*>/gi;
@@ -160,6 +163,15 @@ function chatsLines(facts: ChatFacts): string {
   return [`Chats in this task (${facts.chats.length}):`, ...lines].join('\n');
 }
 
+/** The observer's summaries, when it has seen any chat act. */
+function observerLines(facts: ChatFacts): string[] {
+  const chats = (facts.observations ?? []).flatMap(({ name, observation }) => {
+    const lines = observationLines(name, observation);
+    return lines ? [inContext(lines)] : [];
+  });
+  return chats.length > 0 ? [`Observer: ${OBSERVER_LEAD}`, ...chats] : [];
+}
+
 /**
  * The per-turn state, as a `<context>…</context>` block that starts the user message, so
  * `dropStaleContexts` replaces it once the turn is history.
@@ -176,6 +188,7 @@ export function chatContextBlock(facts: ChatFacts): string {
       ? `Status shown to the developer: ${facts.status.state}, "${oneLine(facts.status.headline)}"`
       : 'Status shown to the developer: none set',
     notes ? `Your notes:\n${notes}` : 'Your notes: none yet',
+    ...observerLines(facts),
     '</context>',
   ].join('\n');
 }

@@ -1,6 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { describe, expect, it, vi } from 'vitest';
 import type { ConductorDecision } from '@core/primitives/agents/api/conductor-decisions';
+import { LOOP_THRESHOLD, type ObservedAction } from '../../api/chat-conductor/observer';
 import { CHAT_NOTHING_NEW } from '../../api/chat-conductor/prompt';
 import type { ConductorTaskThread } from '../../api/chat-conductor/thread';
 import {
@@ -71,6 +72,7 @@ function harness(
   let id = 0;
   let onScreen: string | null = chats[0]?.id ?? null;
   const received: SubmittedPrompt[] = [];
+  const actions: ObservedAction[] = [];
   let cursor = 0;
   const agent = {
     chats: () =>
@@ -125,6 +127,11 @@ function harness(
       prompts: received.splice(0),
       cursor: ++cursor,
     })),
+    /** The agent's tool calls as the observer reads them; tests push into `actions`. */
+    recentActions: vi.fn(
+      async (_chatId: string): Promise<readonly ObservedAction[]> => [...actions]
+    ),
+    taskFolder: () => 'C:/work/fix-login',
   };
   const announce: { mode: 'all' | 'attention_only' } = { mode: 'all' };
   const tabs: TaskBrowser[] = [];
@@ -179,6 +186,7 @@ function harness(
     warn: vi.fn(),
     eventGatherMs: 0,
     promptDrawWaitMs: 300,
+    observeIntervalMs: 0,
     resolveDecision: vi.fn(
       (_holdId: string, _conversationId: string, _decision: ConductorDecision) => {}
     ),
@@ -202,6 +210,7 @@ function harness(
     yoloCalls,
     saved,
     received,
+    actions,
     setReady: (value: boolean) => (ready = value),
     setOnScreen: (chatId: string | null) => (onScreen = chatId),
     /** The first chat's agent changes state. */
@@ -1957,5 +1966,81 @@ describe('YOLO mode', () => {
     expect(h.session.unattendedActionsLeft).toBe(
       MAX_UNATTENDED_ACTIONS_YOLO - MAX_UNATTENDED_ACTIONS - 1
     );
+  });
+});
+
+describe('ChatConductorSession observer', () => {
+  const run = (id: string, command: string): ObservedAction => ({
+    id,
+    kind: 'command',
+    text: command,
+  });
+
+  it('updates the chat summary on an agent event, with no model call', async () => {
+    const h = await following();
+    h.actions.push(run('t1', 'git status'), { id: 't2', kind: 'read', text: 'src/login.ts' });
+    h.agentIs(working);
+
+    await vi.waitFor(() => expect(h.session.observation('conv-1')?.actions).toBe(2));
+    const observation = h.session.observation('conv-1')!;
+    expect(observation.doing).toBe('read src/login.ts');
+    expect(observation.signals).toEqual([]);
+    expect(h.calls).toHaveLength(0);
+  });
+
+  it('records a destructive command mid-turn as a signal, sends nothing to the agent, and shows it on the next turn', async () => {
+    const h = await following();
+    h.agentIs(working);
+    h.actions.push(run('t1', 'git push --force origin main'));
+    await h.session.observeWorking();
+
+    expect(h.session.observation('conv-1')?.signals).toEqual([
+      expect.objectContaining({ kind: 'destructive', evidence: 'git push --force origin main' }),
+    ]);
+    // The observer is read-only: no model call, nothing typed into or stopped in the agent.
+    expect(h.calls).toHaveLength(0);
+    expect(h.agent.send).not.toHaveBeenCalled();
+    expect(h.agent.interrupt).not.toHaveBeenCalled();
+    expect(h.agent.stop).not.toHaveBeenCalled();
+
+    h.replies.push(says(text(CHAT_NOTHING_NEW)));
+    h.agentIs(finished('Pushed.'));
+    await h.idle();
+    expect(h.calls).toHaveLength(1);
+    expect(lastUserText(h.calls[0]!)).toContain('Signal (new) destructive');
+    expect(lastUserText(h.calls[0]!)).toContain('git push --force origin main');
+    expect(h.agent.send).not.toHaveBeenCalled();
+    expect(h.session.observation('conv-1')?.signals[0]?.shown).toBe(true);
+  });
+
+  it('fires a looping signal once the same call repeats the threshold', async () => {
+    const h = await following();
+    h.agentIs(working);
+    for (let index = 1; index < LOOP_THRESHOLD; index++) {
+      h.actions.push(run(`t${index}`, 'pnpm vitest run login.test.ts'));
+      await h.session.observeWorking();
+    }
+    expect(h.session.observation('conv-1')?.signals).toEqual([]);
+    h.actions.push(run(`t${LOOP_THRESHOLD}`, 'pnpm vitest run login.test.ts'));
+    await h.session.observeWorking();
+    expect(h.session.observation('conv-1')?.signals).toEqual([
+      expect.objectContaining({ kind: 'looping' }),
+    ]);
+    expect(h.agent.send).not.toHaveBeenCalled();
+  });
+
+  it('fires nothing on an ordinary exploratory step', async () => {
+    const h = await following();
+    h.agentIs(working);
+    h.actions.push(
+      { id: 't1', kind: 'search', text: 'useSession' },
+      { id: 't2', kind: 'read', text: 'C:/Github/other-repo/src/auth.ts' },
+      run('t3', 'git checkout -b try-another-way'),
+      run('t4', 'rm -rf node_modules'),
+      { id: 't5', kind: 'edit', text: 'C:/work/fix-login/src/login.ts' }
+    );
+    await h.session.observeWorking();
+    expect(h.session.observation('conv-1')?.actions).toBe(5);
+    expect(h.session.observation('conv-1')?.signals).toEqual([]);
   });
 });

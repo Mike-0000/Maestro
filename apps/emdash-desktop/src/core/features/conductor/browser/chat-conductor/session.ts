@@ -16,6 +16,13 @@ import {
   withTurnImages,
   type ConductorImage,
 } from '../../api/chat-conductor/images';
+import {
+  emptyObservation,
+  markSignalsShown,
+  observe,
+  type ChatObservation,
+  type ObservedAction,
+} from '../../api/chat-conductor/observer';
 import { CHAT_NOTHING_NEW } from '../../api/chat-conductor/prompt';
 import { STEER_TOOLS, type SteerReason } from '../../api/chat-conductor/steer';
 import {
@@ -86,6 +93,11 @@ const PROMPT_DRAW_POLL_MS = 150;
  * together share one turn.
  */
 export const EVENT_GATHER_MS = 1_500;
+/**
+ * How often the observer reads the tool calls of agents that are working, between events. A read
+ * is one transcript page or one terminal screen, and no model call.
+ */
+export const OBSERVE_INTERVAL_MS = 20_000;
 
 /** The developer's words for a message that is only images. */
 const IMAGES_ONLY_TEXT = 'See the attached images.';
@@ -213,6 +225,13 @@ export interface TaskAgentPort {
   listAccounts(chatId: string): string;
   /** The chat left its task for good (deleted or moved), rather than being unloaded with it. */
   chatDeleted(chatId: string): boolean;
+  /**
+   * A chat agent's latest tool calls, oldest first, for the observer: from a chat agent's
+   * transcript, or parsed from a terminal agent's screen. Empty when none can be read.
+   */
+  recentActions?(chatId: string): Promise<readonly ObservedAction[]>;
+  /** The task's folder (its worktree), for the observer's checks; null when not known. */
+  taskFolder?(): string | null;
 }
 
 /** One of the task's browser tabs. */
@@ -284,6 +303,8 @@ export interface ChatConductorPorts {
   eventGatherMs?: number;
   /** Overrides `PROMPT_DRAW_WAIT_MS`. */
   promptDrawWaitMs?: number;
+  /** Overrides `OBSERVE_INTERVAL_MS`; 0 runs no timer (tests). */
+  observeIntervalMs?: number;
   /** Hands main the decision on a held event. Never throws. */
   resolveDecision(holdId: string, conversationId: string, decision: ConductorDecision): void;
   /** Whether the developer wants to hear about every finished agent, or only those that need them. */
@@ -522,6 +543,11 @@ export class ChatConductorSession {
   private epoch = 0;
   private loading: Promise<void> | null = null;
   private stopWatch: (() => void) | null = null;
+  /** The observer's running summary per chat (observer.ts): read-only, never sent to an agent. */
+  private readonly observations = new Map<string, ChatObservation>();
+  /** A chat's observer read in flight: one at a time per chat. */
+  private readonly observing = new Map<string, Promise<void>>();
+  private observeTimer: ReturnType<typeof setInterval> | null = null;
   private saving: Promise<void> = Promise.resolve();
   private dirty = false;
   private caughtUp = false;
@@ -681,6 +707,8 @@ export class ChatConductorSession {
       this.stopWatch = this.ports.agent.watch((chatId, snapshot) =>
         this.onAgentChange(chatId, snapshot)
       );
+      const every = this.ports.observeIntervalMs ?? OBSERVE_INTERVAL_MS;
+      if (every > 0) this.observeTimer = setInterval(() => void this.observeWorking(), every);
       const empty = this.isEmpty;
       for (const chat of this.ports.agent.chats()) {
         const snapshot = this.ports.agent.snapshot(chat.id);
@@ -866,6 +894,8 @@ export class ChatConductorSession {
     this.epoch++;
     this.stopWatch?.();
     this.stopWatch = null;
+    if (this.observeTimer) clearInterval(this.observeTimer);
+    this.observeTimer = null;
     if (this.gatherTimer) clearTimeout(this.gatherTimer);
     this.gatherTimer = null;
     this.developerQueue.length = 0;
@@ -899,6 +929,7 @@ export class ChatConductorSession {
     if (!snapshot && this.ports.agent.chatDeleted(chatId)) {
       // The chat was deleted, not just unloaded: nothing of it is kept.
       this.chatStates.delete(chatId);
+      this.observations.delete(chatId);
       this.pendingEvents.delete(chatId);
       if (this.lastChatId === chatId) this.lastChatId = null;
       this.persist();
@@ -911,6 +942,8 @@ export class ChatConductorSession {
       this.pendingEvents.delete(chatId);
       return;
     }
+    // Every change of a chat's state updates its summary: what the agent did up to now.
+    void this.observeChat(chatId);
     const restored = state.restored;
     state.restored = false;
     const signal = agentEventSignal(snapshot);
@@ -956,6 +989,60 @@ export class ChatConductorSession {
     }, delay);
   }
 
+  // ── Observer ───────────────────────────────────────────────────────────────
+
+  /** The observer's running summary of a chat; null before it saw the chat act. */
+  observation(chatId: string): ChatObservation | null {
+    return this.observations.get(chatId) ?? null;
+  }
+
+  /**
+   * Reads a chat agent's latest tool calls and updates its summary and signals. Read-only: it
+   * calls no model and sends nothing to any agent; a signal waits for the task conductor's next
+   * turn, which may act on it only through the steering gate. One read per chat at a time.
+   */
+  private observeChat(chatId: string): Promise<void> {
+    const running = this.observing.get(chatId);
+    if (running) return running;
+    const read = this.ports.agent.recentActions;
+    if (!read || this.disposed) return Promise.resolve();
+    const reading = (async () => {
+      try {
+        const actions = await read.call(this.ports.agent, chatId);
+        if (this.disposed || !this.ports.agent.snapshot(chatId)) return;
+        const { observation } = observe(
+          this.observations.get(chatId) ?? emptyObservation(),
+          actions,
+          { now: this.ports.now().getTime(), root: this.ports.agent.taskFolder?.() ?? null }
+        );
+        this.observations.set(chatId, observation);
+      } catch (error) {
+        this.ports.warn('task conductor: observer could not read the chat', {
+          error: errorMessage(error),
+        });
+      } finally {
+        this.observing.delete(chatId);
+      }
+    })();
+    this.observing.set(chatId, reading);
+    return reading;
+  }
+
+  /** The timer's read: the chats whose agents are working, between their events. */
+  observeWorking(): Promise<void> {
+    if (this.disposed) return Promise.resolve();
+    const working = this.ports.agent
+      .chats()
+      .filter((chat) => this.ports.agent.snapshot(chat.id)?.status === 'working');
+    return Promise.all(working.map((chat) => this.observeFresh(chat.id))).then(() => {});
+  }
+
+  /** A read that starts after any read in flight, so it sees the calls made up to now. */
+  private async observeFresh(chatId: string): Promise<void> {
+    await this.observing.get(chatId);
+    await this.observeChat(chatId);
+  }
+
   private chatName(chatId: string): string {
     return (
       this.ports.agent.chats().find((chat) => chat.id === chatId)?.name ?? 'a chat no longer loaded'
@@ -964,6 +1051,8 @@ export class ChatConductorSession {
 
   private async chatEventFor(chatId: string, pending: PendingEvent): Promise<ChatEvent> {
     const { agent } = this.ports;
+    // The turn's context shows the chat's summary as of its turn end.
+    await this.observeFresh(chatId);
     const chat = this.chatName(chatId);
     const prompts = await this.promptsFromOthers(chatId);
     const output = async () =>
@@ -1371,7 +1460,21 @@ export class ChatConductorSession {
         timeZoneName: 'short',
       }),
       unattendedActionsLeft: this.unattendedActionsLeft,
+      observations: this.observedFacts(chats),
     };
+  }
+
+  /**
+   * The observer's summaries for a turn's context. Facts are built for a turn about to start, so
+   * the signals they show count as shown from here on: the next turn marks only newer ones as new.
+   */
+  private observedFacts(chats: readonly ChatInfo[]): ChatFacts['observations'] {
+    return chats.flatMap((chat) => {
+      const observation = this.observations.get(chat.id);
+      if (!observation) return [];
+      this.observations.set(chat.id, markSignalsShown(observation));
+      return [{ name: chat.name, observation }];
+    });
   }
 
   /**
