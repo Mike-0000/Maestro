@@ -4,6 +4,7 @@ import {
   CircleAlert,
   CircleSlash,
   Hand,
+  Image as ImageIcon,
   Plus,
   Send,
   ShieldCheck,
@@ -37,7 +38,15 @@ function entryTime(at: string): string | undefined {
 }
 
 /** What the developer wrote: a quiet bubble on the right. */
-function DeveloperBubble({ text, at }: { text: string; at: string }) {
+function DeveloperBubble({
+  text,
+  images,
+  at,
+}: {
+  text: string;
+  images?: readonly string[];
+  at: string;
+}) {
   return (
     <div
       className="flex justify-end pl-[20%] motion-safe:animate-in motion-safe:duration-200 motion-safe:fade-in"
@@ -45,6 +54,18 @@ function DeveloperBubble({ text, at }: { text: string; at: string }) {
     >
       <div className="max-w-full rounded-lg bg-background-2 px-4 py-2.5 text-base break-words whitespace-pre-wrap text-foreground select-text">
         {text}
+        {images && images.length > 0 && (
+          <span
+            className={cn('flex flex-wrap gap-1.5 text-xs text-foreground-muted', text && 'mt-1.5')}
+          >
+            {images.map((name, index) => (
+              <span key={index} className="flex min-w-0 items-center gap-1">
+                <ImageIcon className="size-3.5 shrink-0" aria-hidden />
+                <span className="truncate">{name}</span>
+              </span>
+            ))}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -269,7 +290,9 @@ export function ThreadBlocks({
   return blocks.map((block) => {
     switch (block.kind) {
       case 'developer':
-        return <DeveloperBubble key={block.id} text={block.text} at={block.at} />;
+        return (
+          <DeveloperBubble key={block.id} text={block.text} images={block.images} at={block.at} />
+        );
       case 'line':
         return <ConductorLine key={block.id} block={block} />;
       case 'work':

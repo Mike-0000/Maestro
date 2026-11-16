@@ -270,6 +270,33 @@ describe('ChatConductorSession', () => {
     expect(last.messages).toHaveLength(2);
   });
 
+  it("sends the developer's images with their turn and keeps only their names", async () => {
+    const h = harness();
+    h.replies.push(says(text('That is the login page.')));
+    const image = { id: 'i1', name: 'shot.png', mediaType: 'image/png' as const, data: 'AAAA' };
+    h.session.send('', [image]);
+    await h.idle();
+
+    expect(h.session.entries[0]).toMatchObject({
+      kind: 'developer',
+      text: '',
+      images: ['shot.png'],
+    });
+    const sent = h.calls[0]!.at(-1)!;
+    expect(sent.role).toBe('user');
+    const blocks = sent.content as Anthropic.Beta.BetaContentBlockParam[];
+    expect(blocks[0]).toEqual({
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/png', data: 'AAAA' },
+    });
+    expect(blocks[1]).toMatchObject({ type: 'text' });
+    expect((blocks[1] as Anthropic.Beta.BetaTextBlockParam).text).toContain('shot.png');
+    // The saved history keeps the text and a note, never the image itself.
+    const saved = h.saved.at(-1)!;
+    expect(typeof saved.messages[0]!.content).toBe('string');
+    expect(JSON.stringify(saved)).not.toContain('AAAA');
+  });
+
   it('catches the developer up on first attach, and only once', async () => {
     const h = harness();
     h.replies.push(says(text('The agent is waiting for you.')));
