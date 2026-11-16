@@ -466,3 +466,135 @@ describe('RemoteLogUploader', () => {
     }
   });
 });
+
+describe('RemoteLogUploader: the main process log', () => {
+  const appLog = () => join(dir, 'logs', 'emdash.log');
+
+  function mainLog(entries: object[], file = appLog()): void {
+    mkdirSync(join(dir, 'logs'), { recursive: true });
+    writeFileSync(file, entries.map((entry) => JSON.stringify(entry) + '\n').join(''));
+  }
+
+  function withAppLog(): RemoteLogUploader {
+    return new RemoteLogUploader({
+      dataDir: dir,
+      logger,
+      enabled: async () => enabled,
+      fetch: fakeFetch,
+      appVersion: '1.2.6-test',
+      builtIn: null,
+      appLogPath: appLog(),
+      now: () => clock,
+    });
+  }
+
+  const failure = {
+    level: 'error',
+    time: '2026-11-12T11:00:00.000Z',
+    proc: 'emdash-main',
+    projectId: 'p1',
+    error: { type: 'repository-unavailable', message: 'connect ETIMEDOUT' },
+    msg: 'ProjectAttachmentManager: failed to attach Project',
+  };
+
+  it('sends its warnings and errors to their own table, and nothing else from it', async () => {
+    configure();
+    mainLog([
+      failure,
+      { level: 'warn', time: '2026-11-12T11:00:01.000Z', msg: 'main: heartbeat', rssMb: 300 },
+      { level: 'info', time: '2026-11-12T11:00:02.000Z', msg: 'started' },
+      { level: 'warn', time: '2026-11-12T11:00:03.000Z', msg: 'auth: sign-in refused' },
+    ]);
+    await withAppLog().runOnce();
+    const rows = rowsFor('maestro_app_log');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      source: 'emdash.log',
+      app_version: '1.2.6-test',
+      recorded_at: '2026-11-12T11:00:00.000Z',
+      record: {
+        level: 'error',
+        msg: 'ProjectAttachmentManager: failed to attach Project',
+        error: { message: 'connect ETIMEDOUT' },
+      },
+    });
+    expect(rows[1]).toMatchObject({ record: { msg: 'auth: sign-in refused' } });
+  });
+
+  it('never uploads a token or the upload key quoted in a log line', async () => {
+    configure();
+    const github = `ghp_${'z'.repeat(36)}`;
+    mainLog([
+      {
+        level: 'error',
+        time: '2026-11-12T11:00:00.000Z',
+        msg: `fetch failed: Authorization: Bearer ${github} apikey=${PUBLISHABLE}`,
+        error: { message: `401 for key ${PUBLISHABLE}`, token: 'opaque-session-token-1' },
+      },
+    ]);
+    await withAppLog().runOnce();
+    expect(rowsFor('maestro_app_log')).toHaveLength(1);
+    const bodies = calls.map((call) => JSON.stringify(call.rows)).join('\n');
+    expect(bodies).not.toContain(github);
+    expect(bodies).not.toContain(PUBLISHABLE);
+    expect(bodies).not.toContain('opaque-session-token-1');
+    expect(bodies).toContain('fetch failed');
+  });
+
+  it('sends each line once, across passes, restarts and a rotation', async () => {
+    configure();
+    mainLog([failure]);
+    await withAppLog().runOnce();
+    await withAppLog().runOnce();
+    expect(rowsFor('maestro_app_log')).toHaveLength(1);
+
+    const later = { ...failure, time: '2026-11-12T11:05:00.000Z', msg: 'reconnect failed' };
+    // The file rotates: what was in it moves to emdash.log.1, and a new line starts emdash.log.
+    mainLog([failure], appLog() + '.1');
+    mainLog([later]);
+    await withAppLog().runOnce();
+    const rows = rowsFor('maestro_app_log');
+    expect(rows.map((row) => (row.record as { msg: string }).msg)).toEqual([
+      failure.msg,
+      'reconnect failed',
+    ]);
+  });
+
+  it('reaches back a week on its first upload', async () => {
+    configure();
+    mainLog([
+      { level: 'error', time: '2026-11-01T00:00:00.000Z', msg: 'too old' },
+      { level: 'error', time: '2026-11-10T00:00:00.000Z', msg: 'recent' },
+    ]);
+    await withAppLog().runOnce();
+    expect(rowsFor('maestro_app_log').map((row) => (row.record as { msg: string }).msg)).toEqual([
+      'recent',
+    ]);
+  });
+
+  it('keeps sending the other logs when its table refuses rows', async () => {
+    configure();
+    jsonl('conductor-log.jsonl', [{ at: '2026-11-12T10:00:00.000Z', utterance: 'go' }]);
+    mainLog([failure]);
+    respond = () => new Response(null, { status: 201 });
+    const refusing = (async (url: string, init: RequestInit) => {
+      if (url.endsWith('/maestro_app_log')) {
+        return new Response('{"code":"PGRST205"}', { status: 404 });
+      }
+      return fakeFetch(url, init);
+    }) as unknown as typeof fetch;
+    const up = new RemoteLogUploader({
+      dataDir: dir,
+      logger,
+      enabled: async () => true,
+      fetch: refusing,
+      appVersion: null,
+      builtIn: null,
+      appLogPath: appLog(),
+      now: () => clock,
+    });
+    await up.runOnce();
+    expect(rowsFor('maestro_voice_turns')).toHaveLength(1);
+    expect(up.getStatus().lastError).toContain('maestro_app_log');
+  });
+});
