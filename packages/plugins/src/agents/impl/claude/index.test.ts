@@ -23,6 +23,18 @@ describe('claude provider delegation policy', () => {
     expect(CLAUDE_SYSTEM_PROMPT_APPEND).toMatch(/computer use.*provider codex/);
   });
 
+  it('tells a new chat to fast-forward its branch, guarding local work', () => {
+    const { args } = provider.behavior.prompt!.buildCommand({
+      ...context,
+      isResuming: false,
+      initialPrompt: 'refactor the parser',
+    });
+    const appended = args[args.indexOf('--append-system-prompt') + 1];
+    expect(appended).toMatch(/new conversation.*fast-forwarding it.*merge the base in/);
+    expect(appended).toMatch(/uncommitted changes.*do not discard or overwrite.*report/);
+    expect(JSON.stringify(provider.behavior.acp!.sessionMeta!())).toMatch(/fast-forwarding it/);
+  });
+
   it('is appended to the system prompt ahead of the prompt on a fresh session', () => {
     const { args } = provider.behavior.prompt!.buildCommand({
       ...context,

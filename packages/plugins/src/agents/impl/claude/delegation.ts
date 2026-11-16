@@ -44,8 +44,19 @@ export const CLAUDE_CONDUCTOR_POLICY =
   'provider codex) and do not attempt it another way or ask the developer to do it by hand. ' +
   'The canvas browser tools for the app of your own task are not computer use.';
 
+/**
+ * New chats often start in a checkout whose branch lags its base, so the agent syncs it first.
+ * One sentence, no double quotes, for the same Windows command-line reason as above.
+ */
+export const CLAUDE_BRANCH_SYNC_POLICY =
+  'Before starting work in a new conversation, bring your current branch up to date with its ' +
+  'upstream or configured base branch (such as chorus/main) by fast-forwarding it, and if that ' +
+  'is not a fast-forward, merge the base in and resolve any conflicts yourself, unless the ' +
+  'working tree has uncommitted changes or the branch has local commits you did not make, in ' +
+  'which case do not discard or overwrite anything and report the situation instead of merging.';
+
 /** Everything Maestro appends to Claude Code's system prompt. */
-export const CLAUDE_SYSTEM_PROMPT_APPEND = `${CLAUDE_DELEGATION_POLICY} ${CLAUDE_CONDUCTOR_POLICY}`;
+export const CLAUDE_SYSTEM_PROMPT_APPEND = `${CLAUDE_DELEGATION_POLICY} ${CLAUDE_CONDUCTOR_POLICY} ${CLAUDE_BRANCH_SYNC_POLICY}`;
 
 const SYSTEM_PROMPT_FLAG = /^--(append-)?system-prompt(-file)?(=|$)/;
 
