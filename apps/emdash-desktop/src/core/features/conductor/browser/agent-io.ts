@@ -11,8 +11,11 @@ import {
   noteDictatedText,
   noteUnsentMessage,
 } from '@core/features/terminals/api/browser/pty/developer-typing';
+import { createTerminalAttachmentTarget } from '@core/features/terminals/api/browser/pty/terminal-attachment-target';
+import { buildTerminalImageInjection } from '@core/features/terminals/api/browser/pty/terminal-image-paths';
 import { finalAssistantReply } from '@core/primitives/agents/api/completion-report';
 import { buildPromptInjectionPayload } from '@core/primitives/prompt-injection/api/prompt-injection';
+import type { ConductorImage } from '../api/chat-conductor/images';
 import { type DeliveryHold, emitDelivery, queueDelivery, writeToInput } from './delivery-lane';
 
 /** Pause between a bracketed paste and Enter so TUIs finish ingesting the paste first. */
@@ -78,6 +81,70 @@ export interface SendOptions {
    * prompt, for the chat conductor (see `developerSubmissionsSince`).
    */
   dictated?: boolean;
+  /**
+   * Images that go with the prompt as image files, the way the agent's own chat sends pasted
+   * images: attachments of a chat agent's prompt, or files on a terminal agent's host whose paths
+   * are pasted before the text, which the agent attaches as images.
+   */
+  images?: readonly ConductorImage[];
+}
+
+function imageFile(image: ConductorImage): File {
+  const bytes = Uint8Array.from(atob(image.data), (char) => char.charCodeAt(0));
+  return new File([bytes], image.name, { type: image.mediaType });
+}
+
+/** Uploads images to a chat agent's conversation: the attachments of its prompt. */
+async function chatImageAttachments(
+  conversationId: string,
+  images: readonly ConductorImage[]
+): Promise<
+  { type: 'attachment'; id: string; name: string; mimeType: ConductorImage['mediaType'] }[]
+> {
+  const client = await getConversationsClient();
+  const attachments = [];
+  for (const image of images) {
+    const file = imageFile(image);
+    const result = await client.attachments.upload(
+      { conversationId },
+      { name: image.name, mimeType: image.mediaType, size: file.size, source: file.stream() }
+    );
+    if (!result.success) {
+      throw new Error(
+        `The image ${image.name} could not be attached: ${'message' in result.error ? result.error.message : result.error.type}`
+      );
+    }
+    attachments.push({
+      type: 'attachment' as const,
+      id: result.data.id,
+      name: image.name,
+      mimeType: image.mediaType,
+    });
+  }
+  return attachments;
+}
+
+/**
+ * Puts images on a terminal agent's host, as a file the developer pastes or drops into its
+ * terminal does, and returns the paste of their paths that makes the agent attach them.
+ */
+async function terminalImagePaste(
+  conversationId: string,
+  images: readonly ConductorImage[]
+): Promise<string> {
+  const target = createTerminalAttachmentTarget({
+    prepareLocalFiles: async (sources, signal) =>
+      (await getConversationsClient()).attachments.prepareLocalFiles(
+        { conversationId, sources },
+        { signal }
+      ),
+    upload: async (file, signal) =>
+      (await getConversationsClient()).attachments.upload({ conversationId }, file, { signal }),
+    delete: async (attachmentId) =>
+      (await getConversationsClient()).attachments.delete({ conversationId, attachmentId }),
+  });
+  const prepared = await target.prepareFiles(images.map(imageFile), new AbortController().signal);
+  return buildTerminalImageInjection(prepared.paths, prepared.platform);
 }
 
 /**
@@ -497,7 +564,15 @@ export async function sendToLiveSession(
   options: SendOptions = {}
 ): Promise<boolean> {
   if (entry.type === 'acp') return false;
+  const images = options.images?.length
+    ? await terminalImagePaste(entry.conversationId, options.images)
+    : '';
   const paste = async (): Promise<boolean> => {
+    if (images) {
+      const refused = await writeInput(entry.conversationId, images);
+      if (refused === 'not-found') return false;
+      if (refused) throw new Error(`The agent did not accept input (${refused}).`);
+    }
     const refused = await writeInput(entry.conversationId, pastePayload(entry, text));
     if (refused === 'not-found') return false;
     if (refused) throw new Error(`The agent did not accept input (${refused}).`);
@@ -527,12 +602,15 @@ export async function sendToAgent(
   options: SendOptions = {}
 ): Promise<void> {
   if (entry.type === 'acp') {
+    const attachments = options.images?.length
+      ? await chatImageAttachments(entry.conversationId, options.images)
+      : [];
     const client = await getConversationsClient();
     const result = await client.acp.sendPrompt(
       {
         conversationId: entry.conversationId,
         promptId: crypto.randomUUID(),
-        prompt: { text },
+        prompt: { text, ...(attachments.length > 0 ? { attachments } : {}) },
         placement: 'auto',
       },
       { timeoutMs: 0 }
@@ -541,7 +619,14 @@ export async function sendToAgent(
     return;
   }
   if (!entry.sessionActive) throw new Error(`${entry.taskName} is not running. Resume it first.`);
-  const paste = () => sendRaw(entry.conversationId, pastePayload(entry, text));
+  // Uploaded before the send queues: the paths go in just ahead of the text.
+  const images = options.images?.length
+    ? await terminalImagePaste(entry.conversationId, options.images)
+    : '';
+  const paste = async () => {
+    if (images) await sendRaw(entry.conversationId, images);
+    await sendRaw(entry.conversationId, pastePayload(entry, text));
+  };
   if (!submit) {
     await writeToInput(entry.conversationId, paste);
     noteDictatedText(entry.conversationId, text);

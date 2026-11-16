@@ -167,8 +167,14 @@ export interface TaskAgentPort {
   /**
    * Types a prompt into a chat's agent and submits it. `onLateFailure` is told when a send that
    * resolved as still on its way (held, or waiting for the agent to start) fails after all.
+   * `images` go with the prompt as image files, the way the agent's own chat sends pasted images.
    */
-  send(chatId: string, message: string, onLateFailure: (message: string) => void): Promise<string>;
+  send(
+    chatId: string,
+    message: string,
+    onLateFailure: (message: string) => void,
+    images?: readonly ConductorImage[]
+  ): Promise<string>;
   interrupt(chatId: string): Promise<string>;
   /**
    * Answers the permission prompt a chat's agent shows. `held` says main holds that prompt for
@@ -351,7 +357,10 @@ function actionWords(
   switch (tool) {
     case 'send_to_agent':
       return {
-        did: `Sent ${agent} a prompt`,
+        did:
+          value.include_images === true
+            ? `Sent ${agent} a prompt with the images`
+            : `Sent ${agent} a prompt`,
         doing: `Sending ${agent} a prompt…`,
         could: `send ${agent} a prompt`,
         detail: text('message') || undefined,
@@ -492,6 +501,8 @@ export class ChatConductorSession {
   private gatherTimer: ReturnType<typeof setTimeout> | null = null;
   /** The developer's message the running turn answers; null for an event turn. */
   private turnWords: string | null = null;
+  /** The images the developer attached to the message the running turn answers. */
+  private turnImages: readonly ConductorImage[] = [];
   /** Held events waiting for their turn, by chat; they go before the developer's messages. */
   private readonly pendingDecisions = new Map<string, DecisionRequest>();
   /** The statuses the running event turn set, in order, for the decisions it was asked for. */
@@ -1117,6 +1128,7 @@ export class ChatConductorSession {
         try {
           if (said !== undefined) {
             this.turnWords = said.text;
+            this.turnImages = said.images;
             const words = [said.text || IMAGES_ONLY_TEXT, attachedImagesNote(said.images)]
               .filter(Boolean)
               .join('\n\n');
@@ -1130,6 +1142,7 @@ export class ChatConductorSession {
               );
             } finally {
               this.turnWords = null;
+              this.turnImages = [];
             }
             continue;
           }
@@ -1597,8 +1610,16 @@ export class ChatConductorSession {
         );
       }
       case 'send_to_agent': {
-        const { message } = input as ChatConductorToolInput<'send_to_agent'>;
-        return agent.send(chatId, this.toAgent(chatId, message), lateFailure);
+        const { message, include_images } = input as ChatConductorToolInput<'send_to_agent'>;
+        if (include_images && this.turnImages.length === 0) {
+          throw new Error(
+            'there are no images to pass on: the developer attached none to their message in this turn. Send it without include_images.'
+          );
+        }
+        const prompt = this.toAgent(chatId, message);
+        return include_images
+          ? agent.send(chatId, prompt, lateFailure, this.turnImages)
+          : agent.send(chatId, prompt, lateFailure);
       }
       case 'interrupt_agent':
         return agent.interrupt(chatId);

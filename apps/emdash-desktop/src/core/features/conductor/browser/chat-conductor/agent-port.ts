@@ -259,12 +259,15 @@ export function createTaskAgentPort(canvas: CanvasStore, taskId: string): TaskAg
         : terminalTailReport(await readFinishedTerminal(entry).catch(() => null));
     },
 
-    async send(chatId, message, onLateFailure) {
+    async send(chatId, message, onLateFailure, images) {
       const entry = need(chatId);
       // A send held for the developer's typing can wait minutes: the turn does not wait with it.
       let onHold: (hold: DeliveryHold) => void = () => {};
       const heldNow = new Promise<DeliveryHold>((resolve) => (onHold = resolve));
-      const options = { onHold: (hold: DeliveryHold) => onHold(hold) };
+      const options = {
+        onHold: (hold: DeliveryHold) => onHold(hold),
+        ...(images && images.length > 0 ? { images } : {}),
+      };
       // The session list can call a live agent stopped; its host knows, so ask it before starting.
       const sending =
         entry.type === 'acp' || entry.sessionActive
@@ -284,7 +287,13 @@ export function createTaskAgentPort(canvas: CanvasStore, taskId: string): TaskAg
       if (first) return 'Sent to the agent.';
       const started = await startAgentSession(entry.projectId, entry.taskId, chatId);
       if (!started) throw new Error('The agent was not running and could not be started.');
-      const delivered = await deliverPromptWhenReady(canvas, chatId, message);
+      const delivered = await deliverPromptWhenReady(
+        canvas,
+        chatId,
+        message,
+        true,
+        images && images.length > 0 ? { images } : {}
+      );
       if (!delivered) throw new Error('The agent was started, but it did not take the prompt.');
       return 'The agent was not running: it was started, then sent the prompt.';
     },

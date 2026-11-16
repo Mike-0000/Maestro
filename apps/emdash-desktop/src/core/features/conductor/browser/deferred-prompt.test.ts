@@ -59,7 +59,8 @@ describe('deliverPromptWhenReady', () => {
     expect(mocks.sendToLiveSession).toHaveBeenCalledWith(
       expect.objectContaining({ conversationId: 'conv-1' }),
       'go',
-      true
+      true,
+      {}
     );
   });
 

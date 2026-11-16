@@ -28,12 +28,18 @@ import {
 
 const mocks = vi.hoisted(() => ({
   sendInput: vi.fn(),
+  sendPrompt: vi.fn(),
+  upload: vi.fn(),
   registryGet: vi.fn(),
   readTerminalTail: vi.fn((): string[] => []),
 }));
 
 vi.mock('@core/features/conversations/api/browser/client', () => ({
-  getConversationsClient: async () => ({ tui: { sendInput: mocks.sendInput } }),
+  getConversationsClient: async () => ({
+    tui: { sendInput: mocks.sendInput },
+    acp: { sendPrompt: mocks.sendPrompt },
+    attachments: { upload: mocks.upload, prepareLocalFiles: vi.fn(), delete: vi.fn() },
+  }),
 }));
 vi.mock('@core/features/conversations/api/browser/stores/conversation-registry', () => ({
   conversationRegistry: { get: mocks.registryGet },
@@ -76,6 +82,20 @@ beforeEach(() => {
   hookStatus('idle');
   mocks.sendInput.mockReset();
   mocks.sendInput.mockResolvedValue(ok);
+  mocks.sendPrompt.mockReset();
+  mocks.sendPrompt.mockResolvedValue({ success: true, data: undefined });
+  mocks.upload.mockReset();
+  mocks.upload.mockResolvedValue({
+    success: true,
+    data: {
+      id: 'att-1',
+      name: 'shot.png',
+      mimeType: 'image/png',
+      size: 4,
+      targetPath: 'C:\\attachments\\shot.png',
+      pathStyle: 'win32',
+    },
+  });
   mocks.readTerminalTail.mockReset();
   mocks.readTerminalTail.mockReturnValue([]);
   mocks.registryGet.mockReset();
@@ -425,6 +445,44 @@ describe('sendToAgent', () => {
   it('still refuses a terminal agent the session list calls stopped', async () => {
     await expect(sendToAgent(entry(), 'hello')).rejects.toThrow('is not running');
     expect(mocks.sendInput).not.toHaveBeenCalled();
+  });
+});
+
+describe("passing the developer's images on to the agent", () => {
+  const image = { id: 'i1', name: 'shot.png', mediaType: 'image/png' as const, data: 'AAAAAA==' };
+
+  it("attaches them to a chat agent's prompt as images", async () => {
+    await sendToAgent(entry({ type: 'acp' }), 'Fix this', true, { images: [image] });
+
+    expect(mocks.upload).toHaveBeenCalledTimes(1);
+    expect(mocks.upload.mock.calls[0]?.[0]).toEqual({ conversationId: 'conv-1' });
+    expect(mocks.upload.mock.calls[0]?.[1]).toMatchObject({
+      name: 'shot.png',
+      mimeType: 'image/png',
+      size: 4,
+    });
+    expect(mocks.sendPrompt.mock.calls[0]?.[0].prompt).toEqual({
+      text: 'Fix this',
+      attachments: [{ type: 'attachment', id: 'att-1', name: 'shot.png', mimeType: 'image/png' }],
+    });
+  });
+
+  it("puts them on a terminal agent's host and pastes their paths before the text", async () => {
+    await sendToAgent(entry({ sessionActive: true }), 'Fix this', true, { images: [image] });
+
+    expect(mocks.upload).toHaveBeenCalledTimes(1);
+    const typed = mocks.sendInput.mock.calls.map(([input]) => input.data as string);
+    expect(typed).toHaveLength(3);
+    expect(typed[0]).toContain(String.raw`C:\attachments\shot.png`);
+    expect(typed[0]).not.toContain('Fix this');
+    expect(typed[1]).toContain('Fix this');
+    expect(typed[2]).toBe('\r');
+  });
+
+  it('sends a prompt without images as before', async () => {
+    await sendToAgent(entry({ type: 'acp' }), 'Fix this');
+    expect(mocks.upload).not.toHaveBeenCalled();
+    expect(mocks.sendPrompt.mock.calls[0]?.[0].prompt).toEqual({ text: 'Fix this' });
   });
 });
 

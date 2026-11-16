@@ -5,6 +5,7 @@ import {
   DeliveryLeftUnsentError,
   sendToAgent,
   sendToLiveSession,
+  type SendOptions,
 } from './agent-io';
 import { DeliveryHeldError } from './delivery-lane';
 import { entryForConversation } from './roster';
@@ -36,7 +37,9 @@ export async function deliverPromptWhenReady(
   canvas: CanvasStore,
   conversationId: string,
   prompt: string,
-  submit = true
+  submit = true,
+  /** The images go with the prompt; see `SendOptions`. */
+  options: SendOptions = {}
 ): Promise<boolean> {
   const deadline = Date.now() + TIMEOUT_MS;
   while (Date.now() < deadline) {
@@ -45,7 +48,7 @@ export async function deliverPromptWhenReady(
       await new Promise((resolve) => setTimeout(resolve, BOOT_GRACE_MS));
       const current = entryForConversation(canvas, conversationId) ?? entry;
       try {
-        await sendToAgent(current, prompt, submit);
+        await sendToAgent(current, prompt, submit, options);
         return true;
       } catch (error) {
         log.warn('conductor: deferred prompt failed', { error, conversationId });
@@ -59,7 +62,7 @@ export async function deliverPromptWhenReady(
   const entry = entryForConversation(canvas, conversationId);
   if (!entry) return false;
   try {
-    return await sendToLiveSession(entry, prompt, submit);
+    return await sendToLiveSession(entry, prompt, submit, options);
   } catch (error) {
     log.warn('conductor: deferred prompt failed', { error, conversationId });
     if (reportedAsIs(error)) throw error;
