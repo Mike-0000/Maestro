@@ -19,7 +19,11 @@ export const chatViewChoiceSchema = defineVersionedSchema()
   .build();
 export type ChatViewChoiceState = typeof chatViewChoiceSchema.Type;
 
-/** The view the developer last picked for a chat, kept per conversation. */
+/**
+ * The view the developer last picked for a chat, kept per conversation. Nothing reads it since
+ * the conductor became the task strip's pinned tab; it stays in the catalog so the sweep ages
+ * out what was stored.
+ */
 export const chatViewChoiceMemento = defineMemento({
   id: 'conductor.chat-view',
   subject: conversationSubject,

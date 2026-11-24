@@ -1,10 +1,31 @@
 import { StateGlyph, type StateGlyphState } from '@emdash/ui/react/components';
-import { Tabs } from '@emdash/ui/react/primitives';
 import { cn } from '@core/primitives/styling/browser/cn';
-import type { ConductorVitals } from './vitals';
+import type { ChatConductorSession } from '../session';
+import { conductorVitals, type ConductorVitals } from './vitals';
 
 export type ConductorGlyph = ConductorVitals['glyph'];
-export type ChatViewChoice = 'conductor' | 'raw';
+
+/**
+ * A conductor's mark: the same one its footer shows, or none before there is anything to report
+ * (no thread yet, still loading, or nothing in it and nothing running).
+ */
+export function sessionGlyph(session: ChatConductorSession | undefined): ConductorGlyph | null {
+  if (!session?.loaded) return null;
+  const last = session.entries.at(-1) ?? null;
+  if (!last && !session.busy && !session.status) return null;
+  return conductorVitals({
+    state: session.status?.state ?? null,
+    busy: session.busy,
+    activity: null,
+    busySinceMs: null,
+    lastEntryAt: last?.at ?? null,
+    lastEntryKind: last?.kind ?? null,
+    nowMs: 0,
+    providerLabel: null,
+    accountLabel: null,
+    conductorEffort: null,
+  }).glyph;
+}
 
 const KIT_STATE: Record<ConductorGlyph, StateGlyphState> = {
   working: 'working',
@@ -36,19 +57,16 @@ export interface StatusStripProps {
   headline: string;
   /** The developer is waited on: the headline reads in full strength. */
   needsYou: boolean;
-  view: ChatViewChoice;
-  onViewChange: (view: ChatViewChoice) => void;
 }
 
 /**
- * The line above a chat: the conductor's state and headline on the left, and the Conductor | Raw
- * switch on the right as two plain text tabs, the one on screen underlined. It sits on the
- * reading surface with no rule under it. In a very narrow pane the headline steps aside for the
- * switch and stays in the tooltip.
+ * The line above a chat and above the conductor's thread: the conductor's state and headline. It
+ * sits on the reading surface with no rule under it. In a very narrow pane the headline steps
+ * aside and stays in the tooltip.
  */
-export function StatusStrip({ glyph, headline, needsYou, view, onViewChange }: StatusStripProps) {
+export function StatusStrip({ glyph, headline, needsYou }: StatusStripProps) {
   return (
-    <div className="surface-paper @container/strip flex h-9 shrink-0 items-center gap-3 bg-surface pr-1.5 pl-4">
+    <div className="surface-paper @container/strip flex h-9 shrink-0 items-center gap-3 bg-surface px-4">
       <span
         role="status"
         className="flex min-w-0 flex-1 items-center gap-2"
@@ -66,17 +84,6 @@ export function StatusStrip({ glyph, headline, needsYou, view, onViewChange }: S
           </span>
         )}
       </span>
-      <Tabs.Root
-        value={view}
-        onValueChange={(value) => {
-          if (value === 'conductor' || value === 'raw') onViewChange(value);
-        }}
-      >
-        <Tabs.List variant="underline" aria-label="Chat view">
-          <Tabs.Tab value="conductor">Conductor</Tabs.Tab>
-          <Tabs.Tab value="raw">Raw</Tabs.Tab>
-        </Tabs.List>
-      </Tabs.Root>
     </div>
   );
 }

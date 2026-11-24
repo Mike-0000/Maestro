@@ -458,30 +458,20 @@ describe('ChatConductorPanel', () => {
 });
 
 describe('StatusStrip', () => {
-  it('names the state and switches to the raw view', async () => {
-    const views: string[] = [];
+  it('names the state and has no view switch of its own', () => {
     host = document.createElement('div');
     document.body.appendChild(host);
     root = createRoot(host);
     act(() =>
       root!.render(
-        <StatusStrip
-          glyph="needs_you"
-          headline="Migration: keep or drop the old one?"
-          needsYou
-          view="conductor"
-          onViewChange={(view) => views.push(view)}
-        />
+        <StatusStrip glyph="needs_you" headline="Migration: keep or drop the old one?" needsYou />
       )
     );
     expect(host.querySelector('[role="status"]')?.textContent).toBe(
       'Migration: keep or drop the old one?'
     );
-    const tabs = [...host.querySelectorAll('[role="tab"]')] as HTMLElement[];
-    expect(tabs.map((tab) => tab.textContent)).toEqual(['Conductor', 'Raw']);
-    expect(tabs[0]!.getAttribute('aria-selected')).toBe('true');
-    await userEvent.click(tabs[1]!);
-    expect(views).toEqual(['raw']);
+    // The conductor and the raw chats are tabs of the task's strip now, not a switch here.
+    expect(host.querySelectorAll('[role="tab"]')).toHaveLength(0);
   });
 
   it('switches YOLO mode under the composer, which turns acting for the developer on', async () => {

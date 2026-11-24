@@ -21,11 +21,18 @@ function focusActiveContentElement(container: HTMLElement): void {
 export const PaneContent = observer(function PaneContent({
   emptyState,
   trailingSlot,
+  lead,
 }: {
   /** Rendered when the pane has no open tabs (domain-specific, injected by the task view). */
   emptyState?: ReactNode;
   /** Rendered after the last tab in the tab strip (domain-specific, injected by the task view). */
   trailingSlot?: ReactNode;
+  /**
+   * A view pinned before the tabs that cannot be closed: its chip leads the tab strip, and while
+   * `pane.leadActive` its content covers the tabs' content, which stays mounted underneath.
+   * With a lead the strip shows even when the pane has no tabs.
+   */
+  lead?: { tab: ReactNode; content: ReactNode };
 }) {
   const { paneId, pane } = usePaneContext();
   const { setNodeRef: setContentDropRef, isOver: isOverContent } = useDroppable({
@@ -49,9 +56,10 @@ export const PaneContent = observer(function PaneContent({
   );
 
   const hasAnyTab = pane.resolvedTabs.length > 0;
-  const activeKind = pane.resolvedTabs.find((t) => t.isActive)?.kind ?? null;
+  const leadShown = lead !== undefined && pane.leadActive;
+  const activeKind = leadShown ? null : (pane.resolvedTabs.find((t) => t.isActive)?.kind ?? null);
 
-  if (!hasAnyTab) {
+  if (!hasAnyTab && !lead) {
     return (
       <div ref={setContentRef} className="surface-paper relative h-full bg-(--em-surface)">
         {isOverContent && <div className={cn(DROP_PREVIEW_CLASS, 'inset-2')} />}
@@ -62,7 +70,7 @@ export const PaneContent = observer(function PaneContent({
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <TabBar trailingSlot={trailingSlot} />
+      <TabBar leadingSlot={lead?.tab} trailingSlot={trailingSlot} />
       <div ref={setContentRef} className="surface-paper relative min-h-0 flex-1 bg-(--em-surface)">
         <PaneSplitDropZones paneId={paneId} />
         {/*
@@ -89,6 +97,8 @@ export const PaneContent = observer(function PaneContent({
               </div>
             );
           })}
+          {!hasAnyTab && !leadShown && emptyState}
+          {leadShown && lead && <div className="absolute inset-0">{lead.content}</div>}
         </PaneDimensionProvider>
       </div>
     </div>

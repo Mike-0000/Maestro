@@ -3,7 +3,14 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { usePaneContext } from '@core/primitives/workbench-shell/browser/tabs/pane-context';
 import { PaneDropZone } from './tab-bar/draggable-tab';
 
-export const TabBar = observer(function TabBar({ trailingSlot }: { trailingSlot?: ReactNode }) {
+export const TabBar = observer(function TabBar({
+  leadingSlot,
+  trailingSlot,
+}: {
+  /** Pinned before the first tab; it stays in view while the tabs scroll. */
+  leadingSlot?: ReactNode;
+  trailingSlot?: ReactNode;
+}) {
   const { paneId, pane } = usePaneContext();
 
   const resolvedTabs = pane.resolvedTabs;
@@ -36,6 +43,11 @@ export const TabBar = observer(function TabBar({ trailingSlot }: { trailingSlot?
         ref={scrollContainerRef}
         className="flex h-full w-full items-end gap-0.5 overflow-x-auto overflow-y-hidden pl-1.5"
       >
+        {leadingSlot && (
+          <div className="sticky left-0 z-20 flex shrink-0 items-end bg-(--em-surface)">
+            {leadingSlot}
+          </div>
+        )}
         {resolvedTabs.map((tab) => {
           if (!pane.registry.has(tab.kind)) return null;
           const def = pane.registry.get(tab.kind);
