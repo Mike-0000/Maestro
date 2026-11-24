@@ -2,6 +2,7 @@ import { EmptyState } from '@emdash/ui/react/components';
 import { Button, Resizable, toast, useCollapsiblePanelBinding } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { useInTaskWindow } from '@core/features/tasks/api/browser/hooks/use-is-active-task';
 import {
   getTaskManagerStore,
   getTaskStore,
@@ -9,6 +10,7 @@ import {
   taskErrorMessage,
   taskViewKind,
 } from '@core/features/tasks/api/browser/task-state/task-selectors';
+import { taskWindows } from '@core/features/tasks/api/browser/task-windows/task-windows';
 import { useTaskViewContext } from '@core/features/tasks/contributions/browser/task-view-context';
 import { taskPanelLayoutsMemento } from '@core/features/tasks/contributions/mementos';
 import { useTaskComposition } from '@core/features/workbench/api/browser/task-composition-context';
@@ -51,8 +53,38 @@ function TaskViewErrorState({
   );
 }
 
+/**
+ * The main window's stand-in for a task that is open in its own window: one view of a task at a
+ * time, since its terminals can be on screen in only one place.
+ */
+function TaskInOwnWindowState({ taskId }: { taskId: string }) {
+  return (
+    <EmptyState
+      label="This conductor is open in its own window"
+      description="Its conductor and chats are there. Close that window, or bring the conductor back here."
+      bare
+      className="p-8"
+      action={
+        <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
+          <Button size="sm" variant="primary" onClick={() => taskWindows.focus(taskId)}>
+            Show window
+          </Button>
+          <Button size="sm" variant="text" onClick={() => taskWindows.close(taskId)}>
+            Bring it back here
+          </Button>
+        </div>
+      }
+    />
+  );
+}
+
 export const TaskMainPanel = observer(function TaskMainPanel() {
-  const { projectId } = useTaskViewContext();
+  const { projectId, taskId } = useTaskViewContext();
+  const inTaskWindow = useInTaskWindow();
+
+  if (!inTaskWindow && taskWindows.isOpen(taskId)) {
+    return <TaskInOwnWindowState taskId={taskId} />;
+  }
 
   return (
     <projectAvailabilityUi.Boundary projectId={projectId}>

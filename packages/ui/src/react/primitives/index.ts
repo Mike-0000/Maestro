@@ -1,6 +1,7 @@
 // ── Single-component primitives (named exports) ───────────────────────────────
 export { AnimatedHeight, type AnimatedHeightProps } from './animated-height';
 export { Box } from './box';
+export { PortalContainerProvider, usePortalContainer } from './portal-container';
 export { Badge, type BadgeProps, type BadgeTone, type BadgeVariant } from './badge';
 export { Breadcrumbs, type BreadcrumbItem, type BreadcrumbsProps } from './breadcrumbs';
 export { Button, type ButtonProps } from './button';

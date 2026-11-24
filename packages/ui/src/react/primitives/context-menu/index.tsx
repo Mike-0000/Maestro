@@ -1,5 +1,6 @@
 import { ContextMenu as ContextMenuPrimitive } from '@base-ui/react/context-menu';
 import { cx } from '@styles/utilities/cx';
+import { usePortalContainer } from '../portal-container';
 import * as styles from './context-menu.css';
 
 function ContextMenuRoot({ ...props }: ContextMenuPrimitive.Root.Props) {
@@ -15,8 +16,9 @@ function ContextMenuContent({
   sideOffset = 4,
   ...props
 }: ContextMenuPrimitive.Popup.Props & Pick<ContextMenuPrimitive.Positioner.Props, 'sideOffset'>) {
+  const portalContainer = usePortalContainer();
   return (
-    <ContextMenuPrimitive.Portal>
+    <ContextMenuPrimitive.Portal container={portalContainer}>
       <ContextMenuPrimitive.Positioner className={styles.positioner} sideOffset={sideOffset}>
         <ContextMenuPrimitive.Popup
           data-slot="context-menu-content"

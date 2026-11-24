@@ -12,14 +12,17 @@ import { TaskMainPanel, TaskViewLoadingState } from './main-panel';
 import { TaskScope } from './task-scope';
 import { TaskTitlebar } from './task-titlebar';
 
-const TaskViewWrapperWithProviders = observer(function TaskViewWrapperWithProviders({
+export const TaskViewWrapperWithProviders = observer(function TaskViewWrapperWithProviders({
   children,
   projectId,
   taskId,
+  activateScope = true,
 }: {
   children: ReactNode;
   projectId: string;
   taskId: string;
+  /** False in a task's own window, which leaves the main window's command scope alone. */
+  activateScope?: boolean;
 }) {
   // Single hydration gate for the task view (spec §Hydration gating): nothing
   // below this boundary may paint persisted view state (titlebar chrome
@@ -35,7 +38,7 @@ const TaskViewWrapperWithProviders = observer(function TaskViewWrapperWithProvid
 
   return (
     <TaskViewWrapper projectId={projectId} taskId={taskId}>
-      <TaskScope projectId={projectId} taskId={taskId}>
+      <TaskScope projectId={projectId} taskId={taskId} activate={activateScope}>
         {children}
       </TaskScope>
     </TaskViewWrapper>

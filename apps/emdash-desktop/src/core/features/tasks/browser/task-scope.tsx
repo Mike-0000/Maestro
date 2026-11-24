@@ -382,10 +382,16 @@ const taskScopeImplementation = {
 export function TaskScope({
   projectId,
   taskId,
+  activate = true,
   children,
 }: {
   readonly projectId: string;
   readonly taskId: string;
+  /**
+   * Make this the active scope (what the command palette and shortcuts address). A task's own
+   * window leaves the main window's scope as it is.
+   */
+  readonly activate?: boolean;
   readonly children: ReactNode;
 }) {
   const { instance } = useViewScope<typeof taskViewScope>(
@@ -394,8 +400,8 @@ export function TaskScope({
   );
 
   useLayoutEffect(() => {
-    if (instance) scopes.activate(instance);
-  }, [instance]);
+    if (instance && activate) scopes.activate(instance);
+  }, [instance, activate]);
 
   if (!instance) return null;
   return <ViewScopeInstanceProvider instance={instance}>{children}</ViewScopeInstanceProvider>;

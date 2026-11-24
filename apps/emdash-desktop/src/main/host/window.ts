@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { app, BrowserWindow, nativeTheme } from 'electron';
 import devIcon from '@/assets/images/chorus/chorus-dev.png?asset';
+import { TASK_WINDOW_FRAME_PREFIX } from '@core/features/tasks/api/task-window';
 import { desktopHostEvents } from '@core/features/workbench/node';
 import { PRODUCT_NAME } from '@core/primitives/app-identity/api/app-identity';
 import type { Theme } from '@core/primitives/app-settings/api';
@@ -22,6 +23,7 @@ import { log } from '@main/lib/logger';
 import { telemetryService } from '@main/lib/telemetry';
 import { restrictMediaPermissions } from './media-permissions';
 import { APP_ORIGIN } from './protocol';
+import { adoptTaskWindow } from './task-windows';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -95,6 +97,16 @@ export function createMainWindow(): BrowserWindow {
   // Route anything outside the renderer origin through the external-link flow
   registerExternalLinkHandlers(mainWindow, rendererUrl);
   registerBrowserWebviewHandlers(mainWindow);
+
+  // A task popped out into its own window gets the same link and in-app browser guards.
+  const owner = mainWindow;
+  mainWindow.webContents.on('did-create-window', (child, details) => {
+    if (!details.frameName.startsWith(TASK_WINDOW_FRAME_PREFIX)) return;
+    adoptTaskWindow(owner, child, (window) => {
+      registerExternalLinkHandlers(window, rendererUrl);
+      registerBrowserWebviewHandlers(window);
+    });
+  });
 
   // Window-first: show immediately with the theme-matching background instead
   // of waiting for ready-to-show. For a module-script page, ready-to-show only

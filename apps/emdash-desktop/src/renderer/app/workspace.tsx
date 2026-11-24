@@ -1,6 +1,7 @@
 import { Toaster } from '@emdash/ui/react/primitives';
 import { BrowserSurfaceHost } from '@core/features/canvas/browser/browser-surface-host';
 import { ConductorHud } from '@core/features/conductor/browser/hud/conductor-hud';
+import { TaskWindowsHost } from '@core/features/tasks/contributions/browser/task-windows-host';
 import { LeftSidebar } from '@core/features/workbench/browser/sidebar/left-sidebar';
 import { WindowScope } from '@core/features/workbench/browser/window-scope';
 import {
@@ -30,6 +31,7 @@ export function Workspace() {
       />
       <BrowserSurfaceHost />
       <ConductorHud />
+      <TaskWindowsHost />
       <Toaster />
     </WindowScope>
   );

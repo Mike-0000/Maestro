@@ -13,6 +13,7 @@ import {
   getTaskManagerStore,
   getTaskStore,
 } from '@core/features/tasks/api/browser/task-state/task-selectors';
+import { taskWindows } from '@core/features/tasks/api/browser/task-windows/task-windows';
 import { TaskContextMenu } from '@core/features/tasks/contributions/browser/task-context-menu';
 import { TaskGitDiffStats } from '@core/features/tasks/contributions/browser/task-git-diff-stats';
 import { taskViewDef } from '@core/features/tasks/contributions/views';
@@ -59,6 +60,11 @@ export const SidebarTaskItem = observer(function SidebarTaskItem({
 
   const openTask = () => {
     navigate(taskViewDef({ projectId, taskId }));
+  };
+
+  // A double click pops the conductor out into its own window, beside the others.
+  const openTaskWindow = () => {
+    taskWindows.open(projectId, taskId);
   };
 
   const handleArchive = () => {
@@ -131,6 +137,7 @@ export const SidebarTaskItem = observer(function SidebarTaskItem({
         isActive={isActive}
         onMouseDown={(e) => e.preventDefault()}
         onClick={openTask}
+        onDoubleClick={openTaskWindow}
       >
         <div className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
           <div className="flex min-w-0 items-center gap-2">

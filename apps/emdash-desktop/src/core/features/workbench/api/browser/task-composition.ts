@@ -25,6 +25,7 @@ import {
 } from '@core/features/tasks/api/browser/stores/task-chrome-store';
 import { TaskNavigationParticipant } from '@core/features/tasks/api/browser/stores/task-navigation-participant';
 import type { TaskStore } from '@core/features/tasks/api/browser/stores/task-store';
+import { taskWindows } from '@core/features/tasks/api/browser/task-windows/task-windows';
 import { type SidebarTab } from '@core/features/tasks/api/browser/types';
 import {
   taskDiffPreferencesMemento,
@@ -214,8 +215,10 @@ export class TaskComposition {
     this._disposers.push(
       reaction(
         () =>
-          getNavigation().currentRef.viewId === 'task' &&
-          (getNavigation().currentRef.params as { taskId?: string }).taskId === taskId,
+          // On screen in the main window, or in the task's own window.
+          taskWindows.isOpen(taskId) ||
+          (getNavigation().currentRef.viewId === 'task' &&
+            (getNavigation().currentRef.params as { taskId?: string }).taskId === taskId),
         (isActive) => this.paneLayout.setViewActive(isActive),
         { fireImmediately: true }
       ),

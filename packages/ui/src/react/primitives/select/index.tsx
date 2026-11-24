@@ -5,6 +5,7 @@ import * as React from 'react';
 // Relative type import: the dts emitter rewrites `@styles/*` type imports to a
 // dangling relative path, silently degrading the variant prop types.
 import type { ControlVariantProps } from '../../../styles/recipes/control';
+import { usePortalContainer } from '../portal-container';
 import { TriggerButton } from '../trigger-button';
 import * as styles from './select.css';
 
@@ -77,8 +78,9 @@ function SelectContent({
   > & {
     width?: 'trigger' | 'content' | 'content-at-least-trigger';
   }) {
+  const portalContainer = usePortalContainer();
   return (
-    <SelectPrimitive.Portal>
+    <SelectPrimitive.Portal container={portalContainer}>
       <SelectPrimitive.Positioner
         side={side}
         sideOffset={sideOffset}

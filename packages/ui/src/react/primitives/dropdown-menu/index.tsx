@@ -2,14 +2,22 @@ import { Menu as MenuPrimitive } from '@base-ui/react/menu';
 import { cx } from '@styles/utilities/cx';
 import { CheckIcon, ChevronRightIcon } from 'lucide-react';
 import * as React from 'react';
+import { usePortalContainer } from '../portal-container';
 import * as styles from './dropdown-menu.css';
 
 function DropdownMenuRoot({ ...props }: MenuPrimitive.Root.Props) {
   return <MenuPrimitive.Root data-slot="dropdown-menu" {...props} />;
 }
 
-function DropdownMenuPortal({ ...props }: MenuPrimitive.Portal.Props) {
-  return <MenuPrimitive.Portal data-slot="dropdown-menu-portal" {...props} />;
+function DropdownMenuPortal({ container, ...props }: MenuPrimitive.Portal.Props) {
+  const portalContainer = usePortalContainer();
+  return (
+    <MenuPrimitive.Portal
+      data-slot="dropdown-menu-portal"
+      container={container ?? portalContainer}
+      {...props}
+    />
+  );
 }
 
 function DropdownMenuTrigger({ ...props }: MenuPrimitive.Trigger.Props) {
@@ -28,8 +36,9 @@ function DropdownMenuContent({
   Pick<MenuPrimitive.Positioner.Props, 'align' | 'alignOffset' | 'side' | 'sideOffset'> & {
     width?: 'trigger' | 'content' | 'content-at-least-trigger';
   }) {
+  const portalContainer = usePortalContainer();
   return (
-    <MenuPrimitive.Portal>
+    <MenuPrimitive.Portal container={portalContainer}>
       <MenuPrimitive.Positioner
         className={styles.positioner}
         align={align}

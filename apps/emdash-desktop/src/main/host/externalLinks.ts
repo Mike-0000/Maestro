@@ -1,6 +1,7 @@
 import { shell, type BrowserWindow } from 'electron';
 import { desktopHostEvents } from '@core/features/workbench/node';
 import { isInternalAppUrl } from '@main/host/external-link-policy';
+import { isTaskWindowRequest, taskWindowOptions } from '@main/host/task-windows';
 import { getMainWindow } from '@main/host/window';
 import { log } from '@main/lib/logger';
 
@@ -30,7 +31,11 @@ export function registerExternalLinkHandlers(win: BrowserWindow, rendererUrl: st
   const wc = win.webContents;
 
   // Handle window.open and target="_blank"
-  wc.setWindowOpenHandler(({ url }) => {
+  wc.setWindowOpenHandler(({ url, frameName }) => {
+    // A task popped out into its own window: a blank page the renderer fills itself.
+    if (isTaskWindowRequest({ url, frameName })) {
+      return { action: 'allow', overrideBrowserWindowOptions: taskWindowOptions() };
+    }
     if (!isInternalAppUrl(url, rendererUrl) && /^https?:\/\//i.test(url)) {
       requestExternalLinkOpen(url);
       return { action: 'deny' };

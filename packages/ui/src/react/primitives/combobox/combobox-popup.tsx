@@ -18,6 +18,7 @@ import { Popover as PopoverPrimitive } from '@base-ui/react/popover';
 import { cx } from '@styles/utilities/cx';
 import { XIcon } from 'lucide-react';
 import * as React from 'react';
+import { usePortalContainer } from '../portal-container';
 import * as styles from './combobox-popup.css';
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -104,13 +105,15 @@ export const ComboboxPopup = React.forwardRef<ComboboxPopupHandle, ComboboxPopup
       [anchorRect]
     );
 
+    const portalContainer = usePortalContainer();
+
     // Nothing to render.
     if (!anchorRect) return null;
     if (items.length === 0 && !emptyLabel) return null;
 
     return (
       <PopoverPrimitive.Root open modal={false}>
-        <PopoverPrimitive.Portal>
+        <PopoverPrimitive.Portal container={portalContainer}>
           <PopoverPrimitive.Positioner
             anchor={virtualAnchor}
             positionMethod="fixed"
