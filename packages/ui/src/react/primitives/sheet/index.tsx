@@ -4,6 +4,7 @@ import { ScrollContainer } from '@react/primitives/scroll-container';
 import { cx } from '@styles/utilities/cx';
 import { XIcon } from 'lucide-react';
 import * as React from 'react';
+import { usePortalContainer } from '../portal-container';
 import * as styles from './sheet.css';
 
 export type SheetSide = 'right' | 'left' | 'top' | 'bottom';
@@ -18,8 +19,11 @@ function SheetTrigger({ ...props }: Drawer.Trigger.Props) {
   return <Drawer.Trigger data-slot="sheet-trigger" {...props} />;
 }
 
-function SheetPortal({ ...props }: Drawer.Portal.Props) {
-  return <Drawer.Portal data-slot="sheet-portal" {...props} />;
+function SheetPortal({ container, ...props }: Drawer.Portal.Props) {
+  const portalContainer = usePortalContainer();
+  return (
+    <Drawer.Portal data-slot="sheet-portal" container={container ?? portalContainer} {...props} />
+  );
 }
 
 function SheetClose({ ...props }: Drawer.Close.Props) {

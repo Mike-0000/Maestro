@@ -329,9 +329,11 @@ export class FrontendPty {
       this.terminal.resize(targetDims.cols, targetDims.rows);
     }
     mountTarget.appendChild(this.ownedContainer);
+    this.followWindow();
     // Force a repaint after reparenting in the DOM.
     const t = this.terminal;
-    requestAnimationFrame(() => {
+    const view = this.ownedContainer.ownerDocument.defaultView ?? window;
+    view.requestAnimationFrame(() => {
       try {
         if ((t as unknown as { _isDisposed?: boolean })._isDisposed) return;
         t.refresh(0, t.rows - 1);
@@ -351,6 +353,18 @@ export class FrontendPty {
    */
   unmount(): void {
     ensureXtermHost().appendChild(this.ownedContainer);
+    this.followWindow();
+  }
+
+  /**
+   * A terminal can move between windows: a task popped out into its own window shows its
+   * terminals there. Opening an already opened terminal again only points xterm at the window
+   * its element now lives in, for its animation frames, focus and pixel ratio.
+   */
+  private followWindow(): void {
+    try {
+      this.terminal.open(this.ownedContainer);
+    } catch {}
   }
 
   /**

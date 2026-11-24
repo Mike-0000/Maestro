@@ -2,6 +2,7 @@
 
 import { Tooltip as TooltipPrimitive } from '@base-ui/react/tooltip';
 import { cx } from '@styles/utilities/cx';
+import { usePortalContainer } from '../portal-container';
 import * as styles from './tooltip.css';
 
 /**
@@ -35,8 +36,9 @@ function TooltipContent({
     /** Draw a pointer arrow. Off by default: tooltips are quiet notes (design brief 2.10). */
     showArrow?: boolean;
   }) {
+  const portalContainer = usePortalContainer();
   return (
-    <TooltipPrimitive.Portal>
+    <TooltipPrimitive.Portal container={portalContainer}>
       <TooltipPrimitive.Positioner
         align={align}
         alignOffset={alignOffset}

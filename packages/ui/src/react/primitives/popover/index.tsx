@@ -3,6 +3,7 @@
 import { Popover as PopoverPrimitive } from '@base-ui/react/popover';
 import { cx } from '@styles/utilities/cx';
 import * as React from 'react';
+import { usePortalContainer } from '../portal-container';
 import * as styles from './popover.css';
 
 function PopoverRoot({ ...props }: PopoverPrimitive.Root.Props) {
@@ -26,8 +27,9 @@ function PopoverContent({
     PopoverPrimitive.Positioner.Props,
     'align' | 'alignOffset' | 'side' | 'sideOffset' | 'anchor'
   >) {
+  const portalContainer = usePortalContainer();
   return (
-    <PopoverPrimitive.Portal>
+    <PopoverPrimitive.Portal container={portalContainer}>
       <PopoverPrimitive.Positioner
         align={align}
         alignOffset={alignOffset}
