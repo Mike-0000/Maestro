@@ -17,6 +17,10 @@ import {
 import { observer } from 'mobx-react-lite';
 import { useMemo, useState } from 'react';
 import {
+  ConductorLeadContent,
+  ConductorLeadTab,
+} from '@core/features/conductor/contributions/browser/conductor-lead';
+import {
   splitPanePanelId,
   taskPanelLayoutsMemento,
 } from '@core/features/tasks/contributions/mementos';
@@ -180,6 +184,12 @@ const SplitPane = observer(function SplitPane({
           <PaneContent
             emptyState={<PaneEmptyState />}
             trailingSlot={<NewConversationTabButton />}
+            // The task's conductor is pinned first in the first pane and never closes.
+            lead={
+              index === 0
+                ? { tab: <ConductorLeadTab />, content: <ConductorLeadContent /> }
+                : undefined
+            }
           />
         </PaneProvider>
       </Resizable.Panel>

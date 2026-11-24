@@ -95,6 +95,9 @@ export const GenericTabItem = observer(function GenericTabItem({
     [host, label, renameMaxLength, renameValue, tab.tabId]
   );
 
+  // With the pinned lead in front, the active tab keeps its place but reads as any other.
+  const isActive = tab.isActive && !pane.leadActive;
+
   const handleSelect = () => {
     host.setActiveTab(tab.tabId);
     // Container TabBar onClick will return focus to active content for mouse clicks.
@@ -132,12 +135,12 @@ export const GenericTabItem = observer(function GenericTabItem({
           }}
           title={fullTitle}
           data-tabid={tab.tabId}
-          data-active={tab.isActive || undefined}
+          data-active={isActive || undefined}
           className={cn(
             // The active tab is cut from the content's surface and opens into it; the rest are
             // text on the strip. In a pane without focus the active tab's text steps down.
             'group relative flex h-[33px] cursor-pointer items-center rounded-t-md text-sm transition-colors outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset',
-            tab.isActive
+            isActive
               ? cn(
                   'bg-(--em-surface-paper)',
                   isFocusedPane ? 'text-foreground' : 'text-foreground-muted'
@@ -151,7 +154,7 @@ export const GenericTabItem = observer(function GenericTabItem({
               <span
                 className={cn(
                   'flex shrink-0 items-center transition-opacity',
-                  !tab.isActive && 'opacity-60 group-hover:opacity-100'
+                  !isActive && 'opacity-60 group-hover:opacity-100'
                 )}
               >
                 {preSlot}
@@ -181,7 +184,7 @@ export const GenericTabItem = observer(function GenericTabItem({
             ) : (
               (labelSlot ?? (
                 <TabTitle
-                  isActive={tab.isActive}
+                  isActive={isActive}
                   isPreview={tab.isPreview}
                   hasError={hasError}
                   className="px-1.5"

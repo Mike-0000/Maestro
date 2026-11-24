@@ -70,6 +70,8 @@ export class ChatConductorManager implements FrontConductorSource {
   /** The chat tabs on screen right now, by the place that shows them (a pane). */
   private readonly screens = observable.map<string, PlacedScreen>([], { deep: false });
   private screenClock = 0;
+  /** Each task's chat whose tab was on screen last, kept after it leaves the screen. */
+  private readonly lastChats = observable.map<string, string>([], { deep: false });
 
   constructor(
     private readonly canvas: CanvasStore,
@@ -126,6 +128,9 @@ export class ChatConductorManager implements FrontConductorSource {
         this.screens.delete(screenId);
         return;
       }
+      if (this.lastChats.get(screen.taskId) !== screen.conversationId) {
+        this.lastChats.set(screen.taskId, screen.conversationId);
+      }
       if (
         current?.conversationId === screen.conversationId &&
         current.taskId === screen.taskId &&
@@ -136,6 +141,11 @@ export class ChatConductorManager implements FrontConductorSource {
       }
       this.screens.set(screenId, { ...screen, at: ++this.screenClock });
     });
+  }
+
+  /** The task's chat whose tab was on screen last, even when none is now. */
+  lastChatOnScreen(taskId: string): string | null {
+    return this.lastChats.get(taskId) ?? null;
   }
 
   /** The developer worked in that place's Conductor view: of two on screen, it is in front. */
@@ -253,6 +263,7 @@ export class ChatConductorManager implements FrontConductorSource {
     runInAction(() => {
       this.sessions.clear();
       this.screens.clear();
+      this.lastChats.clear();
     });
   }
 

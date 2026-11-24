@@ -78,7 +78,12 @@ export class PaneStore<R extends TabRegistry = TabRegistry>
   readonly _resources = observable.map<string, TabResource>();
   /** Tab display order (array of tabIds). Drives resolvedTabs. */
   tabOrder: string[] = [];
-  activeTabId: string | undefined = undefined;
+  private _activeTabId: string | undefined = undefined;
+  /**
+   * A view pinned before the tabs (the task's conductor) is in front of the pane's content. The
+   * active tab keeps its place but is not on screen; choosing any tab puts it back in front.
+   */
+  leadActive = false;
   /** Current pixel dimensions of the pane container, null until first measurement. */
   dimensions: { width: number; height: number } | null = null;
 
@@ -123,9 +128,12 @@ export class PaneStore<R extends TabRegistry = TabRegistry>
     this._layoutOpener = opts?.layoutOpener ?? null;
     this._isViewActive = opts?.isViewActive ?? (() => false);
 
-    makeObservable(this, {
+    makeObservable<this, '_activeTabId'>(this, {
       tabOrder: observable,
-      activeTabId: observable,
+      _activeTabId: observable,
+      activeTabId: computed,
+      leadActive: observable,
+      setLeadActive: action,
       isVisible: computed,
       dimensions: observable,
       resolvedActiveTabId: computed,
@@ -165,6 +173,20 @@ export class PaneStore<R extends TabRegistry = TabRegistry>
       (resource) => resource?.onActivate?.(),
       { fireImmediately: true }
     );
+  }
+
+  get activeTabId(): string | undefined {
+    return this._activeTabId;
+  }
+
+  /** Every way a tab becomes active (a click, an open, a keyboard step) also leaves the lead. */
+  set activeTabId(id: string | undefined) {
+    this._activeTabId = id;
+    if (id !== undefined) this.leadActive = false;
+  }
+
+  setLeadActive(active: boolean): void {
+    this.leadActive = active;
   }
 
   /** True when the owning view is the currently active route. */
@@ -386,6 +408,7 @@ export class PaneStore<R extends TabRegistry = TabRegistry>
   }
 
   setActiveTab(id: string): void {
+    // Assigned even when it is already the active tab: choosing it leaves the lead.
     this.activeTabId = id;
   }
 
