@@ -66,6 +66,14 @@ export const plugin = definePlugin(
     models: {
       kind: 'selectable',
       modelOptions: {
+        'claude-fable-5-2': {
+          name: 'Claude Fable 5.2',
+          modelFeatures: { intelligence: 4, speed: 3 },
+        },
+        'claude-opus-5-5': {
+          name: 'Claude Opus 5.5',
+          modelFeatures: { intelligence: 5, speed: 2 },
+        },
         'claude-fable-5-1': {
           name: 'Claude Fable 5.1',
           modelFeatures: { intelligence: 4, speed: 3 },
