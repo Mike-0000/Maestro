@@ -122,7 +122,7 @@ On the VM: `./install-maestro-host.sh pairing-code` prints a single-use code tha
 minutes. On the PC (signed in to the same tailnet as a user, not a tagged device):
 
 ```powershell
-& "$env:LOCALAPPDATA\Programs\Maestro\Maestro.exe" --maestro-client
+& "$env:LOCALAPPDATA\Programs\Chorus\Maestro\Maestro.exe" --maestro-client
 ```
 
 Enter `https://<vm>.<tailnet>.ts.net` and the code, then use **Create a shortcut** in the connection
