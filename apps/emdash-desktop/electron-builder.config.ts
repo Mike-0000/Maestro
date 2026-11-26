@@ -131,6 +131,8 @@ const config: Configuration = {
     oneClick: false,
     allowToChangeInstallationDirectory: true,
     perMachine: false,
+    // Adds the "Maestro Client" shortcut (client mode) on every install and update.
+    include: 'build/installer.nsh',
   },
   npmRebuild: false,
   // Encrypt Chromium's on-disk cookie store (in-app browser logins) with OS-level
