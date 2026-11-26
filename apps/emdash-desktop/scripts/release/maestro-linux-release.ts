@@ -82,7 +82,8 @@ function resolveRelease(): ReleaseRef {
   if (values.version && values.commit) {
     if (!isMaestroReleaseVersion(values.version))
       fail(`${values.version} is not a release version`);
-    const commit = exec(`git rev-parse --verify ${shellSafe(values.commit)}^{commit}`, {
+    // Quoted: unquoted, cmd.exe reads `^` as its escape character and drops it.
+    const commit = exec(`git rev-parse --verify "${shellSafe(values.commit)}^{commit}"`, {
       cwd: workspaceRoot,
     });
     return { version: values.version, commit };
