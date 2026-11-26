@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { formatAbsolute, type HostFileRef } from '#primitives/path/api';
-import { AUTOMATION_COMPLETION_DEFAULT_TIMEOUT_MS } from '../../api/deployment';
+import type { AutomationSessionRef } from '../../api/delivery';
+import {
+  AUTOMATION_CLOSE_DEFAULT_TIMEOUT_MS,
+  AUTOMATION_COMPLETION_DEFAULT_TIMEOUT_MS,
+  type AutomationCloseCompletion,
+} from '../../api/deployment';
 import type { AutomationRun, AutomationRunDelivery } from '../../api/run';
 import type { AutomationDeliveryPort } from '../ports/delivery';
 import type { AutomationPortError } from '../ports/port-error';
@@ -22,6 +27,11 @@ export type AutomationRunExecutorOptions = {
 };
 
 export type AutomationRunExecutor = (run: AutomationRun, signal: AbortSignal) => Promise<void>;
+
+type FinishDelivery = (
+  state: AutomationRunDelivery['state'],
+  extra?: { pullRequestUrl?: string; error?: AutomationPortError }
+) => void;
 
 export function createAutomationRunExecutor(
   options: AutomationRunExecutorOptions
@@ -90,10 +100,7 @@ export function createAutomationRunExecutor(
     const completion = run.configSnapshot.completion;
     if (!completion) return;
 
-    const finish = (
-      state: AutomationRunDelivery['state'],
-      extra: { pullRequestUrl?: string; error?: AutomationPortError } = {}
-    ): void => {
+    const finish: FinishDelivery = (state, extra = {}) => {
       transitions.updateDelivery(run.id, {
         state,
         pullRequestUrl: extra.pullRequestUrl ?? null,
@@ -104,6 +111,17 @@ export function createAutomationRunExecutor(
 
     if (!deliveryPort) {
       finish('failed', { error: { code: 'delivery_unsupported' } });
+      return;
+    }
+    if (completion.kind === 'close') {
+      await closeWhenSettled(
+        run,
+        completion,
+        { conversationId: session.conversationId, type: run.configSnapshot.agent.type },
+        deliveryPort,
+        finish,
+        signal
+      );
       return;
     }
     if (!session.branchName) {
@@ -175,6 +193,51 @@ export function createAutomationRunExecutor(
       return;
     }
     finish(draft ? 'pr_draft' : 'pr_open', { pullRequestUrl: published.data.url });
+  }
+
+  /**
+   * `close` completion: wait for the agent to settle, then end the session with the
+   * terminating verb so it does not auto-resume. Needs no branch.
+   */
+  async function closeWhenSettled(
+    run: AutomationRun,
+    completion: AutomationCloseCompletion,
+    sessionRef: AutomationSessionRef,
+    port: AutomationDeliveryPort,
+    finish: FinishDelivery,
+    signal: AbortSignal
+  ): Promise<void> {
+    transitions.updateDelivery(run.id, {
+      state: 'agent_running',
+      pullRequestUrl: null,
+      error: null,
+      finishedAt: null,
+    });
+
+    const outcome = await port.awaitSession({
+      session: sessionRef,
+      timeoutMs: completion.timeoutMs ?? AUTOMATION_CLOSE_DEFAULT_TIMEOUT_MS,
+      signal,
+    });
+
+    if (outcome === 'aborted') {
+      // Shutdown leaves the delivery in flight; restart recovery marks it interrupted.
+      if (signal.reason !== RUN_CANCELLED_REASON) return;
+      await port.closeSession(sessionRef);
+      finish('cancelled');
+      return;
+    }
+
+    const closed = await port.closeSession(sessionRef);
+    if (outcome !== 'clean') {
+      finish('failed', { error: { code: `agent_${outcome}` } });
+      return;
+    }
+    if (!closed.success) {
+      finish('failed', { error: closed.error });
+      return;
+    }
+    finish('closed');
   }
 }
 

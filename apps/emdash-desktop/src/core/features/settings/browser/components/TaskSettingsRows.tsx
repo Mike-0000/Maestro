@@ -3,6 +3,8 @@ import { Info } from 'lucide-react';
 import React from 'react';
 import { useAppSettingsKey } from '@core/features/settings/api/browser/use-app-settings-key';
 import { useTaskSettings } from '@core/features/tasks/api/browser/hooks/useTaskSettings';
+import { isClientMode } from '@core/primitives/client-mode/browser/client-mode';
+import { useHostPlatform } from '@core/primitives/client-mode/browser/host-platform';
 import { detectPlatformContext } from '@core/primitives/keybindings/api';
 import { ResetToDefaultButton } from './ResetToDefaultButton';
 import { SettingRow } from './SettingRow';
@@ -231,7 +233,11 @@ export const EnableTmuxRow: React.FC = () => {
   } = useAppSettingsKey('project');
 
   const tmuxByDefault = projects?.tmuxByDefault ?? false;
-  const tmuxSupported = detectPlatformContext().os !== 'windows';
+  const hostPlatform = useHostPlatform();
+  // A Maestro client's sessions run on the remote host, so its platform decides.
+  const tmuxSupported = isClientMode()
+    ? hostPlatform !== 'win32'
+    : detectPlatformContext().os !== 'windows';
 
   return (
     <SettingRow

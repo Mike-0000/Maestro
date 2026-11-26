@@ -2,6 +2,7 @@ import { Tooltip } from '@emdash/ui/react/primitives';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAccountSession } from '@core/features/account/api/browser/useAccount';
+import { ConnectionOverlay } from '@core/features/client-mode/browser/connection-overlay';
 import { useGitHubAuthEvents } from '@core/features/github/api/browser/use-github-auth-events';
 import { useIntegrationAccountEvents } from '@core/features/integrations/api/browser/use-integration-account-events';
 import { IntegrationsProvider } from '@core/features/integrations/contributions/browser/integrations-provider';
@@ -11,6 +12,7 @@ import { confirmOpenExternalLink } from '@core/features/workbench/api/browser/op
 import { Onboarding } from '@core/features/workbench/browser/onboarding/onboarding';
 import { FramelessTitlebarOverlay } from '@core/features/workbench/browser/window-controls';
 import { WorkspaceLayoutContextProvider } from '@core/features/workbench/contributions/browser/layout-provider';
+import { isClientMode } from '@core/primitives/client-mode/browser/client-mode';
 import { ExternalLinkProvider } from '@core/primitives/external-links/browser';
 import { queryClient } from '@core/primitives/query/browser/query-client';
 import { HostRecoveryWakeups } from '@core/services/hosts/browser/recovery-wakeups';
@@ -114,6 +116,10 @@ function AppContent() {
               <AppMenuEvents onOpenSettings={handleOpenSettingsFromMenu} />
               <ExternalLinkProvider openExternalLink={confirmOpenExternalLink}>
                 <ThemeProvider>
+                  {/* Client mode only, and first: its key handling must precede the app's. */}
+                  {isClientMode() && (
+                    <ConnectionOverlay windowChrome={<FramelessTitlebarOverlay />} />
+                  )}
                   <ModalRenderer />
                   <AppShutdownLifecycle />
                   <HostRecoveryWakeups />

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { gitCredentialsSessionSpecSchema } from '#primitives/git-credentials/api';
+import { tuiEffortIdSchema } from '#services/session-start/api';
 import { runtimeUnavailableErrorSchema } from '#workspace-server/shared/schemas';
 
 export const tuiAgentStartInputSchema = z.object({
@@ -16,6 +17,11 @@ export const tuiAgentStartInputSchema = z.object({
    */
   chosenSessionId: z.string().nullable().optional(),
   model: z.string().nullable(),
+  /**
+   * Reasoning effort id passed to the provider CLI's effort flag (for example Claude's
+   * `--effort high`). Absent or null: no flag, the CLI's own default.
+   */
+  effort: tuiEffortIdSchema.nullable().optional(),
   initialPrompt: z.string().optional(),
   autoApprove: z.boolean().optional(),
   trustWorkspace: z.boolean().optional(),

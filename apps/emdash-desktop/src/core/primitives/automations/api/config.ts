@@ -27,6 +27,21 @@ export const automationTriggerConfig = defineVersionedSchema()
   .unversioned(triggerConfigSchema)
   .build();
 
+/** Runtime default for a close-when-done run with no timeout of its own (4 hours). */
+export const DEFAULT_CLOSE_WHEN_DONE_TIMEOUT_MINUTES = 4 * 60;
+
+/**
+ * Close-when-done: each run waits for the agent to settle (or the timeout), then ends
+ * the agent session. Such runs are unattended (no permission prompts). On-demand
+ * automations ignore it, since they finish by opening a pull request.
+ */
+export const closeWhenDoneSchema = z.object({
+  /** Absent means {@link DEFAULT_CLOSE_WHEN_DONE_TIMEOUT_MINUTES}. */
+  timeoutMinutes: z.number().int().positive().optional(),
+});
+
+export type CloseWhenDoneConfig = z.infer<typeof closeWhenDoneSchema>;
+
 export const conversationConfigSchema = z.object({
   prompt: z.string(),
   provider: z.string(),
@@ -36,6 +51,13 @@ export const conversationConfigSchema = z.object({
   model: z.string().optional(),
   /** Conversation transport: 'pty' for terminal or 'acp' for structured chat UI. */
   type: z.enum(['pty', 'acp']).optional(),
+  /**
+   * Effort id from the agent's `capabilities.effort.effortOptions`. Absent or empty
+   * string means use the agent default.
+   */
+  effort: z.string().optional(),
+  /** Absent means runs are left open when the agent finishes. */
+  closeWhenDone: closeWhenDoneSchema.optional(),
 });
 
 export type ConversationConfig = z.infer<typeof conversationConfigSchema>;

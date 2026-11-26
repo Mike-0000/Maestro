@@ -35,13 +35,15 @@ function fakeClient(statuses: Array<AutomationSessionStatus | 'error'>) {
     return status === 'error' ? err({ type: 'runtime-unavailable' }) : ok(status);
   });
   const stopSession = vi.fn(async () => ok(undefined));
+  const closeSession = vi.fn();
   const publish = vi.fn();
   const client = {
     sessionStatus,
     stopSession,
+    closeSession,
     publish,
   } as unknown as ContractClient<AutomationDeliveryContract>;
-  return { client, sessionStatus, stopSession, publish };
+  return { client, sessionStatus, stopSession, closeSession, publish };
 }
 
 const working: AutomationSessionStatus = { state: 'working', clean: false };
@@ -158,6 +160,36 @@ describe('awaitSession', () => {
       })
     ).toBe('aborted');
     expect(harness.sessionStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe('closeSession', () => {
+  it('closes through the dependency', async () => {
+    const harness = port([working]);
+    harness.closeSession.mockResolvedValue(ok(undefined));
+
+    expect(await harness.port.closeSession(tui)).toEqual(ok(undefined));
+    expect(harness.closeSession).toHaveBeenCalledWith(tui);
+  });
+
+  it('returns a refusal as a port error', async () => {
+    const harness = port([working]);
+    harness.closeSession.mockResolvedValue(
+      err({ type: 'runtime-unavailable', message: 'Could not close the agent session' })
+    );
+
+    expect(await harness.port.closeSession(acp)).toEqual(
+      err({ code: 'runtime-unavailable', message: 'Could not close the agent session' })
+    );
+  });
+
+  it('returns a transport failure as close_failed', async () => {
+    const harness = port([working]);
+    harness.closeSession.mockRejectedValue(new Error('connection lost'));
+
+    expect(await harness.port.closeSession(acp)).toEqual(
+      err({ code: 'close_failed', message: 'connection lost' })
+    );
   });
 });
 

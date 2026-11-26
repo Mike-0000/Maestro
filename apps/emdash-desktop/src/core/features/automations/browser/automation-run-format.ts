@@ -32,14 +32,22 @@ const RUN_DELIVERY_LABELS: Record<AutomationRunDelivery['state'], string> = {
   pr_open: 'Pull request ready for review',
   pr_draft: 'Draft pull request (agent did not finish cleanly)',
   no_changes: 'Finished without changes',
+  closed: 'Agent finished and was closed',
   failed: 'Delivery failed',
   cancelled: 'Cancelled',
+};
+
+/** Wording for delivery error codes the runtime records without a message. */
+const RUN_DELIVERY_ERROR_MESSAGES: Record<string, string | undefined> = {
+  agent_timeout: 'The agent did not finish before the timeout',
+  agent_incomplete: 'The agent stopped without finishing',
 };
 
 export function formatRunDeliveryLabel(delivery: AutomationRunDelivery): string {
   const label = RUN_DELIVERY_LABELS[delivery.state];
   if (delivery.state !== 'failed' || !delivery.error) return label;
-  return `${label}: ${delivery.error.message ?? delivery.error.code}`;
+  const { code, message } = delivery.error;
+  return `${label}: ${message ?? RUN_DELIVERY_ERROR_MESSAGES[code] ?? code}`;
 }
 
 export function formatRunTriggerKindLabel(kind: AutomationRunTriggerKind): string {

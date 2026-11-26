@@ -12,6 +12,7 @@ import {
   type RemoteAccessTrigger,
   type RemoteConductorSnapshot,
 } from '../api';
+import type { RemoteAccessOwnerSettingsPatch } from '../api/contract';
 
 /** The listener itself lives in the main process; the slice only describes and steers it. */
 export type RemoteAccessOperations = {
@@ -31,6 +32,9 @@ export type RemoteAccessOperations = {
   readonly conductorCommands: EventStreamHost<typeof remoteAccessContract.conductorCommands>;
   getTailscale(): Promise<RemoteAccessTailscale>;
   setTailscaleServe(enabled: boolean): Promise<Result<RemoteAccessTailscale, RemoteAccessError>>;
+  setOwnerAccess(patch: RemoteAccessOwnerSettingsPatch): Promise<Result<void, RemoteAccessError>>;
+  createOwnerPairingCode(): Promise<Result<RemoteAccessPairing, RemoteAccessError>>;
+  cancelOwnerPairingCode(): void;
 };
 
 export function createRemoteAccessWireController(
@@ -50,5 +54,8 @@ export function createRemoteAccessWireController(
     conductorCommands: operations.conductorCommands,
     getTailscale: () => operations.getTailscale(),
     setTailscaleServe: ({ enabled }) => operations.setTailscaleServe(enabled),
+    setOwnerAccess: (patch) => operations.setOwnerAccess(patch),
+    createOwnerPairingCode: () => operations.createOwnerPairingCode(),
+    cancelOwnerPairingCode: () => operations.cancelOwnerPairingCode(),
   });
 }

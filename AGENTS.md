@@ -409,6 +409,7 @@ pnpm run test
 - [Remote development workflow](agents/workflows/remote-development.md)
 - [Workspace server architecture](agents/architecture/workspace-server.md)
 - [Remote access architecture](agents/architecture/remote-access.md)
+- [Client mode architecture](agents/architecture/client-mode.md)
 - [Provider integration](agents/integrations/providers.md)
 - [MCP integration](agents/integrations/mcp.md)
 - [IPC conventions](agents/conventions/ipc.md)

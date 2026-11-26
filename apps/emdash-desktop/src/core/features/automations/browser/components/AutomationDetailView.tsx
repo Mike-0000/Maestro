@@ -61,8 +61,17 @@ export const AutomationDetailView = observer(function AutomationDetailView({
   };
   const canEdit = runtimeAvailability.available;
 
-  const { formState, setCronExpr, setOnDemand, handlePromptBlur, handleNameBlur, saveError } =
-    useAutomationSettingsAutoSave(automation, canEdit);
+  const {
+    formState,
+    setCronExpr,
+    setOnDemand,
+    setEffort,
+    setCloseWhenDone,
+    setCloseTimeoutMinutes,
+    handlePromptBlur,
+    handleNameBlur,
+    saveError,
+  } = useAutomationSettingsAutoSave(automation, canEdit);
   const { name, setName } = formState;
 
   const runNow = useRunAutomationNow();
@@ -219,6 +228,9 @@ export const AutomationDetailView = observer(function AutomationDetailView({
             }}
             onCronErrorClear={() => setCronError(null)}
             onOnDemandChange={setOnDemand}
+            onEffortChange={setEffort}
+            onCloseWhenDoneChange={setCloseWhenDone}
+            onCloseTimeoutChange={setCloseTimeoutMinutes}
             automationId={automation.id}
             onPromptBlur={handlePromptBlur}
             error={saveError}

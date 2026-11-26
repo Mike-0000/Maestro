@@ -1,4 +1,5 @@
 import type { ClaudeAccountPicker } from '@core/features/claude-accounts/contributions/browser/claude-account-picker';
+import type { EffortOption } from '@core/features/tasks/contributions/browser/task-config/effort-select';
 import { InitialConversationField } from '@core/features/tasks/contributions/browser/task-config/initial-conversation-section';
 import { useTaskState } from '@core/features/tasks/contributions/browser/task-config/task-state-context';
 
@@ -13,6 +14,11 @@ interface ConversationFieldProps {
   autoFocus?: boolean;
   /** Resting height of the prompt in lines; it still grows with what is typed. */
   minRows?: number;
+  /** Effort levels to offer for the selected agent; absent renders no effort picker. */
+  effortOptions?: readonly EffortOption[] | null;
+  /** The chosen effort id, or null for the agent's default. */
+  selectedEffort?: string | null;
+  onEffortChange?: (effort: string | null) => void;
 }
 
 export function ConversationField({
@@ -24,6 +30,9 @@ export function ConversationField({
   claudeAccount,
   autoFocus,
   minRows,
+  effortOptions,
+  selectedEffort,
+  onEffortChange,
 }: ConversationFieldProps) {
   const { initialConversation, linkedIssue, includeIssueContextByDefault } = useTaskState();
 
@@ -40,6 +49,9 @@ export function ConversationField({
       claudeAccount={claudeAccount}
       autoFocus={autoFocus}
       minRows={minRows}
+      effortOptions={effortOptions}
+      selectedEffort={selectedEffort}
+      onEffortChange={onEffortChange}
     />
   );
 }

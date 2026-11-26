@@ -8,6 +8,7 @@ export type TriggerRequestStatus =
   | 'pr_open'
   | 'pr_draft'
   | 'no_changes'
+  | 'closed'
   | 'failed'
   | 'cancelled';
 
@@ -26,6 +27,7 @@ const TERMINAL_STATUSES: ReadonlySet<TriggerRequestStatus> = new Set([
   'pr_open',
   'pr_draft',
   'no_changes',
+  'closed',
   'failed',
   'cancelled',
 ]);
@@ -64,8 +66,8 @@ export function requestView(run: AutomationRun): TriggerRequestView {
         finishedAt: run.finishedAt,
       };
     case 'done':
-      // Without a delivery the automation has no pull-request completion: the
-      // session started and the agent is on its own.
+      // Without a delivery the automation has no completion: the session started
+      // and the agent is on its own.
       return {
         ...base,
         status: run.delivery?.state ?? 'agent_running',

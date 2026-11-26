@@ -97,18 +97,36 @@ export const automationTriggersSchema = z.object({
 });
 
 export const AUTOMATION_COMPLETION_DEFAULT_TIMEOUT_MS = 60 * 60_000;
+export const AUTOMATION_CLOSE_DEFAULT_TIMEOUT_MS = 4 * 60 * 60_000;
 
 /**
- * Post-session delivery. When present, a run keeps its worker slot after the session
- * starts, waits for the agent to settle, then pushes the run branch and opens a pull
- * request against `baseBranch`. Nothing merges automatically.
+ * Pushes the run branch and opens a pull request against `baseBranch` once the agent
+ * settles. Nothing merges automatically.
  */
-export const automationCompletionSchema = z.object({
+export const automationPullRequestCompletionSchema = z.object({
   kind: z.literal('pull-request'),
   baseBranch: nonBlankStringSchema,
   remote: nonBlankStringSchema,
   timeoutMs: z.number().int().positive().optional(),
 });
+
+/**
+ * Ends the agent session once the agent settles (or `timeoutMs` elapses), so the
+ * session does not auto-resume. Needs no branch, so directory workspaces qualify.
+ */
+export const automationCloseCompletionSchema = z.object({
+  kind: z.literal('close'),
+  timeoutMs: z.number().int().positive().optional(),
+});
+
+/**
+ * Post-session delivery. When present, a run keeps its worker slot after the session
+ * starts and waits for the agent to settle, then finishes by `kind`.
+ */
+export const automationCompletionSchema = z.discriminatedUnion('kind', [
+  automationPullRequestCompletionSchema,
+  automationCloseCompletionSchema,
+]);
 
 export const automationDeploymentSchema = z.object({
   automationId: automationIdSchema,
@@ -143,6 +161,8 @@ export type AutomationAcpAgentConfig = z.infer<typeof automationAcpAgentConfigSc
 export type AutomationTuiAgentConfig = z.infer<typeof automationTuiAgentConfigSchema>;
 export type AutomationAgentConfig = z.infer<typeof automationAgentConfigSchema>;
 export type AutomationTriggers = z.infer<typeof automationTriggersSchema>;
+export type AutomationPullRequestCompletion = z.infer<typeof automationPullRequestCompletionSchema>;
+export type AutomationCloseCompletion = z.infer<typeof automationCloseCompletionSchema>;
 export type AutomationCompletion = z.infer<typeof automationCompletionSchema>;
 export type AutomationDeployment = z.infer<typeof automationDeploymentSchema>;
 export type AutomationRunConfigSnapshot = z.infer<typeof automationRunConfigSnapshotSchema>;

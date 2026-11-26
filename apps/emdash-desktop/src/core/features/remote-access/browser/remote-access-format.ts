@@ -46,6 +46,7 @@ export function formatCountdown(expiresAt: number, now: number): string {
 }
 
 export function deviceKindLabel(kind: RemoteAccessDevice['kind']): string {
+  if (kind === 'owner') return 'Maestro client';
   return kind === 'desktop' ? 'Maestro app' : 'Phone or browser';
 }
 
@@ -111,4 +112,50 @@ export function requestsEndpoint(
       ? tailscale.url.replace(/\/+$/u, '')
       : `http://${formatListenerAddress(status.bindAddress, status.port)}`;
   return `${base}/v1/requests`;
+}
+
+export const OWNER_ALLOWED_LOGINS_MAX = 64;
+
+export type AllowedLoginsInput = { ok: true; logins: string[] } | { ok: false; message: string };
+
+/**
+ * The tailnet logins typed into the full-access allowlist: separated by commas, spaces or new
+ * lines, compared without regard to case, each kept once in the order given.
+ */
+export function parseAllowedLogins(text: string): AllowedLoginsInput {
+  const logins: string[] = [];
+  const seen = new Set<string>();
+  for (const part of text.split(/[\s,;]+/u)) {
+    const login = part.trim();
+    if (!login) continue;
+    if (login.length > 256) {
+      return { ok: false, message: 'A login can be at most 256 characters long.' };
+    }
+    const key = login.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    logins.push(login);
+  }
+  if (logins.length > OWNER_ALLOWED_LOGINS_MAX) {
+    return { ok: false, message: `Enter at most ${OWNER_ALLOWED_LOGINS_MAX} logins.` };
+  }
+  return { ok: true, logins };
+}
+
+export function formatAllowedLogins(logins: readonly string[]): string {
+  return logins.join(', ');
+}
+
+/** `Windows`, `macOS`, `Linux` for a Node platform name; the name itself when it is another. */
+export function clientPlatformLabel(platform: string): string {
+  switch (platform) {
+    case 'win32':
+      return 'Windows';
+    case 'darwin':
+      return 'macOS';
+    case 'linux':
+      return 'Linux';
+    default:
+      return platform;
+  }
 }

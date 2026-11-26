@@ -23,7 +23,7 @@ export type AutomationDeliveryControllerOptions = {
 };
 
 /**
- * Pull-request delivery for host-resident automation runs. It sits here because it joins
+ * Post-session delivery (pull request or close) for host-resident automation runs. It sits here because it joins
  * two session runtimes: session state comes from their own live models, and the host
  * supplies the publisher.
  */
@@ -59,6 +59,17 @@ export function createAutomationDeliveryController(
       return result.success
         ? ok(undefined)
         : err({ type: result.error.type, message: 'Could not stop the agent session' });
+    },
+    // The terminating verbs drop the session's active intent, so a closed run's agent
+    // does not auto-resume after a restart.
+    closeSession: async ({ conversationId, type }) => {
+      const result =
+        type === 'acp'
+          ? await acp.terminate({ conversationId })
+          : await tuiAgents.kill({ conversationId });
+      return result.success
+        ? ok(undefined)
+        : err({ type: result.error.type, message: 'Could not close the agent session' });
     },
     publish: (input) => options.publish(input),
   });

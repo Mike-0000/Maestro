@@ -1,5 +1,6 @@
 import { DirectoryField as DirectoryFieldPrimitive } from '@emdash/ui/react/primitives';
 import { useOpenModal } from '@core/manifests/browser/modal-api';
+import { isClientMode } from '@core/primitives/client-mode/browser/client-mode';
 import { getHostClient } from '@core/primitives/desktop-host/browser/host-client';
 import { type Strategy } from './add-project-modal';
 import { type ProjectDirectoryPickerClient } from './project-directory-picker';
@@ -38,6 +39,18 @@ export function DirectoryField({
       if (!connectionId) return;
       const outcome = await openDirectorySelectorModal({
         connectionId,
+        initialPath: path || undefined,
+        ensureDefaultRoot,
+        getProjectsClient,
+      });
+      if (outcome.success) onPathChange(outcome.data.path);
+      return;
+    }
+
+    if (isClientMode()) {
+      // A Maestro client has no native dialog onto the host's disk: browse it instead.
+      const outcome = await openDirectorySelectorModal({
+        strategy: 'local',
         initialPath: path || undefined,
         ensureDefaultRoot,
         getProjectsClient,

@@ -58,6 +58,9 @@ of extending the bridge.
 - Reach the wire through the owning slice's domain client; the aggregate client in
   `src/renderer/lib/runtime/desktop-wire-client.ts` is renderer-internal only.
 - Register contracts and controllers through the desktop Wire manifest and gateway.
+- Classify every new desktop domain in `src/core/manifests/shared/client-mode-routing.ts`
+  (typecheck fails until you do) and update the endpoint snapshot when endpoints change; see
+  [client mode](../architecture/client-mode.md#routing-table).
 - Keep provider-specific adaptation at plugin or slice edges.
 - Never import a `node/` surface from browser code.
 - Test contracts, controllers, event hosts, and browser stores at their owning boundary.

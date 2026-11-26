@@ -3,6 +3,7 @@ import type { Automation } from '@core/primitives/automations/api';
 import type { ConversationConfig, TriggerConfig } from '@core/primitives/automations/api';
 import { assertValidCronTrigger } from '@core/primitives/automations/api';
 import { formatAutomationError } from './automation-run-format';
+import { normalizeCloseTimeoutMinutes, type AutomationRunOptions } from './automation-run-options';
 import { useAutomationTargetAvailability, useUpdateAutomation } from './use-automations';
 import { useAutomationFormState } from './useAutomationFormState';
 
@@ -16,7 +17,6 @@ export function useAutomationSettingsAutoSave(automation: Automation, editable =
     effectiveProjectId,
     prompt,
     provider,
-    model,
     triggerConfig,
     cronTz,
     canSave,
@@ -26,19 +26,25 @@ export function useAutomationSettingsAutoSave(automation: Automation, editable =
   } = formState;
   const availability = useAutomationTargetAvailability(effectiveProjectId);
 
+  // Effort and close-when-done save where they change, in the same tick as their setter. The
+  // ref carries the new value to that save (and to any save from a handler React has not
+  // re-rendered yet), so an older value can never be written over a newer one.
+  const runOptionsRef = useRef<AutomationRunOptions>({
+    effort: formState.effort,
+    closeWhenDone: formState.closeWhenDone,
+    closeTimeoutMinutes: formState.closeTimeoutMinutes,
+  });
+  runOptionsRef.current = {
+    effort: formState.effort,
+    closeWhenDone: formState.closeWhenDone,
+    closeTimeoutMinutes: formState.closeTimeoutMinutes,
+  };
+
   function buildConversationConfig(): ConversationConfig {
-    if (!provider) throw new Error('Cannot build automation conversation config without provider');
-    const useChatUi = formState.initialConversation.useChatUi;
-    return {
-      prompt: prompt.trim(),
-      provider,
-      autoApprove: false,
-      type: useChatUi ? 'acp' : 'pty',
-      ...(model && { model }),
-      ...(automation.conversationConfig?.title && {
-        title: automation.conversationConfig.title,
-      }),
-    };
+    return formState.buildConversationConfig({
+      title: automation.conversationConfig?.title,
+      runOptions: runOptionsRef.current,
+    });
   }
 
   function savePatch(overrideTrigger?: TriggerConfig) {
@@ -77,6 +83,27 @@ export function useAutomationSettingsAutoSave(automation: Automation, editable =
         ? { ...schedule, onDemand: current ?? automation.triggerConfig?.onDemand ?? {} }
         : schedule
     );
+  }
+
+  function saveRunOptions(next: Partial<AutomationRunOptions>) {
+    runOptionsRef.current = { ...runOptionsRef.current, ...next };
+    savePatch();
+  }
+
+  function setEffort(effort: string | null) {
+    formState.setEffort(effort);
+    saveRunOptions({ effort });
+  }
+
+  function setCloseWhenDone(closeWhenDone: boolean) {
+    formState.setCloseWhenDone(closeWhenDone);
+    saveRunOptions({ closeWhenDone });
+  }
+
+  function setCloseTimeoutMinutes(minutes: number | null) {
+    const closeTimeoutMinutes = normalizeCloseTimeoutMinutes(minutes);
+    formState.setCloseTimeoutMinutes(closeTimeoutMinutes);
+    saveRunOptions({ closeTimeoutMinutes });
   }
 
   // Provider lives inside the initialConversation sub-hook and is not directly
@@ -128,6 +155,9 @@ export function useAutomationSettingsAutoSave(automation: Automation, editable =
     formState,
     setCronExpr,
     setOnDemand,
+    setEffort,
+    setCloseWhenDone,
+    setCloseTimeoutMinutes,
     handlePromptBlur,
     handleNameBlur,
     isSaving: update.isPending,

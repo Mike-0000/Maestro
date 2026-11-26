@@ -84,4 +84,22 @@ describe('automationRunSchema', () => {
       expect(automationRunSchema.safeParse({ ...scheduledRun, [field]: -1 }).success).toBe(false);
     }
   });
+
+  it('accepts a closed delivery on a close-completion run without a branch', () => {
+    const parsed = automationRunSchema.parse({
+      ...scheduledRun,
+      status: 'done',
+      configSnapshot: {
+        ...configSnapshot,
+        workspace: { kind: 'directory', path: workspace },
+        completion: { kind: 'close' },
+      },
+      workspace,
+      conversationId: 'conv-1',
+      delivery: { state: 'closed', pullRequestUrl: null, error: null, finishedAt: 3_000 },
+    });
+
+    expect(parsed.branchName).toBeNull();
+    expect(parsed.delivery?.state).toBe('closed');
+  });
 });

@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { setClientModeForTesting } from '@core/primitives/client-mode/browser/client-mode';
 import { hostFileRefFromNativePath } from '@core/primitives/desktop-runtime/api';
 import { openWithOS } from './open-with-os';
 
@@ -18,7 +19,23 @@ vi.mock('@emdash/ui/react/primitives', () => ({
 describe('openWithOS', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    setClientModeForTesting(false);
     mocks.openPath.mockResolvedValue({ success: true });
+  });
+
+  afterEach(() => {
+    setClientModeForTesting(undefined);
+  });
+
+  it('leaves files on the remote host alone in client mode', async () => {
+    setClientModeForTesting(true);
+
+    await openWithOS(hostFileRefFromNativePath('/home/dev/photo.png'));
+
+    expect(mocks.openPath).not.toHaveBeenCalled();
+    expect(mocks.toastError).toHaveBeenCalledWith(
+      'Could not open /home/dev/photo.png: default applications are not available in client mode'
+    );
   });
 
   it('opens a local HostFileRef without discarding its host identity', async () => {

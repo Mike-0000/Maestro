@@ -92,6 +92,42 @@ describe('stored automation payloads', () => {
     expect(parseDeploymentPayload(serialized)).toEqual(value);
   });
 
+  it('decodes stored deployments and runs that carry a pull-request completion', () => {
+    const completion = {
+      kind: 'pull-request' as const,
+      baseBranch: 'main',
+      remote: 'origin',
+      timeoutMs: 600_000,
+    };
+    const storedDeployment = JSON.stringify({ ...deployment(), completion, version: '1' });
+    const storedRun = JSON.stringify({
+      ...run(),
+      configSnapshot: { ...run().configSnapshot, completion },
+      delivery: {
+        state: 'pr_open',
+        pullRequestUrl: 'https://example.test/pr/1',
+        error: null,
+        finishedAt: 5,
+      },
+      version: '1',
+    });
+
+    expect(parseDeploymentPayload(storedDeployment).completion).toEqual(completion);
+    expect(parseRunPayload(storedRun).configSnapshot.completion).toEqual(completion);
+  });
+
+  it('round-trips a close completion and a closed delivery', () => {
+    const deployed: AutomationDeployment = { ...deployment(), completion: { kind: 'close' } };
+    const closedRun: AutomationRun = {
+      ...run(),
+      configSnapshot: { ...run().configSnapshot, completion: { kind: 'close' } },
+      delivery: { state: 'closed', pullRequestUrl: null, error: null, finishedAt: 5 },
+    };
+
+    expect(parseDeploymentPayload(serializeDeploymentPayload(deployed))).toEqual(deployed);
+    expect(parseRunPayload(serializeRunPayload(closedRun))).toEqual(closedRun);
+  });
+
   it('rejects version-less and future-version payloads', () => {
     expect(() => parseRunPayload(JSON.stringify(run()))).toThrow(/Missing 'version'/);
     expect(() => parseRunPayload(JSON.stringify({ ...run(), version: '2' }))).toThrow(

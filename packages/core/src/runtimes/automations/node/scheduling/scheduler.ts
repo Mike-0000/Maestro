@@ -20,6 +20,12 @@ import { nextRunTimes } from './cron';
 
 const DEFAULT_TICK_INTERVAL_MS = 60_000;
 const DEFAULT_MAX_CONCURRENT_RUNS = 4;
+/**
+ * Workers for runs with a `close` completion. Such a run keeps its worker until the
+ * agent settles, which can take hours, so these runs get their own pool and never
+ * take a slot from `maxConcurrentRuns`.
+ */
+export const DEFAULT_MAX_CONCURRENT_CLOSE_RUNS = 2;
 const DEFAULT_MAX_DUE_PER_TICK = 100;
 /** Queued runs inspected per drain, so held request runs cannot starve other automations. */
 const QUEUE_SCAN_LIMIT = 200;
@@ -38,13 +44,19 @@ export type AutomationSchedulerOptions = {
   logger?: Logger;
   tickIntervalMs?: number;
   maxConcurrentRuns?: number;
+  /** Separate cap for close-completion runs; see `DEFAULT_MAX_CONCURRENT_CLOSE_RUNS`. */
+  maxConcurrentCloseRuns?: number;
   maxDuePerTick?: number;
   onRunChanged?: OnRunChanged;
   createRunIdentity?: (deployment: AutomationDeployment) => AutomationRunIdentity;
 };
 
+/** `close` holds close-completion runs; `default` holds every other run. */
+type WorkerPool = 'default' | 'close';
+
 type ActiveWorker = {
   automationId: AutomationId;
+  pool: WorkerPool;
   abortController: AbortController;
   done: Promise<void>;
 };
@@ -58,6 +70,7 @@ export class AutomationScheduler {
   private readonly logger: Logger;
   private readonly tickIntervalMs: number;
   private readonly maxConcurrentRuns: number;
+  private readonly maxConcurrentCloseRuns: number;
   private readonly maxDuePerTick: number;
   private readonly onRunChanged: OnRunChanged | undefined;
   private readonly createRunIdentity: (deployment: AutomationDeployment) => AutomationRunIdentity;
@@ -81,6 +94,10 @@ export class AutomationScheduler {
     this.maxConcurrentRuns = positiveInteger(
       options.maxConcurrentRuns ?? DEFAULT_MAX_CONCURRENT_RUNS,
       'Automation scheduler concurrency'
+    );
+    this.maxConcurrentCloseRuns = positiveInteger(
+      options.maxConcurrentCloseRuns ?? DEFAULT_MAX_CONCURRENT_CLOSE_RUNS,
+      'Automation scheduler close-run concurrency'
     );
     this.maxDuePerTick = positiveInteger(
       options.maxDuePerTick ?? DEFAULT_MAX_DUE_PER_TICK,
@@ -292,15 +309,19 @@ export class AutomationScheduler {
 
   private drainQueue(): void {
     for (;;) {
-      const capacity = this.maxConcurrentRuns - this.workers.size;
-      if (capacity <= 0) return;
+      if (this.isPoolFull('default') && this.isPoolFull('close')) return;
 
       const queuedRuns = this.runStore.listQueuedRuns(QUEUE_SCAN_LIMIT);
       if (queuedRuns.length === 0) return;
 
       let madeProgress = false;
       for (const run of queuedRuns) {
-        if (this.workers.size >= this.maxConcurrentRuns) return;
+        // A full pool leaves its runs queued untouched, exactly as a full scheduler
+        // did before close runs had a pool of their own.
+        if (this.isPoolFull(poolOf(run))) {
+          if (this.isPoolFull('default') && this.isPoolFull('close')) return;
+          continue;
+        }
 
         const now = this.clock.now();
         if (run.deadlineAt !== null && run.deadlineAt <= now) {
@@ -337,6 +358,14 @@ export class AutomationScheduler {
 
       if (!madeProgress) return;
     }
+  }
+
+  private isPoolFull(pool: WorkerPool): boolean {
+    let active = 0;
+    for (const worker of this.workers.values()) {
+      if (worker.pool === pool) active += 1;
+    }
+    return active >= (pool === 'close' ? this.maxConcurrentCloseRuns : this.maxConcurrentRuns);
   }
 
   private isAutomationAtCapacity(deployment: AutomationDeployment): boolean {
@@ -378,10 +407,15 @@ export class AutomationScheduler {
 
     this.workers.set(run.id, {
       automationId: run.automationId,
+      pool: poolOf(run),
       abortController,
       done,
     });
   }
+}
+
+function poolOf(run: AutomationRun): WorkerPool {
+  return run.configSnapshot.completion?.kind === 'close' ? 'close' : 'default';
 }
 
 function positiveInteger(value: number, label: string): number {

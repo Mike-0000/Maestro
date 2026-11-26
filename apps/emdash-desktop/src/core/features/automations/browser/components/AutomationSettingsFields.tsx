@@ -7,6 +7,7 @@ import { TaskConfigPanel } from '@core/features/tasks/contributions/browser/task
 import { TaskStateProvider } from '@core/features/tasks/contributions/browser/task-config/task-state-context';
 import { WorkspaceSettingsSection } from '@core/features/tasks/contributions/browser/task-config/workspace-settings-section';
 import type { AutomationFormState } from '../useAutomationFormState';
+import { CloseWhenDoneField } from './CloseWhenDoneField';
 
 interface AutomationSettingsFieldsProps {
   state: AutomationFormState;
@@ -14,6 +15,11 @@ interface AutomationSettingsFieldsProps {
   onCronExprChange: (expr: string) => void;
   onCronErrorClear: () => void;
   onOnDemandChange: (onDemand: boolean) => void;
+  /** Null picks the agent's default effort. */
+  onEffortChange: (effort: string | null) => void;
+  onCloseWhenDoneChange: (closeWhenDone: boolean) => void;
+  /** Null picks the runtime's default time limit. */
+  onCloseTimeoutChange: (minutes: number | null) => void;
   /** Shown for a saved on-demand automation: the id a trigger gateway config refers to. */
   automationId?: string;
   onPromptBlur?: () => void;
@@ -27,6 +33,9 @@ export function AutomationSettingsFields({
   onCronExprChange,
   onCronErrorClear,
   onOnDemandChange,
+  onEffortChange,
+  onCloseWhenDoneChange,
+  onCloseTimeoutChange,
   automationId,
   onPromptBlur,
   error,
@@ -36,6 +45,10 @@ export function AutomationSettingsFields({
     initialConversation,
     cronExpr,
     onDemand,
+    effort,
+    effortOptions,
+    closeWhenDone,
+    closeTimeoutMinutes,
     workspaceConfig,
     effectiveProjectId,
     isUnborn,
@@ -115,6 +128,9 @@ export function AutomationSettingsFields({
                       placeholder="Add a prompt to the automation..."
                       showAutoApproveToggle={false}
                       requirePromptDelivery={true}
+                      effortOptions={effortOptions}
+                      selectedEffort={effort}
+                      onEffortChange={onEffortChange}
                     />
                   ),
                 },
@@ -127,6 +143,14 @@ export function AutomationSettingsFields({
             />
           </TaskConfigProvider>
         </TaskStateProvider>
+        <CloseWhenDoneField
+          checked={closeWhenDone}
+          timeoutMinutes={closeTimeoutMinutes}
+          onDemand={onDemand}
+          disabled={disabled}
+          onCheckedChange={onCloseWhenDoneChange}
+          onTimeoutChange={onCloseTimeoutChange}
+        />
       </Field.Group>
 
       {error && <p className="mt-4 text-xs text-foreground-error">{error}</p>}

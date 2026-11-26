@@ -126,7 +126,7 @@ export function PairingCard({ status }: { status: RemoteAccessStatus | undefined
 }
 
 /** Re-renders once a second while `active`, for the countdown. */
-function useSecondTick(active: boolean): void {
+export function useSecondTick(active: boolean): void {
   const [, setTick] = useState(0);
   useEffect(() => {
     if (!active) return;

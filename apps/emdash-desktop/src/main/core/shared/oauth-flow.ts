@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'crypto';
 import * as http from 'http';
-import { shell } from 'electron';
+import { openExternalForUser } from '@main/host/external-opener';
 
 export interface OAuthFlowOptions {
   authorizeUrl: string;
@@ -132,7 +132,7 @@ function startLoopbackServer(opts: LoopbackOptions): Promise<{ code: string }> {
 
       const fullUrl = `${authorizeUrl}?${params.toString()}`;
 
-      shell.openExternal(fullUrl).catch((err) => {
+      openExternalForUser(fullUrl, { loopbackPort: port }).catch((err) => {
         clearTimeout(timeout);
         server.close();
         reject(new Error(`Failed to open browser: ${err.message}`));

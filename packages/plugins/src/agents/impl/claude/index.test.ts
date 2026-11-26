@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CLAUDE_SYSTEM_PROMPT_APPEND } from './delegation';
-import { provider } from './index';
+import { plugin, provider } from './index';
 
 describe('claude provider delegation policy', () => {
   const context = {
@@ -105,5 +105,61 @@ describe('claude provider session MCP', () => {
     expect(flagIndex).toBeGreaterThanOrEqual(0);
     expect(command.args.at(-1)).toBe('check the app');
     expect(flagIndex).toBeLessThan(command.args.length - 1);
+  });
+});
+
+describe('claude provider effort', () => {
+  const context = {
+    cli: 'claude',
+    autoApprove: true,
+    sessionId: '6f1c2f0e-7d1b-4c43-9a55-2d4b0e1f3a10',
+    providerSessionId: undefined,
+    isResuming: false,
+    model: 'claude-opus-5',
+    initialPrompt: 'run the nightly review',
+  };
+
+  it('offers the claude --effort levels in ascending order', () => {
+    expect(plugin.capabilities.effort).toEqual({
+      kind: 'selectable',
+      effortOptions: {
+        low: { label: 'Low', level: 1 },
+        medium: { label: 'Medium', level: 2 },
+        high: { label: 'High', level: 3 },
+        xhigh: { label: 'Extra high', level: 4 },
+        max: { label: 'Max', level: 5 },
+      },
+    });
+  });
+
+  it('passes the effort after the model, keeping the prompt as the last positional argument', () => {
+    const { command, args } = provider.behavior.prompt!.buildCommand({
+      ...context,
+      effort: 'max',
+    });
+    expect(command).toBe('claude');
+    const effortIndex = args.indexOf('--effort');
+    expect(args.slice(effortIndex - 2, effortIndex + 2)).toEqual([
+      '--model',
+      'claude-opus-5',
+      '--effort',
+      'max',
+    ]);
+    expect(args.at(-1)).toBe('run the nightly review');
+  });
+
+  it('builds the same command as before when no effort is set', () => {
+    const { args } = provider.behavior.prompt!.buildCommand(context);
+    expect(args).not.toContain('--effort');
+    expect(args).toEqual([
+      '--session-id',
+      context.sessionId,
+      '--dangerously-skip-permissions',
+      '--model',
+      'claude-opus-5',
+      '--append-system-prompt',
+      CLAUDE_SYSTEM_PROMPT_APPEND,
+      'run the nightly review',
+    ]);
   });
 });

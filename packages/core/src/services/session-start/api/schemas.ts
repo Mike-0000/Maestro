@@ -3,6 +3,13 @@ import { z } from 'zod';
 const nonBlankStringSchema = z.string().trim().min(1);
 
 /**
+ * A terminal agent's reasoning effort id, appended to its CLI as a flag value (for example
+ * Claude's `--effort high`). Restricted to a plain token so the value can never read as another
+ * flag. Absent or null means the CLI's own default.
+ */
+export const tuiEffortIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/);
+
+/**
  * Common error surface for starting a headless session. Runtime-specific
  * errors may carry additional fields; automations only need the tag and
  * optional message.
@@ -24,6 +31,9 @@ export const acpSessionLaunchInputSchema = z.object({
   sessionId: z.null(),
   model: nonBlankStringSchema.nullable(),
   modeId: nonBlankStringSchema.nullable().optional(),
+  /** Provider-native ACP effort id (`thought_level` option). An id the session does not offer is
+   * cleared and reported, never a launch failure. Absent or null means the provider default. */
+  effort: nonBlankStringSchema.nullable().optional(),
   initialQueue: z.array(headlessPromptInputSchema).min(1),
 });
 
@@ -39,6 +49,7 @@ export const tuiSessionStartInputSchema = z.object({
   model: nonBlankStringSchema.nullable(),
   initialPrompt: nonBlankStringSchema,
   autoApprove: z.boolean(),
+  effort: tuiEffortIdSchema.nullable().optional(),
   cols: z.number().int().positive(),
   rows: z.number().int().positive(),
 });

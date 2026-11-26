@@ -121,6 +121,65 @@ pnpm run updates:publish --publish                 # upload, then verify the fee
   earlier signed release. This affects only new installs and clients older than that version:
   installed apps never downgrade. To fix a bad release, publish a newer build.
 
+## Linux host builds
+
+A Maestro host on a Linux machine (driven from Windows in client mode, see
+[remote-rig.md](remote-rig.md)) installs an x64 AppImage from the same feed. The client and host
+must run the same build, so the AppImage reuses the Windows release's version string and commit.
+It is published under its own manifest, which is what electron-updater asks for on Linux:
+
+```text
+<feed>/v1-stable-linux.yml                                live signed Linux manifest (no-cache)
+<feed>/releases/<version>/maestro-x86_64.AppImage         AppImage (immutable; blockmap embedded)
+<feed>/releases/<version>/v1-stable-linux.yml             the release's signed Linux manifest
+```
+
+After `/push` has published Windows, run this from `apps/emdash-desktop` on the same Windows
+machine (it needs Docker Desktop, the signing key and the Azure sign-in `/push` uses):
+
+```powershell
+node --experimental-strip-types scripts/release/maestro-linux-release.ts --check    # Docker ready? prints the plan
+node --experimental-strip-types scripts/release/maestro-linux-release.ts            # build, then a dry-run publish
+node --experimental-strip-types scripts/release/maestro-linux-release.ts --publish  # publish (builds first if needed)
+```
+
+- It takes the version and commit from `%LOCALAPPDATA%\Chorus\UpdateBuilds\last-release.json`
+  (written by `/push`), or `--version <v> --commit <sha>`.
+- The build runs `scripts/release/linux/build-linux-release.sh` in a `node:24-bookworm` container:
+  it clones the commit out of the checkout (mounted read only) into the Docker volume
+  `maestro-linux-build`, which keeps `node_modules` and download caches (the first build takes
+  10 to 20 minutes and several GB; `docker volume rm maestro-linux-build` reclaims it). It builds
+  the way `/push` does, including the remote-logs settings, and packages with
+  `build-maestro-update.ts --platform linux --version <v>`. Debian 12's glibc 2.36 keeps the
+  compiled native modules loadable on Ubuntu 22.04 and later.
+- `--builder wsl [--distro <name>]` builds in a WSL distro instead (it needs Node 24,
+  `build-essential` and `python3` there). A distro newer than the host produces native modules the
+  host may not load, so prefer Docker. On the Linux host itself:
+  `bash scripts/release/linux/build-linux-release.sh --source <repo> --commit <sha> --version <v> --out <dir>`,
+  then copy the folder to Windows and run
+  `pnpm run updates:publish -- --platform linux --dir <folder> [--publish]`.
+- Builds land in `%LOCALAPPDATA%\Chorus\LinuxUpdateBuilds\<version>`, apart from the Windows
+  builds `/push` prunes. A finished build is reused; `--rebuild` replaces it.
+- The publish is `publish-maestro-update.ts --platform linux`: same key, same checks, same
+  create-only uploads, live manifest last, then a read-back as an installed app would.
+- The release notes are the Windows release's, read from the live Windows manifest.
+
+The ideal order is Linux first, so a host is never behind its client. `/push` publishes Windows
+first and lives outside the repository, so the Linux leg is a second command for now; a host
+with `hostUpdates.mode: "when-idle"` catches up on its next hourly check, or at once when a
+blocked client chooses **Update host**.
+
+### Unattended host updates
+
+A headless host has nobody to click Download. When `hostUpdates.mode` is `when-idle` in its
+`remote-access.json` (`manual` by default), `unattended-update-policy.ts` downloads an available
+update, waits until no chat or terminal agent has been working and no automation run has been
+starting for five minutes, sends `host-quitting` to the attached client, and quits to install. An
+owner client can also ask for it (`session.requestHostUpdate`, `when: 'idle' | 'now'`), which
+works in `manual` mode too and before the client has attached (a build mismatch). Under the
+systemd unit (`MAESTRO_HOST_SERVICE=1`) the installer does not relaunch the app; systemd restarts
+it with the service's flags. Nothing of this runs in an ordinary install.
+
 ## First install and friends
 
 Existing builds have updates turned off, so each machine needs one manual install of a release
@@ -136,8 +195,9 @@ sign releases with a publicly trusted certificate, such as Azure Trusted Signing
 
 ## Limitations
 
-- The feed covers Windows x64 only. macOS updates need an Apple Developer ID signature and
-  notarization. Linux is not set up.
+- The feed covers Windows x64 and, for client-mode hosts, the Linux x64 AppImage (see
+  [Linux host builds](#linux-host-builds)). macOS updates need an Apple Developer ID signature
+  and notarization.
 - Every machine, including the development machine, runs an installer build and updates from
   the feed. `/push` (`.claude/skills/push`) only builds and publishes a release; it never installs
   locally. Installer builds refuse the local delivery coordinator's install and rollback actions.

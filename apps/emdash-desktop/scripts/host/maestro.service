@@ -1,0 +1,26 @@
+# Maestro as a headless host on a Linux machine, driven from another computer in client mode.
+# A systemd user unit: install-maestro-host.sh copies it to ~/.config/systemd/user/maestro.service.
+# See docs/chorus/remote-rig.md.
+#
+#   systemctl --user enable --now maestro      start now and at boot (needs `loginctl enable-linger`)
+#   journalctl --user -u maestro -f            follow its output
+[Unit]
+Description=Maestro host (headless, for client mode)
+StartLimitIntervalSec=600
+StartLimitBurst=10
+
+[Service]
+Type=simple
+Environment=MAESTRO_APPIMAGE=%h/.local/share/maestro/Maestro.AppImage
+# Uncomment to keep secrets in a keyring instead (see the guide's "Secrets" section):
+# Environment=MAESTRO_PASSWORD_STORE=gnome-libsecret
+ExecStart=%h/.local/share/maestro/maestro-host-run.sh
+# Restarts after a crash and after Maestro quits to install an update.
+Restart=always
+RestartSec=5
+# SIGTERM goes to the wrapper only, which forwards it to Maestro and waits for it to quit.
+KillMode=mixed
+TimeoutStopSec=90
+
+[Install]
+WantedBy=default.target

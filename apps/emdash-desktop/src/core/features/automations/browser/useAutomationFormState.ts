@@ -24,6 +24,13 @@ import { agentSupportsAcp, agentSupportsInitialPromptDelivery } from '@core/prim
 import type { Automation } from '@core/primitives/automations/api';
 import type { StoredAutomationTaskConfig, TriggerConfig } from '@core/primitives/automations/api';
 import { getLocalTimeZone } from '@core/primitives/automations/api';
+import {
+  automationEffortOptions,
+  buildAutomationConversationConfig,
+  resolveAutomationEffort,
+  runOptionsFromConversationConfig,
+  type AutomationRunOptions,
+} from './automation-run-options';
 import type { BuiltinAutomationTemplate } from './automation-template';
 
 const DEFAULT_CRON = toCron(DEFAULT_CRON_STATE);
@@ -96,6 +103,14 @@ export function useAutomationFormState(
   );
   const [cronTz] = useState<string>(seedTrigger?.tz ?? getLocalTimeZone());
   const [onDemand, setOnDemand] = useState<boolean>(seedTrigger?.onDemand !== undefined);
+  // Effort, close-when-done and its timeout. Seeded from the stored automation, so one saved
+  // before these existed opens with all three empty.
+  const [seedRunOptions] = useState(() => runOptionsFromConversationConfig(seedConversationConfig));
+  const [effort, setEffort] = useState<string | null>(seedRunOptions.effort);
+  const [closeWhenDone, setCloseWhenDone] = useState(seedRunOptions.closeWhenDone);
+  const [closeTimeoutMinutes, setCloseTimeoutMinutes] = useState<number | null>(
+    seedRunOptions.closeTimeoutMinutes
+  );
 
   const effectiveProjectId =
     projectId && asAvailableProject(getProjectStore(projectId))
@@ -170,6 +185,12 @@ export function useAutomationFormState(
   const setUseChatUi = initialConversation.setUseChatUi;
   const selectedAgent = provider ? agents?.find((agent) => agent.id === provider) : null;
   const selectedCapabilities = selectedAgent?.capabilities;
+  // Effort levels belong to the agent. Once the agent is known, an effort it does not offer
+  // (the agent was switched, or it dropped the level) falls back to the agent default.
+  const effortOptions = automationEffortOptions(selectedCapabilities);
+  if (selectedAgent && effort !== resolveAutomationEffort(effort, effortOptions)) {
+    setEffort(null);
+  }
   const providerSupportsAutomationPrompt =
     !provider ||
     !agents ||
@@ -237,6 +258,24 @@ export function useAutomationFormState(
     ...(onDemand && { onDemand: seedTrigger?.onDemand ?? {} }),
   };
 
+  /**
+   * The conversation config to save. `runOptions` overrides the form's own effort and
+   * close-when-done values, for a caller saving in the same tick as it changes one.
+   */
+  function buildConversationConfig(
+    options: { title?: string; runOptions?: AutomationRunOptions } = {}
+  ) {
+    if (!provider) throw new Error('Cannot build automation conversation config without provider');
+    return buildAutomationConversationConfig({
+      prompt,
+      provider,
+      model,
+      useChatUi,
+      title: options.title,
+      ...(options.runOptions ?? { effort, closeWhenDone, closeTimeoutMinutes }),
+    });
+  }
+
   function applyTemplate(template: BuiltinAutomationTemplate) {
     setName(template.name);
     setCronExpr(template.defaultTrigger.expr);
@@ -254,6 +293,13 @@ export function useAutomationFormState(
     cronTz,
     onDemand,
     setOnDemand,
+    effort,
+    setEffort,
+    effortOptions,
+    closeWhenDone,
+    setCloseWhenDone,
+    closeTimeoutMinutes,
+    setCloseTimeoutMinutes,
     initialConversation,
     workspaceConfig,
     isUnborn,
@@ -266,5 +312,6 @@ export function useAutomationFormState(
     triggerConfig,
     applyTemplate,
     buildTaskConfig,
+    buildConversationConfig,
   };
 }

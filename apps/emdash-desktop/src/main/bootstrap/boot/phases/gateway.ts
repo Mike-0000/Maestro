@@ -23,6 +23,9 @@ import {
 import { createDesktopDevServerBridgeParticipant } from '@main/gateway/dev-server-bridge';
 import { remoteAccessService } from '@main/host/remote-access/remote-access-service';
 import { encryptedAppSecretsStore } from '@main/host/secrets/encrypted-app-secrets-store';
+import { countInFlightAutomationRuns, readHostActivity } from '@main/host/updates/host-activity';
+import { runsUnderServiceManager } from '@main/host/updates/unattended-update-policy';
+import { updateService } from '@main/host/updates/update-service';
 import { log } from '@main/lib/logger';
 import { appScope } from '../../core/app-scope';
 import { runInBackground } from '../../core/background';
@@ -125,6 +128,17 @@ export function installGateway(
       notifications: services.notifications,
       notificationsEnabled: async () => (await database.appSettings.get('notifications')).enabled,
       secrets: encryptedAppSecretsStore,
+      // Read only by the unattended update policy, which stays off in an ordinary install.
+      hostUpdates: {
+        updater: updateService,
+        activity: () =>
+          readHostActivity({
+            runtimes: runtimes.broker,
+            attachedHosts: () => services.hostAttachments.attachedHosts(),
+            inFlightAutomationRuns: () => countInFlightAutomationRuns(database.db),
+          }),
+        relaunchAfterInstall: !runsUnderServiceManager(process.env),
+      },
     })
   );
 

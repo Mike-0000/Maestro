@@ -2,6 +2,7 @@ import { EmptyState } from '@emdash/ui/react/components';
 import { Button, Dialog, Field, Input, ModalLayout } from '@emdash/ui/react/primitives';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
+import type { ProjectHostParams } from '@core/features/projects/api/wire-contract';
 import { useModalController } from '@core/manifests/browser/modal-api';
 import { ConfirmButton } from '@core/primitives/keybindings/browser/confirm-button';
 import { defineModal } from '@core/primitives/modals/react';
@@ -10,36 +11,42 @@ import {
   type ProjectDirectoryPickerClient,
 } from './add-project-modal/project-directory-picker';
 
-export interface DirectorySelectorModalProps {
-  connectionId: string;
+/**
+ * Which machine to browse: an SSH machine by its connection, or `local`, the computer the
+ * projects slice runs on (the remote host when this window is a Maestro client).
+ */
+export type DirectorySelectorTarget =
+  | { strategy?: 'ssh'; connectionId: string }
+  | { strategy: 'local'; connectionId?: undefined };
+
+export type DirectorySelectorModalProps = DirectorySelectorTarget & {
   initialPath?: string;
   ensureDefaultRoot?: boolean;
   getProjectsClient(): Promise<ProjectDirectoryPickerClient>;
-}
+};
 
 export function DirectorySelectorModal({
-  connectionId,
   initialPath = '',
   ensureDefaultRoot = false,
   getProjectsClient,
+  ...target
 }: DirectorySelectorModalProps) {
   const modal = useModalController('directorySelectorModal');
   const [selectedPathOverride, setSelectedPathOverride] = useState<string | null>(null);
+  const host: ProjectHostParams =
+    target.strategy === 'local'
+      ? { type: 'local' }
+      : { type: 'ssh', connectionId: target.connectionId };
   const homeQuery = useQuery({
-    queryKey: ['projectHostHomeDir', { type: 'ssh', connectionId }],
-    queryFn: async () =>
-      (await getProjectsClient()).getHostHomeDir({
-        type: 'ssh',
-        connectionId,
-      }),
+    queryKey: ['projectHostHomeDir', host],
+    queryFn: async () => (await getProjectsClient()).getHostHomeDir(host),
   });
   const ensureDefaultRootQuery = useQuery({
-    queryKey: ['ensureProjectDefaultRepositoriesRoot', connectionId],
-    queryFn: async () =>
-      (await getProjectsClient()).ensureDefaultRepositoriesRoot({
-        type: 'ssh',
-        connectionId,
-      }),
+    queryKey: [
+      'ensureProjectDefaultRepositoriesRoot',
+      host.type === 'ssh' ? host.connectionId : host,
+    ],
+    queryFn: async () => (await getProjectsClient()).ensureDefaultRepositoriesRoot(host),
     enabled: ensureDefaultRoot,
   });
   const pickerInitialPath =
@@ -79,8 +86,8 @@ export function DirectorySelectorModal({
             </div>
           ) : (
             <ProjectDirectoryPicker
-              strategy="ssh"
-              connectionId={connectionId}
+              strategy={host.type}
+              connectionId={host.type === 'ssh' ? host.connectionId : undefined}
               initialPath={pickerInitialPath}
               homePath={homeQuery.data ?? ''}
               homePending={homeQuery.isPending}

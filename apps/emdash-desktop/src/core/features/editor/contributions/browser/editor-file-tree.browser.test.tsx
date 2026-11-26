@@ -6,7 +6,9 @@ import {
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { setClientModeForTesting } from '@core/primitives/client-mode/browser/client-mode';
 import {
+  canRevealInFileManager,
   FileTreeGitChangeIndicator,
   FileTreeHeaderBar,
   fileTreeGitStatusTone,
@@ -186,5 +188,21 @@ describe('FileTree Git decorations', () => {
     expect(bubble).not.toBeNull();
     expect(bubble).toHaveStyle({ color: 'var(--em-foreground-success)' });
     expect(getComputedStyle(folderName!).color).toBe(getComputedStyle(bubble!).color);
+  });
+});
+
+describe('reveal in file manager', () => {
+  afterEach(() => setClientModeForTesting(undefined));
+
+  it('is offered for local workspaces in local mode, as before', () => {
+    setClientModeForTesting(false);
+    expect(canRevealInFileManager(undefined)).toBe(true);
+    expect(canRevealInFileManager('ssh-1')).toBe(false);
+  });
+
+  it('is never offered in client mode, where workspaces are on the remote host', () => {
+    setClientModeForTesting(true);
+    expect(canRevealInFileManager(undefined)).toBe(false);
+    expect(canRevealInFileManager('ssh-1')).toBe(false);
   });
 });

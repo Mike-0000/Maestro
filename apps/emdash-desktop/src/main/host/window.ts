@@ -27,6 +27,20 @@ import { adoptTaskWindow } from './task-windows';
 
 let mainWindow: BrowserWindow | null = null;
 
+/** How a client-mode process loads its main window (see `configureMainWindow`). */
+export type MainWindowConfig = { rendererSearch?: string; title?: string };
+
+let mainWindowConfig: MainWindowConfig = {};
+
+/**
+ * Client mode only, called once before the window is created: the renderer URL's search string
+ * (`?maestroClient=1`) and the window title. The local app never calls it, so its window title and
+ * renderer URL stay exactly as they were.
+ */
+export function configureMainWindow(config: MainWindowConfig): void {
+  mainWindowConfig = config;
+}
+
 export function applyNativeTheme(theme: Theme): void {
   if (process.platform !== 'win32') return;
   nativeTheme.themeSource = theme === 'emdark' ? 'dark' : theme === 'emlight' ? 'light' : 'system';
@@ -38,7 +52,7 @@ export function createMainWindow(): BrowserWindow {
     height: 900,
     minWidth: 700,
     minHeight: 500,
-    title: PRODUCT_NAME,
+    title: mainWindowConfig.title ?? PRODUCT_NAME,
     // sRGB approximation of the theme --background tokens, so the window that
     // appears before the splash paints is not a white flash. System-theme
     // heuristic: the DB-backed app theme is not readable this early; the
@@ -89,9 +103,10 @@ export function createMainWindow(): BrowserWindow {
     mainWindow.setMenuBarVisibility(false);
   }
 
-  const rendererUrl = import.meta.env.DEV
+  const rendererBaseUrl = import.meta.env.DEV
     ? process.env.ELECTRON_RENDERER_URL!
     : `${APP_ORIGIN}/index.html`;
+  const rendererUrl = `${rendererBaseUrl}${mainWindowConfig.rendererSearch ?? ''}`;
   void mainWindow.loadURL(rendererUrl);
 
   // Route anything outside the renderer origin through the external-link flow

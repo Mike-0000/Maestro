@@ -2,6 +2,7 @@ import { err, ok } from '@emdash/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LOCAL_HOST_REF } from '#primitives/host/api';
 import type { TempStoreHandle } from '#primitives/sqlite-store/api';
+import { AUTOMATION_CLOSE_DEFAULT_TIMEOUT_MS } from '../../api/deployment';
 import type { AutomationRun } from '../../api/run';
 import { AutomationRunStore } from '../persistence/run-store';
 import type { AutomationsDb } from '../persistence/store';
@@ -39,14 +40,27 @@ const configSnapshot: AutomationRun['configSnapshot'] = {
   completion: { kind: 'pull-request', baseBranch: 'main', remote: 'origin', timeoutMs: 1_000 },
 };
 
+const directory = {
+  host: LOCAL_HOST_REF,
+  path: { root: { kind: 'posix' as const }, segments: ['projects', 'notes'] },
+};
+
+const closeConfigSnapshot: AutomationRun['configSnapshot'] = {
+  ...configSnapshot,
+  workspace: { kind: 'directory', path: directory },
+  completion: { kind: 'close' },
+};
+
 function fakeDeliveryPort(
   outcome: AutomationSessionOutcome,
   publish: AutomationDeliveryPort['publish'] = async () =>
-    ok({ outcome: 'pull-request', url: 'https://example.test/pr/7' })
+    ok({ outcome: 'pull-request', url: 'https://example.test/pr/7' }),
+  closeSession: AutomationDeliveryPort['closeSession'] = async () => ok(undefined)
 ) {
   return {
     awaitSession: vi.fn(async () => outcome),
     stopSession: vi.fn(async () => {}),
+    closeSession: vi.fn(closeSession),
     publish: vi.fn(publish),
   } satisfies AutomationDeliveryPort;
 }
@@ -236,6 +250,144 @@ describe('automation run delivery', () => {
     expect(runStore.getRun(REQUEST_ID)?.delivery).toMatchObject({
       state: 'failed',
       error: { code: 'delivery_unsupported' },
+    });
+  });
+
+  describe('close completion', () => {
+    function closeExecutor(deliveryPort: AutomationDeliveryPort | undefined) {
+      return createAutomationRunExecutor({
+        transitions,
+        workspacePort: { provision: async () => ok({ workspace: directory, branchName: null }) },
+        sessionPort: { start: async () => ok({ sessionId: 'sess-1' }) },
+        deliveryPort,
+        createConversationId: () => 'conv-1',
+        now: () => 9_000,
+      });
+    }
+
+    function closeRun(completion = closeConfigSnapshot.completion) {
+      return claimedRun({ configSnapshot: { ...closeConfigSnapshot, completion } });
+    }
+
+    it('closes the session after a clean turn in a directory workspace without a branch', async () => {
+      const delivery = fakeDeliveryPort('clean');
+
+      await closeExecutor(delivery)(closeRun(), new AbortController().signal);
+
+      const run = runStore.getRun(REQUEST_ID);
+      expect(run?.status).toBe('done');
+      expect(run?.branchName).toBeNull();
+      expect(run?.delivery).toEqual({
+        state: 'closed',
+        pullRequestUrl: null,
+        error: null,
+        finishedAt: 9_000,
+      });
+      expect(deliveryStates).toEqual(['agent_running', 'closed']);
+      expect(delivery.awaitSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          session: { conversationId: 'conv-1', type: 'acp' },
+          timeoutMs: AUTOMATION_CLOSE_DEFAULT_TIMEOUT_MS,
+        })
+      );
+      expect(delivery.closeSession).toHaveBeenCalledTimes(1);
+      expect(delivery.closeSession).toHaveBeenCalledWith({ conversationId: 'conv-1', type: 'acp' });
+      expect(delivery.stopSession).not.toHaveBeenCalled();
+      expect(delivery.publish).not.toHaveBeenCalled();
+    });
+
+    it('waits for the configured timeout', async () => {
+      const delivery = fakeDeliveryPort('clean');
+
+      await closeExecutor(delivery)(
+        closeRun({ kind: 'close', timeoutMs: 5_000 }),
+        new AbortController().signal
+      );
+
+      expect(delivery.awaitSession).toHaveBeenCalledWith(
+        expect.objectContaining({ timeoutMs: 5_000 })
+      );
+    });
+
+    it('closes the session and fails with agent_timeout on timeout', async () => {
+      const delivery = fakeDeliveryPort('timeout');
+
+      await closeExecutor(delivery)(closeRun(), new AbortController().signal);
+
+      expect(delivery.closeSession).toHaveBeenCalledTimes(1);
+      expect(runStore.getRun(REQUEST_ID)?.delivery).toEqual({
+        state: 'failed',
+        pullRequestUrl: null,
+        error: { code: 'agent_timeout' },
+        finishedAt: 9_000,
+      });
+    });
+
+    it('closes the session and fails with agent_incomplete on an incomplete turn', async () => {
+      const delivery = fakeDeliveryPort('incomplete');
+
+      await closeExecutor(delivery)(closeRun(), new AbortController().signal);
+
+      expect(delivery.closeSession).toHaveBeenCalledTimes(1);
+      expect(runStore.getRun(REQUEST_ID)?.delivery).toMatchObject({
+        state: 'failed',
+        error: { code: 'agent_incomplete' },
+      });
+    });
+
+    it('records a close failure after a clean turn', async () => {
+      const delivery = fakeDeliveryPort('clean', undefined, async () =>
+        err({ code: 'runtime-unavailable', message: 'Could not close the agent session' })
+      );
+
+      await closeExecutor(delivery)(closeRun(), new AbortController().signal);
+
+      expect(runStore.getRun(REQUEST_ID)?.delivery).toMatchObject({
+        state: 'failed',
+        error: { code: 'runtime-unavailable', message: 'Could not close the agent session' },
+      });
+    });
+
+    it('closes the session and records cancelled on an explicit cancel', async () => {
+      const delivery = fakeDeliveryPort('aborted');
+      const controller = new AbortController();
+      controller.abort(RUN_CANCELLED_REASON);
+
+      await closeExecutor(delivery)(closeRun(), controller.signal);
+
+      expect(delivery.closeSession).toHaveBeenCalledTimes(1);
+      expect(delivery.stopSession).not.toHaveBeenCalled();
+      expect(runStore.getRun(REQUEST_ID)?.delivery?.state).toBe('cancelled');
+    });
+
+    it('leaves delivery in flight on runtime shutdown so restart recovery can mark it', async () => {
+      const delivery = fakeDeliveryPort('aborted');
+      const controller = new AbortController();
+      controller.abort();
+
+      await closeExecutor(delivery)(closeRun(), controller.signal);
+
+      expect(delivery.closeSession).not.toHaveBeenCalled();
+      expect(runStore.getRun(REQUEST_ID)?.delivery?.state).toBe('agent_running');
+      expect(runStore.listRunsWithActiveDelivery().map((run) => run.id)).toEqual([REQUEST_ID]);
+    });
+
+    it('fails delivery when no delivery port is available', async () => {
+      await closeExecutor(undefined)(closeRun(), new AbortController().signal);
+
+      expect(runStore.getRun(REQUEST_ID)?.delivery).toMatchObject({
+        state: 'failed',
+        error: { code: 'delivery_unsupported' },
+      });
+    });
+
+    it('never closes the session for a pull-request completion', async () => {
+      const delivery = fakeDeliveryPort('timeout');
+
+      await executor(delivery)(claimedRun(), new AbortController().signal);
+
+      expect(delivery.closeSession).not.toHaveBeenCalled();
+      expect(delivery.stopSession).toHaveBeenCalledTimes(1);
     });
   });
 });

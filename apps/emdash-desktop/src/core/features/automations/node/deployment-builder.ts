@@ -1,7 +1,10 @@
 import { emdashConfigSchema } from '@emdash/core/primitives/emdash-config/api';
 import { hostRefEquals } from '@emdash/core/primitives/host/api';
 import { hostFileRef } from '@emdash/core/primitives/path/api';
-import type { AutomationDeployment } from '@emdash/core/runtimes/automations/api';
+import type {
+  AutomationCloseCompletion,
+  AutomationDeployment,
+} from '@emdash/core/runtimes/automations/api';
 import { err, ok, type Result } from '@emdash/shared';
 import { eq } from 'drizzle-orm';
 import { storedGitSettingsFromRow } from '@core/features/projects/api/node/settings/effective-settings';
@@ -176,11 +179,21 @@ async function buildAutomationDeploymentOnce(
     };
   }
 
+  // Close-when-done is ignored on demand: those runs finish by opening a pull request.
+  // It needs no branch, so directory workspaces qualify.
+  const closeWhenDone = onDemand ? undefined : conversation.closeWhenDone;
+  const closeCompletion: AutomationCloseCompletion | undefined = closeWhenDone && {
+    kind: 'close',
+    ...(closeWhenDone.timeoutMinutes && { timeoutMs: closeWhenDone.timeoutMinutes * 60_000 }),
+  };
+
   const model = conversation.model?.trim() || null;
+  const effort = conversation.effort?.trim() || undefined;
   const title = conversation.title?.trim() || automation.name.trim();
-  // Nobody is watching an on-demand run, so a permission prompt would stall it
-  // until the timeout; it runs unattended inside its own worktree instead.
-  const unattendedModeId = onDemand ? UNATTENDED_ACP_MODE_IDS[conversation.provider] : undefined;
+  // Nobody is watching an on-demand or close-when-done run, so a permission prompt
+  // would stall it until the timeout; it runs unattended instead.
+  const unattended = Boolean(onDemand || closeCompletion);
+  const unattendedModeId = unattended ? UNATTENDED_ACP_MODE_IDS[conversation.provider] : undefined;
   const agent: AutomationDeployment['agent'] =
     conversation.type === 'acp'
       ? {
@@ -188,6 +201,7 @@ async function buildAutomationDeploymentOnce(
           start: {
             providerId: conversation.provider,
             model,
+            ...(effort && { effort }),
             ...(unattendedModeId && { modeId: unattendedModeId }),
             initialQueue: [{ text: prompt }],
           },
@@ -199,8 +213,9 @@ async function buildAutomationDeploymentOnce(
           start: {
             providerId: conversation.provider,
             model,
+            ...(effort && { effort }),
             initialPrompt: prompt,
-            autoApprove: onDemand ? true : conversation.autoApprove,
+            autoApprove: unattended ? true : conversation.autoApprove,
           },
           ...(!onDemand && { title }),
         };
@@ -221,6 +236,7 @@ async function buildAutomationDeploymentOnce(
       maxConcurrentRuns: onDemand.maxConcurrentRuns ?? DEFAULT_ON_DEMAND_MAX_CONCURRENT_RUNS,
       completion,
     }),
+    ...(closeCompletion && { completion: closeCompletion }),
   });
 }
 

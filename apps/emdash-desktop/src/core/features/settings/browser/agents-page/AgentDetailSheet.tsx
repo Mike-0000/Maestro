@@ -14,6 +14,8 @@ import {
 import { AgentSheetHeaderSection } from '@core/features/settings/browser/agents-page/AgentSheetHeaderSection';
 import { InstalledAgentContent } from '@core/features/settings/browser/agents-page/InstalledAgentContent';
 import { InstallSection } from '@core/features/settings/contributions/browser/agents-page/InstallSection';
+import { isClientMode } from '@core/primitives/client-mode/browser/client-mode';
+import { useHostPlatform } from '@core/primitives/client-mode/browser/host-platform';
 
 interface AgentDetailSheetProps {
   agentId: string | null;
@@ -45,6 +47,11 @@ const AgentDetailSheetContent = observer(function AgentDetailSheetContent({
     reset,
   } = useAgentSettings(agentId, host);
   const navigateToMcpSettings = useManageMcpSettingsNavigation();
+  const hostPlatform = useHostPlatform();
+  // A Maestro client's agents run on the remote host, so its platform decides the WSL option.
+  const hostIsWindows = isClientMode()
+    ? hostPlatform === 'win32'
+    : navigator.userAgent.includes('Windows');
 
   const isInstalled = agentPayload?.status === 'available';
   const isRemote = !!connectionId;
@@ -88,9 +95,7 @@ const AgentDetailSheetContent = observer(function AgentDetailSheetContent({
                 isLoading={isLoading}
                 update={update}
                 reset={reset}
-                showWsl={
-                  agentId === 'claude' && !isRemote && navigator.userAgent.includes('Windows')
-                }
+                showWsl={agentId === 'claude' && !isRemote && hostIsWindows}
               />
             )}
           </>

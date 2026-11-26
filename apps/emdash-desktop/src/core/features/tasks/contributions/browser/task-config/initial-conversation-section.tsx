@@ -28,6 +28,10 @@ import { buildIssueContextText } from '@core/features/tasks/browser/context-bar/
 import { appendInitialConversationText } from '@core/features/tasks/browser/create-task-modal/initial-conversation-text';
 import { usePromptFileDrop } from '@core/features/tasks/browser/create-task-modal/use-prompt-file-drop';
 import {
+  EffortSelect,
+  type EffortOption,
+} from '@core/features/tasks/contributions/browser/task-config/effort-select';
+import {
   agentSupportsAcp,
   agentSupportsInitialPromptDelivery,
   agentSupportsAutoApprove,
@@ -201,6 +205,14 @@ interface InitialConversationFieldProps {
   autoFocus?: boolean;
   /** Resting height of the prompt in lines; it still grows with what is typed. */
   minRows?: number;
+  /**
+   * Effort levels the form lets the user choose for the selected agent, lowest first. Absent,
+   * null or empty renders no effort picker (the create-task form passes none).
+   */
+  effortOptions?: readonly EffortOption[] | null;
+  /** The chosen effort id, or null for the agent's default. */
+  selectedEffort?: string | null;
+  onEffortChange?: (effort: string | null) => void;
 }
 
 export function InitialConversationField({
@@ -215,6 +227,9 @@ export function InitialConversationField({
   claudeAccount,
   autoFocus = false,
   minRows = 3,
+  effortOptions,
+  selectedEffort = null,
+  onEffortChange,
 }: InitialConversationFieldProps) {
   const claudeAccountSelectId = useId();
   const autoApproveSwitchId = useId();
@@ -395,6 +410,15 @@ export function InitialConversationField({
             appearance="quiet"
             className="-ml-1"
           />
+
+          {effortOptions && effortOptions.length > 0 && onEffortChange ? (
+            <EffortSelect
+              options={effortOptions}
+              value={selectedEffort}
+              onChange={onEffortChange}
+              disabled={!state.provider}
+            />
+          ) : null}
 
           {claudeAccount?.visible ? (
             <div className="flex min-w-0 items-center gap-2">

@@ -41,6 +41,16 @@ export function updateBuildsRoot(environment: Environment = process.env): string
     : null;
 }
 
+/**
+ * Where Linux builds land on the Windows publishing machine. A folder of its own, so `/push`'s
+ * pruning of `UpdateBuilds` and its "one new build" check never see them.
+ */
+export function linuxUpdateBuildsRoot(environment: Environment = process.env): string | null {
+  return environment.LOCALAPPDATA
+    ? win32.join(environment.LOCALAPPDATA, 'Chorus', 'LinuxUpdateBuilds')
+    : null;
+}
+
 /** The highest-versioned build folder under `root` that holds a manifest, if any. */
 export function latestUpdateBuild(root: string, manifestName: string): string | null {
   if (!existsSync(root)) return null;
@@ -138,8 +148,37 @@ export function releaseBlobPath(version: string, fileName: string): string {
   return `${RELEASES_PREFIX}/${version}/${fileName}`;
 }
 
-export function manifestFileName(channel: string): string {
-  return `${channel}.yml`;
+/**
+ * The manifest electron-updater fetches for a channel. Windows uses the bare channel name; an x64
+ * Linux install asks for `<channel>-linux.yml` (electron-updater's platform suffix).
+ */
+export function manifestFileName(channel: string, platform: MaestroPlatform = 'win'): string {
+  return platform === 'linux' ? `${channel}-linux.yml` : `${channel}.yml`;
+}
+
+/** The platforms the Maestro feed carries: the Windows installer and the Linux host AppImage. */
+export type MaestroPlatform = 'win' | 'linux';
+
+export function parseMaestroPlatform(value: string | undefined): MaestroPlatform {
+  if (value === undefined || value === 'win') return 'win';
+  if (value === 'linux') return 'linux';
+  throw new Error(`Unknown platform "${value}"; expected win or linux`);
+}
+
+/** What each platform packages: its electron-builder target and the native modules to rebuild. */
+export function maestroPackaging(platform: MaestroPlatform): {
+  target: 'nsis' | 'AppImage';
+  nativeModules: readonly string[];
+} {
+  // node-pty ships Windows and macOS prebuilds only, so Linux compiles it for Electron as well.
+  return platform === 'linux'
+    ? { target: 'AppImage', nativeModules: ['better-sqlite3', 'node-pty'] }
+    : { target: 'nsis', nativeModules: ['better-sqlite3'] };
+}
+
+/** A version `maestroReleaseVersion` produces, which a Linux build must reuse verbatim. */
+export function isMaestroReleaseVersion(value: string): boolean {
+  return /^\d+\.\d+\.\d+-maestro\.\d{12}$/.test(value);
 }
 
 export interface ReleaseUpload {

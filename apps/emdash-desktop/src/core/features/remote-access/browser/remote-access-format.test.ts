@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { RemoteAccessDevice } from '@core/features/remote-access/api';
 import {
+  clientPlatformLabel,
   deviceActivity,
   deviceKindLabel,
+  formatAllowedLogins,
   formatCountdown,
   formatListenerAddress,
   listenerStateLine,
+  parseAllowedLogins,
   parsePortInput,
   requestsEndpoint,
   sortDevices,
@@ -96,6 +99,7 @@ describe('device helpers', () => {
   it('labels device kinds', () => {
     expect(deviceKindLabel('browser')).toBe('Phone or browser');
     expect(deviceKindLabel('desktop')).toBe('Maestro app');
+    expect(deviceKindLabel('owner')).toBe('Maestro client');
   });
 
   it('prefers a live connection over the last-seen time', () => {
@@ -173,5 +177,36 @@ describe('requestsEndpoint', () => {
     expect(requestsEndpoint(listener, { ...serving, serving: false })).toBe(
       'http://127.0.0.1:7462/v1/requests'
     );
+  });
+});
+
+describe('full-access allowlist', () => {
+  it('reads logins separated by commas, spaces or new lines, each once', () => {
+    expect(parseAllowedLogins(' me@example.com, Me@Example.com\nteam@example.com;;')).toEqual({
+      ok: true,
+      logins: ['me@example.com', 'team@example.com'],
+    });
+    expect(parseAllowedLogins('   ')).toEqual({ ok: true, logins: [] });
+  });
+
+  it('refuses what the host would refuse', () => {
+    expect(parseAllowedLogins('x'.repeat(257))).toMatchObject({ ok: false });
+    const many = Array.from({ length: 65 }, (_, index) => `user${index}@example.com`).join(',');
+    expect(parseAllowedLogins(many)).toEqual({ ok: false, message: 'Enter at most 64 logins.' });
+  });
+
+  it('round-trips through its display form', () => {
+    const logins = ['me@example.com', 'team@example.com'];
+    expect(parseAllowedLogins(formatAllowedLogins(logins))).toEqual({ ok: true, logins });
+    expect(formatAllowedLogins([])).toBe('');
+  });
+});
+
+describe('clientPlatformLabel', () => {
+  it('names the common platforms and passes others through', () => {
+    expect(clientPlatformLabel('win32')).toBe('Windows');
+    expect(clientPlatformLabel('darwin')).toBe('macOS');
+    expect(clientPlatformLabel('linux')).toBe('Linux');
+    expect(clientPlatformLabel('freebsd')).toBe('freebsd');
   });
 });

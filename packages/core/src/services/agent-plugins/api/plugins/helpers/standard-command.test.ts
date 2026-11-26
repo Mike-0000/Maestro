@@ -192,4 +192,75 @@ describe('buildStandardCommand', () => {
     expect(mIdx).toBeGreaterThanOrEqual(0);
     expect(result.args[mIdx + 1]).toBe('gpt-5-codex');
   });
+
+  describe('effortFlag', () => {
+    const ctx = {
+      cli: 'claude',
+      autoApprove: true,
+      sessionId: 'conv-1',
+      isResuming: false,
+      model: 'opus',
+      extraArgs: ['--verbose'],
+      initialPrompt: 'fix the bug',
+    };
+    const spec = {
+      autoApproveFlag: '--dangerously-skip-permissions',
+      initialPromptFlag: '',
+      sessionIdFlag: '--session-id',
+      resumeFlag: '--resume',
+      modelFlag: '--model',
+      effortFlag: '--effort',
+    };
+
+    it('appends the effort right after the model, ahead of extra args and the prompt', () => {
+      expect(buildStandardCommand({ ...ctx, effort: 'high' }, spec).args).toEqual([
+        '--session-id',
+        'conv-1',
+        '--dangerously-skip-permissions',
+        '--model',
+        'opus',
+        '--effort',
+        'high',
+        '--verbose',
+        'fix the bug',
+      ]);
+    });
+
+    it('leaves the command identical to a spec without effortFlag when no effort is set', () => {
+      const { effortFlag: _unused, ...withoutEffortFlag } = spec;
+      const expected = buildStandardCommand(ctx, withoutEffortFlag);
+      expect(buildStandardCommand(ctx, spec)).toEqual(expected);
+      expect(buildStandardCommand({ ...ctx, effort: '' }, spec)).toEqual(expected);
+      expect(expected.args).not.toContain('--effort');
+    });
+
+    it('ignores an effort when the provider has no effortFlag', () => {
+      const { effortFlag: _unused, ...withoutEffortFlag } = spec;
+      expect(buildStandardCommand({ ...ctx, effort: 'max' }, withoutEffortFlag)).toEqual(
+        buildStandardCommand(ctx, withoutEffortFlag)
+      );
+    });
+
+    it('keeps the effort on resume, like the model', () => {
+      const result = buildStandardCommand({ ...ctx, isResuming: true, effort: 'low' }, spec);
+      expect(result.args).toEqual([
+        '--resume',
+        'conv-1',
+        '--dangerously-skip-permissions',
+        '--model',
+        'opus',
+        '--effort',
+        'low',
+        '--verbose',
+      ]);
+    });
+
+    it('supports the --flag=value form', () => {
+      const result = buildStandardCommand(
+        { ...ctx, effort: 'medium' },
+        { ...spec, effortFlag: '--effort=' }
+      );
+      expect(result.args).toContain('--effort=medium');
+    });
+  });
 });

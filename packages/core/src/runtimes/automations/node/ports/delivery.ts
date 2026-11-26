@@ -1,4 +1,4 @@
-import { err, type Result } from '@emdash/shared';
+import { err, ok, type Result } from '@emdash/shared';
 import { systemClock, type Clock } from '@emdash/shared/scheduling';
 import type { ContractClient } from '@emdash/wire/rpc';
 import type {
@@ -29,6 +29,8 @@ export interface AutomationDeliveryPort {
     signal: AbortSignal;
   }): Promise<AutomationSessionOutcome>;
   stopSession(session: AutomationSessionRef): Promise<void>;
+  /** Ends the session so it does not auto-resume; see the contract's `closeSession`. */
+  closeSession(session: AutomationSessionRef): Promise<Result<void, AutomationPortError>>;
   publish(
     input: AutomationPublishInput,
     signal: AbortSignal
@@ -44,7 +46,7 @@ export type AutomationDeliveryPortOptions = {
 
 /**
  * Polls the app-supplied delivery contract instead of holding a live subscription:
- * a run lasts minutes to an hour, so a few seconds of latency is free, and a plain
+ * a run lasts minutes to hours, so a few seconds of latency is free, and a plain
  * RPC survives session-runtime restarts without resubscription logic.
  */
 export function createDeliveryPortFromDependency(
@@ -122,6 +124,20 @@ export function createDeliveryPortFromDependency(
 
     async stopSession(session) {
       await client.stopSession(session).catch(() => undefined);
+    },
+
+    async closeSession(session) {
+      try {
+        const result = await client.closeSession(session);
+        return result.success
+          ? ok(undefined)
+          : err({ code: result.error.type, message: result.error.message });
+      } catch (error) {
+        return err({
+          code: 'close_failed',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
     },
 
     async publish(input, signal) {

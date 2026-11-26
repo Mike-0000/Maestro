@@ -6,7 +6,11 @@ import type { Logger } from '@emdash/shared/logger';
 import { acceptWebSocket, isWebSocketUpgrade } from '@emdash/wire/node';
 import type { WireTransport } from '@emdash/wire/rpc';
 import { z } from 'zod';
-import { remoteDeviceKindSchema, type RemoteDevice, type RemoteDeviceStore } from './device-store';
+import {
+  pairableDeviceKindSchema,
+  type RemoteDevice,
+  type RemoteDeviceStore,
+} from './device-store';
 import type { PairingCodes } from './pairing';
 
 const SESSION_COOKIE = 'maestro_device';
@@ -16,7 +20,8 @@ const MAX_JSON_BODY_BYTES = 16 * 1024;
 const pairRequestSchema = z.object({
   code: z.string().min(1).max(64),
   deviceName: z.string().trim().min(1).max(80),
-  kind: remoteDeviceKindSchema,
+  // Owners pair only through their own route and code; this one can never create one.
+  kind: pairableDeviceKindSchema,
 });
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -63,6 +68,17 @@ export type RemoteAccessRoute = (
   url: URL
 ) => Promise<boolean>;
 
+/**
+ * An extra WebSocket endpoint mounted on the listener (see `upgradeRoutes`). It returns true once
+ * it has taken the socket (upgraded or refused it), false to leave the request to the listener.
+ */
+export type RemoteAccessUpgradeRoute = (
+  request: IncomingMessage,
+  socket: Duplex,
+  head: Buffer,
+  url: URL
+) => boolean;
+
 export type RemoteAccessHttpOptions = {
   store: RemoteDeviceStore;
   pairing: PairingCodes;
@@ -74,6 +90,8 @@ export type RemoteAccessHttpOptions = {
   onDevicesChanged(): void;
   /** Routes tried before the built-in ones; each returns true once it has answered. */
   routes?: readonly RemoteAccessRoute[];
+  /** Upgrade endpoints tried before the built-in `/wire`; each returns true once it answered. */
+  upgradeRoutes?: readonly RemoteAccessUpgradeRoute[];
   logger: Logger;
 };
 
@@ -200,6 +218,16 @@ export function createRemoteAccessHttpServer(
   function handleUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer): void {
     socket.on('error', () => {});
     const url = new URL(request.url ?? '/', 'http://maestro.invalid');
+    try {
+      for (const route of options.upgradeRoutes ?? []) {
+        if (route(request, socket, head, url)) return;
+      }
+    } catch (error) {
+      // An upgrade runs in an event handler: a throw here would reach the process.
+      options.logger.warn('Remote access upgrade failed', { error: String(error) });
+      socket.destroy();
+      return;
+    }
     if (url.pathname !== '/wire' || !isWebSocketUpgrade(request)) {
       rejectUpgrade(socket, 404, 'Not Found');
       return;
@@ -214,6 +242,11 @@ export function createRemoteAccessHttpServer(
     const device = authenticate(request);
     if (!device) {
       rejectUpgrade(socket, 401, 'Unauthorized');
+      return;
+    }
+    // An owner client is served only on its own endpoint, under the owner access rules.
+    if (device.kind === 'owner') {
+      rejectUpgrade(socket, 403, 'Forbidden');
       return;
     }
 

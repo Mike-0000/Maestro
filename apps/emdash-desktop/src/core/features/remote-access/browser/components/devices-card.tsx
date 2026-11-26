@@ -1,6 +1,6 @@
 import { EmptyState } from '@emdash/ui/react/components';
 import { SettingsSection } from '@emdash/ui/react/patterns';
-import { AbsoluteTime, Button, RelativeTime, toast } from '@emdash/ui/react/primitives';
+import { AbsoluteTime, Badge, Button, RelativeTime, toast } from '@emdash/ui/react/primitives';
 import { MonitorIcon, SmartphoneIcon } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { RemoteAccessDevice, RemoteAccessStatus } from '@core/features/remote-access/api';
@@ -50,14 +50,21 @@ export function DevicesCard({ status }: { status: RemoteAccessStatus | undefined
           {devices.map((device) => (
             <li key={device.id} className="flex items-center gap-3">
               <span className="flex size-8 shrink-0 items-center justify-center text-foreground-passive">
-                {device.kind === 'desktop' ? (
-                  <MonitorIcon className="size-4" aria-hidden />
-                ) : (
+                {device.kind === 'browser' ? (
                   <SmartphoneIcon className="size-4" aria-hidden />
+                ) : (
+                  <MonitorIcon className="size-4" aria-hidden />
                 )}
               </span>
               <div className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate text-sm text-foreground">{device.name}</span>
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="truncate text-sm text-foreground">{device.name}</span>
+                  {device.kind === 'owner' ? (
+                    <Badge variant="outline" className="shrink-0">
+                      Full access
+                    </Badge>
+                  ) : null}
+                </span>
                 <span className="flex flex-wrap items-center gap-x-1.5 text-xs text-foreground-muted">
                   <span>{deviceKindLabel(device.kind)}</span>
                   <span aria-hidden>·</span>

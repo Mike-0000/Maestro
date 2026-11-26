@@ -23,14 +23,27 @@ import type {
   RemoteAccessStatus,
   RemoteAccessTailscale,
 } from '@core/features/remote-access/api';
+import type { RemoteAccessOwnerAccess } from '@core/features/remote-access/api/contract';
 import type { RemoteAccessOperations } from '@core/features/remote-access/node/wire-controller';
 import type { TaskService } from '@core/features/tasks/api/node/task-service';
 import { desktopWireContract } from '@core/manifests/shared/desktop-wire-contract';
 import type { AppDb } from '@core/services/app-db/node/db';
-import type { NotificationSink } from '@core/services/notifications/api/ports';
+import type {
+  EmitNotificationDelivery,
+  NotificationSink,
+} from '@core/services/notifications/api/ports';
 import { agentStatusService } from '@main/core/agent-status/agent-status-service';
 import { tuiAgentStatusBridge } from '@main/core/agent-status/tui-agent-status-bridge';
 import type { DesktopRuntimeClients } from '@main/gateway/desktop-workers';
+import { setExternalOpenerOverride } from '@main/host/external-opener';
+import { createSystemNotificationSink } from '@main/host/notifications/system-notification-sink';
+import type { HostActivity } from '@main/host/updates/host-activity';
+import {
+  createUnattendedUpdatePolicy,
+  type HostUpdaterPort,
+  type UnattendedUpdatePolicy,
+} from '@main/host/updates/unattended-update-policy';
+import { isBuildCheckSkipped, resolveBuildIdentity } from '@main/owner-link/build-identity';
 import {
   DEFAULT_REMOTE_ACCESS_PORT,
   isTriggerName,
@@ -44,6 +57,8 @@ import {
   type RemoteAccessHttpServer,
   type RemoteAccessRoute,
 } from './http-server';
+import { electronHostDetails, electronHostWindowPort } from './owner/electron-host-ports';
+import { createOwnerAccess, type OwnerAccess } from './owner/owner-access';
 import { PairingCodes } from './pairing';
 import { createPushDispatcher, type PushDispatcher } from './push/push-dispatcher';
 import { createPushRoute } from './push/push-route';
@@ -71,12 +86,28 @@ export type RemoteAccessDependencies = {
   logger: Logger;
   /** Extra HTTP surfaces served by the same listener. */
   routes?: readonly RemoteAccessRoute[];
-  /** Where agent notifications come from, to forward them to paired phones. */
-  notifications: { registerSink(sink: NotificationSink): () => void };
+  /**
+   * Where agent notifications come from, to forward them to paired phones (and, while a
+   * full-access client is attached, to that client instead of this computer's banners).
+   */
+  notifications: {
+    registerSink(sink: NotificationSink): () => void;
+    emitDelivery: EmitNotificationDelivery;
+  };
   /** The app-wide notifications switch. */
   notificationsEnabled(): Promise<boolean>;
   /** Encrypted storage for this host's push key and the phones' subscriptions. */
   secrets: PushSecrets;
+  /**
+   * The app's updater and how busy the host is, for unattended host updates. Unused unless
+   * `hostUpdates.mode` is `when-idle` in the settings file or an owner client asks for an update.
+   */
+  hostUpdates?: {
+    updater: HostUpdaterPort;
+    activity(): Promise<HostActivity>;
+    /** False when a service manager (systemd) restarts the app after it quits to install. */
+    relaunchAfterInstall: boolean;
+  };
 };
 
 type Attached = {
@@ -90,12 +121,24 @@ type Attached = {
   pushDispatcher: PushDispatcher;
   hostController: Controller;
   browserController: Controller;
+  /** The full-access (owner) tier; inert until owner access is turned on. */
+  owner: OwnerAccess;
+  /** Unattended host updates; idle unless `hostUpdates.mode` is `when-idle` or a client asks. */
+  hostUpdatePolicy: UnattendedUpdatePolicy | undefined;
 };
 
 const SETTINGS_FILE = 'remote-access.json';
 const NOT_READY: RemoteAccessError = {
   type: 'unavailable',
   message: 'Remote access is still starting. Try again in a moment.',
+};
+/** Owner access as reported before the service attaches: off. */
+const OWNER_ACCESS_OFF: RemoteAccessOwnerAccess = {
+  enabled: false,
+  tailscaleOnly: true,
+  allowedLogins: [],
+  pairing: null,
+  attachedClient: null,
 };
 
 /**
@@ -117,6 +160,7 @@ export class RemoteAccessService {
     devices: [],
     pairing: null,
     triggers: { tokenSet: false, routes: [] },
+    ownerAccess: OWNER_ACCESS_OFF,
   });
   private attached: Attached | undefined;
   private http: RemoteAccessHttpServer | undefined;
@@ -170,6 +214,11 @@ export class RemoteAccessService {
     conductorCommands: this.conductorCommands,
     getTailscale: () => inspectTailscale(peek(this.statusCell).port),
     setTailscaleServe: (enabled) => this.setTailscaleServe(enabled),
+    setOwnerAccess: async (patch) =>
+      this.attached ? this.attached.owner.operations.setOwnerAccess(patch) : err(NOT_READY),
+    createOwnerPairingCode: async () =>
+      this.attached ? this.attached.owner.operations.createOwnerPairingCode() : err(NOT_READY),
+    cancelOwnerPairingCode: () => this.attached?.owner.operations.cancelOwnerPairingCode(),
   };
 
   /** Binds the service to the running app and starts the listener if it is enabled. */
@@ -198,6 +247,17 @@ export class RemoteAccessService {
       logger: deps.logger,
     });
     scope.add(deps.notifications.registerSink(pushDispatcher.sink));
+    const hostUpdatePolicy = deps.hostUpdates
+      ? createUnattendedUpdatePolicy({
+          mode: () => store.current().hostUpdates.mode,
+          updater: deps.hostUpdates.updater,
+          activity: deps.hostUpdates.activity,
+          notifyHostQuitting: (reason) => this.attached?.owner.notifyHostQuitting(reason),
+          relaunchAfterInstall: deps.hostUpdates.relaunchAfterInstall,
+          logger: deps.logger,
+        })
+      : undefined;
+    const owner = createRemoteOwnerAccess(deps, store, () => this.publish(), hostUpdatePolicy);
     this.attached = {
       deps,
       scope,
@@ -213,9 +273,13 @@ export class RemoteAccessService {
         appVersion: deps.appVersion,
       }),
       browserController: createBrowserDeviceController(remoteControl.impl),
+      owner,
+      hostUpdatePolicy,
     };
     this.publish();
     await this.reconcileListener();
+    // A no-op unless the settings file says `when-idle`.
+    hostUpdatePolicy?.start();
   }
 
   async dispose(): Promise<void> {
@@ -224,6 +288,8 @@ export class RemoteAccessService {
     clearTimeout(this.pairingExpiry);
     await this.enqueue(() => this.stopListener());
     if (!attached) return;
+    attached.hostUpdatePolicy?.dispose();
+    await attached.owner.dispose();
     attached.remoteControl.dispose();
     attached.remoteVoice.dispose();
     await attached.desktop.dispose();
@@ -262,6 +328,7 @@ export class RemoteAccessService {
     if (!attached) return;
     await attached.store.removeDevice(deviceId);
     this.http?.closeDeviceSessions(deviceId);
+    attached.owner.closeDevice(deviceId);
     this.publish();
   }
 
@@ -306,6 +373,7 @@ export class RemoteAccessService {
       openSession: (device, transport) => this.openSession(attached, device, transport),
       onDevicesChanged: () => this.publish(),
       routes: [
+        ...attached.owner.routes,
         createTriggerRoute({
           automations: deps.clients.automations,
           triggers: () => store.current().triggers,
@@ -319,6 +387,7 @@ export class RemoteAccessService {
         }),
         ...(deps.routes ?? []),
       ],
+      upgradeRoutes: attached.owner.upgradeRoutes,
       logger: deps.logger,
     });
     try {
@@ -347,10 +416,17 @@ export class RemoteAccessService {
     const http = this.http;
     this.http = undefined;
     this.connections.clear();
+    // Owner sockets are upgraded, so the HTTP server no longer tracks them.
+    this.attached?.owner.closeAll();
     await http?.close();
   }
 
   private openSession(attached: Attached, device: RemoteDevice, transport: WireTransport): void {
+    // Owners are served only on their own endpoint; the listener already refuses them here.
+    if (device.kind === 'owner') {
+      transport.close?.();
+      return;
+    }
     const controller =
       device.kind === 'desktop' ? attached.hostController : attached.browserController;
     const stopServing = serve(transport, controller);
@@ -379,7 +455,8 @@ export class RemoteAccessService {
       webAppAvailable: existsSync(join(attached.deps.staticRoot, 'index.html')),
       devices: attached.store.devices().map((device) => ({
         ...device,
-        connections: this.connections.get(device.id) ?? 0,
+        connections:
+          (this.connections.get(device.id) ?? 0) + attached.owner.connectionCount(device.id),
       })),
       pairing: this.pairing.current() ?? null,
       triggers: {
@@ -388,6 +465,7 @@ export class RemoteAccessService {
           .map(([name, route]) => ({ name, automationId: route.automationId }))
           .sort((a, b) => a.name.localeCompare(b.name)),
       },
+      ownerAccess: attached.owner.status(),
     });
   }
 
@@ -396,6 +474,46 @@ export class RemoteAccessService {
     this.lifecycle = run.catch(() => {});
     return run;
   }
+}
+
+/** The owner tier, bound to this app's window, banners, browser opener and build. */
+function createRemoteOwnerAccess(
+  deps: RemoteAccessDependencies,
+  store: RemoteDeviceStore,
+  publish: () => void,
+  hostUpdatePolicy: UnattendedUpdatePolicy | undefined
+): OwnerAccess {
+  const host = electronHostDetails();
+  let hostBuild: ReturnType<typeof resolveBuildIdentity> | undefined;
+  return createOwnerAccess({
+    store,
+    dataDirectory: deps.dataDirectory,
+    hostInfo: () => ({
+      id: store.current().hostId,
+      name: deps.hostName,
+      platform: host.platform,
+      arch: host.arch,
+      homeDir: host.homeDir,
+    }),
+    hostBuild: () =>
+      (hostBuild ??= resolveBuildIdentity({
+        isPackaged: host.isPackaged,
+        version: deps.appVersion,
+        resourcesPath: host.resourcesPath,
+      })),
+    skipBuildCheck: isBuildCheckSkipped(host.isPackaged),
+    desktopController: deps.desktopController,
+    notifications: deps.notifications,
+    createSystemSink: createSystemNotificationSink,
+    window: electronHostWindowPort,
+    setExternalOpener: setExternalOpenerOverride,
+    onChanged: publish,
+    logger: deps.logger,
+    hostUpdates: hostUpdatePolicy && {
+      state: () => hostUpdatePolicy.state(),
+      request: (request) => hostUpdatePolicy.request(request),
+    },
+  });
 }
 
 function remoteControlPorts(

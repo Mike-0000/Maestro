@@ -4,6 +4,7 @@ import { observer } from 'mobx-react-lite';
 import { useEffect, useState } from 'react';
 import { getCanvasStore } from '@core/features/canvas/contributions/browser/app-stores';
 import { getMachinesClient } from '@core/features/machines/api/browser/client';
+import { getProjectsWireClient } from '@core/features/projects/api/browser/client';
 import {
   DEFAULT_TALK_SETTINGS,
   isTalkAgentId,
@@ -28,7 +29,9 @@ import {
   getDictationStore,
   getVoiceStore,
 } from '@core/features/voice/contributions/browser/app-stores';
+import { useOpenModal } from '@core/manifests/browser/modal-api';
 import type { ChorusCredentialId } from '@core/primitives/chorus-host/api/credentials';
+import { isClientMode } from '@core/primitives/client-mode/browser/client-mode';
 import {
   copyTextToClipboard,
   getHostClient,
@@ -1204,22 +1207,25 @@ const INVESTIGATOR_MODELS = { haiku: 'Haiku, fast and low cost', sonnet: 'Sonnet
  * Extra folders a code check may read besides the project. Each one is checked in the main
  * process before it is saved, and again before every check.
  */
-const CodeCheckFolders = observer(function CodeCheckFolders() {
+export const CodeCheckFolders = observer(function CodeCheckFolders() {
   const conductor = getConductorStore();
   const folders = conductor.settings?.investigationFolders ?? [];
   const [message, setMessage] = useState('');
   const [adding, setAdding] = useState(false);
+  const openDirectorySelectorModal = useOpenModal('directorySelectorModal');
   const add = async () => {
     if (adding) return;
     setAdding(true);
     setMessage('');
     try {
-      const chosen = await (
-        await getHostClient()
-      ).openSelectDirectoryDialog({
-        title: 'Add a folder for code checks',
-        message: 'Choose a folder the conductor may read but not change.',
-      });
+      const chosen = isClientMode()
+        ? await chooseHostFolder()
+        : await (
+            await getHostClient()
+          ).openSelectDirectoryDialog({
+            title: 'Add a folder for code checks',
+            message: 'Choose a folder the conductor may read but not change.',
+          });
       if (!chosen) return;
       const check = await (await getConductorClient()).checkInvestigationFolder({ path: chosen });
       if (!check.ok) {
@@ -1234,6 +1240,14 @@ const CodeCheckFolders = observer(function CodeCheckFolders() {
       setAdding(false);
     }
   };
+  /** A Maestro client cannot open a native dialog onto the host's disk: browse the host. */
+  async function chooseHostFolder(): Promise<string | null> {
+    const outcome = await openDirectorySelectorModal({
+      strategy: 'local',
+      getProjectsClient: getProjectsWireClient,
+    });
+    return outcome.success ? outcome.data.path : null;
+  }
   return (
     <>
       <SettingsRow

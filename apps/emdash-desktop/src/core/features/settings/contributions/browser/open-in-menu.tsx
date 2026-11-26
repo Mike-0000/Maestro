@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo } from 'react';
 import { useAppSettingsKey } from '@core/features/settings/api/browser/use-app-settings-key';
 import { useOpenInApps } from '@core/features/settings/api/browser/useOpenInApps';
 import { OpenInAppIcon } from '@core/features/settings/browser/components/OpenInAppIcon';
+import { isClientMode } from '@core/primitives/client-mode/browser/client-mode';
 import { getHostClient } from '@core/primitives/desktop-host/browser/host-client';
 import { BoundShortcut } from '@core/primitives/keybindings/browser/shortcut';
 import {
@@ -21,7 +22,14 @@ interface OpenInMenuProps {
   sshConnectionId?: string;
 }
 
-export const OpenInMenu: React.FC<OpenInMenuProps> = ({
+/**
+ * "Open in" launches apps on this computer against a project path. A Maestro client's projects
+ * are on the remote host, so the menu is hidden there.
+ */
+export const OpenInMenu: React.FC<OpenInMenuProps> = (props) =>
+  isClientMode() ? null : <LocalOpenInMenu {...props} />;
+
+const LocalOpenInMenu: React.FC<OpenInMenuProps> = ({
   path,
   className,
   borderless = false,

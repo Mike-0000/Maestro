@@ -244,4 +244,47 @@ describe('automation deployment schemas', () => {
       }).success
     ).toBe(false);
   });
+
+  describe('completion', () => {
+    const pullRequest = { kind: 'pull-request' as const, baseBranch: 'main', remote: 'origin' };
+
+    it('still accepts a pull-request completion unchanged', () => {
+      const parsed = automationDeploymentSchema.parse({ ...deployment, completion: pullRequest });
+
+      expect(parsed.completion).toEqual(pullRequest);
+      expect(automationRunConfigSnapshotSchema.parse(parsed).completion).toEqual(pullRequest);
+    });
+
+    it('accepts a close completion with or without a timeout on a directory workspace', () => {
+      const directory = { kind: 'directory' as const, path: repository };
+
+      expect(
+        automationDeploymentSchema.parse({
+          ...deployment,
+          workspace: directory,
+          completion: { kind: 'close' },
+        }).completion
+      ).toEqual({ kind: 'close' });
+      expect(
+        automationDeploymentSchema.parse({
+          ...deployment,
+          workspace: directory,
+          completion: { kind: 'close', timeoutMs: 60_000 },
+        }).completion
+      ).toEqual({ kind: 'close', timeoutMs: 60_000 });
+    });
+
+    it('rejects unknown kinds, non-positive timeouts, and pull requests without a base', () => {
+      for (const completion of [
+        { kind: 'merge' },
+        { kind: 'close', timeoutMs: 0 },
+        { kind: 'close', timeoutMs: 1.5 },
+        { kind: 'pull-request', remote: 'origin' },
+      ]) {
+        expect(automationDeploymentSchema.safeParse({ ...deployment, completion }).success).toBe(
+          false
+        );
+      }
+    });
+  });
 });
