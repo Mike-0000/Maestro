@@ -133,11 +133,11 @@ that came through `tailscale serve` or another proxy, so run it on the VM itself
 
 ## 8. Start the client on Windows
 
-The client is the Maestro you already installed (`%LOCALAPPDATA%\Programs\Maestro\Maestro.exe`),
+The client is the Maestro you already installed (`%LOCALAPPDATA%\Programs\Chorus\Maestro\Maestro.exe`),
 started with one switch:
 
 ```powershell
-& "$env:LOCALAPPDATA\Programs\Maestro\Maestro.exe" --maestro-client
+& "$env:LOCALAPPDATA\Programs\Chorus\Maestro\Maestro.exe" --maestro-client
 ```
 
 It opens a connection screen. Enter the host address (`https://<vm>.<tailnet>.ts.net`) and the
