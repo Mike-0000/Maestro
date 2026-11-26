@@ -60,13 +60,17 @@ export const automationRunDeliveryStates = [
   'pr_open',
   'pr_draft',
   'no_changes',
+  'closed',
   'failed',
   'cancelled',
 ] as const;
 
 export const automationRunDeliveryStateSchema = z.enum(automationRunDeliveryStates);
 
-/** Post-session progress of a run whose automation has a `completion` config. */
+/**
+ * Post-session progress of a run whose automation has a `completion` config.
+ * `closed` is the clean end of a `close` completion.
+ */
 export const automationRunDeliverySchema = z.object({
   state: automationRunDeliveryStateSchema,
   pullRequestUrl: z.string().nullable(),

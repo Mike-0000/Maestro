@@ -1,7 +1,8 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { DEFAULT_REMOTE_ACCESS_PORT, RemoteDeviceStore } from './device-store';
 import { normalizePairingCode, PairingCodes } from './pairing';
 
@@ -51,6 +52,70 @@ describe('RemoteDeviceStore', () => {
     expect(reloaded.authenticate(credential)?.name).toBe('Phone');
   });
 
+  it('loads a settings file from before owner access with owner access off', async () => {
+    const existing = {
+      version: 1,
+      enabled: true,
+      port: 7462,
+      bindAddress: '127.0.0.1',
+      hostId: 'host-1',
+      devices: [
+        {
+          id: 'd1',
+          name: 'Laptop',
+          kind: 'desktop',
+          tokenHash: 'ab',
+          createdAt: 1,
+          lastSeenAt: null,
+        },
+      ],
+      triggers: { tokenDigest: null, routes: {}, maxQueued: 20 },
+    };
+    await mkdir(join(directory, 'nested'), { recursive: true });
+    await writeFile(filePath, JSON.stringify(existing));
+
+    const state = await new RemoteDeviceStore(filePath).load();
+    expect(state).toMatchObject({ enabled: true, hostId: 'host-1' });
+    expect(state.devices).toHaveLength(1);
+    expect(state.ownerAccess).toEqual({ enabled: false, tailscaleOnly: true, allowedLogins: [] });
+    expect(state.hostUpdates).toEqual({ mode: 'manual' });
+  });
+
+  it('fills in owner access fields a person left out of the file', async () => {
+    await mkdir(join(directory, 'nested'), { recursive: true });
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        version: 1,
+        enabled: true,
+        port: 7462,
+        bindAddress: '127.0.0.1',
+        hostId: 'host-1',
+        devices: [],
+        ownerAccess: { enabled: true },
+        hostUpdates: {},
+      })
+    );
+    const state = await new RemoteDeviceStore(filePath).load();
+    expect(state.hostId).toBe('host-1');
+    expect(state.ownerAccess).toEqual({ enabled: true, tailscaleOnly: true, allowedLogins: [] });
+    expect(state.hostUpdates).toEqual({ mode: 'manual' });
+  });
+
+  it('updates owner access settings and keeps them', async () => {
+    const store = new RemoteDeviceStore(filePath);
+    expect((await store.load()).ownerAccess.enabled).toBe(false);
+    await store.updateOwnerAccess({ enabled: true, allowedLogins: ['me@example.com'] });
+    await store.updateOwnerAccess({ tailscaleOnly: undefined });
+
+    const reloaded = await new RemoteDeviceStore(filePath).load();
+    expect(reloaded.ownerAccess).toEqual({
+      enabled: true,
+      tailscaleOnly: true,
+      allowedLogins: ['me@example.com'],
+    });
+  });
+
   it('forgets a removed device', async () => {
     const store = new RemoteDeviceStore(filePath);
     await store.load();
@@ -59,6 +124,93 @@ describe('RemoteDeviceStore', () => {
     expect(await store.removeDevice(device.id)).toBe(false);
     expect(store.authenticate(credential)).toBeUndefined();
   });
+
+  it('keeps owners apart from ordinary devices, and authenticates and revokes them', async () => {
+    const store = new RemoteDeviceStore(filePath);
+    await store.load();
+    const desktop = await store.addDevice({ name: 'Laptop', kind: 'desktop' });
+    const owner = await store.addDevice({ name: 'Studio PC', kind: 'owner' });
+    expect(owner.device.kind).toBe('owner');
+
+    const file = JSON.parse(await readFile(filePath, 'utf8')) as {
+      devices: Array<{ id: string; kind: string }>;
+      ownerDevices: Array<{ id: string; kind?: string }>;
+    };
+    expect(file.devices.map((device) => device.kind)).toEqual(['desktop']);
+    expect(file.ownerDevices.map((device) => device.id)).toEqual([owner.device.id]);
+    expect(file.ownerDevices[0]?.kind).toBeUndefined();
+
+    expect(store.devices().map(({ name, kind }) => ({ name, kind }))).toEqual([
+      { name: 'Laptop', kind: 'desktop' },
+      { name: 'Studio PC', kind: 'owner' },
+    ]);
+    expect(store.authenticate(owner.credential)).toMatchObject({
+      id: owner.device.id,
+      kind: 'owner',
+    });
+    expect(store.devices().find((device) => device.kind === 'owner')?.lastSeenAt).toEqual(
+      expect.any(Number)
+    );
+    expect(store.authenticate(desktop.credential)?.kind).toBe('desktop');
+    // A token is bound to its own device id, across the two lists.
+    const swapped = `${desktop.device.id}.${owner.credential.split('.')[1]}`;
+    expect(store.authenticate(swapped)).toBeUndefined();
+
+    // Waits for the last-seen writes, so the two stores never write the file at once.
+    await store.update({});
+    const reloaded = new RemoteDeviceStore(filePath);
+    await reloaded.load();
+    expect(reloaded.authenticate(owner.credential)?.kind).toBe('owner');
+    await reloaded.update({});
+    expect(await reloaded.removeDevice(owner.device.id)).toBe(true);
+    expect(reloaded.authenticate(owner.credential)).toBeUndefined();
+    expect(reloaded.devices().map((device) => device.kind)).toEqual(['desktop']);
+  });
+
+  it('writes a file that a build from before owner access still reads, devices intact', async () => {
+    const store = new RemoteDeviceStore(filePath);
+    await store.load();
+    await store.update({ enabled: true });
+    await store.addDevice({ name: 'Phone', kind: 'browser' });
+    await store.addDevice({ name: 'Studio PC', kind: 'owner' });
+    await store.updateOwnerAccess({ enabled: true });
+
+    const parsed = headStateSchema.safeParse(JSON.parse(await readFile(filePath, 'utf8')));
+    expect(parsed.success).toBe(true);
+    expect(parsed.data).toMatchObject({
+      enabled: true,
+      hostId: store.current().hostId,
+      devices: [expect.objectContaining({ name: 'Phone', kind: 'browser' })],
+    });
+  });
+});
+
+/** `stateSchema` exactly as the build before owner access shipped it. */
+const headDeviceSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  kind: z.enum(['desktop', 'browser']),
+  tokenHash: z.string(),
+  createdAt: z.number(),
+  lastSeenAt: z.number().nullable(),
+});
+const headStateSchema = z.object({
+  version: z.literal(1),
+  enabled: z.boolean(),
+  port: z.number().int().min(1).max(65535),
+  bindAddress: z.string(),
+  hostId: z.string(),
+  devices: z.array(headDeviceSchema),
+  triggers: z
+    .object({
+      tokenDigest: z.string().nullable(),
+      routes: z.record(
+        z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/u),
+        z.object({ automationId: z.string() })
+      ),
+      maxQueued: z.number().int().positive(),
+    })
+    .default({ tokenDigest: null, routes: {}, maxQueued: 20 }),
 });
 
 describe('PairingCodes', () => {

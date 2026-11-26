@@ -120,6 +120,7 @@ export {
   type WireTransportEvent,
 } from '../api/instrumentation';
 export {
+  isWireMessage,
   WireError,
   type WireErrorCode,
   type WireFileMeta,

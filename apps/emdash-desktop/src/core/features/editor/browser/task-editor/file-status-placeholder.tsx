@@ -3,6 +3,7 @@ import { Button } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
 import type { FileTabResource } from '@core/features/editor/api/browser/task-editor/stores/file-tab-resource';
 import { openWithOS } from '@core/features/workbench/api/browser/open-with-os';
+import { isClientMode } from '@core/primitives/client-mode/browser/client-mode';
 
 /**
  * Placeholder for a file tab whose OpenFileStore entry is not ready: the
@@ -45,8 +46,9 @@ export const FileStatusPlaceholder = observer(function FileStatusPlaceholder({
       Try again
     </Button>
   );
+  // A Maestro client's files are on the remote host, out of this computer's apps' reach.
   const openAction =
-    resource.ref?.host.type === 'local' ? (
+    resource.ref?.host.type === 'local' && !isClientMode() ? (
       <Button variant="text" onClick={openInDefaultApp}>
         Open in default app
       </Button>

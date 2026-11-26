@@ -6,6 +6,8 @@ import { observer } from 'mobx-react-lite';
 import { useState } from 'react';
 import { getMachinesStore } from '@core/features/machines/contributions/app-stores';
 import { useOpenModal } from '@core/manifests/browser/modal-api';
+import { isClientMode } from '@core/primitives/client-mode/browser/client-mode';
+import { useHostPlatform } from '@core/primitives/client-mode/browser/host-platform';
 import type { SettingsPageProps } from '@core/primitives/settings/api/page-contribution';
 import type { ConnectionState } from '@core/primitives/ssh/api';
 import { MachineListRow } from '../components/machine-list-row';
@@ -21,6 +23,11 @@ export const MachinesSettingsPage = observer(function MachinesSettingsPage({
   const machinesStore = getMachinesStore();
   const openMachineModal = useOpenModal('addSshConnModal');
   const openMaestroHostModal = useOpenModal('maestroHostModal');
+  const hostPlatform = useHostPlatform();
+  // "This computer" is the remote host for a Maestro client, so WSL depends on its platform.
+  const hostIsWindows = isClientMode()
+    ? hostPlatform === 'win32'
+    : navigator.userAgent.includes('Windows');
   // The machines store is MobX-observable, so the view's source getter reads it
   // directly and the list pipeline re-derives on store changes — no bridge needed.
   const [view] = useState(() =>
@@ -80,9 +87,7 @@ export const MachinesSettingsPage = observer(function MachinesSettingsPage({
               onAdd={openCreateModal}
               onAddMaestroHost={() => void addMaestroHost()}
               onAddThisComputer={hasThisComputer ? undefined : () => void addThisComputer()}
-              onAddWslDistro={
-                navigator.userAgent.includes('Windows') ? () => void addWslDistro() : undefined
-              }
+              onAddWslDistro={hostIsWindows ? () => void addWslDistro() : undefined}
             />
           }
           onItemClick={(machine) => openDetail(machine.id)}

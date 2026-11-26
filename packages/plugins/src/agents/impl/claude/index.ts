@@ -51,6 +51,18 @@ export const plugin = definePlugin(
         },
       ],
     },
+    // Ids are the `claude --effort` levels, which are also the ids the ACP adapter offers for its
+    // `thought_level` option (each model offers a subset; an unoffered id is cleared on launch).
+    effort: {
+      kind: 'selectable',
+      effortOptions: {
+        low: { label: 'Low', level: 1 },
+        medium: { label: 'Medium', level: 2 },
+        high: { label: 'High', level: 3 },
+        xhigh: { label: 'Extra high', level: 4 },
+        max: { label: 'Max', level: 5 },
+      },
+    },
     models: {
       kind: 'selectable',
       modelOptions: {
@@ -170,6 +182,7 @@ export const provider = registerPluginBehavior(plugin, {
           resumeFlag: '--resume',
           sessionIdFlag: '--session-id',
           modelFlag: '--model',
+          effortFlag: '--effort',
         }
       ),
   },

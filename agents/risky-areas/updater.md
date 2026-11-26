@@ -62,6 +62,14 @@ GitHub/R2 pipeline below. Full design, setup, and publishing steps: `docs/chorus
 - `scripts/release/build-maestro-update.ts`, `publish-maestro-update.ts` (dry run unless
   `--publish`), and `maestro-update-keygen.ts` own the release flow. Release folders are
   create-only; the live manifest is written last.
+- Both scripts default to `--platform win`, the `/push` path. `--platform linux` (driven by
+  `maestro-linux-release.ts`) builds the client-mode host's x64 AppImage with the Windows release's
+  `--version` and publishes `v1-stable-linux.yml`. Linux builds live in `LinuxUpdateBuilds`, never
+  in the `UpdateBuilds` folder `/push` prunes.
+- `quitAndInstall({ relaunch: false })` exists only for the unattended host policy
+  (`unattended-update-policy.ts`) under systemd; every other caller passes nothing and keeps the
+  relaunching install. The policy is inert unless `hostUpdates.mode` is `when-idle` or an owner
+  client asks.
 
 ## Update Feed / Publishing Strategy
 

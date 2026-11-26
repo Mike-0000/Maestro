@@ -59,6 +59,11 @@ export type StandardCommandSpec = {
    * Supports both '--flag value' and '--flag=value' forms via appendFlagValue.
    */
   modelFlag?: string;
+  /**
+   * CLI flag for reasoning effort, e.g. '--effort'. Appended right after the model flag only when
+   * ctx.effort is non-empty, so commands without an effort are unchanged.
+   */
+  effortFlag?: string;
 };
 
 /**
@@ -127,6 +132,11 @@ export function buildStandardCommand(ctx: CommandContext, spec: StandardCommandS
   // Model selection
   if (spec.modelFlag && ctx.model) {
     appendFlagValue(args, spec.modelFlag, ctx.model);
+  }
+
+  // Reasoning effort
+  if (spec.effortFlag && ctx.effort) {
+    appendFlagValue(args, spec.effortFlag, ctx.effort);
   }
 
   // User extra args

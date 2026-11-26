@@ -3,6 +3,8 @@ import { SettingsRow, SettingsSection } from '@emdash/ui/react/patterns';
 import { Input, Switch, Textarea, toast } from '@emdash/ui/react/primitives';
 import { observer } from 'mobx-react-lite';
 import { useEffect, useId, useState } from 'react';
+import { isClientMode } from '@core/primitives/client-mode/browser/client-mode';
+import { useHostPlatform } from '@core/primitives/client-mode/browser/host-platform';
 import { detectPlatformContext } from '@core/primitives/keybindings/api';
 import { getMachinesStore } from '../../contributions/app-stores';
 import { useHostSettings } from '../use-host-settings';
@@ -27,7 +29,11 @@ export const HostSettingsCard = observer(function HostSettingsCard({
     ? machinesStore.connections.find((connection) => connection.id === machineId)
     : undefined;
   const syncLocalSettings = machine?.syncLocalSettings ?? false;
-  const tmuxSupported = machineId !== undefined || detectPlatformContext().os !== 'windows';
+  const hostPlatform = useHostPlatform();
+  // A Maestro client's own host defaults belong to the remote host, so its platform decides.
+  const tmuxSupported = isClientMode()
+    ? machineId !== undefined || hostPlatform !== 'win32'
+    : machineId !== undefined || detectPlatformContext().os !== 'windows';
   const [shellSetup, setShellSetup] = useState('');
   const [worktreeRoot, setWorktreeRoot] = useState('');
   const [watcherExclude, setWatcherExclude] = useState('');

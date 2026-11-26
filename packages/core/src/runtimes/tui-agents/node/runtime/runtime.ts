@@ -577,6 +577,7 @@ export class TuiAgentsRuntime {
       providerSessionId: config.input.sessionId ?? undefined,
       isResuming,
       model: config.input.model ?? '',
+      ...(config.input.effort ? { effort: config.input.effort } : {}),
     };
     const sessionMcp = config.input.sessionMcp;
     const commandResult = sessionMcp

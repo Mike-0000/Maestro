@@ -15,8 +15,11 @@ import { z } from 'zod';
 export const remoteAccessDeviceSchema = z.object({
   id: z.string(),
   name: z.string(),
-  /** A Maestro app reaches the whole host; a browser only the remote-control surface. */
-  kind: z.enum(['desktop', 'browser']),
+  /**
+   * A Maestro app reaches the host's workspace runtimes; a browser only the remote-control
+   * surface; an owner (a client-mode Maestro) the host's full desktop app.
+   */
+  kind: z.enum(['desktop', 'browser', 'owner']),
   createdAt: z.number(),
   lastSeenAt: z.number().nullable(),
   /** Number of live connections the device holds right now. */
@@ -37,6 +40,27 @@ export const remoteAccessTriggerSchema = z.object({
 });
 export type RemoteAccessTrigger = z.infer<typeof remoteAccessTriggerSchema>;
 
+/** Full-access (owner) clients: a client-mode Maestro that drives this app as its own. */
+export const remoteAccessOwnerAccessSchema = z.object({
+  enabled: z.boolean(),
+  /** Accept owners only through `tailscale serve` (tailnet identity) or direct loopback. */
+  tailscaleOnly: z.boolean(),
+  /** Tailnet logins allowed to connect as an owner; empty allows every tailnet user. */
+  allowedLogins: z.array(z.string()),
+  /** The outstanding owner pairing code, separate from the ordinary one. */
+  pairing: remoteAccessPairingSchema.nullable(),
+  /** The owner client attached right now; at most one at a time. */
+  attachedClient: z
+    .object({
+      deviceId: z.string(),
+      clientName: z.string(),
+      clientPlatform: z.string(),
+      since: z.number(),
+    })
+    .nullable(),
+});
+export type RemoteAccessOwnerAccess = z.infer<typeof remoteAccessOwnerAccessSchema>;
+
 export const remoteAccessStatusSchema = z.object({
   /** The person's setting; `listening` says whether it took effect. */
   enabled: z.boolean(),
@@ -55,6 +79,7 @@ export const remoteAccessStatusSchema = z.object({
     tokenSet: z.boolean(),
     routes: z.array(remoteAccessTriggerSchema),
   }),
+  ownerAccess: remoteAccessOwnerAccessSchema,
 });
 export type RemoteAccessStatus = z.infer<typeof remoteAccessStatusSchema>;
 
@@ -101,6 +126,13 @@ export const remoteConductorCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('respond'), decision: z.enum(['yes', 'no']) }),
 ]);
 export type RemoteConductorCommand = z.infer<typeof remoteConductorCommandSchema>;
+
+export const remoteAccessOwnerSettingsPatchSchema = z.object({
+  enabled: z.boolean().optional(),
+  tailscaleOnly: z.boolean().optional(),
+  allowedLogins: z.array(z.string().trim().min(1).max(256)).max(64).optional(),
+});
+export type RemoteAccessOwnerSettingsPatch = z.infer<typeof remoteAccessOwnerSettingsPatchSchema>;
 
 export const remoteAccessDomain = 'remoteAccess' as const;
 
@@ -149,6 +181,19 @@ export const remoteAccessContract = defineContract({
     data: remoteAccessTailscaleSchema,
     error: remoteAccessErrorSchema,
   }),
+  /** Changes the owner-access settings; omitted fields keep their value. */
+  setOwnerAccess: fallible({
+    input: remoteAccessOwnerSettingsPatchSchema,
+    data: z.void(),
+    error: remoteAccessErrorSchema,
+  }),
+  /** Issues a one-time owner pairing code; ordinary codes can never create an owner. */
+  createOwnerPairingCode: fallible({
+    input: z.void(),
+    data: remoteAccessPairingSchema,
+    error: remoteAccessErrorSchema,
+  }),
+  cancelOwnerPairingCode: procedure({ input: z.void(), output: z.void() }),
 });
 
 export type RemoteAccessContract = typeof remoteAccessContract;

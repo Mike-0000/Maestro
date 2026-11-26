@@ -128,6 +128,17 @@ request. The run status stays `done`; progress is on the optional `delivery` fie
 that only know the session-start lifecycle are unaffected. A delivery interrupted by a restart is
 marked `failed` on the next start.
 
+`completion` is a union on `kind`. `pull-request` is the on-demand delivery above. `close` ends
+the agent session once it settles (or after `timeoutMs`, default four hours), so it does not
+auto-resume; it needs no branch, so directory workspaces qualify. A clean close is delivery state
+`closed`; a timeout or incomplete agent is `failed`. The desktop builds `close` from a scheduled
+automation's `conversationConfig.closeWhenDone` (`timeoutMinutes`; ignored for on-demand
+automations) in `src/core/features/automations/node/deployment-builder.ts`, and runs such
+automations unattended like on-demand ones. `conversationConfig.effort` (an id from the agent's
+`capabilities.effort.effortOptions`; empty means the agent default) is passed as `start.effort`
+for both ACP and TUI agents; the TUI command gets the plugin's `effortFlag` (Claude:
+`--effort`). Both fields live in `src/core/primitives/automations/api/config.ts`.
+
 The delivery contract is implemented once, in
 `packages/core/src/services/runtime-broker/node/automation-delivery/`, from the ACP and TUI session live
 models, with `git`/`gh` publishing in `runtimes/automations/node/publish/`; the workspace server and the desktop's local runtime both supply it.

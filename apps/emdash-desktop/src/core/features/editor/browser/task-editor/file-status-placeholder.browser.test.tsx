@@ -9,6 +9,7 @@ import type {
   OpenFileStore,
 } from '@core/features/editor/api/browser/open-file-store/open-file-store';
 import { FileTabResource } from '@core/features/editor/api/browser/task-editor/stores/file-tab-resource';
+import { setClientModeForTesting } from '@core/primitives/client-mode/browser/client-mode';
 import { hostFileRefFromNativePath } from '@core/primitives/desktop-runtime/api';
 import { FileStatusPlaceholder } from './file-status-placeholder';
 import '@emdash/ui/style.css';
@@ -73,6 +74,7 @@ describe('FileStatusPlaceholder rendering states', () => {
     await act(async () => root.unmount());
     resource.dispose();
     host.remove();
+    setClientModeForTesting(undefined);
   });
 
   async function render() {
@@ -109,6 +111,7 @@ describe('FileStatusPlaceholder rendering states', () => {
   });
 
   it('offers open-in-default-app for binary and too-large files', async () => {
+    setClientModeForTesting(false);
     await render();
 
     await act(async () => fake.setStatus({ kind: 'error', code: 'binary' }));
@@ -122,5 +125,20 @@ describe('FileStatusPlaceholder rendering states', () => {
     expect([...host.querySelectorAll('button')].map((b) => b.textContent)).toContain(
       'Open in default app'
     );
+  });
+
+  it('hides open-in-default-app in client mode, where files are on the remote host', async () => {
+    setClientModeForTesting(true);
+    await render();
+
+    await act(async () => fake.setStatus({ kind: 'error', code: 'binary' }));
+    expect(host.textContent).toContain('Binary file');
+    expect([...host.querySelectorAll('button')].map((b) => b.textContent)).not.toContain(
+      'Open in default app'
+    );
+
+    await act(async () => fake.setStatus({ kind: 'error', code: 'too-large' }));
+    expect(host.textContent).toContain('File too large');
+    expect(host.querySelectorAll('button')).toHaveLength(0);
   });
 });

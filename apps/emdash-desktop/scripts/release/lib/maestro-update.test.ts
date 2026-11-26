@@ -10,8 +10,13 @@ import {
 import {
   compareSemver,
   feedBlobUrl,
+  isMaestroReleaseVersion,
   latestUpdateBuild,
+  linuxUpdateBuildsRoot,
+  maestroPackaging,
   maestroReleaseVersion,
+  manifestFileName,
+  parseMaestroPlatform,
   parseManifest,
   relocateManifest,
   signManifest,
@@ -107,5 +112,40 @@ describe('update builds', () => {
     mkdirSync(join(root, '1.2.7-maestro.202610010000')); // interrupted build: no manifest
     mkdirSync(join(root, 'notes'));
     expect(latestUpdateBuild(root, 'v1-stable.yml')).toBe(join(root, '1.2.6-maestro.202609301200'));
+  });
+});
+
+describe('platforms', () => {
+  it('keeps the Windows manifest name and adds the Linux one electron-updater asks for', () => {
+    expect(manifestFileName('v1-stable')).toBe('v1-stable.yml');
+    expect(manifestFileName('v1-stable', 'win')).toBe('v1-stable.yml');
+    expect(manifestFileName('v1-stable', 'linux')).toBe('v1-stable-linux.yml');
+  });
+
+  it('defaults to Windows and rejects unknown platforms', () => {
+    expect(parseMaestroPlatform(undefined)).toBe('win');
+    expect(parseMaestroPlatform('linux')).toBe('linux');
+    expect(() => parseMaestroPlatform('mac')).toThrow(/Unknown platform/);
+  });
+
+  it('packages Windows exactly as before and compiles node-pty for Linux', () => {
+    expect(maestroPackaging('win')).toEqual({ target: 'nsis', nativeModules: ['better-sqlite3'] });
+    expect(maestroPackaging('linux')).toEqual({
+      target: 'AppImage',
+      nativeModules: ['better-sqlite3', 'node-pty'],
+    });
+  });
+
+  it('accepts only release versions for a reused version', () => {
+    expect(isMaestroReleaseVersion(VERSION)).toBe(true);
+    expect(isMaestroReleaseVersion('1.2.6')).toBe(false);
+    expect(isMaestroReleaseVersion('1.2.6-maestro.2026')).toBe(false);
+  });
+
+  it('keeps Linux builds out of the folder /push prunes', () => {
+    expect(linuxUpdateBuildsRoot({ LOCALAPPDATA: 'C:\\Users\\me\\AppData\\Local' })).toBe(
+      'C:\\Users\\me\\AppData\\Local\\Chorus\\LinuxUpdateBuilds'
+    );
+    expect(linuxUpdateBuildsRoot({})).toBeNull();
   });
 });

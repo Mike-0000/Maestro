@@ -3,7 +3,6 @@ import { TriangleAlert } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useState } from 'react';
 import type { Automation } from '@core/primitives/automations/api';
-import type { ConversationConfig } from '@core/primitives/automations/api';
 import { assertValidCronTrigger } from '@core/primitives/automations/api';
 import { ConfirmButton } from '@core/primitives/keybindings/browser/confirm-button';
 import { formatAutomationError } from '../automation-run-format';
@@ -35,12 +34,12 @@ export const CreateAutomationView = observer(function CreateAutomationView({
     name,
     setName,
     effectiveProjectId,
-    prompt,
     provider,
     canSave,
     triggerConfig,
     applyTemplate,
     buildTaskConfig,
+    buildConversationConfig,
   } = formState;
 
   const [error, setError] = useState<string | null>(null);
@@ -66,14 +65,7 @@ export const CreateAutomationView = observer(function CreateAutomationView({
       return;
     }
     setCronError(null);
-    const useChatUi = formState.initialConversation.useChatUi;
-    const conversationConfig: ConversationConfig = {
-      prompt: prompt.trim(),
-      provider,
-      autoApprove: false,
-      model: formState.model ?? undefined,
-      type: useChatUi ? 'acp' : 'pty',
-    };
+    const conversationConfig = buildConversationConfig();
     try {
       const trimmedName = name.trim();
       const saved = await create.mutateAsync({
@@ -130,6 +122,9 @@ export const CreateAutomationView = observer(function CreateAutomationView({
             onCronExprChange={(expr) => formState.setCronExpr(expr)}
             onCronErrorClear={() => setCronError(null)}
             onOnDemandChange={(onDemand) => formState.setOnDemand(onDemand)}
+            onEffortChange={formState.setEffort}
+            onCloseWhenDoneChange={formState.setCloseWhenDone}
+            onCloseTimeoutChange={formState.setCloseTimeoutMinutes}
             error={error}
           />
           {availability.data?.available === false && effectiveProjectId && (

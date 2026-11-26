@@ -1,5 +1,6 @@
 import type { HostFileRef } from '@emdash/core/primitives/path/api';
 import { toast } from '@emdash/ui/react/primitives';
+import { isClientMode } from '@core/primitives/client-mode/browser/client-mode';
 import { getHostClient } from '@core/primitives/desktop-host/browser/host-client';
 import { nativePathFromHost } from '@core/primitives/desktop-runtime/api';
 
@@ -13,6 +14,11 @@ export async function openWithOS(target: HostFileRef): Promise<void> {
   const path = nativePathFromHost(target.path);
   if (target.host.type !== 'local') {
     toast.error(`Could not open ${path}: default applications are only available for local files`);
+    return;
+  }
+  if (isClientMode()) {
+    // The file is on the remote host; this computer's applications cannot open it.
+    toast.error(`Could not open ${path}: default applications are not available in client mode`);
     return;
   }
   const result = await (await getHostClient()).openPath({ ref: target });

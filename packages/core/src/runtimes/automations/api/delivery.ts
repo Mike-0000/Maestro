@@ -5,8 +5,8 @@ import { z } from 'zod';
  * Post-session delivery for automation runs. Observing a session and publishing a
  * branch both reach outside the automations runtime (session runtimes, git, the
  * forge CLI), so the embedding app supplies this contract as a component dependency,
- * the same way it supplies creation admission. Apps that do not deliver pull requests
- * answer every verb with `delivery-unsupported`.
+ * the same way it supplies creation admission. Apps that do not deliver runs answer
+ * every verb with `delivery-unsupported`.
  */
 
 export const automationSessionRefSchema = z.object({
@@ -54,6 +54,15 @@ export const automationDeliveryContract = defineContract({
   }),
   /** Stops in-flight agent work; the conversation stays resumable. */
   stopSession: fallible({
+    input: automationSessionRefSchema,
+    data: z.void(),
+    error: automationDeliveryErrorSchema,
+  }),
+  /**
+   * Ends the session: terminates any agent process and drops its active intent, so it
+   * does not auto-resume after a restart. The conversation stays resumable by hand.
+   */
+  closeSession: fallible({
     input: automationSessionRefSchema,
     data: z.void(),
     error: automationDeliveryErrorSchema,

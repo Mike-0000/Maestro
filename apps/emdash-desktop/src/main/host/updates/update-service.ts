@@ -301,7 +301,13 @@ export class UpdateService implements Disposable {
     this.publishNotification((publisher) => publisher.error(message));
   }
 
-  quitAndInstall(): void {
+  /**
+   * Quits and installs the downloaded update. `relaunch: false` is only for a host whose service
+   * manager starts it again (the unattended Linux host under systemd): the installer then does not
+   * start the new build itself, so it never runs twice or without the service's flags. Every other
+   * caller passes nothing and gets the long-standing behaviour.
+   */
+  quitAndInstall(options: { relaunch?: boolean } = {}): void {
     if (!this.active) throw new Error('Update service is not active');
     if (this.installRequested) {
       log.info('quitAndInstall ignored: install already requested');
@@ -330,8 +336,10 @@ export class UpdateService implements Disposable {
       }
     };
 
+    const relaunch = options.relaunch !== false;
     const rollback = (reason: string) => {
       clearGuard();
+      if (!relaunch) getAutoUpdater().autoRunAppAfterInstall = true;
       this.installRequested = false;
       this.updateState.status = 'downloaded';
       if (this.updateState.availableVersion) {
@@ -352,6 +360,8 @@ export class UpdateService implements Disposable {
 
     setTimeout(() => {
       try {
+        // A non-silent install relaunches according to `autoRunAppAfterInstall`.
+        if (!relaunch) getAutoUpdater().autoRunAppAfterInstall = false;
         getAutoUpdater().quitAndInstall(false, true);
       } catch (error) {
         rollback(`quitAndInstall threw: ${formatUpdaterError(error)}`);

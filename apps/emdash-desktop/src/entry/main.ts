@@ -1,4 +1,5 @@
 import { app, dialog } from 'electron';
+import { resolveLaunchMode } from '@main/client/launch-mode';
 import { configureChromiumCommandLine } from '@main/host/chromium-command-line';
 
 // Packaged Electron does not set NODE_ENV, so environment-keyed defaults (such
@@ -14,6 +15,14 @@ if (app.isPackaged && !process.env.NODE_ENV) {
 configureChromiumCommandLine({ commandLine: app.commandLine });
 
 async function start(): Promise<void> {
+  // `--maestro-client` (or MAESTRO_CLIENT in development) starts the thin client of a remote
+  // Maestro host instead. Without it nothing below changes: the client bootstrap is never imported.
+  if (
+    resolveLaunchMode(process.argv, process.env, { isPackaged: app.isPackaged }).mode === 'client'
+  ) {
+    await startClient();
+    return;
+  }
   try {
     const { main } = await import('@main/bootstrap');
     await main();
@@ -30,6 +39,21 @@ async function start(): Promise<void> {
         }`
       );
     }
+  }
+}
+
+/** A client never enters local recovery: it has no local backend to recover. */
+async function startClient(): Promise<void> {
+  try {
+    const { clientMain } = await import('@main/client/bootstrap');
+    await clientMain();
+  } catch (error) {
+    await app.whenReady();
+    dialog.showErrorBox(
+      'Maestro client could not start',
+      error instanceof Error ? error.message : String(error)
+    );
+    app.exit(1);
   }
 }
 

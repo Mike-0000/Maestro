@@ -63,6 +63,7 @@ import { useTabLayout } from '@core/features/workbench/api/browser/task-tab-regi
 import { relativeToWorkspace } from '@core/features/workspaces/api/browser/workspace-path';
 import { openModal, useOpenModal } from '@core/manifests/browser/modal-api';
 import { projectAvailabilityUi } from '@core/manifests/browser/project-availability-ui';
+import { isClientMode } from '@core/primitives/client-mode/browser/client-mode';
 import {
   copyTextToClipboard,
   getHostClient,
@@ -92,6 +93,14 @@ type ResultLikeError =
   | TreeMutationError
   | { message?: string; type?: string; paths?: readonly string[] };
 type FileTreeClipboard = { mode: 'cut' | 'copy'; paths: string[] };
+
+/**
+ * Reveal opens this computer's file manager: never for an SSH workspace, and never in client
+ * mode, where every workspace is on the remote host.
+ */
+export function canRevealInFileManager(sshConnectionId: string | undefined): boolean {
+  return !sshConnectionId && !isClientMode();
+}
 
 function resultErrorMessage(error: ResultLikeError | string | undefined): string {
   if (typeof error === 'string') return error;
@@ -719,7 +728,7 @@ export const EditorFileTree = observer(function EditorFileTree() {
         onSelect: () => void copyRelativePath(node),
       }
     );
-    if (!workspace.sshConnectionId) {
+    if (canRevealInFileManager(workspace.sshConnectionId)) {
       items.push({
         id: 'reveal',
         label: REVEAL_LABEL,

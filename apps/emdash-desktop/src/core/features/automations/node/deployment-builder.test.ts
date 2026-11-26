@@ -301,4 +301,130 @@ describe('buildAutomationDeployment', () => {
       error: { type: 'workspace-not-supported' },
     });
   });
+
+  it('builds the same terminal deployment as before for an automation without new fields', async () => {
+    const automation = automationFixture();
+    automation.conversationConfig = { ...automation.conversationConfig!, type: 'pty' };
+    automation.taskConfig!.workspaceConfig.workspace = {
+      kind: 'repository-instance',
+      workspaceId: 'repository-workspace',
+    };
+
+    const result = await buildAutomationDeployment(dependencies, automation);
+
+    // Golden: no effort, no completion, no unattended override.
+    expect(result).toStrictEqual({
+      success: true,
+      data: {
+        automationId: 'automation-1',
+        enabled: true,
+        name: 'Review changes',
+        revision: 1,
+        schedule: { expr: '0 9 * * 1', tz: 'America/Los_Angeles' },
+        agent: {
+          type: 'tui',
+          title: 'Review changes',
+          start: {
+            providerId: 'claude',
+            model: 'sonnet',
+            initialPrompt: 'Review the latest changes',
+            autoApprove: false,
+          },
+        },
+        workspace: {
+          kind: 'directory',
+          path: hostFileRef(LOCAL_HOST_REF, hostPathFromNative('/repo')),
+        },
+      },
+    });
+  });
+
+  it('passes a configured effort to both agent transports', async () => {
+    const acp = automationFixture();
+    acp.conversationConfig = { ...acp.conversationConfig!, effort: ' high ' };
+    const tui = automationFixture();
+    tui.conversationConfig = { ...tui.conversationConfig!, type: 'pty', effort: 'max' };
+
+    await expect(buildAutomationDeployment(dependencies, acp)).resolves.toMatchObject({
+      success: true,
+      data: { agent: { type: 'acp', start: { effort: 'high' } } },
+    });
+    await expect(buildAutomationDeployment(dependencies, tui)).resolves.toMatchObject({
+      success: true,
+      data: { agent: { type: 'tui', start: { effort: 'max', autoApprove: false } } },
+    });
+  });
+
+  it('omits a blank effort', async () => {
+    const automation = automationFixture();
+    automation.conversationConfig = { ...automation.conversationConfig!, effort: '  ' };
+
+    const result = await buildAutomationDeployment(dependencies, automation);
+
+    expect(result.success && 'effort' in result.data.agent.start).toBe(false);
+  });
+
+  it('deploys close-when-done on a directory workspace as an unattended close run', async () => {
+    const automation = automationFixture();
+    automation.conversationConfig = {
+      ...automation.conversationConfig!,
+      closeWhenDone: { timeoutMinutes: 90 },
+    };
+    automation.taskConfig!.workspaceConfig.workspace = {
+      kind: 'repository-instance',
+      workspaceId: 'repository-workspace',
+    };
+
+    const result = await buildAutomationDeployment(dependencies, automation);
+
+    expect(result).toMatchObject({
+      success: true,
+      data: {
+        completion: { kind: 'close', timeoutMs: 90 * 60_000 },
+        workspace: { kind: 'directory' },
+        agent: {
+          type: 'acp',
+          title: 'Review changes',
+          start: { providerId: 'claude', modeId: 'bypassPermissions' },
+        },
+      },
+    });
+    // Still a scheduled automation with the default single run slot.
+    expect(result.success && result.data.triggers).toBeUndefined();
+    expect(result.success && result.data.maxConcurrentRuns).toBeUndefined();
+  });
+
+  it('auto-approves a close-when-done terminal agent and keeps the default timeout', async () => {
+    const automation = automationFixture();
+    automation.conversationConfig = {
+      ...automation.conversationConfig!,
+      type: 'pty',
+      closeWhenDone: {},
+    };
+
+    const result = await buildAutomationDeployment(dependencies, automation);
+
+    expect(result).toMatchObject({
+      success: true,
+      data: { agent: { type: 'tui', start: { autoApprove: true } } },
+    });
+    expect(result.success && result.data.completion).toStrictEqual({ kind: 'close' });
+  });
+
+  it('ignores close-when-done on an on-demand automation', async () => {
+    const automation = automationFixture();
+    automation.triggerConfig = { expr: '0 9 * * 1', tz: 'UTC', onDemand: {} };
+    automation.conversationConfig = {
+      ...automation.conversationConfig!,
+      closeWhenDone: { timeoutMinutes: 10 },
+    };
+
+    const result = await buildAutomationDeployment(dependencies, automation);
+
+    expect(result.success && result.data.completion).toStrictEqual({
+      kind: 'pull-request',
+      baseBranch: 'main',
+      remote: 'origin',
+    });
+  });
 });

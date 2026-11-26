@@ -147,6 +147,47 @@ describe('desktop update lifecycle', () => {
   });
 });
 
+describe('install relaunch', () => {
+  async function downloaded(): Promise<void> {
+    service.downloadUpdate();
+    updater.emit('update-downloaded', info);
+    transfer.resolve([]);
+    await vi.advanceTimersByTimeAsync(1);
+  }
+
+  it('relaunches the app after installing, as always, when no option is passed', async () => {
+    await downloaded();
+    const autoUpdater = updater as unknown as { autoRunAppAfterInstall: boolean };
+    expect(autoUpdater.autoRunAppAfterInstall).toBe(true);
+    service.quitAndInstall();
+    await vi.advanceTimersByTimeAsync(250);
+    expect(updater.quitAndInstall).toHaveBeenCalledExactlyOnceWith(false, true);
+    expect(autoUpdater.autoRunAppAfterInstall).toBe(true);
+  });
+
+  it('leaves the restart to the service manager only when asked', async () => {
+    await downloaded();
+    const autoUpdater = updater as unknown as { autoRunAppAfterInstall: boolean };
+    service.quitAndInstall({ relaunch: false });
+    expect(autoUpdater.autoRunAppAfterInstall).toBe(true);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(updater.quitAndInstall).toHaveBeenCalledExactlyOnceWith(false, true);
+    expect(autoUpdater.autoRunAppAfterInstall).toBe(false);
+  });
+
+  it('restores relaunching when an unattended install fails', async () => {
+    await downloaded();
+    const autoUpdater = updater as unknown as { autoRunAppAfterInstall: boolean };
+    updater.quitAndInstall.mockImplementationOnce(() => {
+      throw new Error('disk full');
+    });
+    service.quitAndInstall({ relaunch: false });
+    await vi.advanceTimersByTimeAsync(250);
+    expect(autoUpdater.autoRunAppAfterInstall).toBe(true);
+    expect(service.getState().status).toBe('downloaded');
+  });
+});
+
 describe('update manifest trust', () => {
   const release = {
     version: '1.2.7-maestro.202609291530',

@@ -9,7 +9,7 @@ import { AutomationRunStore } from '../persistence/run-store';
 import type { AutomationsDb } from '../persistence/store';
 import { automationsStore } from '../persistence/store';
 import { AutomationRunTransitions } from '../runs/transitions';
-import { AutomationScheduler } from './scheduler';
+import { AutomationScheduler, DEFAULT_MAX_CONCURRENT_CLOSE_RUNS } from './scheduler';
 
 const MINUTE = 60_000;
 const START = Date.UTC(2026, 6, 16, 8, 59);
@@ -55,6 +55,7 @@ async function createHarness(options: {
   deployments?: AutomationDeployment[];
   execute?: (run: AutomationRun, signal: AbortSignal) => Promise<void>;
   maxConcurrentRuns?: number;
+  maxConcurrentCloseRuns?: number;
 }) {
   const handle = await automationsStore.openTemp();
   const clock = new ManualClock(START);
@@ -77,6 +78,7 @@ async function createHarness(options: {
     transitions,
     execute,
     maxConcurrentRuns: options.maxConcurrentRuns,
+    maxConcurrentCloseRuns: options.maxConcurrentCloseRuns,
     onRunChanged: (run) => changed.push(run),
     createRunIdentity: () => {
       identity += 1;
@@ -359,5 +361,99 @@ describe('AutomationScheduler', () => {
 
     const repeat = harness.scheduler.cancelRun(run.id);
     expect(repeat).toMatchObject({ id: run.id, status: 'cancelled' });
+  });
+
+  describe('close-completion runs', () => {
+    /** An on-demand automation whose runs end with a `close` completion. */
+    function closeDeployment(automationId: string): AutomationDeployment {
+      return deployment({
+        automationId,
+        triggers: { cron: false },
+        completion: { kind: 'close' },
+      });
+    }
+
+    /** Runs that stay in flight (like an agent that never settles) until released or aborted. */
+    function stuckRuns() {
+      const releases = new Map<string, () => void>();
+      const execute = (run: AutomationRun, signal: AbortSignal) =>
+        new Promise<void>((resolve) => {
+          releases.set(run.automationId, resolve);
+          signal.addEventListener('abort', () => resolve(), { once: true });
+        });
+      return { releases, execute };
+    }
+
+    function startedAutomations(execute: {
+      mock: { calls: Array<[AutomationRun, ...unknown[]]> };
+    }) {
+      return execute.mock.calls.map(([run]) => run.automationId);
+    }
+
+    it('keeps four stuck close runs from blocking a cron run of another automation', async () => {
+      const closeIds = ['close-1', 'close-2', 'close-3', 'close-4'];
+      const stuck = stuckRuns();
+      const harness = await createHarness({
+        deployments: [deployment(), ...closeIds.map(closeDeployment)],
+        execute: stuck.execute,
+      });
+      schedulers.push(harness.scheduler);
+      handles.push(harness.handle);
+      harness.scheduler.start();
+
+      for (const id of closeIds) harness.scheduler.runNow(closeDeployment(id));
+      await Promise.resolve();
+
+      expect(startedAutomations(harness.execute)).toEqual(
+        closeIds.slice(0, DEFAULT_MAX_CONCURRENT_CLOSE_RUNS)
+      );
+
+      await harness.clock.advanceBy(MINUTE);
+
+      await vi.waitFor(() => {
+        expect(startedAutomations(harness.execute)).toContain('auto-1');
+      });
+      expect(harness.execute.mock.calls.at(-1)?.[0]).toMatchObject({
+        automationId: 'auto-1',
+        triggerKind: 'cron',
+      });
+      expect(
+        harness.runStore
+          .listRunsInStatuses(['queued'])
+          .map((run) => run.automationId)
+          .sort()
+      ).toEqual(['close-3', 'close-4']);
+    });
+
+    it('respects the close pool cap and starts a waiting close run when one finishes', async () => {
+      const stuck = stuckRuns();
+      const harness = await createHarness({
+        deployments: [
+          deployment({ triggers: { cron: false } }),
+          closeDeployment('close-1'),
+          closeDeployment('close-2'),
+        ],
+        maxConcurrentRuns: 1,
+        maxConcurrentCloseRuns: 1,
+        execute: stuck.execute,
+      });
+      schedulers.push(harness.scheduler);
+      handles.push(harness.handle);
+      harness.scheduler.start();
+
+      harness.scheduler.runNow(closeDeployment('close-1'));
+      harness.scheduler.runNow(closeDeployment('close-2'));
+      harness.scheduler.runNow(deployment({ triggers: { cron: false } }));
+      await Promise.resolve();
+
+      // One close run in its own pool, and the ordinary run still gets the one
+      // global slot.
+      expect(startedAutomations(harness.execute)).toEqual(['close-1', 'auto-1']);
+
+      stuck.releases.get('close-1')?.();
+      await vi.waitFor(() => {
+        expect(startedAutomations(harness.execute)).toEqual(['close-1', 'auto-1', 'close-2']);
+      });
+    });
   });
 });

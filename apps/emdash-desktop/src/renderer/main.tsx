@@ -9,6 +9,7 @@ import ReactDOM from 'react-dom/client';
 import { getCanvasStore } from '@core/features/canvas/contributions/browser/app-stores';
 import { canvasBoardMemento } from '@core/features/canvas/contributions/mementos';
 import { canvasViewDef } from '@core/features/canvas/contributions/views';
+import { runClientGate } from '@core/features/client-mode/browser/run-client-gate';
 import { installChatUiRuntime } from '@core/features/conversations/api/browser/chat/chat-ui-runtime';
 import { configureDevPerfClient } from '@core/features/dev-perf/api/browser/client';
 import { installMonacoFacetBinder } from '@core/features/editor/browser/monaco/install-monaco-facet-binder';
@@ -16,12 +17,14 @@ import { monacoBootstrap } from '@core/features/editor/browser/monaco/monaco-boo
 import { getProjectManagerStore } from '@core/features/projects/api/browser/stores/project-selectors';
 import { prefetchAppSettingsKey } from '@core/features/settings/api/browser/use-app-settings-key';
 import { initSoundPlayer, soundPlayer } from '@core/features/settings/browser/sound-player';
+import { FramelessTitlebarOverlay } from '@core/features/workbench/browser/window-controls';
 import { getSidebarStore } from '@core/features/workbench/contributions/browser/app-stores';
 import { workbenchSidebarMemento } from '@core/features/workbench/contributions/mementos';
 import { appStoreContributions } from '@core/manifests/browser/app-scoped-stores';
 import { featureViewRuntimes } from '@core/manifests/browser/browser-contributions';
 import { viewCatalog } from '@core/manifests/browser/view-catalog';
 import { mementoCatalog } from '@core/manifests/shared/memento-catalog';
+import { isClientMode } from '@core/primitives/client-mode/browser/client-mode';
 import { log } from '@core/primitives/logging/browser/logger';
 import { getMementosWireClient } from '@core/primitives/mementos/api/client';
 import { configureMementos, initMementos } from '@core/primitives/mementos/browser';
@@ -85,6 +88,10 @@ async function bootstrap() {
   // Core owns wire access through the seeded-connection seam; seed it before
   // React mounts so any slice can reach the wire without host imports.
   seedDesktopWire();
+
+  // A client window boots only once its link to the host is attached. Until then the gate
+  // shows pairing, connecting, or why the host refused. A local window never enters here.
+  if (isClientMode()) await runClientGate({ windowChrome: <FramelessTitlebarOverlay /> });
 
   // Navigation lives in core behind a seeded host seam; the bootstrap hands it
   // the aggregated view catalog before the app scope creates the stores.

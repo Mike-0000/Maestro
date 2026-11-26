@@ -2,6 +2,8 @@ import { type ReactNode } from 'react';
 import { SidebarRecoveryControls } from '@core/features/workbench/browser/sidebar-recovery-controls';
 import { WindowControls } from '@core/features/workbench/browser/window-controls';
 import { useWorkspaceLayoutContext } from '@core/features/workbench/contributions/browser/layout-provider';
+import { isClientMode } from '@core/primitives/client-mode/browser/client-mode';
+import { ClientTitlebarStatus } from '@core/primitives/client-mode/browser/titlebar-status';
 import { detectPlatformContext } from '@core/primitives/keybindings/api';
 import { cn } from '@core/primitives/styling/browser/cn';
 
@@ -32,6 +34,7 @@ export function Titlebar({ leftSlot, rightSlot }: { leftSlot?: ReactNode; rightS
           </div>
           <div className="flex items-center justify-end gap-1 [-webkit-app-region:no-drag]">
             {rightSlot}
+            {isClientMode() && <ClientTitlebarStatus />}
           </div>
         </div>
       </div>

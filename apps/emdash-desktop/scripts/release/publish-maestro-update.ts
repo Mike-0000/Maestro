@@ -5,6 +5,9 @@
 //   releases/<version>/<installer>(.blockmap)  immutable, never overwritten
 //   releases/<version>/<channel>.yml           signed manifest archived with its release
 //   <channel>.yml                              signed live manifest, replaced last
+//
+// `--platform linux` publishes the Linux host AppImage the same way under its own manifest,
+// `<channel>-linux.yml`, from LinuxUpdateBuilds (see maestro-linux-release.ts).
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -24,6 +27,9 @@ import {
   feedBlobUrl,
   IMMUTABLE_CACHE_CONTROL,
   latestUpdateBuild,
+  linuxUpdateBuildsRoot,
+  type MaestroPlatform,
+  parseMaestroPlatform,
   loadSigningKey,
   MANIFEST_CACHE_CONTROL,
   manifestFileName,
@@ -44,6 +50,8 @@ const { values } = parseArgs({
     dir: { type: 'string' },
     publish: { type: 'boolean', default: false },
     restore: { type: 'string' },
+    /** `win` (default) or `linux`. */
+    platform: { type: 'string' },
   },
   strict: true,
 });
@@ -53,7 +61,13 @@ if (!UPDATE_FEED_URL || UPDATE_SIGNING_PUBLIC_KEYS.length === 0) {
 }
 const feedUrl = UPDATE_FEED_URL;
 parseFeedUrl(feedUrl);
-const channelFile = manifestFileName(UPDATE_CHANNEL);
+let platform: MaestroPlatform;
+try {
+  platform = parseMaestroPlatform(values.platform);
+} catch (error) {
+  fail(error instanceof Error ? error.message : String(error));
+}
+const channelFile = manifestFileName(UPDATE_CHANNEL, platform);
 
 function uploadSas(): string {
   const sas = process.env[UPLOAD_SAS_ENV]?.trim().replace(/^\?/, '');
@@ -120,9 +134,15 @@ async function restore(version: string): Promise<void> {
 }
 
 async function publish(): Promise<void> {
-  const buildsRoot = updateBuildsRoot();
+  const buildsRoot = platform === 'linux' ? linuxUpdateBuildsRoot() : updateBuildsRoot();
   const dir = values.dir ?? (buildsRoot ? latestUpdateBuild(buildsRoot, channelFile) : null);
-  if (!dir) fail('No build found; run `pnpm run updates:build` or pass --dir <build folder>');
+  if (!dir) {
+    fail(
+      platform === 'linux'
+        ? 'No Linux build found; run scripts/release/maestro-linux-release.ts or pass --dir'
+        : 'No build found; run `pnpm run updates:build` or pass --dir <build folder>'
+    );
+  }
   info(`Release folder: ${dir}`);
   const keyFile = defaultSigningKeyFile();
   if (!keyFile || !existsSync(keyFile)) {

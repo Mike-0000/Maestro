@@ -4,6 +4,7 @@ import { useRemoteAccessStatus } from '@core/features/remote-access/api/browser/
 import { AdvancedCard } from '../components/advanced-card';
 import { DevicesCard } from '../components/devices-card';
 import { ListenerCard } from '../components/listener-card';
+import { OwnerAccessCard } from '../components/owner-access-card';
 import { PairingCard } from '../components/pairing-card';
 import { TailscaleCard } from '../components/tailscale-card';
 import { TriggersCard } from '../components/triggers-card';
@@ -33,6 +34,7 @@ export function RemoteAccessSettingsPage() {
         {status?.enabled ? <TailscaleCard listenerKey={listenerKey} /> : null}
         <PairingCard status={status} />
         <DevicesCard status={status} />
+        <OwnerAccessCard status={status} />
         {status?.enabled ? <TriggersCard status={status} listenerKey={listenerKey} /> : null}
         <AdvancedCard status={status} />
       </div>

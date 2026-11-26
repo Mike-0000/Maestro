@@ -1,6 +1,8 @@
 import { SidebarRecoveryControls } from '@core/features/workbench/browser/sidebar-recovery-controls';
 import { WindowControls } from '@core/features/workbench/browser/window-controls';
 import { useWorkspaceLayoutContext } from '@core/features/workbench/contributions/browser/layout-provider';
+import { isClientMode } from '@core/primitives/client-mode/browser/client-mode';
+import { ClientTitlebarStatus } from '@core/primitives/client-mode/browser/titlebar-status';
 import { detectPlatformContext } from '@core/primitives/keybindings/api';
 import { cn } from '@core/primitives/styling/browser/cn';
 
@@ -23,6 +25,7 @@ export function BorderlessTitlebar() {
       <div className="flex min-w-0 flex-1 items-center">
         {!isLeftOpen && <SidebarRecoveryControls onShowSidebar={toggleLeftSidebar} />}
       </div>
+      {isClientMode() && <ClientTitlebarStatus />}
       {isLinux && <WindowControls />}
     </header>
   );

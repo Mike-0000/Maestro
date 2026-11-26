@@ -5,6 +5,7 @@ import { Button, Input, Select, Switch } from '@emdash/ui/react/primitives';
 import { Folder } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useState, type ReactNode } from 'react';
+import { getProjectsWireClient } from '@core/features/projects/api/browser/client';
 import {
   resolveRendererEffectiveSettings,
   useEffectiveSettingsInputs,
@@ -22,6 +23,9 @@ import {
 import type { ProvenanceFlavor } from '@core/features/projects/contributions/browser/settings-provenance-labels';
 import { ProjectBranchSelector } from '@core/features/source-control/contributions/browser/project-branch-selector';
 import { RemoteSelector } from '@core/features/source-control/contributions/browser/remote-selector';
+import { useOpenModal } from '@core/manifests/browser/modal-api';
+import { isClientMode } from '@core/primitives/client-mode/browser/client-mode';
+import { useHostPlatform } from '@core/primitives/client-mode/browser/host-platform';
 import { getHostClient } from '@core/primitives/desktop-host/browser/host-client';
 import { detectPlatformContext } from '@core/primitives/keybindings/api';
 import type {
@@ -174,7 +178,12 @@ export const BaseProjectSettingsSection = observer(function BaseProjectSettingsS
     hostTmux: placement.layers.hostTmux,
     appDefaultTmux: placement.layers.appDefaultTmux,
   });
-  const tmuxSupported = projectType !== 'local' || detectPlatformContext().os !== 'windows';
+  const openDirectorySelectorModal = useOpenModal('directorySelectorModal');
+  const hostPlatform = useHostPlatform();
+  // A Maestro client's local projects run on the remote host, so its platform decides.
+  const tmuxSupported = isClientMode()
+    ? projectType !== 'local' || hostPlatform !== 'win32'
+    : projectType !== 'local' || detectPlatformContext().os !== 'windows';
   const derivedPoolPath =
     projectPath !== null && effectiveWorktreeRoot !== null
       ? deriveWorktreePoolPath({ worktreeRoot: effectiveWorktreeRoot, repoPath: projectPath })
@@ -185,6 +194,17 @@ export const BaseProjectSettingsSection = observer(function BaseProjectSettingsS
 
     setIsBrowsingWorktreeDirectory(true);
     try {
+      if (isClientMode()) {
+        // No native dialog reaches the host's disk from a client: browse the host instead.
+        const outcome = await openDirectorySelectorModal({
+          strategy: 'local',
+          initialPath:
+            placementForm.worktreeDirectory || (effectiveWorktreeRoot ?? inheritedWorktreeRoot),
+          getProjectsClient: getProjectsWireClient,
+        });
+        if (outcome.success) updatePlacement('worktreeDirectory', outcome.data.path);
+        return;
+      }
       const result = await (
         await getHostClient()
       ).openSelectDirectoryDialog({

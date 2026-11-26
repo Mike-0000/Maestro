@@ -3,6 +3,7 @@ import { useCallback, useRef, useState } from 'react';
 import { getProjectsWireClient } from '@core/features/projects/api/browser/client';
 import { getProjectManagerStore } from '@core/features/projects/api/browser/stores/project-selectors';
 import { projectViewDef } from '@core/features/projects/contributions/views';
+import { isClientMode } from '@core/primitives/client-mode/browser/client-mode';
 import {
   getDraggedFilePaths,
   hasDraggedFiles,
@@ -48,6 +49,15 @@ export function useSidebarDrop() {
 
       const filePaths = getDraggedFilePaths(e.dataTransfer);
       if (filePaths.length === 0) return;
+
+      if (isClientMode()) {
+        // Projects live on the remote host; a folder from this computer cannot become one.
+        toast('Cannot add a folder from this computer', {
+          description:
+            'Projects run on the Maestro host. Use Add project to choose a folder on the host.',
+        });
+        return;
+      }
 
       const projectManager = getProjectManagerStore();
 

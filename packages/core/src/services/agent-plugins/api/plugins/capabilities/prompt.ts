@@ -15,6 +15,8 @@ export type CommandContext = {
   providerSessionId?: string;
   isResuming?: boolean;
   model: string;
+  /** Reasoning effort id for the provider's effort flag. Undefined = the CLI's own default. */
+  effort?: string;
 };
 
 export type AgentCommand = {

@@ -3,9 +3,23 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { z } from 'zod';
 
-/** What a paired device may reach: a Maestro app gets the full host, a browser only remote control. */
+/**
+ * The kinds stored in `devices[]`: a Maestro app gets the host's workspace runtimes, a browser
+ * only remote control. This enum must stay exactly as older builds know it: they reject (and
+ * then reset) the whole file when `devices[]` holds a kind they do not know.
+ */
 export const remoteDeviceKindSchema = z.enum(['desktop', 'browser']);
-export type RemoteDeviceKind = z.infer<typeof remoteDeviceKindSchema>;
+
+/** The kinds an ordinary pairing code may create. Owners pair only through the owner route. */
+export const pairableDeviceKindSchema = z.enum(['desktop', 'browser']);
+export type PairableDeviceKind = z.infer<typeof pairableDeviceKindSchema>;
+
+/**
+ * Every kind of paired device. An owner (a client-mode Maestro) reaches the full desktop app; it
+ * is kept in its own `ownerDevices[]`, which older builds drop as an unknown key instead of
+ * failing on it.
+ */
+export type RemoteDeviceKind = PairableDeviceKind | 'owner';
 
 const deviceSchema = z.object({
   id: z.string(),
@@ -16,6 +30,9 @@ const deviceSchema = z.object({
   createdAt: z.number(),
   lastSeenAt: z.number().nullable(),
 });
+
+/** An owner device record: the same fields, with the kind implied by the array. */
+const ownerDeviceSchema = deviceSchema.omit({ kind: true });
 
 const TRIGGER_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/u;
 
@@ -33,6 +50,28 @@ const DEFAULT_TRIGGERS: z.infer<typeof triggersSchema> = {
   maxQueued: 20,
 };
 
+/** Full-access (owner) clients. Off unless the person turns it on. */
+const ownerAccessSchema = z.object({
+  enabled: z.boolean().default(false),
+  /** Accept owners only through `tailscale serve` or a direct loopback connection. */
+  tailscaleOnly: z.boolean().default(true),
+  /** Tailnet logins allowed as owners; empty allows every tailnet user. */
+  allowedLogins: z.array(z.string()).default([]),
+});
+
+const DEFAULT_OWNER_ACCESS: z.infer<typeof ownerAccessSchema> = {
+  enabled: false,
+  tailscaleOnly: true,
+  allowedLogins: [],
+};
+
+/** How this host installs its own updates: by a click, or by itself once it is idle. */
+const hostUpdatesSchema = z.object({
+  mode: z.enum(['manual', 'when-idle']).default('manual'),
+});
+
+const DEFAULT_HOST_UPDATES: z.infer<typeof hostUpdatesSchema> = { mode: 'manual' };
+
 const stateSchema = z.object({
   version: z.literal(1),
   enabled: z.boolean(),
@@ -40,13 +79,23 @@ const stateSchema = z.object({
   bindAddress: z.string(),
   hostId: z.string(),
   devices: z.array(deviceSchema),
+  /** Owner devices, apart from `devices[]` so an older build still reads the file. */
+  ownerDevices: z.array(ownerDeviceSchema).default([]),
   triggers: triggersSchema.default(DEFAULT_TRIGGERS),
+  ownerAccess: ownerAccessSchema.default(DEFAULT_OWNER_ACCESS),
+  hostUpdates: hostUpdatesSchema.default(DEFAULT_HOST_UPDATES),
 });
 
 export type RemoteDeviceRecord = z.infer<typeof deviceSchema>;
+type OwnerDeviceRecord = z.infer<typeof ownerDeviceSchema>;
 export type RemoteAccessState = z.infer<typeof stateSchema>;
-export type RemoteDevice = Omit<RemoteDeviceRecord, 'tokenHash'>;
+/** A paired device of any kind, as the rest of the app sees it (never with its token hash). */
+export type RemoteDevice = Omit<RemoteDeviceRecord, 'tokenHash' | 'kind'> & {
+  kind: RemoteDeviceKind;
+};
 export type RemoteTriggers = z.infer<typeof triggersSchema>;
+export type RemoteOwnerAccessSettings = z.infer<typeof ownerAccessSchema>;
+export type RemoteHostUpdates = z.infer<typeof hostUpdatesSchema>;
 
 export function isTriggerName(value: string): boolean {
   return TRIGGER_NAME_PATTERN.test(value);
@@ -81,8 +130,16 @@ export class RemoteDeviceStore {
     return this.state;
   }
 
+  /** Every paired device: ordinary ones first, then owners. */
   devices(): RemoteDevice[] {
-    return this.current().devices.map(({ tokenHash: _tokenHash, ...device }) => device);
+    const state = this.current();
+    return [
+      ...state.devices.map(({ tokenHash: _tokenHash, ...device }) => device),
+      ...state.ownerDevices.map(({ tokenHash: _tokenHash, ...device }) => ({
+        ...device,
+        kind: 'owner' as const,
+      })),
+    ];
   }
 
   async update(
@@ -93,32 +150,50 @@ export class RemoteDeviceStore {
     return this.state;
   }
 
+  /** Changes the owner-access settings; omitted fields keep their value. */
+  async updateOwnerAccess(patch: Partial<RemoteOwnerAccessSettings>): Promise<RemoteAccessState> {
+    const state = this.current();
+    const defined = Object.fromEntries(
+      Object.entries(patch).filter(([, value]) => value !== undefined)
+    );
+    this.state = stateSchema.parse({ ...state, ownerAccess: { ...state.ownerAccess, ...defined } });
+    await this.persist();
+    return this.state;
+  }
+
   /** Registers a device and returns the credential it presents from now on. */
   async addDevice(input: {
     name: string;
     kind: RemoteDeviceKind;
   }): Promise<{ device: RemoteDevice; credential: string }> {
     const token = randomBytes(32).toString('base64url');
-    const record: RemoteDeviceRecord = {
+    const record: OwnerDeviceRecord = {
       id: randomUUID(),
       name: input.name,
-      kind: input.kind,
       tokenHash: hashToken(token),
       createdAt: this.now(),
       lastSeenAt: null,
     };
     const state = this.current();
-    this.state = { ...state, devices: [...state.devices, record] };
+    const kind = input.kind;
+    this.state =
+      kind === 'owner'
+        ? { ...state, ownerDevices: [...state.ownerDevices, record] }
+        : { ...state, devices: [...state.devices, { ...record, kind }] };
     await this.persist();
     const { tokenHash: _tokenHash, ...device } = record;
-    return { device, credential: `${record.id}.${token}` };
+    return { device: { ...device, kind }, credential: `${record.id}.${token}` };
   }
 
+  /** Forgets a device of any kind. */
   async removeDevice(deviceId: string): Promise<boolean> {
     const state = this.current();
     const devices = state.devices.filter((device) => device.id !== deviceId);
-    if (devices.length === state.devices.length) return false;
-    this.state = { ...state, devices };
+    const ownerDevices = state.ownerDevices.filter((device) => device.id !== deviceId);
+    const removed =
+      devices.length !== state.devices.length || ownerDevices.length !== state.ownerDevices.length;
+    if (!removed) return false;
+    this.state = { ...state, devices, ownerDevices };
     await this.persist();
     return true;
   }
@@ -147,9 +222,11 @@ export class RemoteDeviceStore {
     if (!credential) return undefined;
     const separator = credential.indexOf('.');
     if (separator <= 0) return undefined;
-    const record = this.current().devices.find(
-      (device) => device.id === credential.slice(0, separator)
-    );
+    const id = credential.slice(0, separator);
+    const state = this.current();
+    const ordinary = state.devices.find((device) => device.id === id);
+    const owner = ordinary ? undefined : state.ownerDevices.find((device) => device.id === id);
+    const record = ordinary ?? owner;
     if (!record) return undefined;
     const presented = Buffer.from(hashToken(credential.slice(separator + 1)), 'hex');
     const expected = Buffer.from(record.tokenHash, 'hex');
@@ -158,18 +235,19 @@ export class RemoteDeviceStore {
     }
     this.touch(record);
     const { tokenHash: _tokenHash, ...device } = record;
-    return device;
+    return ordinary ? { ...device, kind: ordinary.kind } : { ...device, kind: 'owner' };
   }
 
-  private touch(record: RemoteDeviceRecord): void {
+  private touch(record: OwnerDeviceRecord): void {
     const now = this.now();
     if (record.lastSeenAt !== null && now - record.lastSeenAt < LAST_SEEN_WRITE_INTERVAL_MS) return;
     const state = this.current();
+    const seen = <T extends OwnerDeviceRecord>(device: T): T =>
+      device.id === record.id ? { ...device, lastSeenAt: now } : device;
     this.state = {
       ...state,
-      devices: state.devices.map((device) =>
-        device.id === record.id ? { ...device, lastSeenAt: now } : device
-      ),
+      devices: state.devices.map(seen),
+      ownerDevices: state.ownerDevices.map(seen),
     };
     void this.persist().catch(() => {});
   }
@@ -188,7 +266,10 @@ export class RemoteDeviceStore {
       bindAddress: LOOPBACK_BIND_ADDRESS,
       hostId: randomUUID(),
       devices: [],
+      ownerDevices: [],
       triggers: DEFAULT_TRIGGERS,
+      ownerAccess: DEFAULT_OWNER_ACCESS,
+      hostUpdates: DEFAULT_HOST_UPDATES,
     };
   }
 

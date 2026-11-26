@@ -44,6 +44,7 @@ caller behind a tunnel arrives from loopback.
 | --- | --- | --- |
 | `desktop` (another Maestro) | `Authorization: Bearer <deviceId>.<token>` | `maestroHostWireContract`: every workspace runtime plus remote control |
 | `browser` | HttpOnly, `SameSite=Strict` cookie; the page never sees the token | `remoteDeviceWireContract`: remote control only |
+| `owner` (a client-mode Maestro) | Bearer token, owner pairing route only | `ownerHostWireContract` at `/owner/wire`; refused on `/wire` |
 
 A cookie-authenticated upgrade or POST must carry an `Origin` matching the request's `Host`.
 Revoking a device drops its live connections.
@@ -59,6 +60,18 @@ for browsers. A Maestro client stores the service token on its host entry and se
 `CF-Access-Client-Id` and `CF-Access-Client-Secret` on every request. A browser cannot send those
 headers; Access signs it in with a cookie instead. The device credential is still required
 behind either policy.
+
+## Owner Tier
+
+Owner access (`ownerAccess` in `remote-access.json`, off by default, Settings → Remote access)
+lets a [client-mode](client-mode.md) Maestro drive this app as its own: the full desktop Wire
+contract filtered by `clientModeRouting`, plus loopback tunnels. `src/main/host/remote-access/owner/`
+adds `POST /api/owner/pair`, `POST /api/owner/pairing-code` (loopback plus
+`<userData>/owner-setup.token`, for headless hosts), `GET /owner/wire`, and `GET /owner/tunnel`;
+all answer 404 while owner access is off. Owner requests carry no `Origin` and, with
+`tailscaleOnly` (the default), must arrive through `tailscale serve` or direct loopback. Owner
+devices use owner-only pairing codes; an ordinary code can never create one. Details are in
+[client mode](client-mode.md#host-owner-tier).
 
 ## What a paired Maestro is served
 
@@ -134,6 +147,19 @@ and status mapping are shared with the daemon from
 `packages/core/src/runtimes/automations/node/trigger/`, and delivery from
 `packages/core/src/services/runtime-broker/node/automation-delivery/`.
 
+## Unattended host updates
+
+A headless host (the Linux VM a client-mode Maestro drives, [remote-rig.md](../../docs/chorus/remote-rig.md))
+updates itself. `RemoteAccessService.attach` builds `src/main/host/updates/unattended-update-policy.ts`
+from its `hostUpdates` dependency (the app's `updateService`, `host-activity.ts`, and whether
+systemd restarts the app) and hands it to the owner tier, which serves it as
+`session.hostUpdateState` / `session.requestHostUpdate`. Both answer before `attach`, so a client
+blocked on a build mismatch can still ask the host to update. The policy is inert unless
+`hostUpdates.mode` is `when-idle` in `remote-access.json` or an owner asks; then it downloads,
+waits for five idle minutes (`when: 'now'` skips that), emits `host-quitting`, and calls
+`updateService.quitAndInstall`, with `{ relaunch: false }` under the systemd unit. Linux release
+and service files: `scripts/release/maestro-linux-release.ts`, `apps/emdash-desktop/scripts/host/`.
+
 ## Key Files
 
 | Path | Role |
@@ -148,5 +174,6 @@ and status mapping are shared with the daemon from
 | `src/main/host/remote-access/remote-voice.ts` | Voice relay between devices, the voice service, and the window |
 | `src/core/features/conductor/browser/remote-voice-bridge.ts` | Publishes the conductor's display and runs device commands in the window |
 | `src/main/host/remote-access/trigger-route.ts` | On-demand agent API on the listener |
+| `src/main/host/remote-access/owner/` | Owner tier: pairing, owner link, tunnels, window suspension |
 | `src/core/features/remote-access/` | Settings contract, controller, and page |
 | `src/remote-web/` | The web app |

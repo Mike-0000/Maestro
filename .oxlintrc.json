@@ -129,6 +129,7 @@
         "apps/emdash-desktop/src/main/host/**/*.{ts,tsx}",
         "apps/emdash-desktop/src/main/gateway/**/*.{ts,tsx}",
         "apps/emdash-desktop/src/main/bootstrap/**/*.{ts,tsx}",
+        "apps/emdash-desktop/src/main/client/**/*.{ts,tsx}",
         "apps/emdash-desktop/src/main/core/**/*.{ts,tsx}",
         "apps/emdash-desktop/src/main/db/**/*.{ts,tsx}"
       ],

@@ -1,10 +1,16 @@
 import { Switch } from '@emdash/ui/react/primitives';
 import { useAppSettingsKey } from '@core/features/settings/api/browser/use-app-settings-key';
+import { isClientMode } from '@core/primitives/client-mode/browser/client-mode';
 import { detectPlatformContext } from '@core/primitives/keybindings/api';
 import { ResetToDefaultButton } from './ResetToDefaultButton';
 import { SettingRow } from './SettingRow';
 
+/** The tray icon belongs to the host's window; a Maestro client has none, so the row is hidden. */
 export function TrayIconSettingsRow() {
+  return isClientMode() ? null : <LocalTrayIconSettingsRow />;
+}
+
+function LocalTrayIconSettingsRow() {
   const { value, update, isLoading, isSaving, isFieldOverridden, resetField } =
     useAppSettingsKey('interface');
   const location = detectPlatformContext().os === 'mac' ? 'menu bar' : 'system tray';

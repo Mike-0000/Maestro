@@ -95,6 +95,30 @@ describe('remote access http server', () => {
     transport.close?.();
   });
 
+  it('never pairs an owner with an ordinary code', async () => {
+    const { code } = pairing.issue();
+    const response = await fetch(`${base}/api/pair`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, deviceName: 'my client', kind: 'owner' }),
+    });
+    expect(response.status).toBe(400);
+    expect(store.devices()).toHaveLength(0);
+    // The code was not spent on the refused request.
+    expect(pairing.current()?.code).toBe(code);
+  });
+
+  it('refuses an owner device on the ordinary websocket', async () => {
+    const { credential } = await store.addDevice({ name: 'client', kind: 'owner' });
+    const error = await connectWebSocket({
+      url: `${base}/wire`,
+      headers: { Authorization: `Bearer ${credential}` },
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(WebSocketHandshakeError);
+    expect((error as WebSocketHandshakeError).statusCode).toBe(403);
+    expect(opened).toHaveLength(0);
+  });
+
   it('refuses a code twice and a wrong code', async () => {
     const { code } = pairing.issue();
     const send = (value: string) =>
@@ -206,6 +230,57 @@ describe('remote access http server', () => {
     expect((await fetch(`${base}/assets/missing.js`)).status).toBe(404);
     expect((await fetch(`${base}/..%2Fsecret.txt`)).status).toBe(404);
     expect((await fetch(`${base}/api/unknown`)).status).toBe(404);
+  });
+});
+
+describe('remote access upgrade routes', () => {
+  it('tries extra upgrade routes first and leaves everything else to the built-in /wire', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'maestro-remote-access-upgrades-'));
+    const store = new RemoteDeviceStore(join(directory, 'remote-access.json'));
+    await store.load();
+    const seen: string[] = [];
+    const http = createRemoteAccessHttpServer({
+      store,
+      pairing: new PairingCodes(),
+      staticRoot: join(directory, 'web'),
+      hostInfo: () => ({ hostId: 'host-1', hostName: 'studio', protocolVersion: '10.1.0' }),
+      openSession: (device, transport) => {
+        serve(transport, createController(echoContract, { whoAmI: () => device.name }));
+      },
+      onDevicesChanged: () => {},
+      upgradeRoutes: [
+        (_request, socket, _head, url) => {
+          seen.push(url.pathname);
+          if (url.pathname === '/boom') throw new Error('route failed');
+          if (url.pathname !== '/custom') return false;
+          socket.end('HTTP/1.1 418 Teapot\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+          return true;
+        },
+      ],
+      logger: logger as never,
+    });
+    await new Promise<void>((resolve) => http.server.listen(0, '127.0.0.1', resolve));
+    const base = `http://127.0.0.1:${(http.server.address() as AddressInfo).port}`;
+    try {
+      const custom = await connectWebSocket({ url: `${base}/custom` }).catch((e: unknown) => e);
+      expect((custom as WebSocketHandshakeError).statusCode).toBe(418);
+
+      // A throwing route drops that socket only; the listener keeps serving.
+      const boom = await connectWebSocket({ url: `${base}/boom` }).catch((e: unknown) => e);
+      expect(boom).toBeInstanceOf(Error);
+
+      const { credential } = await store.addDevice({ name: 'my desktop', kind: 'desktop' });
+      const transport = await connectWebSocket({
+        url: `${base}/wire`,
+        headers: { Authorization: `Bearer ${credential}` },
+      });
+      expect(await client(echoContract, connect(transport)).whoAmI()).toBe('my desktop');
+      transport.close?.();
+      expect(seen).toEqual(['/custom', '/boom', '/wire']);
+    } finally {
+      await http.close();
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });
 

@@ -7,7 +7,7 @@ import { peek } from '@emdash/wire/state';
 import { createTestWire } from '@emdash/wire/testing';
 import { describe, expect, it, vi } from 'vitest';
 import type { TuiAgentStartInput } from '#runtimes/tui-agents/api';
-import { tuiAgentsContract } from '#runtimes/tui-agents/api';
+import { tuiAgentStartInputSchema, tuiAgentsContract } from '#runtimes/tui-agents/api';
 import type {
   ListeningSocket,
   ProcessTableRow,
@@ -798,6 +798,49 @@ describe('TuiAgentsRuntime', () => {
       await runtime.startSession(startInput({ initialPrompt: prompt }));
 
       expect(spillPrompt).toHaveBeenCalledWith(prompt, { spillLineBreaks });
+    }
+  );
+
+  it.each(['--dangerously-skip-permissions', '-x', 'high max', ''])(
+    'rejects an effort that could read as another argument at the boundary (%j)',
+    (effort) => {
+      expect(tuiAgentStartInputSchema.safeParse(startInput({ effort })).success).toBe(false);
+      expect(tuiAgentStartInputSchema.safeParse(startInput({ effort: 'xhigh' })).success).toBe(
+        true
+      );
+    }
+  );
+
+  it('hands the effort to the provider command builder', async () => {
+    const { runtime, agentHost } = createRuntime();
+
+    await runtime.startSession(startInput({ providerId: 'claude', effort: 'max' }));
+
+    expect(agentHost.buildPromptCommand).toHaveBeenCalledWith(
+      'claude',
+      expect.objectContaining({ effort: 'max' })
+    );
+  });
+
+  it.each([undefined, null])(
+    'leaves the command context without an effort when none is set (%s)',
+    async (effort) => {
+      const { runtime, agentHost } = createRuntime();
+
+      await runtime.startSession(startInput({ effort }));
+
+      expect(agentHost.buildPromptCommand).toHaveBeenCalledWith('test', {
+        extraArgs: undefined,
+        autoApprove: false,
+        initialPrompt: 'hello',
+        sessionId: 'conversation-1',
+        providerSessionId: undefined,
+        isResuming: false,
+        model: '',
+      });
+      expect(vi.mocked(agentHost.buildPromptCommand).mock.calls[0]![1]).not.toHaveProperty(
+        'effort'
+      );
     }
   );
 

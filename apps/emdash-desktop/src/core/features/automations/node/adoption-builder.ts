@@ -54,6 +54,7 @@ export function conversationForRun(
           type: 'acp',
           ...(agent.start.model && { model: agent.start.model }),
           ...(agent.start.modeId && { modeId: agent.start.modeId }),
+          ...(agent.start.effort && { effort: agent.start.effort }),
           initialQueue: agent.start.initialQueue,
         }
       : {
