@@ -27,7 +27,11 @@ sudo apt install -y libfuse2t64     # Ubuntu 24.04; on 22.04 the package is libf
 
 Install the tools your agents use, as that user: `git`, `gh`, `claude` and any other agent CLIs,
 and your language toolchains. Sign them in over SSH now (`gh auth login`, `claude` and follow its
-login), because the host has no screen to show a login page on.
+login), because the host has no screen to show a login page on. Log `claude` in with your Claude
+account and leave `ANTHROPIC_API_KEY` unset, or agents bill the API instead of your plan.
+
+Once the host runs, `./install-maestro-host.sh doctor` checks all of this the way the service sees
+it. For a VM that only runs scheduled tasks, see [scheduled-task-host.md](scheduled-task-host.md).
 
 ## 2. Install Maestro
 
@@ -173,8 +177,10 @@ Scheduled runs happen on the VM, so they run with your PC switched off.
 Every release goes to the same feed for both platforms with the same version string: the Windows
 installer (`v1-stable.yml`) and the Linux AppImage (`v1-stable-linux.yml`).
 
-**Publishing (the developer's machine).** `/push` builds and publishes Windows as always. Then
-publish the Linux build of the same release, from `apps/emdash-desktop` on Windows:
+**Publishing (the developer's machine).** `/push` publishes both: Windows first, then the Linux
+build of the same release (its Linux leg, which needs Docker Desktop running). To publish only the
+Linux leg of the last release, or to retry it, run `push.mjs --linux-only`, or run the script
+directly from `apps/emdash-desktop` on Windows:
 
 ```powershell
 node --experimental-strip-types scripts/release/maestro-linux-release.ts            # build, then a dry run of the publish
@@ -207,7 +213,7 @@ build, then choose **Update host**.
   it was replaced.
 - A full-access client can do everything on the VM that you can. Revoke a lost device under
   **Settings → Remote access** in a client (it shows and manages the host's devices), or stop the
-  service and remove its entry (`"kind": "owner"`) from `remote-access.json`. Revoking closes its
+  service and remove its entry from `ownerDevices` in `remote-access.json`. Revoking closes its
   connection at once.
 - Tailscale-only means the host accepts owners only through `tailscale serve` from a tailnet user
   (or on the VM's loopback). `ownerAccess.allowedLogins` narrows it to listed tailnet logins.

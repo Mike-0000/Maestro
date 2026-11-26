@@ -6,6 +6,7 @@
 #   install-maestro-host.sh configure [--manual-updates]  turn on remote and owner access (service stopped)
 #   install-maestro-host.sh pairing-code                  issue a code for a client (service running)
 #   install-maestro-host.sh status                        service, settings and listener at a glance
+#   install-maestro-host.sh doctor                        check everything a headless host needs
 #
 # Without --appimage, `install` downloads the current Linux release from the update feed and checks
 # it against the SHA-512 in the feed's manifest. Run it again to replace the AppImage by hand; the
@@ -175,7 +176,7 @@ owner = state.get("ownerAccess", {})
 print(f"remote access: {state.get('enabled')} on {state.get('bindAddress')}:{state.get('port')}")
 print(f"owner access: {owner.get('enabled', False)}, Tailscale only: {owner.get('tailscaleOnly', True)}")
 print(f"host updates: {state.get('hostUpdates', {}).get('mode', 'manual')}")
-print(f"paired owners: {sum(1 for d in state.get('devices', []) if d.get('kind') == 'owner')}")
+print(f"paired owners: {len(state.get('ownerDevices', []))}")
 PY
   else
     echo "no settings yet ($settings)"
@@ -185,10 +186,70 @@ PY
   fi
 }
 
+# Checks every prerequisite of an unattended host, the way the service sees them: agent CLIs are
+# looked up through a login shell, as Maestro captures `$SHELL -ilc env` at start.
+cmd_doctor() {
+  local failures=0
+  ok() { printf '  ok    %s\n' "$*"; }
+  bad() { printf '  FAIL  %s\n' "$*"; failures=$((failures + 1)); }
+  warn() { printf '  warn  %s\n' "$*"; }
+  login_shell="${SHELL:-/bin/bash}"
+  in_login_shell() { "$login_shell" -ilc "$1" </dev/null 2>/dev/null; }
+
+  echo "Machine"
+  [ "$(uname -m)" = "x86_64" ] && ok "x64" || bad "not x64: the Linux release is x64 only"
+  command -v Xvfb >/dev/null 2>&1 && ok "Xvfb" || bad "Xvfb missing: sudo apt install xvfb"
+  ldconfig -p 2>/dev/null | grep -q 'libfuse\.so\.2' && ok "libfuse2" ||
+    bad "libfuse2 missing: sudo apt install libfuse2t64 (22.04: libfuse2)"
+  loginctl show-user "$USER" --property=Linger 2>/dev/null | grep -q 'Linger=yes' && ok "linger on" ||
+    bad "linger off: sudo loginctl enable-linger $USER (otherwise the service stops at logout)"
+  if [ "$(swapon --show --noheadings 2>/dev/null | wc -l)" -gt 0 ]; then ok "swap on"; else
+    warn "no swap: add a 4 GB swapfile on small VMs"; fi
+
+  echo "Agent tools (through $login_shell as a login shell)"
+  for tool in git claude; do
+    if path="$(in_login_shell "command -v $tool")" && [ -n "$path" ]; then ok "$tool: $path"; else
+      bad "$tool not found on the login shell's PATH"; fi
+  done
+  if in_login_shell 'command -v gh' >/dev/null; then ok "gh"; else warn "gh not found (only needed for GitHub work)"; fi
+  if in_login_shell 'claude auth status' >/dev/null; then ok "claude is signed in"; else
+    bad "claude is not signed in: run 'claude' over SSH and log in with your Claude account"; fi
+  if in_login_shell 'printenv ANTHROPIC_API_KEY' >/dev/null; then
+    warn "ANTHROPIC_API_KEY is set: agents bill the API instead of your Claude plan"; fi
+
+  echo "Maestro"
+  [ -x "$appimage" ] && ok "$appimage" || bad "no AppImage: $0 install"
+  [ -f "$unit_dir/maestro.service" ] && ok "systemd unit" || bad "no systemd unit: $0 install"
+  systemctl --user is-enabled --quiet maestro.service 2>/dev/null && ok "service enabled" ||
+    bad "service not enabled: systemctl --user enable --now maestro"
+  service_active && ok "service running" || bad "service not running: journalctl --user -u maestro -e"
+  if [ -f "$settings" ] && python3 - "$settings" <<'PY'
+import json, sys
+state = json.load(open(sys.argv[1]))
+sys.exit(0 if state.get("enabled") and state.get("ownerAccess", {}).get("enabled") else 1)
+PY
+  then ok "remote and owner access on"; else bad "remote or owner access off: $0 configure (service stopped)"; fi
+
+  echo "Network"
+  if command -v tailscale >/dev/null 2>&1; then
+    tailscale serve status 2>/dev/null | grep -q '127.0.0.1:' && ok "tailscale serve forwards to Maestro" ||
+      bad "tailscale serve is not set up: sudo tailscale serve --bg 7462"
+  else
+    bad "tailscale missing: curl -fsSL https://tailscale.com/install.sh | sh"
+  fi
+  if command -v curl >/dev/null 2>&1; then
+    latest="$(curl -fsSL "$feed/v1-stable-linux.yml" 2>/dev/null | sed -n 's/^version: *"\{0,1\}\([^"]*\)"\{0,1\} *$/\1/p' || true)"
+    [ -n "$latest" ] && ok "feed's Linux release: $latest" || bad "the feed has no Linux release yet"
+  fi
+
+  if [ "$failures" -eq 0 ]; then echo "All checks passed."; else echo "$failures check(s) failed."; exit 1; fi
+}
+
 case "${1:-}" in
   install) shift; cmd_install "$@" ;;
   configure) shift; cmd_configure "$@" ;;
   pairing-code) shift; cmd_pairing_code "$@" ;;
   status) shift; cmd_status "$@" ;;
-  *) sed -n '2,15p' "$0"; exit 2 ;;
+  doctor) shift; cmd_doctor "$@" ;;
+  *) sed -n '2,16p' "$0"; exit 2 ;;
 esac
