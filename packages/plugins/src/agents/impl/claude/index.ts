@@ -90,6 +90,14 @@ export const plugin = definePlugin(
           name: 'Claude Opus 5',
           modelFeatures: { intelligence: 5, speed: 2 },
         },
+        'claude-sonnet-5-5': {
+          name: 'Claude Sonnet 5.5',
+          modelFeatures: { intelligence: 4, speed: 4 },
+        },
+        'claude-haiku-5-5': {
+          name: 'Claude Haiku 5.5',
+          modelFeatures: { intelligence: 3, speed: 5 },
+        },
         'claude-sonnet-5': {
           name: 'Claude Sonnet 5',
           modelFeatures: { intelligence: 4, speed: 4 },
