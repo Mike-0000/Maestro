@@ -43,7 +43,7 @@ describe('agent plugin registry', () => {
     });
   });
 
-  it('advertises Claude Fable 5.2 and Claude Opus 5.5', () => {
+  it('advertises the latest Claude models', () => {
     const claude = pluginRegistry.get('claude');
 
     expect(claude).toBeDefined();
@@ -52,6 +52,8 @@ describe('agent plugin registry', () => {
       modelOptions: {
         'claude-fable-5-2': { name: 'Claude Fable 5.2' },
         'claude-opus-5-5': { name: 'Claude Opus 5.5' },
+        'claude-sonnet-5-5': { name: 'Claude Sonnet 5.5' },
+        'claude-haiku-5-5': { name: 'Claude Haiku 5.5' },
       },
     });
   });
