@@ -15,7 +15,14 @@ type SpawnCountProps = {
   [P in SpawnPurpose as `spawns_${P}`]?: number;
 };
 
-export type FocusView = 'home' | 'project' | 'task' | 'settings' | 'automations' | 'canvas';
+export type FocusView =
+  | 'home'
+  | 'project'
+  | 'task'
+  | 'settings'
+  | 'automations'
+  | 'canvas'
+  | 'clients';
 export type FocusMainPanel = 'agents' | 'editor' | 'diff' | 'browser' | 'terminal';
 export type FocusedRegion = 'main' | 'bottom';
 
@@ -66,6 +73,7 @@ export type TelemetryEventProperties = {
   settings_viewed: { from_view: FocusView | null };
   automations_viewed: { from_view: FocusView | null };
   canvas_viewed: { from_view: FocusView | null };
+  clients_viewed: { from_view: FocusView | null };
 
   automation_created: {
     enabled: boolean;

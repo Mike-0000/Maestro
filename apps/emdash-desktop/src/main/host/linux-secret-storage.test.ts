@@ -1,5 +1,42 @@
 import { describe, expect, it } from 'vitest';
-import { shouldForceLibsecretBackend } from './linux-secret-storage';
+import { allowsBasicTextSecretStorage, shouldForceLibsecretBackend } from './linux-secret-storage';
+
+describe('allowsBasicTextSecretStorage', () => {
+  it('allows basic_text for the host service started with --password-store=basic', () => {
+    expect(
+      allowsBasicTextSecretStorage({
+        env: { MAESTRO_HOST_SERVICE: '1' },
+        passwordStoreSwitch: 'basic',
+      })
+    ).toBe(true);
+  });
+
+  it('refuses a desktop install that fell back to basic_text without the host service', () => {
+    expect(allowsBasicTextSecretStorage({ env: {}, passwordStoreSwitch: undefined })).toBe(false);
+    expect(allowsBasicTextSecretStorage({ env: {}, passwordStoreSwitch: 'basic' })).toBe(false);
+  });
+
+  it('refuses the host service when basic was not asked for explicitly', () => {
+    expect(
+      allowsBasicTextSecretStorage({
+        env: { MAESTRO_HOST_SERVICE: '1' },
+        passwordStoreSwitch: undefined,
+      })
+    ).toBe(false);
+    expect(
+      allowsBasicTextSecretStorage({
+        env: { MAESTRO_HOST_SERVICE: '1' },
+        passwordStoreSwitch: 'gnome-libsecret',
+      })
+    ).toBe(false);
+    expect(
+      allowsBasicTextSecretStorage({
+        env: { MAESTRO_HOST_SERVICE: '0' },
+        passwordStoreSwitch: 'basic',
+      })
+    ).toBe(false);
+  });
+});
 
 describe('shouldForceLibsecretBackend', () => {
   it('forces libsecret on an unrecognized desktop without relying on D-Bus environment', () => {

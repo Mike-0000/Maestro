@@ -1,5 +1,6 @@
 import { automationsViewDef } from '@core/features/automations/contributions/views';
 import { canvasViewDef } from '@core/features/canvas/contributions/views';
+import { clientsViewDef } from '@core/features/client-profiles/contributions/views';
 import { projectViewDef } from '@core/features/projects/contributions/views';
 import { settingsViewDef } from '@core/features/settings/contributions/views';
 import { taskViewDef } from '@core/features/tasks/contributions/views';
@@ -10,6 +11,7 @@ export const viewCatalog = defineViewCatalog([
   homeViewDef,
   automationsViewDef,
   canvasViewDef,
+  clientsViewDef,
   projectViewDef,
   taskViewDef,
   settingsViewDef,

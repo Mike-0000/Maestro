@@ -3,7 +3,15 @@ import { join } from 'node:path';
 import { createScope } from '@emdash/shared/concurrency';
 import { connectWebSocketPipe } from '@emdash/wire/node';
 import type { Controller } from '@emdash/wire/rpc';
-import { app, ipcMain, powerMonitor, safeStorage, session, shell } from 'electron';
+import {
+  app,
+  ipcMain,
+  powerMonitor,
+  safeStorage,
+  session,
+  shell,
+  systemPreferences,
+} from 'electron';
 import _electronUpdater from 'electron-updater';
 import { createBrowserWireController } from '@core/features/browser/node/wire-controller';
 import { clientSessionDomain } from '@core/features/client-mode/api/client-session-contract';
@@ -12,6 +20,7 @@ import {
   unavailableClientProfilesOperations,
 } from '@core/features/client-profiles/node/wire-controller';
 import { createUpdatesWireController } from '@core/features/updates/node/wire-controller';
+import type { VoiceFocusGate } from '@core/features/voice/node/voice-focus';
 import { desktopHostEvents } from '@core/features/workbench/node';
 import { createDesktopHostWireController } from '@core/features/workbench/node/wire-controller';
 import { CLIENT_MODE_RENDERER_SEARCH } from '@core/primitives/client-mode/api/client-mode-search';
@@ -33,6 +42,8 @@ import { createSystemNotificationSink } from '@main/host/notifications/system-no
 import { setupAppProtocol } from '@main/host/protocol';
 import { updateOperations } from '@main/host/updates/controller-operations';
 import { updateService } from '@main/host/updates/update-service';
+import { startProcessVoiceFocus } from '@main/host/voice-focus';
+import { createVoiceKeyPorts } from '@main/host/voice-keys';
 import {
   applyNativeTheme,
   configureMainWindow,
@@ -68,11 +79,7 @@ import { createClientShutdown, type ClientShutdown } from './client-shutdown';
 import { createConnectionStore, type ClientConnection } from './connection-store';
 import { createHostLink, type HostLink } from './host-link';
 import { resolveLaunchMode } from './launch-mode';
-import {
-  hostLoopbackUrlTarget,
-  startHostLoopback,
-  type HostLoopback,
-} from './loopback/host-loopback';
+import { needsHostLoopback, startHostLoopback, type HostLoopback } from './loopback/host-loopback';
 import { createClientShortcuts } from './shortcut';
 
 // Client mode (`--maestro-client`): a thin main process whose renderer is the ordinary Maestro UI.
@@ -166,6 +173,9 @@ export async function clientMain(): Promise<void> {
   // Before the window, so every browser session it creates reaches the host's loopback.
   const loopback = saved ? await startLoopback(saved, ready, lifetime.signal) : null;
 
+  // The global talk keys act only in the Maestro window focused last (local app or any profile).
+  const voiceFocus = startProcessVoiceFocus(profile ?? '');
+  lifetime.signal.addEventListener('abort', () => voiceFocus.release(), { once: true });
   const scope = createScope({ label: 'client-controllers' });
   const host = queuedOwnerClient(ready);
   const controllers = buildClientControllers({
@@ -176,6 +186,8 @@ export async function clientMain(): Promise<void> {
       remoteSettings,
       settingsRuntime,
       shutdown,
+      signal: lifetime.signal,
+      voiceFocus,
     }),
     extra: {
       [clientSessionDomain]: createClientSessionController({
@@ -230,6 +242,7 @@ export async function clientMain(): Promise<void> {
   });
 
   void initializeClientUpdater();
+  void requestMicrophoneAccess();
 }
 
 /**
@@ -264,6 +277,9 @@ function createHandledControllers(deps: {
   remoteSettings: RemoteAppSettings;
   settingsRuntime: ReturnType<typeof clientSettingsRuntime>;
   shutdown: ClientShutdown;
+  /** Aborted when the client quits. */
+  signal: AbortSignal;
+  voiceFocus: VoiceFocusGate;
 }): Record<ClientHandledDomain, Controller> {
   return {
     appSettings: createClientAppSettingsController(deps.remoteSettings, deps.settingsRuntime),
@@ -296,18 +312,25 @@ function createHandledControllers(deps: {
         platform: process.platform,
       })
     ),
-    voice: createClientVoiceController(deps.host, openMicrophoneSettings),
+    voice: createClientVoiceController(deps.host.desktop.voice, {
+      openMicrophoneSettings,
+      keys: createVoiceKeyPorts(),
+      logger: log,
+      signal: deps.signal,
+      focus: deps.voiceFocus,
+    }),
   };
 }
 
 /**
  * The local half of `host`, from the same operations the local app uses. A URL on the host's
- * loopback (a preview's "open in browser") opens through a local mirror of that port.
+ * loopback (a preview's "open in browser") opens through a local mirror of that port, and so does a
+ * sign-in page whose `redirect_uri` is a host loopback callback (an agent CLI's login).
  */
 function localHostOperations(loopback: HostLoopback | null): LocalHostOperations {
   return {
     openExternal: async ({ url }) => {
-      if (!loopback || !hostLoopbackUrlTarget(url)) return await appOperations.openExternal(url);
+      if (!loopback || !needsHostLoopback(url)) return await appOperations.openExternal(url);
       try {
         await loopback.openExternal(url);
         return { success: true };
@@ -396,6 +419,21 @@ function relaunch(shutdown: ClientShutdown): void {
     app.relaunch();
     shutdown.requestQuit();
   }, 150);
+}
+
+/**
+ * The microphone is this computer's: on macOS ask for it at startup, as the local app does, so
+ * the first voice command does not stall on the system prompt.
+ */
+async function requestMicrophoneAccess(): Promise<void> {
+  if (process.platform !== 'darwin') return;
+  if (systemPreferences.getMediaAccessStatus('microphone') === 'granted') return;
+  try {
+    const granted = await systemPreferences.askForMediaAccess('microphone');
+    log.info('client mode: microphone access request resolved', { granted });
+  } catch (error) {
+    log.warn('client mode: microphone access request failed', { error });
+  }
 }
 
 async function openMicrophoneSettings(): Promise<void> {

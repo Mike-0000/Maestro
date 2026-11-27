@@ -63,6 +63,11 @@ safe storage, which on Linux asks a keyring. A headless service has none, so the
 reading. Rely on the VM's disk encryption (Azure encrypts managed disks at rest) and keep the
 user account to yourself.
 
+Maestro accepts this plaintext-keyed store only when both the wrapper's `MAESTRO_HOST_SERVICE=1`
+and an explicit `--password-store=basic` are present. Started any other way (by hand, or a desktop
+install whose keyring is missing), it refuses to save secrets and sign-ins fail with "Secure secret
+storage is unavailable ... basic_text"; run it through the service, or set up a keyring as below.
+
 To use a real keyring instead, run `gnome-keyring-daemon` unlocked in the user session and set
 `Environment=MAESTRO_PASSWORD_STORE=gnome-libsecret` in the unit (there is a commented line for
 it). Decide before you sign anything in: switching later makes stored secrets unreadable.

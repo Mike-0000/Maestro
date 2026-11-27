@@ -1,3 +1,5 @@
+import { runsUnderServiceManager } from './updates/unattended-update-policy';
+
 /** Chromium password-store backend that routes `safeStorage` through the Secret Service. */
 export const LIBSECRET_PASSWORD_STORE = 'gnome-libsecret';
 
@@ -36,5 +38,28 @@ function isKdeDesktop(env: NodeJS.ProcessEnv): boolean {
     desktops.some((desktop) => desktop === 'kde' || desktop === 'plasma') ||
     env.KDE_FULL_SESSION?.trim().toLowerCase() === 'true' ||
     Boolean(env.KDE_SESSION_VERSION?.trim())
+  );
+}
+
+/** The `--password-store` value the host service wrapper passes for a keyring-less machine. */
+export const BASIC_PASSWORD_STORE = 'basic';
+
+/**
+ * Whether the plaintext-keyed `basic_text` safeStorage backend is acceptable for app secrets.
+ *
+ * Only for the headless host service: `scripts/host/maestro-host-run.sh` sets
+ * `MAESTRO_HOST_SERVICE=1` and passes `--password-store=basic` on purpose, because a machine with
+ * no desktop session has no keyring to unlock. There secrets are protected by the disk and the
+ * user account alone (see docs/chorus/remote-rig.md, "Secrets on a headless machine"). Both
+ * conditions must hold: an ordinary desktop install that silently fell back to `basic_text` (no
+ * Secret Service on the bus) still refuses to store secrets.
+ */
+export function allowsBasicTextSecretStorage(options: {
+  env: Readonly<Record<string, string | undefined>>;
+  passwordStoreSwitch: string | undefined;
+}): boolean {
+  return (
+    runsUnderServiceManager(options.env) &&
+    options.passwordStoreSwitch?.trim().toLowerCase() === BASIC_PASSWORD_STORE
   );
 }

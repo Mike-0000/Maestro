@@ -96,7 +96,7 @@ export const clientModeRouting = {
   voice: {
     host: 'all',
     client: 'custom',
-    note: 'Forwarded except openMicrophoneSettings, which opens the client OS settings.',
+    note: 'Forwarded; the global talk keys and openMicrophoneSettings run on the client.',
   },
   conductor: FORWARD,
   talk: FORWARD,

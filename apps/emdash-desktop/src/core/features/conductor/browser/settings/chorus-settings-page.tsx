@@ -1724,12 +1724,21 @@ const KeyRow = observer(function KeyRow({
   const voice = getVoiceStore();
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
   const save = async (value: string | null) => {
     setSaving(true);
+    setMessage('');
     try {
       await voice.setCredential(id, value);
       setDraft('');
       onSaved?.();
+    } catch (error) {
+      // Keys are stored where the speech and conductor engines run (the host in client mode). A
+      // host without secure storage (a Linux VM on the basic password store) refuses them.
+      const reason = error instanceof Error && error.message ? ` ${error.message}` : '';
+      setMessage(
+        `The key was not saved.${reason} Where the app cannot store keys securely, set the provider's API key environment variable for it instead.`
+      );
     } finally {
       setSaving(false);
     }
@@ -1753,7 +1762,7 @@ const KeyRow = observer(function KeyRow({
           </span>
         </>
       }
-      description={description}
+      description={message ? `${description} ${message}` : description}
       control={
         <div className="flex w-full items-center gap-4">
           <div className="max-w-md min-w-0 flex-1">

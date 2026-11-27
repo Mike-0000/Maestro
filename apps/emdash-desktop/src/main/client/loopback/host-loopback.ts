@@ -49,7 +49,7 @@ export async function startHostLoopback(deps: {
     log: deps.log,
   });
   const mirrors = createLoopbackMirrors({ dialTunnel, log: deps.log });
-  const opener = { mirrors, open: deps.openInBrowser };
+  const opener: Opener = { mirrors, open: deps.openInBrowser, log: deps.log };
   deps.log.info('client mode: host loopback proxy ready', { port: proxy.port });
 
   return {
@@ -62,7 +62,11 @@ export async function startHostLoopback(deps: {
   };
 }
 
-type Opener = { mirrors: Pick<LoopbackMirrors, 'ensure'>; open(url: string): Promise<void> };
+type Opener = {
+  mirrors: Pick<LoopbackMirrors, 'ensure'>;
+  open(url: string): Promise<void>;
+  log?: Pick<Logger, 'warn'>;
+};
 
 /** The host port a URL names on the host's loopback, or null for any other URL. */
 export function hostLoopbackUrlTarget(value: string): { port: number; hostname: string } | null {
@@ -78,8 +82,62 @@ export function hostLoopbackUrlTarget(value: string): { port: number; hostname: 
   return { port, hostname: url.hostname };
 }
 
-/** Opens `url`; a host-loopback URL first gets a local mirror and that mirror's port. */
+/** OAuth query parameters that name where the provider sends the browser back. */
+const REDIRECT_PARAMS = ['redirect_uri', 'redirect_url'] as const;
+
+/**
+ * The host loopback port a sign-in page will send the browser back to, read from the page URL's
+ * `redirect_uri` (for example a provider CLI on the host listening on
+ * `http://localhost:54545/callback`). Only explicit ports count: a default-port loopback redirect
+ * is not a CLI's ephemeral callback listener.
+ */
+export function loopbackRedirectTarget(value: string): { port: number; hostname: string } | null {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+  for (const name of REDIRECT_PARAMS) {
+    const redirect = url.searchParams.get(name);
+    if (!redirect) continue;
+    let redirectUrl: URL;
+    try {
+      redirectUrl = new URL(redirect);
+    } catch {
+      continue;
+    }
+    if (redirectUrl.protocol !== 'http:' || !redirectUrl.port) continue;
+    if (!hostLoopbackFamilies(redirectUrl.hostname)) continue;
+    return { port: Number(redirectUrl.port), hostname: redirectUrl.hostname };
+  }
+  return null;
+}
+
+/** Whether opening `url` here needs a mirror of a host loopback port. */
+export function needsHostLoopback(url: string): boolean {
+  return hostLoopbackUrlTarget(url) !== null || loopbackRedirectTarget(url) !== null;
+}
+
+/**
+ * Opens `url`; a host-loopback URL first gets a local mirror and that mirror's port. A sign-in page
+ * whose `redirect_uri` is a host loopback port gets a same-port mirror first, so the provider's
+ * redirect reaches the host's callback listener; if that port is taken here the page still opens
+ * (many CLIs also offer a paste-the-code fallback).
+ */
 export async function openHostUrl(url: string, opener: Opener): Promise<void> {
+  const redirect = loopbackRedirectTarget(url);
+  if (redirect) {
+    try {
+      await opener.mirrors.ensure({ ...redirect, samePort: true });
+    } catch (error) {
+      opener.log?.warn('client mode: could not mirror a sign-in callback port', {
+        port: redirect.port,
+        error,
+      });
+    }
+  }
   const target = hostLoopbackUrlTarget(url);
   if (!target) {
     await opener.open(url);

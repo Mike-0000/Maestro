@@ -1,15 +1,25 @@
 import { secret, type Secret } from '@emdash/shared';
 import { eq } from 'drizzle-orm';
-import { safeStorage } from 'electron';
+import { app, safeStorage } from 'electron';
 import type { AppDb, DrizzleTx } from '@core/services/app-db/node/db';
 import { appSecrets } from '@core/services/app-db/node/schema';
 import { getAppDb } from '@main/db/instance';
+import { allowsBasicTextSecretStorage } from '@main/host/linux-secret-storage';
+
+/** The headless host service may use Linux `basic_text`; see `allowsBasicTextSecretStorage`. */
+function hostServiceAllowsBasicText(): boolean {
+  return allowsBasicTextSecretStorage({
+    env: process.env,
+    passwordStoreSwitch: app.commandLine.getSwitchValue('password-store'),
+  });
+}
 
 export class EncryptedAppSecretsStore {
   constructor(
     private readonly database?: AppDb,
     private readonly safeStorageApi = safeStorage,
-    private readonly platform: NodeJS.Platform = process.platform
+    private readonly platform: NodeJS.Platform = process.platform,
+    private readonly allowBasicText: () => boolean = hostServiceAllowsBasicText
   ) {}
 
   private get db(): AppDb {
@@ -86,9 +96,11 @@ export class EncryptedAppSecretsStore {
     }
 
     const backend = this.safeStorageApi.getSelectedStorageBackend?.();
-    if (backend === 'basic_text') {
+    if (backend === 'basic_text' && !this.allowBasicText()) {
       throw new Error(
-        'Secure secret storage is unavailable: Linux safeStorage backend is basic_text.'
+        'Secure secret storage is unavailable: Linux safeStorage backend is basic_text. ' +
+          'Run a Secret Service keyring (such as gnome-keyring) in this session, or run a ' +
+          'headless host through its service wrapper, which opts into --password-store=basic.'
       );
     }
   }

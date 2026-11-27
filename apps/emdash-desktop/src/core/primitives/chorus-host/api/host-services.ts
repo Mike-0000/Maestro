@@ -28,6 +28,14 @@ export type ChorusHostServices = {
     start(onKey: (event: { type: 'down' | 'up'; keycode: number }) => void): boolean;
     stop(): void;
   };
+  /**
+   * Whether this process may use the global talk keys: only the Maestro window focused last does,
+   * when the local app and client-mode profiles run on one computer. Absent means always.
+   */
+  readonly voiceFocus?: {
+    active(): boolean;
+    subscribe(listener: (active: boolean) => void): () => void;
+  };
   /** Opens the OS microphone privacy settings (a fixed system URL, never caller-supplied). */
   openMicrophoneSettings(): Promise<void>;
 };

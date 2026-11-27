@@ -1,6 +1,7 @@
 import { automationsBrowserContributions } from '@core/features/automations/contributions/browser';
 import { canvasBrowserContributions } from '@core/features/canvas/contributions/browser';
 import { claudeAccountsBrowserContributions } from '@core/features/claude-accounts/contributions/browser';
+import { clientProfilesBrowserContributions } from '@core/features/client-profiles/contributions/browser';
 import { conversationsBrowserContributions } from '@core/features/conversations/contributions/browser';
 import { devPerfBrowserContributions } from '@core/features/dev-perf/contributions/browser';
 import { editorBrowserContributions } from '@core/features/editor/contributions/browser';
@@ -18,6 +19,7 @@ export const featureViewRuntimes = [
   ...workbenchBrowserContributions.views,
   ...automationsBrowserContributions.views,
   ...canvasBrowserContributions.views,
+  ...clientProfilesBrowserContributions.views,
   ...projectsBrowserContributions.views,
   ...settingsBrowserContributions.views,
   ...tasksBrowserContributions.views,
