@@ -40,16 +40,24 @@ export class JsonSettingsFile<T extends object> {
   }
 
   async update(patch: Partial<T>): Promise<T> {
-    const next = this.schema.parse({ ...(await this.read()), ...patch });
-    this.cached = next;
-    // Serialize writes and replace atomically so a crash never leaves a torn file.
-    this.writeChain = this.writeChain.then(async () => {
+    // Read, merge and write one update at a time. Two updates in flight together (for example
+    // two settings saves a remote client sends in one batch) would otherwise both merge into the
+    // same snapshot, and the later write would drop the earlier update's fields. Each file
+    // replace is atomic, so a crash never leaves a torn file.
+    const run = this.writeChain.then(async () => {
+      const next = this.schema.parse({ ...(await this.read()), ...patch });
+      this.cached = next;
       await mkdir(dirname(this.path), { recursive: true });
       const temp = `${this.path}.tmp`;
       await writeFile(temp, JSON.stringify(next, null, 2), 'utf8');
       await rename(temp, this.path);
+      return next;
     });
-    await this.writeChain;
-    return next;
+    // A failed update rejects only its own caller; the next update still runs.
+    this.writeChain = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
   }
 }
