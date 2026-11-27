@@ -312,13 +312,12 @@ export const ChorusSettingsPage = observer(function ChorusSettingsPage() {
                 }
                 disabled={!conductorSettings || !voiceSettings}
                 onCheckedChange={(useOpenRouter) => {
+                  // One conductor save for both fields, so neither can overwrite the other.
                   void conductor.updateSettings({
                     provider: useOpenRouter ? 'openrouter' : 'anthropic',
-                  });
-                  void voice.updateSettings({ engine: useOpenRouter ? 'openrouter' : 'openai' });
-                  void conductor.updateSettings({
                     jevSource: useOpenRouter ? 'openrouter' : 'auto',
                   });
+                  void voice.updateSettings({ engine: useOpenRouter ? 'openrouter' : 'openai' });
                 }}
               />
             }
