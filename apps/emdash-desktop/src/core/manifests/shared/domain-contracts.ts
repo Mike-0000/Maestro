@@ -5,6 +5,10 @@ import { automationsContract, automationsDomain } from '@core/features/automatio
 import { browserContract, browserDomain } from '@core/features/browser/api';
 import { catalogDomain, catalogWireContract } from '@core/features/catalog/api';
 import { claudeAccountsContract, claudeAccountsDomain } from '@core/features/claude-accounts/api';
+import {
+  clientProfilesContract,
+  clientProfilesDomain,
+} from '@core/features/client-profiles/api/contract';
 import { conductorContract, conductorDomain } from '@core/features/conductor/api';
 import { conversationsContract, conversationsDomain } from '@core/features/conversations/api';
 import { devPerfContract, devPerfDomain } from '@core/features/dev-perf/api';
@@ -79,6 +83,7 @@ export const desktopDomainContracts = {
   [skillsDomain]: skillsContract,
   [agentAddonsDomain]: agentAddonsContract,
   [claudeAccountsDomain]: claudeAccountsContract,
+  [clientProfilesDomain]: clientProfilesContract,
   [terminalsDomain]: terminalsContract,
   [mementosDomain]: mementosWireContract,
   [notificationsDomain]: notificationsContract,

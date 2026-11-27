@@ -4,8 +4,8 @@ import {
   PRODUCT_NAME,
   USER_DATA_DIR_NAME,
 } from '@core/primitives/app-identity/api/app-identity';
+import { clientUserDataDirName } from '@core/primitives/client-mode/api/client-profile';
 import { loadAppConfig, type AppConfig } from '@main/bootstrap/core/config';
-import { CLIENT_MODE_SWITCH, clientUserDataDirName } from './launch-mode';
 
 // The configuration a client-mode process boots with. Electron-free: the caller passes the
 // `appData` path (`app.getPath('appData')`, available before `ready`).
@@ -37,9 +37,4 @@ export function buildClientAppConfig(
 /** The window title of a client: `Maestro Client`, or `Maestro Client (work)` for a profile. */
 export function clientWindowTitle(profile: string | null): string {
   return profile === null ? `${PRODUCT_NAME} Client` : `${PRODUCT_NAME} Client (${profile})`;
-}
-
-/** The command-line switch that starts this same client profile again. */
-export function clientLaunchSwitch(profile: string | null): string {
-  return profile === null ? CLIENT_MODE_SWITCH : `${CLIENT_MODE_SWITCH}=${profile}`;
 }

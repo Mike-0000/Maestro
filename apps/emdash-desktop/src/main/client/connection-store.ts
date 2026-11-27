@@ -1,14 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { z } from 'zod';
+import {
+  CLIENT_CONNECTION_FILE,
+  storedClientConnectionSchema,
+  type StoredClientConnection,
+} from '@core/primitives/client-mode/api/client-profile';
 
 // The one host a client profile is paired with, in `<userData>/client-connection.json`. The device
 // token and the Cloudflare Access secret are encrypted with the OS keychain (Electron
 // `safeStorage`); when encryption is unavailable nothing is stored at all, so a credential never
 // lands on disk in the clear.
-
-export const CLIENT_CONNECTION_FILE = 'client-connection.json';
 
 /** The part of Electron's `safeStorage` the store uses; tests pass a fake. */
 export type SecretCipher = {
@@ -32,18 +34,6 @@ export type ClientConnection = {
 export type ConnectionStoreError =
   | { type: 'encryption-unavailable'; message: string }
   | { type: 'io'; message: string };
-
-const storedConnectionSchema = z.object({
-  version: z.literal(1),
-  url: z.string().min(1),
-  hostId: z.string().min(1),
-  hostName: z.string(),
-  deviceId: z.string().min(1),
-  /** Base64 of the `safeStorage` ciphertext. */
-  token: z.string().min(1),
-  cfAccess: z.object({ clientId: z.string(), clientSecret: z.string().min(1) }).optional(),
-  pairedAt: z.number(),
-});
 
 export type ConnectionStore = {
   /** The stored connection, or null when there is none or it cannot be read or decrypted. */
@@ -72,7 +62,7 @@ export function createConnectionStore(options: {
         return null;
       }
       try {
-        const parsed = storedConnectionSchema.safeParse(JSON.parse(text));
+        const parsed = storedClientConnectionSchema.safeParse(JSON.parse(text));
         if (!parsed.success) {
           options.log?.warn('client connection file is not valid; ignoring it');
           return null;
@@ -113,7 +103,7 @@ export function createConnectionStore(options: {
         };
       }
       try {
-        const stored: z.infer<typeof storedConnectionSchema> = {
+        const stored: StoredClientConnection = {
           version: 1,
           url: connection.url,
           hostId: connection.hostId,

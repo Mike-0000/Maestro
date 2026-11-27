@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { basename } from 'node:path';
 import { promisify } from 'node:util';
 import type { Controller } from '@emdash/wire/rpc';
-import { CLIENT_MODE_SWITCH } from '../launch-mode';
+import { CLIENT_MODE_SWITCH } from '@core/primitives/client-mode/api/client-profile';
 
 // Rule U. The client and the local app are the same installation, so installing an update from
 // the client would also replace (and close) a local Maestro that is running agents. The client

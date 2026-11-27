@@ -7,10 +7,15 @@ import { app, ipcMain, powerMonitor, safeStorage, session, shell } from 'electro
 import _electronUpdater from 'electron-updater';
 import { createBrowserWireController } from '@core/features/browser/node/wire-controller';
 import { clientSessionDomain } from '@core/features/client-mode/api/client-session-contract';
+import {
+  createClientProfilesWireController,
+  unavailableClientProfilesOperations,
+} from '@core/features/client-profiles/node/wire-controller';
 import { createUpdatesWireController } from '@core/features/updates/node/wire-controller';
 import { desktopHostEvents } from '@core/features/workbench/node';
 import { createDesktopHostWireController } from '@core/features/workbench/node/wire-controller';
 import { CLIENT_MODE_RENDERER_SEARCH } from '@core/primitives/client-mode/api/client-mode-search';
+import { clientLaunchSwitch } from '@core/primitives/client-mode/api/client-profile';
 import { createLoggingWireController } from '@core/services/logging/node/wire-controller';
 import { runBootPreflight } from '@main/bootstrap/boot/preflight';
 import { isBootAborted, type BootSignals } from '@main/bootstrap/boot/types';
@@ -49,12 +54,7 @@ import { startExternalOpenBridge } from './adapters/external-open';
 import { createClientHostOperations, type LocalHostOperations } from './adapters/host-operations';
 import { startOwnerNotificationBridge } from './adapters/notifications';
 import { guardClientUpdates, isLocalAppRunning, listProcessesNamedLike } from './adapters/updates';
-import {
-  CLIENT_APP_USER_MODEL_ID,
-  buildClientAppConfig,
-  clientLaunchSwitch,
-  clientWindowTitle,
-} from './client-config';
+import { CLIENT_APP_USER_MODEL_ID, buildClientAppConfig, clientWindowTitle } from './client-config';
 import {
   buildClientControllers,
   createClientConversationsController,
@@ -268,6 +268,7 @@ function createHandledControllers(deps: {
   return {
     appSettings: createClientAppSettingsController(deps.remoteSettings, deps.settingsRuntime),
     browser: createBrowserWireController(browserOperations),
+    clientProfiles: createClientProfilesWireController(unavailableClientProfilesOperations),
     conversations: createClientConversationsController(deps.host, {
       localFiles: terminalFileSources,
       logger: log,

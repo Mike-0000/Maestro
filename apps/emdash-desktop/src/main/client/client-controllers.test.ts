@@ -31,6 +31,7 @@ import {
 const HANDLED: ClientHandledDomain[] = [
   'appSettings',
   'browser',
+  'clientProfiles',
   'conversations',
   'devPerf',
   'host',

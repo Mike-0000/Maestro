@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { clientUserDataDirName, isValidClientProfile, resolveLaunchMode } from './launch-mode';
+import {
+  clientUserDataDirName,
+  isValidClientProfile,
+} from '@core/primitives/client-mode/api/client-profile';
+import { resolveLaunchMode } from './launch-mode';
 
 const DEV = { isPackaged: false };
 const PACKAGED = { isPackaged: true };
