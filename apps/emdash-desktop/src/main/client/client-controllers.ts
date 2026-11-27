@@ -1,4 +1,5 @@
 import type { Logger } from '@emdash/shared/logger';
+import { createEventStreamHost } from '@emdash/wire/live';
 import {
   createController,
   forwardContractImpl,
@@ -12,7 +13,17 @@ import {
 import { ownerHostWireContract } from '@core/features/client-mode/api/owner-contract';
 import { conversationsContract } from '@core/features/conversations/api';
 import { terminalsContract } from '@core/features/terminals/api';
-import { voiceContract } from '@core/features/voice/api';
+import {
+  voiceContract,
+  type VoiceContract,
+  type VoiceEvent,
+  type VoiceStatus,
+} from '@core/features/voice/api';
+import {
+  GlobalVoiceKeys,
+  type GlobalVoiceKeyPorts,
+} from '@core/features/voice/node/global-voice-keys';
+import type { VoiceFocusGate } from '@core/features/voice/node/voice-focus';
 import {
   clientModeDomains,
   clientModeRouting,
@@ -134,14 +145,108 @@ export function createClientConversationsController(
   });
 }
 
-/** `voice`: forwarded, except `openMicrophoneSettings`, which opens this computer's settings. */
+/** Host voice events the client replaces with its own: the talk keys of the host's keyboard. */
+function isHostKeyEvent(event: VoiceEvent): boolean {
+  return event.type === 'global-toggle' || event.type === 'global-hold';
+}
+
+/**
+ * `voice`: forwarded (settings, credentials, speech engines and synthesis live on the host, and
+ * synthesized audio comes back as events the renderer plays here), except what belongs to the
+ * computer the developer sits at. The global talk keys run on this computer from the host's
+ * stored settings, and the host's own key events are dropped, since nobody types at a headless
+ * host; `openMicrophoneSettings` opens this computer's settings.
+ */
 export function createClientVoiceController(
-  host: OwnerHostClient,
-  openMicrophoneSettings: () => Promise<void>
+  remote: ContractClient<VoiceContract>,
+  deps: {
+    openMicrophoneSettings: () => Promise<void>;
+    keys: GlobalVoiceKeyPorts;
+    logger: Pick<Logger, 'warn'>;
+    signal: AbortSignal;
+    /** Which Maestro window on this computer owns the keys; absent means this one always. */
+    focus?: VoiceFocusGate;
+  }
 ): Controller {
-  const impl = forwardContractImpl(voiceContract, host.desktop.voice);
+  const events = createEventStreamHost(voiceContract.events, {
+    onActive: () => startRelay(),
+    onIdle: () => stopRelay(),
+  });
+  const keys = new GlobalVoiceKeys(
+    deps.keys,
+    () => events.emit(undefined, { type: 'global-toggle' }),
+    (output) =>
+      events.emit(undefined, {
+        type: 'global-hold',
+        action: output.type,
+        ...(output.type === 'start' ? { intent: output.intent } : {}),
+      }),
+    deps.logger
+  );
+
+  const stopFocus = deps.focus?.subscribe((active) => keys.setActive(active));
+  if (deps.focus) keys.setActive(deps.focus.active());
+
+  let relay: AbortController | null = null;
+  function startRelay(): void {
+    if (relay || deps.signal.aborted) return;
+    const current = new AbortController();
+    relay = current;
+    remote.events
+      .subscribe(undefined, {
+        onEvent: (event) => {
+          if (!isHostKeyEvent(event)) events.emit(undefined, event);
+        },
+        signal: current.signal,
+      })
+      .catch((error: unknown) => {
+        if (current.signal.aborted) return;
+        deps.logger.warn('client voice: host event relay failed', { error });
+        if (relay === current) relay = null;
+      });
+  }
+  function stopRelay(): void {
+    relay?.abort();
+    relay = null;
+  }
+
+  /** Applies the host's stored talk keys here and reports this computer's registration. */
+  const withLocalKeys = (status: VoiceStatus): VoiceStatus => {
+    if (!deps.signal.aborted) keys.apply(status.settings);
+    return {
+      ...status,
+      globalShortcutRegistered: keys.shortcutRegistered,
+      globalHoldActive: keys.holdKeyActive,
+    };
+  };
+
+  // Register the keys as soon as the host answers, before the renderer first asks for status.
+  remote
+    .getStatus(undefined)
+    .then(withLocalKeys)
+    .catch((error: unknown) => {
+      if (!deps.signal.aborted) deps.logger.warn('client voice: no host voice status', { error });
+    });
+  deps.signal.addEventListener(
+    'abort',
+    () => {
+      stopRelay();
+      stopFocus?.();
+      keys.dispose();
+    },
+    { once: true }
+  );
+
+  const impl = forwardContractImpl(voiceContract, remote);
   return createController(voiceContract, {
     ...impl,
-    openMicrophoneSettings: () => openMicrophoneSettings(),
+    getStatus: async (input, meta) =>
+      withLocalKeys(await remote.getStatus(input, { signal: meta.signal })),
+    updateSettings: async (input, meta) =>
+      withLocalKeys(await remote.updateSettings(input, { signal: meta.signal })),
+    setCredential: async (input, meta) =>
+      withLocalKeys(await remote.setCredential(input, { signal: meta.signal })),
+    openMicrophoneSettings: () => deps.openMicrophoneSettings(),
+    events,
   });
 }

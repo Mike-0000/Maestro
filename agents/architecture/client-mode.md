@@ -32,9 +32,10 @@ telemetry off (`client-config.ts`).
 
 The profile slug rules, `clientUserDataDirName`, the switch and the `client-connection.json` schema
 live in `core/primitives/client-mode/api/client-profile.ts`, shared with the local app's
-**Maestro clients** card (Settings > Remote access, hidden in client mode). Its `clientProfiles`
-domain (`core/features/client-profiles/`) lists the profile directories in appData, shows each
-saved host URL without touching the encrypted token, and starts a profile by spawning
+**Clients** view (a left-sidebar entry between Canvas and Automations, hidden in client mode;
+`core/features/client-profiles/browser/clients-page.tsx`). Its `clientProfiles` domain
+(`core/features/client-profiles/`) lists the profile directories in appData, shows each saved host
+URL without touching the encrypted token, and starts a profile by spawning
 `process.execPath` with the switch (no shell, slug validated in the main process).
 
 ## Thin Client Bootstrap
@@ -86,7 +87,7 @@ Domains that are not plain `forward`:
 | `host` | custom; host serves `persistDroppedBlob`, `getPlatform` | Window, shell, dialogs and clipboard are the client's; dropped blobs land where agents run. |
 | `appSettings` | custom | Forwarded; theme, keyboard and browser changes also apply locally. |
 | `terminals`, `conversations` | custom | Forwarded except rule P. |
-| `voice` | custom | Forwarded except `openMicrophoneSettings`. |
+| `voice` | custom | Forwarded; the global talk keys (toggle shortcut, hold-to-talk hook) run on the client from the host's stored settings, the host's key events are dropped, and `openMicrophoneSettings` opens the client's settings. With the local app and several profiles open on one computer, only the window focused last holds the keys (`<appData>/<USER_DATA_DIR_NAME>-voice-focus.json`, `voice/node/voice-focus.ts`). |
 
 `client-mode-routing.test.ts` also checks that both sides agree, that listed endpoints exist,
 that `clientSession` stays out of the desktop contract, and the import boundaries below.

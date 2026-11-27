@@ -4,7 +4,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { OwnerExternalOpenRequest } from '@core/features/client-mode/api/owner-contract';
 import { startExternalOpenBridge } from '../adapters/external-open';
 import type { OwnerHostClient } from '../host-link';
-import { hostLoopbackUrlTarget, openHostLoopbackRequest, openHostUrl } from './host-loopback';
+import {
+  hostLoopbackUrlTarget,
+  loopbackRedirectTarget,
+  needsHostLoopback,
+  openHostLoopbackRequest,
+  openHostUrl,
+} from './host-loopback';
 import { createLoopbackMirrors, type LoopbackMirrorTarget } from './loopback-mirror';
 import { startDevServer, startTunnelHost, TUNNEL_HOST_TOKEN } from './testing/tunnel-host';
 import { createHostTunnelDialer, ownerTunnelConnector } from './tunnel-dialer';
@@ -103,6 +109,58 @@ describe('opening host pages on this computer', () => {
       )
     ).rejects.toThrow('in use');
     expect(open).not.toHaveBeenCalled();
+  });
+});
+
+describe('sign-in pages that redirect to a host loopback callback', () => {
+  const page =
+    'https://claude.ai/oauth/authorize?client_id=x&redirect_uri=' +
+    encodeURIComponent('http://localhost:54545/callback') +
+    '&state=s';
+
+  it('reads the callback port from redirect_uri', () => {
+    expect(loopbackRedirectTarget(page)).toEqual({ port: 54_545, hostname: 'localhost' });
+    expect(
+      loopbackRedirectTarget(
+        `https://a.example/x?redirect_url=${encodeURIComponent('http://127.0.0.1:8123/cb')}`
+      )
+    ).toEqual({ port: 8123, hostname: '127.0.0.1' });
+    expect(needsHostLoopback(page)).toBe(true);
+  });
+
+  it.each([
+    'https://github.com/login/device',
+    `https://a.example/x?redirect_uri=${encodeURIComponent('https://app.example.com/cb')}`,
+    `https://a.example/x?redirect_uri=${encodeURIComponent('http://localhost/cb')}`,
+    `https://a.example/x?redirect_uri=${encodeURIComponent('http://192.168.1.5:8000/cb')}`,
+    'https://a.example/x?redirect_uri=not-a-url',
+  ])('%s has no host loopback callback', (url) => {
+    expect(loopbackRedirectTarget(url)).toBeNull();
+    expect(needsHostLoopback(url)).toBe(false);
+  });
+
+  it('mirrors the callback port on the same port before opening the page unchanged', async () => {
+    const order: string[] = [];
+    const mirrors = fakeMirrors();
+    mirrors.ensure.mockImplementation(async (target) => {
+      order.push(`mirror ${target.port} ${String(target.samePort)}`);
+      return target.port;
+    });
+    const open = vi.fn(async (url: string) => {
+      order.push(`open ${url}`);
+    });
+    await openHostUrl(page, { mirrors, open });
+    expect(order).toEqual(['mirror 54545 true', `open ${page}`]);
+  });
+
+  it('still opens the page when the callback port is taken here', async () => {
+    const mirrors = fakeMirrors();
+    mirrors.ensure.mockRejectedValue(new Error('Local port 54545 is in use on this computer'));
+    const open = vi.fn(async () => {});
+    const warn = vi.fn();
+    await openHostUrl(page, { mirrors, open, log: { warn } });
+    expect(open).toHaveBeenCalledWith(page);
+    expect(warn).toHaveBeenCalledOnce();
   });
 });
 

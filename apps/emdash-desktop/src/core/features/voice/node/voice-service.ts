@@ -17,13 +17,7 @@ import {
   type VoiceSettings,
   type VoiceStatus,
 } from '../api/contract';
-import {
-  acceleratorFromStored,
-  HOLD_KEY_OFF,
-  HoldComboTracker,
-  holdComboKeycodes,
-} from '../api/global-keys';
-import { HoldToTalkMachine, type HoldOutput } from '../api/hold-to-talk';
+import type { HoldOutput } from '../api/hold-to-talk';
 import { fixTranscriptNames, VOICE_NAME_HINTS } from '../api/name-fixups';
 import { decodeWav, STT_SAMPLE_RATE } from '../api/wav';
 import type { BufferedDictationStream } from './buffered-dictation';
@@ -34,6 +28,7 @@ import { OpenAiSttEngine } from './engines/openai';
 import { OpenRouterSttEngine } from './engines/openrouter';
 import { WhisperLocalSttEngine } from './engines/whisper-local';
 import { streamGeminiTts } from './gemini-tts';
+import { GlobalVoiceKeys } from './global-voice-keys';
 import { LocalCommandStream } from './local-command-stream';
 import { DICTATION_MODELS, DictationModel, LocalDictation } from './local-dictation';
 import { LocalTts } from './local-tts';
@@ -55,9 +50,8 @@ export class VoiceService {
   readonly credentials: ChorusCredentials;
   private readonly settings: JsonSettingsFile<VoiceSettings>;
   private readonly engines: Record<SttEngineId, SttEngine>;
-  private registeredShortcut: string | null = null;
-  private holdActive = false;
-  private readonly hold: HoldToTalkMachine;
+  private readonly globalKeys: GlobalVoiceKeys;
+  private stopFocus: (() => void) | null = null;
   private readonly ttsRequests = new Map<string, AbortController>();
   private localTts: LocalTts | null = null;
   private readonly vertexAuth = new VertexAuth();
@@ -79,11 +73,15 @@ export class VoiceService {
 
   constructor(
     private readonly host: ChorusHostServices,
-    private readonly onGlobalToggle: () => void,
+    onGlobalToggle: () => void,
     private readonly logger: Logger,
     onGlobalHold: (output: HoldOutput) => void = () => {}
   ) {
-    this.hold = new HoldToTalkMachine(onGlobalHold);
+    this.globalKeys = new GlobalVoiceKeys(host, onGlobalToggle, onGlobalHold, logger);
+    if (host.voiceFocus) {
+      this.globalKeys.setActive(host.voiceFocus.active());
+      this.stopFocus = host.voiceFocus.subscribe((active) => this.globalKeys.setActive(active));
+    }
     this.credentials = new ChorusCredentials(host.secrets);
     const localModel = (id: LocalSpeechModelId) => {
       const spec = DICTATION_MODELS[id];
@@ -114,9 +112,7 @@ export class VoiceService {
   }
 
   async start(): Promise<void> {
-    const settings = await this.settings.read();
-    await this.applyGlobalShortcut(settings.globalShortcut);
-    this.applyGlobalHold(settings.globalHoldKey);
+    this.globalKeys.apply(await this.settings.read());
   }
 
   dispose(): void {
@@ -125,27 +121,24 @@ export class VoiceService {
     for (const id of [...this.dictations.keys()]) this.abortStream(id);
     for (const id of [...this.localCommands.keys()]) this.abortStream(id);
     for (const model of Object.values(this.localModels)) model.dispose();
-    this.applyGlobalHold(HOLD_KEY_OFF);
-    if (this.registeredShortcut) this.host.globalShortcuts.unregister(this.registeredShortcut);
-    this.registeredShortcut = null;
+    this.stopFocus?.();
+    this.stopFocus = null;
+    this.globalKeys.dispose();
   }
 
   async status(): Promise<VoiceStatus> {
     return {
       settings: await this.settings.read(),
       credentials: await this.credentials.presence(),
-      globalShortcutRegistered: this.registeredShortcut !== null,
-      globalHoldActive: this.holdActive,
+      globalShortcutRegistered: this.globalKeys.shortcutRegistered,
+      globalHoldActive: this.globalKeys.holdKeyActive,
     };
   }
 
   async updateSettings(patch: Partial<VoiceSettings>): Promise<VoiceStatus> {
     const previous = await this.settings.read();
     const next = await this.settings.update(patch);
-    if (next.globalShortcut !== previous.globalShortcut) {
-      await this.applyGlobalShortcut(next.globalShortcut);
-    }
-    if (next.globalHoldKey !== previous.globalHoldKey) this.applyGlobalHold(next.globalHoldKey);
+    this.globalKeys.apply(next);
     if (next.localSpeechModel !== previous.localSpeechModel) {
       // Free the memory and bandwidth of the model that is no longer used; its files stay.
       this.localModels[previous.localSpeechModel].dispose();
@@ -526,43 +519,6 @@ export class VoiceService {
         'engine-failed',
         'Local Parakeet transcription failed. Try again, re-download the model, or turn off “Transcribe on this computer”.'
       );
-    }
-  }
-
-  /** Starts or stops the system-wide key hook for global hold-to-talk. */
-  private applyGlobalHold(key: VoiceSettings['globalHoldKey']): void {
-    if (this.holdActive) {
-      this.host.keyboardHook.stop();
-      this.hold.reset();
-      this.holdActive = false;
-    }
-    if (key.trim() === HOLD_KEY_OFF || !key.trim()) return;
-    const keycodes = holdComboKeycodes(key);
-    if (!keycodes) {
-      this.logger.warn('voice: unsupported global hold-to-talk key', { key });
-      return;
-    }
-    const tracker = new HoldComboTracker(keycodes, this.hold);
-    const started = this.host.keyboardHook.start((event) => tracker.onKey(event));
-    if (started) this.holdActive = true;
-    else this.logger.warn('voice: global hold-to-talk could not start');
-  }
-
-  private async applyGlobalShortcut(accelerator: string): Promise<void> {
-    if (this.registeredShortcut) this.host.globalShortcuts.unregister(this.registeredShortcut);
-    this.registeredShortcut = null;
-    const trimmed = acceleratorFromStored(accelerator);
-    if (!trimmed) return;
-    try {
-      if (this.host.globalShortcuts.register(trimmed, this.onGlobalToggle)) {
-        this.registeredShortcut = trimmed;
-      } else {
-        this.logger.warn('voice: global shortcut is taken by another app', {
-          accelerator: trimmed,
-        });
-      }
-    } catch (error) {
-      this.logger.warn('voice: invalid global shortcut', { accelerator: trimmed, error });
     }
   }
 }

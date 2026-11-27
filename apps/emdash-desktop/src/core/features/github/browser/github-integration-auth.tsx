@@ -120,8 +120,10 @@ export function GitHubIntegrationAuth({ metadata, onSuccess, onClose }: Integrat
     // launched connect from its identity strip stays open underneath the stack
     // and becomes topmost again. A dismissed device flow keeps this modal open
     // so the user can retry another method.
-    const deviceFlowOutcome = openDeviceFlow({});
-    void deviceFlowMutation.mutateAsync();
+    // The flow starts only once the modal listens for the host's one-time device-code event.
+    const deviceFlowOutcome = openDeviceFlow({
+      onSubscribed: () => void deviceFlowMutation.mutateAsync(),
+    });
     void deviceFlowOutcome.then((outcome) => {
       if (outcome.success) onSuccess();
     });

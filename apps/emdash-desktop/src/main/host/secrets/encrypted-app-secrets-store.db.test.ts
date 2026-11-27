@@ -62,6 +62,33 @@ describe('EncryptedAppSecretsStore', () => {
     expect(JSON.stringify(carrying)).toContain(REDACTED);
   });
 
+  describe('Linux basic_text backend', () => {
+    const basicTextStorage = {
+      isEncryptionAvailable: () => true,
+      encryptString: fakeSafeStorage.encryptString,
+      decryptString: fakeSafeStorage.decryptString,
+      getSelectedStorageBackend: () => 'basic_text',
+    } as unknown as Electron.SafeStorage;
+
+    it('refuses to store secrets unless basic_text was opted into', async () => {
+      fixture = await openFixture('empty');
+      const store = new EncryptedAppSecretsStore(
+        fixture.db,
+        basicTextStorage,
+        'linux',
+        () => false
+      );
+      await expect(store.setSecret('test-key', secret('hunter2'))).rejects.toThrow(/basic_text/);
+    });
+
+    it('stores and reads secrets on the opted-in host service', async () => {
+      fixture = await openFixture('empty');
+      const store = new EncryptedAppSecretsStore(fixture.db, basicTextStorage, 'linux', () => true);
+      await store.setSecret('test-key', secret('hunter2'));
+      expect((await store.getSecret('test-key'))?.expose()).toBe('hunter2');
+    });
+  });
+
   it('deletes stored secrets', async () => {
     const store = await makeStore();
     await store.setSecret('test-key', secret('hunter2'));

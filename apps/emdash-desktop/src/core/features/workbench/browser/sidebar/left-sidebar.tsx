@@ -1,12 +1,21 @@
-import { Clock, FolderInput, LayoutDashboard, MessageSquareShare, Settings } from 'lucide-react';
+import {
+  Clock,
+  FolderInput,
+  LayoutDashboard,
+  MessageSquareShare,
+  MonitorSmartphone,
+  Settings,
+} from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import React from 'react';
 import { automationsViewDef } from '@core/features/automations/contributions/views';
 import { canvasViewDef } from '@core/features/canvas/contributions/views';
 import { ClaudeUsageIndicator } from '@core/features/claude-accounts/contributions/browser/claude-usage-indicator';
+import { clientsViewDef } from '@core/features/client-profiles/contributions/views';
 import { ConductorOwnershipLine } from '@core/features/conductor/contributions/browser/conductor-ownership-line';
 import { settingsViewDef } from '@core/features/settings/contributions/views';
 import { useOpenModal } from '@core/manifests/browser/modal-api';
+import { isClientMode } from '@core/primitives/client-mode/browser/client-mode';
 import { BoundShortcut } from '@core/primitives/keybindings/browser/shortcut';
 import { WORKBENCH_BOTTOM_BAR_HEIGHT_PX } from '@core/primitives/layouts/api/workbench-layout';
 import {
@@ -86,6 +95,20 @@ export const LeftSidebar: React.FC = observer(function LeftSidebar() {
                 <span className="truncate">Canvas</span>
               </span>
             </SidebarMenuButton>
+            {/* Clients belong to this computer: a client window has none to open. */}
+            {isClientMode() ? null : (
+              <SidebarMenuButton
+                isActive={isCurrentView(currentView, 'clients')}
+                onClick={() => navigate(clientsViewDef())}
+                aria-label="Clients"
+                className="w-full justify-between"
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <MonitorSmartphone className="size-4 shrink-0" />
+                  <span className="truncate">Clients</span>
+                </span>
+              </SidebarMenuButton>
+            )}
             <SidebarMenuButton
               isActive={isCurrentView(currentView, 'automations')}
               onClick={() => navigate(automationsViewDef())}

@@ -12,9 +12,18 @@ import { EMDASH_ISSUES_URL } from '@core/primitives/urls/api/urls';
 
 export type GithubDeviceFlowModalArgs = {
   onError?: (error: string) => void;
+  /**
+   * Called once the modal listens for auth events. Start the device flow here: the host emits the
+   * one-time `device-code` event without replay, so a flow started before the subscription lands
+   * (likely over a client-mode link) would leave the modal without a code.
+   */
+  onSubscribed?: () => void;
 };
 
-export function GithubDeviceFlowModal({ onError }: GithubDeviceFlowModalArgs) {
+export function GithubDeviceFlowModal({ onError, onSubscribed }: GithubDeviceFlowModalArgs) {
+  const onSubscribedRef = useRef(onSubscribed);
+  onSubscribedRef.current = onSubscribed;
+  const startedRef = useRef(false);
   const modal = useModalController('githubDeviceFlowModal');
   const { toast } = useToast();
   const cancelGithubConnect = useCallback(() => {
@@ -165,8 +174,15 @@ export function GithubDeviceFlowModal({ onError }: GithubDeviceFlowModalArgs) {
         },
         onGap: () => {},
       });
-      if (disposed) nextUnsubscribe();
-      else unsubscribe = nextUnsubscribe;
+      if (disposed) {
+        nextUnsubscribe();
+        return;
+      }
+      unsubscribe = nextUnsubscribe;
+      if (!startedRef.current) {
+        startedRef.current = true;
+        onSubscribedRef.current?.();
+      }
     });
 
     return () => {
