@@ -30,6 +30,13 @@ Each profile has its own user-data directory beside the local app's (`<base>-cli
 `<base>-client-<profile>`), its own Windows AppUserModelID, a window titled `Maestro Client`, and
 telemetry off (`client-config.ts`).
 
+The profile slug rules, `clientUserDataDirName`, the switch and the `client-connection.json` schema
+live in `core/primitives/client-mode/api/client-profile.ts`, shared with the local app's
+**Maestro clients** card (Settings > Remote access, hidden in client mode). Its `clientProfiles`
+domain (`core/features/client-profiles/`) lists the profile directories in appData, shows each
+saved host URL without touching the encrypted token, and starts a profile by spawning
+`process.execPath` with the switch (no shell, slug validated in the main process).
+
 ## Thin Client Bootstrap
 
 `src/main/client/bootstrap.ts` (`clientMain`) runs boot preflight (single instance per profile),
@@ -74,6 +81,7 @@ Domains that are not plain `forward`:
 | `browser` | local | Webviews live in the client window. |
 | `logging` | local | Renderer logs go to the client's log file. |
 | `devPerf` | local | Stub with safe defaults. |
+| `clientProfiles` | local | The client's stub lists nothing; profiles are managed from the local app. |
 | `updates` | local | The client's own updater, under rule U. `localUpdates` is forwarded. |
 | `host` | custom; host serves `persistDroppedBlob`, `getPlatform` | Window, shell, dialogs and clipboard are the client's; dropped blobs land where agents run. |
 | `appSettings` | custom | Forwarded; theme, keyboard and browser changes also apply locally. |

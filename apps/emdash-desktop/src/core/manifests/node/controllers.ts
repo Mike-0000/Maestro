@@ -24,6 +24,8 @@ import { createCatalogWireController } from '@core/features/catalog/node/wire-co
 import type { ClaudeAccountsService } from '@core/features/claude-accounts/node/claude-accounts-service';
 import type { ClaudeUsageService } from '@core/features/claude-accounts/node/usage-service';
 import { createClaudeAccountsWireController } from '@core/features/claude-accounts/node/wire-controller';
+import { createElectronClientProfilesOperations } from '@core/features/client-profiles/node/electron-operations';
+import { createClientProfilesWireController } from '@core/features/client-profiles/node/wire-controller';
 import { createConductorWireController } from '@core/features/conductor/node/wire-controller';
 import type { ClaudeAccountMover } from '@core/features/conversations/node/claude-account-move';
 import type { CompensationRunner } from '@core/features/conversations/node/createConversation';
@@ -317,6 +319,9 @@ export const desktopNodeControllers = {
       scope.add(dispose);
       return controller;
     },
+  },
+  clientProfiles: {
+    create: () => createClientProfilesWireController(createElectronClientProfilesOperations()),
   },
   terminals: {
     create: ({

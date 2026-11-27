@@ -67,7 +67,13 @@ describe('client mode routing', () => {
   });
 
   it('groups domains by client handling', () => {
-    expect(clientModeDomains('local').sort()).toEqual(['browser', 'devPerf', 'logging', 'updates']);
+    expect(clientModeDomains('local').sort()).toEqual([
+      'browser',
+      'clientProfiles',
+      'devPerf',
+      'logging',
+      'updates',
+    ]);
     expect(clientModeDomains('custom').sort()).toEqual([
       'appSettings',
       'conversations',

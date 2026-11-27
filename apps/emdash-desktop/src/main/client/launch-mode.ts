@@ -1,8 +1,10 @@
+import {
+  CLIENT_MODE_SWITCH,
+  isValidClientProfile,
+} from '@core/primitives/client-mode/api/client-profile';
+
 // Read by `src/entry/main.ts` before any bootstrap module loads, so it must stay free of
 // Electron and of anything with side effects: plain string parsing only.
-
-/** The command-line switch that starts the app as a client of a remote Maestro host. */
-export const CLIENT_MODE_SWITCH = '--maestro-client';
 
 /**
  * Development alternative to the switch (ignored when packaged): `1` or `true` for the default
@@ -12,14 +14,8 @@ export const CLIENT_MODE_ENV = 'MAESTRO_CLIENT';
 
 export type LaunchMode = { mode: 'local' } | { mode: 'client'; profile: string | null };
 
-const PROFILE_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/u;
 const TRUE_VALUES = new Set(['1', 'true']);
 const FALSE_VALUES = new Set(['', '0', 'false']);
-
-/** A profile name becomes part of a directory name, so only a short slug is accepted. */
-export function isValidClientProfile(value: string): boolean {
-  return PROFILE_PATTERN.test(value);
-}
 
 /** Where the process runs; Electron-free, so the caller passes `app.isPackaged`. */
 export type LaunchModeOptions = { isPackaged: boolean };
@@ -48,14 +44,6 @@ export function resolveLaunchMode(
   if (raw === undefined || FALSE_VALUES.has(raw)) return { mode: 'local' };
   if (TRUE_VALUES.has(raw)) return { mode: 'client', profile: null };
   return { mode: 'client', profile: profileOrNull(raw) };
-}
-
-/**
- * The user-data directory name of a client profile, beside the local app's own:
- * `<base>-client` or `<base>-client-<profile>`.
- */
-export function clientUserDataDirName(baseName: string, profile: string | null): string {
-  return profile === null ? `${baseName}-client` : `${baseName}-client-${profile}`;
 }
 
 function profileOrNull(value: string): string | null {

@@ -1,6 +1,8 @@
 import { PageLayout } from '@emdash/ui/react/patterns';
 import { Alert } from '@emdash/ui/react/primitives';
+import { ClientProfilesCard } from '@core/features/client-profiles/contributions/browser/client-profiles-card';
 import { useRemoteAccessStatus } from '@core/features/remote-access/api/browser/use-remote-access-status';
+import { isClientMode } from '@core/primitives/client-mode/browser/client-mode';
 import { AdvancedCard } from '../components/advanced-card';
 import { DevicesCard } from '../components/devices-card';
 import { ListenerCard } from '../components/listener-card';
@@ -36,6 +38,8 @@ export function RemoteAccessSettingsPage() {
         <DevicesCard status={status} />
         <OwnerAccessCard status={status} />
         {status?.enabled ? <TriggersCard status={status} listenerKey={listenerKey} /> : null}
+        {/* Client profiles belong to this computer; a client window shows the host's page. */}
+        {isClientMode() ? null : <ClientProfilesCard />}
         <AdvancedCard status={status} />
       </div>
     </div>

@@ -1,7 +1,8 @@
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { USER_DATA_DIR_NAME } from '@core/primitives/app-identity/api/app-identity';
-import { buildClientAppConfig, clientLaunchSwitch, clientWindowTitle } from './client-config';
+import { clientLaunchSwitch } from '@core/primitives/client-mode/api/client-profile';
+import { buildClientAppConfig, clientWindowTitle } from './client-config';
 import { createClientShortcuts } from './shortcut';
 
 describe('client config', () => {

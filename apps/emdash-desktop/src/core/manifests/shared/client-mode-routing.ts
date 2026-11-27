@@ -53,6 +53,10 @@ export const clientModeRouting = {
   skills: FORWARD,
   agentAddons: FORWARD,
   claudeAccounts: FORWARD,
+  clientProfiles: {
+    ...LOCAL,
+    note: "Profiles of this computer; the page is hidden in client mode and the client's stub has none.",
+  },
   terminals: {
     host: 'all',
     client: 'custom',
