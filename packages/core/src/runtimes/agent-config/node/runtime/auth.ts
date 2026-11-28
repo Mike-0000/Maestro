@@ -22,7 +22,9 @@ import type { AgentConfigRuntimeDeps } from './types';
 const CACHE_TTL_MS = 15 * 60 * 1000;
 const DEFAULT_COLS = 120;
 const DEFAULT_ROWS = 30;
-const URL_PATTERN = /https?:\/\/[^\s"'<>]+/i;
+// Control characters end a URL: CLIs such as Claude Code print sign-in links as OSC 8
+// hyperlinks, where the URL runs straight into BEL/ESC with no whitespace in between.
+const URL_PATTERN = /https?:\/\/[^\s"'<>\u0000-\u001f\u007f]+/i;
 
 export type LoginDimensions = {
   cols: number;
@@ -326,11 +328,8 @@ export class AgentAuthManager {
     chunk: string
   ): void {
     if (!this.isCurrentLogin(providerId, generation)) return;
-    const match = URL_PATTERN.exec(chunk);
-    if (!match) return;
-
-    const url = stripTrailingUrlPunctuation(match[0]);
-    if (seenUrls.has(url)) return;
+    const url = extractLoginUrl(chunk);
+    if (!url || seenUrls.has(url)) return;
     seenUrls.add(url);
 
     this.publish(providerId, (current) => {
@@ -402,6 +401,12 @@ export class AgentAuthManager {
     this.statusGenerations.set(providerId, next);
     return next;
   }
+}
+
+/** The first http(s) URL in a chunk of login output, without terminal escapes or trailing punctuation. */
+export function extractLoginUrl(chunk: string): string | null {
+  const match = URL_PATTERN.exec(chunk);
+  return match ? stripTrailingUrlPunctuation(match[0]) : null;
 }
 
 function stripTrailingUrlPunctuation(url: string): string {

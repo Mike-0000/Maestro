@@ -18,11 +18,16 @@ import {
 } from '@core/features/terminals/api/browser/pty/pty';
 import { buildTerminalFontFamily } from '@core/features/terminals/api/browser/pty/terminal-font';
 import { getCellMetrics } from '@core/features/terminals/api/browser/pty/xterm-cell-metrics';
+import { normalizeExternalHttpUrl } from '@core/features/workbench/api/browser/external-url';
 import { confirmOpenExternalLink } from '@core/features/workbench/api/browser/open-external-link';
 import { useModalController } from '@core/manifests/browser/modal-api';
+import { openExternal } from '@core/primitives/desktop-host/browser/host-client';
 import { defineModal } from '@core/primitives/modals/react';
 import { TERMINAL_FONT_SIZE_DEFAULT } from '@core/primitives/terminals/api';
 import { planLoginGrid, type LoginHostSize } from './login-terminal-grid';
+import { isLoginTerminalPasteShortcut, normalizeLoginPaste } from './login-terminal-paste';
+
+const IS_MAC_PLATFORM = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
 
 export type AgentSignInModalArgs = {
   providerId: string;
@@ -97,6 +102,32 @@ export function AgentSignInModal({
     const inputDisposable = terminal.onData((data) => {
       bindingRef.current?.sendInput(data);
     });
+    // Paste goes through terminal.paste so it honours bracketed paste, then out via onData.
+    const pasteFromClipboard = () => {
+      void navigator.clipboard.readText().then(
+        (text) => {
+          const code = normalizeLoginPaste(text);
+          if (!disposed && code) terminal.paste(code);
+        },
+        () => {
+          // Clipboard read denied or unavailable.
+        }
+      );
+    };
+    terminal.attachCustomKeyEventHandler((event) => {
+      if (!isLoginTerminalPasteShortcut(event, IS_MAC_PLATFORM)) return true;
+      event.preventDefault();
+      event.stopPropagation();
+      pasteFromClipboard();
+      return false;
+    });
+    // Right-click pastes, as in most terminals: the sign-in prompt has nothing else to offer.
+    const handleContextMenu = (event: MouseEvent) => {
+      event.preventDefault();
+      pasteFromClipboard();
+      terminal.focus();
+    };
+    terminalHost.addEventListener('contextmenu', handleContextMenu);
     const resize = (force = false, metricsRetries = 0) => {
       if (disposed) return;
       const cell = getCellMetrics(terminal);
@@ -167,6 +198,7 @@ export function AgentSignInModal({
       if (animationFrame !== null) cancelAnimationFrame(animationFrame);
       if (metricsRetryTimer !== null) clearTimeout(metricsRetryTimer);
       observer.disconnect();
+      terminalHost.removeEventListener('contextmenu', handleContextMenu);
       inputDisposable.dispose();
       void bindingRef.current?.dispose();
       bindingRef.current = null;
@@ -177,6 +209,15 @@ export function AgentSignInModal({
   useEffect(() => {
     const binding = bindingRef.current;
     if (!binding || !ready) return;
+
+    // The sign-in command prints its sign-in page's URL; open it once, in the default browser.
+    const openPendingUrl = (state: ReturnType<typeof binding.status.current>) => {
+      const pendingUrl = state.login?.pendingUrl;
+      if (!pendingUrl || handledUrlsRef.current.has(pendingUrl.id)) return;
+      handledUrlsRef.current.add(pendingUrl.id);
+      binding.markUrlHandled(pendingUrl.id);
+      openSignInPage(pendingUrl.url);
+    };
 
     if (claudeAccountId !== undefined) {
       // An account sign-in is over when its command exits. Then ask Claude Code who is signed
@@ -200,7 +241,9 @@ export function AgentSignInModal({
       };
       let exited = false;
       const onState = (state: ReturnType<typeof binding.status.current>) => {
-        if (exited || !state.login?.exit) return;
+        if (exited) return;
+        openPendingUrl(state);
+        if (!state.login?.exit) return;
         exited = true;
         void finish();
       };
@@ -221,12 +264,7 @@ export function AgentSignInModal({
           completeRef.current();
           return;
         }
-
-        const pendingUrl = state.login?.pendingUrl;
-        if (!pendingUrl || handledUrlsRef.current.has(pendingUrl.id)) return;
-        handledUrlsRef.current.add(pendingUrl.id);
-        confirmOpenExternalLink(pendingUrl.url);
-        binding.markUrlHandled(pendingUrl.id);
+        openPendingUrl(state);
       },
       { fireImmediately: true }
     );
@@ -305,6 +343,22 @@ export function AgentSignInModal({
         </Button>
       </Dialog.Footer>
     </>
+  );
+}
+
+/**
+ * Opens a sign-in page straight in the default browser: the developer asked for this sign-in, so
+ * there is nothing to confirm. If that fails, the usual link dialog offers to open or copy it.
+ */
+function openSignInPage(url: string): void {
+  const normalized = normalizeExternalHttpUrl(url);
+  if (!/^https?:\/\//i.test(normalized)) return;
+  void openExternal(normalized).then(
+    (result) => {
+      if (result.success) toast('Opened the sign-in page in your browser');
+      else confirmOpenExternalLink(normalized);
+    },
+    () => confirmOpenExternalLink(normalized)
   );
 }
 
